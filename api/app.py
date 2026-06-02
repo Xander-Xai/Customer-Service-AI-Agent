@@ -10,8 +10,10 @@ FastAPI + WebSocket 异步服务层 (v3.0)
 - httpx.AsyncClient 连接池（20 keepalive / 100 max）
 """
 import asyncio
+import hmac
 import time
 import uuid
+from collections import defaultdict
 from typing import Dict, Any
 from contextlib import asynccontextmanager
 
@@ -21,15 +23,29 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
+from pydantic import BaseModel, Field
 
 from config import (
     CORS_ORIGINS, API_KEY_ENABLED, API_KEY, VERSION,
     RESPONSE_TIME_TARGET_MAX, RESPONSE_TIME_TARGET_MIN,
     HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS, REDIS_URL,
+    MAX_QUERY_LENGTH,
 )
 from logger import get_logger
 
 logger = get_logger("api")
+
+
+class ChatRequest(BaseModel):
+    query: str = Field(..., max_length=2000)
+    session_id: str = Field(default="", max_length=36)
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(..., max_length=36)
+    resolved: bool
+    comment: str = Field(default="", max_length=500)
+
 
 # 全局引用（在 create_app 中注入）
 _graph_app = None
@@ -77,17 +93,59 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         yield
         await app.state.http_client.aclose()
+        from core.monitoring import OpenAICompatibleClient
+        await OpenAICompatibleClient.close_all_clients()
         logger.info("httpx 连接池已关闭")
 
     app = FastAPI(title="多智能体客服系统", version=VERSION, lifespan=lifespan)
 
-    # CORS 配置（v3.0: 从配置读取）
+    # CORS 配置（v3.4: 限制允许的方法和头）
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["X-API-Key", "Content-Type"],
     )
+
+    # v3.6: 请求限流中间件
+    _rate_limit_store: Dict[str, list] = defaultdict(list)
+    _RATE_LIMIT_MAX = 60  # 每分钟最大请求数
+    _RATE_LIMIT_WINDOW = 60  # 窗口秒数
+
+    @app.middleware("http")
+    async def rate_limit_middleware(request: Request, call_next):
+        if request.url.path in ("/api/health", "/api/metrics", "/api/kpi", "/"):
+            return await call_next(request)
+        if request.url.path.startswith("/static/"):
+            return await call_next(request)
+        # v3.6: WebSocket 端点不做限流（长连接，不适用 HTTP 限流模型）
+        if request.url.path.startswith("/ws/"):
+            return await call_next(request)
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        _rate_limit_store[client_ip] = [t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW]
+        if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX:
+            return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
+        _rate_limit_store[client_ip].append(now)
+        return await call_next(request)
+
+    # v3.4: 安全响应头中间件
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' ws: wss:; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'"
+        )
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
 
     # 前端静态资源（v3.3: 暗色主题 UI）
     # 使用项目根目录下的 static 和 templates
@@ -118,7 +176,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
             if request.url.path.startswith("/static/"):
                 return await call_next(request)
             api_key = request.headers.get("X-API-Key", "")
-            if api_key != API_KEY:
+            if not hmac.compare_digest(api_key, API_KEY):
                 return JSONResponse({"error": "Unauthorized: Invalid API Key"}, status_code=401)
         response = await call_next(request)
         return response
@@ -127,6 +185,12 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
     @app.websocket("/ws/chat")
     async def websocket_chat(ws: WebSocket):
+        # v3.4: WebSocket 认证检查 (v3.6: 从 header 获取，防 timing attack)
+        if API_KEY_ENABLED:
+            key = ws.headers.get("x-api-key", "")
+            if not key or not hmac.compare_digest(key, API_KEY):
+                await ws.close(code=4001, reason="Unauthorized")
+                return
         await ws.accept()
         session_id = str(uuid.uuid4())
         logger.info(f"[WS] 新连接: {session_id}")
@@ -153,7 +217,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         try:
             while True:
                 data = await ws.receive_json()
-                query = data.get("query", "").strip()
+                query = data.get("query", "").strip()[:MAX_QUERY_LENGTH]  # v3.4: 输入长度限制
                 sid = data.get("session_id", session_id)
                 if not query:
                     await ws.send_json({"type": "error", "content": "查询不能为空"})
@@ -194,11 +258,12 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                         "agents_used": result.get("agents_used", []),
                         "processing_time": result.get("elapsed", 0),
                         "resolution_status": result.get("resolution_status", ""),
+                        "session_id": sid,  # v3.6: 携带 session_id 供前端同步
                     })
                 except Exception as e:
                     notify_task.cancel()
-                    logger.error(f"WS 处理失败: {e}")
-                    await ws.send_json({"type": "error", "content": f"处理失败: {str(e)}"})
+                    logger.error(f"WS 处理失败: {e}", exc_info=True)
+                    await ws.send_json({"type": "error", "content": "处理失败，请稍后重试"})
 
         except WebSocketDisconnect:
             logger.info(f"[WS] 断开: {session_id}")
@@ -210,17 +275,17 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     # ------ REST API ------
 
     @app.post("/api/chat")
-    async def rest_chat(data: Dict[str, Any]):
-        query = data.get("query", "").strip()
-        sid = data.get("session_id", str(uuid.uuid4()))
+    async def rest_chat(data: ChatRequest):
+        query = data.query.strip()[:MAX_QUERY_LENGTH]  # v3.4: 输入长度限制
+        sid = data.session_id or str(uuid.uuid4())
         if not query:
             return JSONResponse({"error": "query 不能为空"}, status_code=400)
         try:
             result = await _run_graph(sid, query)
             return result
         except Exception as e:
-            logger.error(f"REST 处理失败: {e}")
-            return JSONResponse({"error": str(e)}, status_code=500)
+            logger.error(f"REST 处理失败: {e}", exc_info=True)
+            return JSONResponse({"error": "服务内部错误，请稍后重试"}, status_code=500)
 
     @app.get("/api/health")
     async def health():
@@ -236,13 +301,13 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     async def metrics_endpoint():
         """性能监控端点（v3.1: 含 SLA 详情 + 持久化快照）"""
         if _metrics:
-            stats = _metrics.get_stats()
+            stats = await _metrics.get_stats()
         else:
             stats = {"error": "metrics not initialized"}
         cache_stats = _response_cache.get_stats() if _response_cache else {}
 
         # 持久化指标快照到 Redis（如可用）
-        _persist_metrics_snapshot()
+        await _persist_metrics_snapshot()
 
         return {
             "version": VERSION,
@@ -255,12 +320,12 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     async def kpi_endpoint():
         """业务 KPI 端点（v3.1: 含持久化 + 历史趋势）"""
         if _metrics:
-            kpi = _metrics.get_kpi_stats()
+            kpi = await _metrics.get_kpi_stats()
         else:
             kpi = {"error": "metrics not initialized"}
 
         # 持久化指标快照到 Redis（如可用）
-        _persist_metrics_snapshot()
+        await _persist_metrics_snapshot()
 
         result = {
             "version": VERSION,
@@ -318,29 +383,29 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     # ------ v3.2: 客户反馈端点（首次解决率校准）------
 
     @app.post("/api/feedback")
-    async def submit_feedback(data: Dict[str, Any]):
+    async def submit_feedback(data: FeedbackRequest):
         """
         客户满意度反馈端点
         请求体: {"session_id": "xxx", "resolved": true/false, "comment": "可选备注"}
-        用于校准首次解决率指标，将"估计值"升级为"确认值"
         """
-        session_id = data.get("session_id", "").strip()
-        resolved = data.get("resolved")
-        comment = data.get("comment", "")
+        session_id = data.session_id.strip()
+        resolved = data.resolved
+        comment = data.comment
 
         if not session_id:
             return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
         if resolved is None:
             return JSONResponse({"error": "resolved 字段必填（true/false）"}, status_code=400)
 
-        # 更新 MetricsCollector 中的解决状态
+        # v3.4: 验证会话存在
+        if _session_manager:
+            session = _session_manager.get_session(session_id)
+            if not session or not session.get("messages"):
+                return JSONResponse({"error": "会话不存在或无对话记录"}, status_code=404)
+
+        # 更新 MetricsCollector（v3.6: 通过方法安全获取锁）
         if _metrics:
-            if resolved:
-                _metrics.resolution_counts["resolved"] += 1
-            else:
-                _metrics.resolution_counts["failed"] += 1
-                if _metrics.resolution_counts["resolved"] > 0:
-                    _metrics.resolution_counts["resolved"] -= 1
+            await _metrics.record_feedback(resolved=bool(resolved))
 
         # 广播反馈事件
         if _bus:
@@ -376,14 +441,14 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     return app
 
 
-def _persist_metrics_snapshot():
+async def _persist_metrics_snapshot():
     """将指标快照持久化到 Redis（静默失败，不影响主流程）"""
     if not _metrics:
         return
     r = _get_redis_client()
     if r:
         try:
-            _metrics.save_snapshot(r)
+            await _metrics.save_snapshot(r)
         except Exception:
             pass
 
@@ -432,9 +497,9 @@ async def _run_graph(session_id: str, query: str) -> Dict[str, Any]:
             f"(session={session_id}, cached={result.get('cached', False)})"
         )
 
-    # 采集指标（v3.2: 含解决状态 + SLA 告警检查）
+    # 采集指标（v3.4: record_request 改为 async）
     if _metrics:
-        _metrics.record_request(
+        await _metrics.record_request(
             elapsed=elapsed,
             agent=result.get("current_agent", ""),
             mode=result.get("collaboration_mode", ""),

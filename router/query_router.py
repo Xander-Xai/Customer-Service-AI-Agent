@@ -7,7 +7,6 @@
 """
 import re
 import json
-import asyncio
 from typing import Any, Dict, Optional, Tuple
 from dataclasses import dataclass
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -55,9 +54,6 @@ _RE_TECH_TERMS = [re.compile(r"过敏|刺激|成分|配方|工艺"),
                   re.compile(r"退款|发票|对公|分期"),
                   re.compile(r"投诉|升级|主管")]
 _RE_PRICE = re.compile(r"\d+[\.\d]*\s*[元块]|¥|￥|\d{10,}")
-
-# 向后兼容：未预编译版本供外部引用
-RULE_PATTERNS = {k: [p.pattern for p in v] for k, v in _RULE_PATTERNS.items()}
 
 
 class QueryRouter:
@@ -118,11 +114,19 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
             # 路由使用短超时（LLM_ROUTER_TIMEOUT），避免慢 API 阻塞整个链路
             response = await self.llm.async_invoke(messages, timeout=LLM_ROUTER_TIMEOUT)
             raw = response.content.strip()
-            json_match = re.search(r"\{.*\}", raw, re.DOTALL)
-            if json_match:
-                result = json.loads(json_match.group())
-                result["raw"] = raw
-                return result
+            # v3.4: 使用 json.JSONDecoder.raw_decode 替代贪婪正则，更稳健
+            try:
+                decoder = json.JSONDecoder()
+                obj, _ = decoder.raw_decode(raw[raw.index('{'):])
+                obj["raw"] = raw
+                return obj
+            except (ValueError, KeyError):
+                # 回退：非贪婪正则匹配
+                json_match = re.search(r"\{[^{}]*\}", raw)
+                if json_match:
+                    result = json.loads(json_match.group())
+                    result["raw"] = raw
+                    return result
             return {"query_type": "general_inquiry", "confidence": 0.3, "raw": raw}
         except Exception as e:
             logger.error(f"LLM 分类失败: {e}")
@@ -176,12 +180,7 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
 
         return best_intent, scores, min(complexity, 100)
 
-    def _rule_classify(self, query: str) -> Optional[str]:
-        """向后兼容：仅返回最佳意图类型"""
-        result, _, _ = self._rule_classify_and_score(query)
-        return result
-
-    def _score_complexity(self, query: str, query_type: str, context: str = "") -> int:
-        """向后兼容：独立复杂度评分"""
-        _, _, complexity = self._rule_classify_and_score(query, context)
-        return complexity
+    def _rule_classify(self, query: str, context: str = "") -> Optional[str]:
+        """向后兼容：仅返回最佳意图（不含复杂度评分）"""
+        best_intent, _, _ = self._rule_classify_and_score(query, context)
+        return best_intent

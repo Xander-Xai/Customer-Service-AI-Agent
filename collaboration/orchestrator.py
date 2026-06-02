@@ -1,23 +1,26 @@
 """
-协作编排器（v3.0 - 统一版）
+协作编排器（v3.5: 新增 ReAct 推理模式选择）
 核心改造：
 - 统一模式选择逻辑（消除与 multi_agent_customer_service.py 的重复）
 - graph 节点直接委托 orchestrator
 - 结构化日志
+- v3.5: 高复杂度多领域查询路由到 ReAct 模式
 """
 from typing import Any, Dict, Tuple, List
-from .modes import SequentialMode, ParallelMode, ConsultationMode, HierarchicalMode
+from .modes import SequentialMode, ParallelMode, ConsultationMode, HierarchicalMode, ReActMode
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
 from session_manager import INTENT_KEYWORDS
+from config import REACT_COMPLEXITY_THRESHOLD
 from logger import get_logger
 
 logger = get_logger("collaboration.orchestrator")
 
-# 从 INTENT_KEYWORDS 提取多 Agent 路由关键词（单一数据源，避免与 session_manager 重复）
+# v3.4: 从 INTENT_KEYWORDS 提取所有关键词（单一数据源）
 _PRODUCT_KEYWORDS = set(INTENT_KEYWORDS.get("product_info", []))
 _BILLING_KEYWORDS = set(INTENT_KEYWORDS.get("billing", [])) | set(INTENT_KEYWORDS.get("order_query", []))
 _TECH_KEYWORDS = set(INTENT_KEYWORDS.get("technical_support", []))
+_COMPLAINT_KEYWORDS = set(INTENT_KEYWORDS.get("complaint", []))
 
 
 def _has_keywords(query: str, keywords: set) -> bool:
@@ -39,6 +42,7 @@ class CollaborationOrchestrator:
             "parallel": ParallelMode(bus=message_bus, bb=blackboard),
             "consultation": ConsultationMode(bus=message_bus, bb=blackboard),
             "hierarchical": HierarchicalMode(bus=message_bus, bb=blackboard),
+            "react": ReActMode(bus=message_bus, bb=blackboard),  # v3.5
         }
 
     def select_mode_name(self, routing_result: Any, state: Dict[str, Any]) -> str:
@@ -64,13 +68,14 @@ class CollaborationOrchestrator:
         # 投诉 → 层次模式（协调者 + 各方协作）
         if query_type == "complaint":
             sub_tasks = {"complaint_agent": query}
-            if _has_keywords(query, {"产品", "质量"}):
+            # v3.4: 使用 INTENT_KEYWORDS 而非硬编码关键词
+            if _has_keywords(query, _PRODUCT_KEYWORDS):
                 sub_tasks["product_agent"] = f"[辅助] 检查产品相关信息：{query}"
-            if _has_keywords(query, {"退款", "订单"}):
+            if _has_keywords(query, _BILLING_KEYWORDS):
                 sub_tasks["billing_agent"] = f"[辅助] 检查订单/退款信息：{query}"
             return "hierarchical", {"coordinator": "general_agent", "sub_tasks": sub_tasks}
 
-        # 涉及多领域 → 并行模式
+        # 涉及多领域 → 并行模式 或 ReAct 推理模式
         multi_agent_hints: List[str] = []
         if _has_keywords(query, _PRODUCT_KEYWORDS):
             multi_agent_hints.append("product_agent")
@@ -78,6 +83,10 @@ class CollaborationOrchestrator:
             multi_agent_hints.append("billing_agent")
         if _has_keywords(query, _TECH_KEYWORDS):
             multi_agent_hints.append("tech_agent")
+
+        # v3.5: 高复杂度 + 多领域 → ReAct 推理模式（优先于简单并行）
+        if complexity >= REACT_COMPLEXITY_THRESHOLD and len(multi_agent_hints) >= 2:
+            return "react", {"primary_agent": primary_agent}
 
         if len(multi_agent_hints) >= 2:
             return "parallel", {"agent_list": multi_agent_hints}
@@ -89,7 +98,7 @@ class CollaborationOrchestrator:
             "tech_agent": ["product_agent"],
         }
         consultees = consult_map.get(primary_agent, [])
-        if consultees and complexity >= 60:
+        if consultees and complexity >= REACT_COMPLEXITY_THRESHOLD:
             return "consultation", {
                 "primary_agent": primary_agent,
                 "consult_agents": consultees,

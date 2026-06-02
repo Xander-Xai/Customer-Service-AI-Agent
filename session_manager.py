@@ -28,9 +28,14 @@ from config import (
     DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
     REDIS_URL as _CFG_REDIS_URL,
+    MAX_SESSIONS as _CFG_MAX_SESSIONS,
+    SESSION_IDLE_TTL as _CFG_SESSION_IDLE_TTL,
 )
 
 logger = get_logger("session_manager")
+
+# v3.6: 会话 ID 格式校验（防路径遍历 / 注入）
+_SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9\-_]{1,64}$')
 
 # 中文分词（懒加载）
 _jieba = None
@@ -71,16 +76,18 @@ def _get_tokenizer():
 
 
 def _tokenize_chinese(text: str) -> set:
-    """中文分词 token 化（jieba 优先，回退正则）"""
+    """中文分词 token 化（v3.4: 过滤单字停用词，与正则回退保持一致）"""
     jb = _get_jieba()
     if jb:
-        return set(w for w in jb.cut(text) if len(w.strip()) >= 1)
+        return set(w for w in jb.cut(text) if len(w.strip()) >= 2)
     # 回退：正则提取中文词（2字+）和英文词
     return set(re.findall(r"[\w一-鿿]{2,}", text.lower()))
 
 
 def _count_tokens(text: str) -> int:
     """计算文本 token 数（tiktoken 优先，回退字符估算）"""
+    if not text:
+        return 0
     tok = _get_tokenizer()
     if tok:
         return len(tok.encode(text))
@@ -216,10 +223,44 @@ class EnhancedSessionManager:
 
     # ---- 会话生命周期 ----
 
+    def _evict_idle_sessions(self):
+        """v3.4: 淘汰超过上限的空闲会话，防止内存无限增长"""
+        import config  # 动态读取，支持运行时修改
+        now = time.time()
+        max_sessions = config.MAX_SESSIONS
+        idle_ttl = config.SESSION_IDLE_TTL
+
+        # 先淘汰超过空闲 TTL 的会话
+        expired = [sid for sid, s in self.sessions.items()
+                   if now - s.get("last_activity", 0) > idle_ttl]
+        for sid in expired:
+            self.delete_session(sid)
+
+        # 如果仍然超过上限，淘汰最旧的会话
+        if len(self.sessions) >= max_sessions:
+            sorted_sessions = sorted(
+                self.sessions.items(),
+                key=lambda x: x[1].get("last_activity", 0)
+            )
+            to_remove = len(self.sessions) - max_sessions + 1
+            for sid, _ in sorted_sessions[:to_remove]:
+                self.delete_session(sid)
+            logger.warning(f"[Session] 会话数超限，淘汰 {to_remove} 个旧会话")
+
     def create_session(self, session_id: str = None) -> str:
         if session_id is None:
             session_id = str(uuid.uuid4())
+        elif not _SESSION_ID_PATTERN.match(session_id):
+            session_id = str(uuid.uuid4())  # Invalid ID, generate new one
+            logger.warning("Invalid session_id format, generated new UUID")
         messages = self._create_memory_backend(session_id)
+
+        # v3.6: 节流淘汰（每 50 次创建检查一次，避免 O(N) 扫描）
+        if not hasattr(self, '_create_count'):
+            self._create_count = 0
+        self._create_count += 1
+        if self._create_count % 50 == 0:
+            self._evict_idle_sessions()
 
         # Redis 后端：尝试从 Redis 加载已有会话
         if self.storage_backend == "redis":
@@ -263,6 +304,8 @@ class EnhancedSessionManager:
         return session_id
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        if not _SESSION_ID_PATTERN.match(session_id):
+            return None
         if session_id not in self.sessions:
             self.create_session(session_id)
         return self.sessions[session_id]
@@ -296,8 +339,8 @@ class EnhancedSessionManager:
                 except Exception as e:
                     logger.warning(f"Redis 保存失败: {e}")
 
-    def get_conversation_context(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
-        """获取带滑动窗口 + 摘要的对话上下文（v3.1: token 级裁剪）"""
+    async def get_conversation_context(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
+        """获取带滑动窗口 + 摘要的对话上下文（v3.4: 异步摘要生成，不阻塞事件循环）"""
         session = self.get_session(session_id)
         messages = session["messages"]
 
@@ -327,7 +370,7 @@ class EnhancedSessionManager:
             total_tokens -= _count_tokens(removed.get("content", ""))
 
         if self.llm and old_messages:
-            summary = self._generate_summary_sync(old_messages, session.get("summary", ""))
+            summary = await self._generate_summary_async(old_messages, session.get("summary", ""))
             session["summary"] = summary
 
         context = []
@@ -337,6 +380,7 @@ class EnhancedSessionManager:
         return context
 
     def _messages_to_context(self, messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+        """将消息列表转换为上下文格式"""
         result = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -345,7 +389,8 @@ class EnhancedSessionManager:
             result.append({"role": role, "content": content, "is_user": is_user})
         return result
 
-    def _generate_summary_sync(self, messages: List[Dict[str, str]], existing_summary: str = "") -> str:
+    async def _generate_summary_async(self, messages: List[Dict[str, str]], existing_summary: str = "") -> str:
+        """v3.4: 异步摘要生成（不阻塞事件循环）"""
         if not self.llm:
             return existing_summary
         try:
@@ -355,7 +400,12 @@ class EnhancedSessionManager:
             if existing_summary:
                 prompt = f"已有摘要：{existing_summary}\n\n请结合新对话更新摘要：\n{text}"
             from langchain_core.messages import HumanMessage as HM
-            resp = self.llm.invoke([HM(content=prompt)])
+            # v3.4: 优先使用异步接口，回退到 asyncio.to_thread
+            if hasattr(self.llm, 'async_invoke'):
+                resp = await self.llm.async_invoke([HM(content=prompt)])
+            else:
+                import asyncio
+                resp = await asyncio.to_thread(self.llm.invoke, [HM(content=prompt)])
             return resp.content.strip()[:max_chars]
         except Exception as e:
             logger.warning(f"摘要生成失败: {e}")

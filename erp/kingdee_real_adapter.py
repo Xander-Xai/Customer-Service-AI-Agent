@@ -1,12 +1,13 @@
 """
-金蝶 ERP 真实适配器（v3.0 新增）
+金蝶 ERP 真实适配器（v3.4 安全加固版）
 对接金蝶 Cloud API（REST），实现商品/库存/订单/客户查询
+v3.4: 所有 FilterString 参数经过 sanitize_erp_input 净化，防 SQL 注入
 """
 import time
 from typing import Any, Dict, List, Optional
 
 import httpx
-from erp import KingdeeAdapterBase
+from erp import KingdeeAdapterBase, sanitize_erp_input
 from config import HTTP_TIMEOUT, HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS
 from logger import get_logger
 
@@ -79,9 +80,10 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     async def query_product(self, keyword: str) -> List[Dict[str, Any]]:
         """查询商品信息（映射到金蝶物料表 BD_MATERIAL）"""
         try:
+            safe_keyword = sanitize_erp_input(keyword)  # v3.4: 防注入
             result = await self._api_call(
                 "BD_MATERIAL", "BillQuery",
-                {"FormId": "BD_MATERIAL", "FilterString": f"FName like '%{keyword}%'", "TopRowCount": 10}
+                {"FormId": "BD_MATERIAL", "FilterString": f"FName like '%{safe_keyword}%'", "TopRowCount": 10}
             )
             items = result.get("Data", {}).get("Rows", [])
             return [
@@ -103,7 +105,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     async def query_inventory(self, product_id: str = "", keyword: str = "") -> List[Dict[str, Any]]:
         """查询库存（映射到金蝶库存查询 STK_INVENTORY）"""
         try:
-            filter_str = f"FMaterialId.FNumber='{product_id}'" if product_id else f"FMaterialId.FName like '%{keyword}%'"
+            safe_pid = sanitize_erp_input(product_id)  # v3.4: 防注入
+            safe_kw = sanitize_erp_input(keyword)      # v3.4: 防注入
+            filter_str = f"FMaterialId.FNumber='{safe_pid}'" if product_id else f"FMaterialId.FName like '%{safe_kw}%'"
             result = await self._api_call(
                 "STK_INVENTORY", "BillQuery",
                 {"FormId": "STK_INVENTORY", "FilterString": filter_str, "TopRowCount": 10}
@@ -128,9 +132,11 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         try:
             filter_str = ""
             if order_id:
-                filter_str = f"FBillNo='{order_id}'"
+                safe_oid = sanitize_erp_input(order_id)  # v3.4: 防注入
+                filter_str = f"FBillNo='{safe_oid}'"
             elif customer_id:
-                filter_str = f"FCUSTID.FNumber='{customer_id}'"
+                safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入
+                filter_str = f"FCUSTID.FNumber='{safe_cid}'"
             result = await self._api_call(
                 "SAL_ORDER", "BillQuery",
                 {"FormId": "SAL_ORDER", "FilterString": filter_str, "TopRowCount": 10}
@@ -156,9 +162,10 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     async def query_customer(self, customer_id: str) -> Optional[Dict[str, Any]]:
         """查询客户资料（映射到金蝶客户表 BD_CUSTOMER）"""
         try:
+            safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入
             result = await self._api_call(
                 "BD_CUSTOMER", "BillQuery",
-                {"FormId": "BD_CUSTOMER", "FilterString": f"FNumber='{customer_id}'"}
+                {"FormId": "BD_CUSTOMER", "FilterString": f"FNumber='{safe_cid}'"}
             )
             items = result.get("Data", {}).get("Rows", [])
             if not items:

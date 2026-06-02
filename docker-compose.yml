@@ -6,7 +6,7 @@ services:
     build: .
     container_name: customer-service-ai
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
@@ -22,20 +22,24 @@ services:
       - RETRY_MAX_ATTEMPTS=3
       - RETRY_BASE_DELAY=1.0
       - LOG_LEVEL=INFO
-      - CORS_ORIGINS=*
-      - API_KEY_ENABLED=false
+      # v3.4: 从环境变量读取，不再硬编码 *
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8000}
+      - API_KEY_ENABLED=${API_KEY_ENABLED:-true}
       - API_KEY=${API_KEY:-}
       - ERP_MODE=mock
-      - REDIS_URL=redis://redis:6379
-      # v3.2: SLA 告警配置
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      # SLA 告警配置
       - SLA_ALERT_WINDOW=50
       - SLA_ALERT_THRESHOLD=30.0
       - SLA_ALERT_COOLDOWN=300
-      # v3.2: 熔断器配置
+      # 熔断器配置
       - CIRCUIT_BREAKER_FAIL_THRESHOLD=5
       - CIRCUIT_BREAKER_RECOVERY_TIME=60
-      # v3.2: 分层超时配置
       - LLM_ROUTER_TIMEOUT=8.0
+      # v3.4: 安全配置
+      - MAX_QUERY_LENGTH=2000
+      - MAX_SESSIONS=10000
+      - SESSION_IDLE_TTL=3600
     volumes:
       - ./chat_sessions:/app/chat_sessions
     depends_on:
@@ -50,18 +54,17 @@ services:
     networks:
       - cs-network
 
-  # ===== Redis 服务（可选：Session/Cache 持久化后端）=====
+  # ===== Redis 服务（v3.4: 不暴露主机端口，仅限内部网络）=====
   redis:
     image: redis:7-alpine
     container_name: customer-service-redis
-    ports:
-      - "6379:6379"
+    # v3.4: 移除主机端口映射，仅通过 Docker 网络访问
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3

@@ -34,27 +34,3 @@ class SharedBlackboard:
             now = time.time()
             return {k: v for k, v in self._data.items()
                     if k.startswith(prefix) and self._timestamps.get(k, float("inf")) > now}
-
-    async def delete(self, key: str):
-        async with self._lock:
-            self._data.pop(key, None)
-            self._timestamps.pop(key, None)
-
-    async def clear(self):
-        async with self._lock:
-            self._data.clear()
-            self._timestamps.clear()
-
-    async def cleanup_expired(self) -> int:
-        async with self._lock:
-            now = time.time()
-            expired = [k for k, ts in self._timestamps.items() if ts < now]
-            for k in expired:
-                self._data.pop(k, None)
-                self._timestamps.pop(k, None)
-            return len(expired)
-
-    def snapshot(self) -> Dict[str, Any]:
-        now = time.time()
-        return {k: v for k, v in self._data.items()
-                if self._timestamps.get(k, float("inf")) > now}

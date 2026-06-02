@@ -4,7 +4,7 @@
 新增：结构化日志
 """
 import asyncio, uuid, time
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any, Callable, Coroutine, Dict, List
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -42,7 +42,6 @@ class MessageBus:
 
     def __init__(self):
         self._subscribers: Dict[str, List[Handler]] = {}
-        self._pending_responses: Dict[str, asyncio.Future] = {}
         self._message_log: deque = deque(maxlen=_MESSAGE_LOG_MAXLEN)
 
     def subscribe(self, topic: str, handler: Handler):
@@ -58,20 +57,3 @@ class MessageBus:
         handlers = self._subscribers.get(message.topic, [])
         if handlers:
             await asyncio.gather(*[h(message) for h in handlers], return_exceptions=True)
-
-    async def request(self, message: Message, timeout: float = 30.0) -> Optional[Message]:
-        future = asyncio.get_running_loop().create_future()
-        self._pending_responses[message.id] = future
-        await self.publish(message)
-        try:
-            return await asyncio.wait_for(future, timeout)
-        except asyncio.TimeoutError:
-            return None
-        finally:
-            self._pending_responses.pop(message.id, None)
-
-    async def respond(self, reply_to: str, message: Message):
-        future = self._pending_responses.get(reply_to)
-        if future and not future.done():
-            future.set_result(message)
-        await self.publish(message)

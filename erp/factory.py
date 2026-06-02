@@ -53,9 +53,9 @@ def create_erp_adapter():
                 )
                 logger.info(
                     f"ERP 适配器: real mode | "
-                    f"base_url={ERP_BASE_URL} | "
-                    f"app_id={ERP_APP_ID[:4]}*** | "
-                    f"db_id={ERP_DB_ID}"
+                    f"base_url=*** | "
+                    f"app_id=*** | "
+                    f"db_id=***"
                 )
                 return adapter
             except Exception as e:

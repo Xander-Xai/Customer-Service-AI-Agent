@@ -1,18 +1,29 @@
 """
-多智能体客服系统（v3.0 二次开发版）
-LangGraph 状态机 + 双层路由 + 4种协作模式 + 二级缓存 + 通信总线
+多智能体客服系统（v3.6 稳定版）
+LangGraph 状态机 + 双层路由 + 5种协作模式 + 二级缓存 + 通信总线 + RAG + 工具调用
 
 v3.0 核心改造：
 - 全部图节点原生异步，消除 asyncio.to_thread 死锁风险
 - 模式选择逻辑统一委托 orchestrator（消除重复代码）
 - 结构化日志替换 print
 - 性能指标实时采集
+
+v3.5 新增：
+- RAG 知识库（ChromaDB）：产品成分/FAQ/技术支持检索增强
+- Function Calling：Agent 可自主调用 ERP 工具
+- ReAct 推理模式：第 5 种协作模式，适用于复杂多步骤查询
+
+v3.6 稳定化：
+- 前端 WebSocket 修复 + 暗色主题
+- 安全加固：限流/认证/输入验证/注入防护/安全头
+- 并发安全：asyncio.Lock 初始化保护
+- 代码瘦身：消除重复代码，统一模板方法
 """
-import time
 import asyncio
-from typing import Dict, List, TypedDict
+import time
+from typing import List, TypedDict
 from dotenv import load_dotenv
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 
 load_dotenv()
 from config import (
@@ -21,7 +32,7 @@ from config import (
     SESSION_STORAGE_BACKEND, SESSION_WINDOW_SIZE, REDIS_URL, ERP_MODE,
 )
 
-from agents import ProductAgent, TechAgent, BillingAgent, ComplaintAgent, GeneralAgent, ResponseAgent
+from agents import ProductAgent, TechAgent, BillingAgent, ComplaintAgent, GeneralAgent, ResponseAgent, ReActAgent
 from session_manager import EnhancedSessionManager, default_session_manager
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
@@ -84,8 +95,14 @@ response_agent = None
 orchestrator = CollaborationOrchestrator(bus, bb)
 metrics = MetricsCollector()
 
+# v3.5: RAG 知识库 + 工具注册
+knowledge_base = None
+tool_registry = None
+_init_lock = asyncio.Lock()
 
-def initialize_llm():
+
+async def _initialize_llm_internal():
+    """内部调用，不加锁（由 initialize_agents 或 initialize_router 保护）"""
     global llm
     if llm is None:
         llm = OpenAICompatibleClient(
@@ -97,47 +114,94 @@ def initialize_llm():
     return llm
 
 
-def initialize_agents():
+async def initialize_llm():
+    global llm
+    async with _init_lock:
+        return await _initialize_llm_internal()
+
+
+async def initialize_agents():
     global agents_dict, response_agent, erp
-    if not agents_dict:
-        _llm = initialize_llm()
-        if erp is None:
-            from erp.factory import create_erp_adapter
-            erp = create_erp_adapter()
-        agent_classes = {
-            "product_agent": ProductAgent,
-            "tech_agent": TechAgent,
-            "billing_agent": BillingAgent,
-            "complaint_agent": ComplaintAgent,
-            "general_agent": GeneralAgent,
-        }
-        for name, cls in agent_classes.items():
-            agent = cls()
-            agent.set_llm(_llm)
-            agent.set_session_manager(session_mgr)
-            agent.set_bus(bus)
-            agent.set_blackboard(bb)
-            agent.set_erp(erp)
-            agents_dict[name] = agent
+    async with _init_lock:
+        if not agents_dict:
+            _llm = await _initialize_llm_internal()
+            if erp is None:
+                from erp.factory import create_erp_adapter
+                erp = create_erp_adapter()
+            agent_classes = {
+                "product_agent": ProductAgent,
+                "tech_agent": TechAgent,
+                "billing_agent": BillingAgent,
+                "complaint_agent": ComplaintAgent,
+                "general_agent": GeneralAgent,
+            }
+            for name, cls in agent_classes.items():
+                agent = cls()
+                agent.set_llm(_llm)
+                agent.set_session_manager(session_mgr)
+                agent.set_bus(bus)
+                agent.set_blackboard(bb)
+                agent.set_erp(erp)
+                agents_dict[name] = agent
 
-        # ResponseAgent: Router → Expert → Response 三层架构的最终环节
-        response_agent = ResponseAgent(
-            session_manager=session_mgr,
-            message_bus=bus,
-            blackboard=bb,
-            cache=cache,
-        )
-        response_agent.set_llm(_llm)
+            # v3.5: 注入 RAG 知识库到需要检索的 Agent（直接初始化，避免嵌套锁死锁）
+            await _init_rag_and_tools_internal()
+            for name in ("product_agent", "tech_agent"):
+                if name in agents_dict:
+                    agents_dict[name].set_knowledge_base(knowledge_base)
 
-        logger.info(f"初始化 {len(agents_dict)} 个专家 Agent + ResponseAgent 完成 (ERP_MODE={ERP_MODE})")
+            # v3.5: 创建 ReAct 推理 Agent
+            react_agent = ReActAgent()
+            react_agent.set_llm(_llm)
+            react_agent.set_session_manager(session_mgr)
+            react_agent.set_bus(bus)
+            react_agent.set_blackboard(bb)
+            react_agent.set_erp(erp)
+            react_agent.set_knowledge_base(knowledge_base)
+            react_agent.set_tool_registry(tool_registry)
+            agents_dict["react_agent"] = react_agent
+
+            # ResponseAgent: Router → Expert → Response 三层架构的最终环节
+            response_agent = ResponseAgent(
+                session_manager=session_mgr,
+                message_bus=bus,
+                blackboard=bb,
+                cache=cache,
+            )
+            response_agent.set_llm(_llm)
+
+            logger.info(f"初始化 {len(agents_dict)} 个 Agent（含 ReActAgent）完成 (ERP_MODE={ERP_MODE})")
     return agents_dict
 
 
-def initialize_router():
+async def initialize_router():
     global router
-    if router is None:
-        router = QueryRouter(llm=initialize_llm(), complexity_threshold=ROUTING_COMPLEXITY_THRESHOLD)
-    return router
+    async with _init_lock:
+        if router is None:
+            router = QueryRouter(llm=await _initialize_llm_internal(), complexity_threshold=ROUTING_COMPLEXITY_THRESHOLD)
+        return router
+
+
+async def _init_rag_and_tools_internal():
+    """v3.5: 初始化 RAG 知识库 + 工具注册（内部调用，不加锁，由 initialize_agents 保护）"""
+    global knowledge_base, tool_registry, erp
+    if knowledge_base is None:
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+        from rag.seed_data import seed_product_knowledge, seed_faq, seed_tech_support
+        knowledge_base = CosmeticsKnowledgeBase()
+        seed_product_knowledge(knowledge_base)
+        seed_faq(knowledge_base)
+        seed_tech_support(knowledge_base)
+        logger.info(f"RAG 知识库初始化完成 (product={knowledge_base.get_collection_count('product_knowledge')}, "
+                    f"faq={knowledge_base.get_collection_count('faq')}, "
+                    f"tech={knowledge_base.get_collection_count('tech_support')})")
+    if tool_registry is None:
+        from tools.erp_tools import create_erp_tools
+        if erp is None:
+            from erp.factory import create_erp_adapter
+            erp = create_erp_adapter()
+        tool_registry = create_erp_tools(erp)
+        logger.info(f"工具注册完成: {tool_registry.list_tools()}")
 
 
 # ===== 图节点（v3.0 全部原生异步）=====
@@ -152,17 +216,16 @@ async def classify_query_node(state: AgentState) -> AgentState:
     session_mgr.create_session(session_id)
     # v3.3: 不在此处写入用户消息，避免与 _process_with_llm 重复
 
-    _router = initialize_router()
-    context = session_mgr.get_conversation_context(session_id)
+    _router = await initialize_router()
+    context = await session_mgr.get_conversation_context(session_id)
     context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
 
     # v3.2: 熔断器检查 — OPEN 状态时跳过 LLM，仅用规则分类
-    if not circuit_breaker.should_allow():
+    if not await circuit_breaker.should_allow():
         logger.warning("[Router] LLM 熔断中，降级为纯规则分类")
-        rule_type = _router._rule_classify(query)
         from router.query_router import INTENT_AGENT_MAP
+        rule_type, _, complexity = _router._rule_classify_and_score(query, context_text)
         final_type = rule_type or "general_inquiry"
-        complexity = _router._score_complexity(query, final_type, context_text)
         result = RoutingResult(
             query_type=final_type,
             agent_name=INTENT_AGENT_MAP.get(final_type, "general_agent"),
@@ -176,8 +239,16 @@ async def classify_query_node(state: AgentState) -> AgentState:
         try:
             result = await _router.route(query, context_text)
         except Exception as e:
-            logger.error(f"router error: {e}")
-            result = RoutingResult()
+            logger.warning(f"[Router] 路由异常，降级到通用查询: {e}")
+            result = RoutingResult(
+                query_type="general_inquiry",
+                agent_name="general_agent",
+                complexity=30,
+                fast_path=True,
+                confidence=0.0,
+                raw_llm_result="[error_fallback]",
+                rule_override=True,
+            )
 
     state["query_type"] = result.query_type
     state["current_agent"] = result.agent_name
@@ -218,7 +289,7 @@ async def check_cache_node(state: AgentState) -> AgentState:
 
 async def execute_collaboration(state: AgentState, mode_name: str) -> AgentState:
     """统一执行协作模式"""
-    _ = initialize_agents()
+    _ = await initialize_agents()
 
     start = time.time()
     try:
@@ -263,7 +334,7 @@ hierarchical_node = _make_collaboration_node("hierarchical")
 
 async def final_response_node(state: AgentState) -> AgentState:
     """最终响应节点（v3.0: 委托 ResponseAgent 处理后处理逻辑）"""
-    _ = initialize_agents()
+    _ = await initialize_agents()
     global response_agent
     if response_agent:
         try:
@@ -279,13 +350,11 @@ async def final_response_node(state: AgentState) -> AgentState:
 
 
 def _fallback_post_process(state: AgentState):
-    """降级后处理：仅做缓存和会话写入（不替代 ResponseAgent 完整功能）"""
+    """降级后处理：仅做缓存写入（不重复写入会话记录，避免与 ResponseAgent 双写）
+    v3.4: 移除 session_mgr.add_message 调用，因为 ResponseAgent 已在 process() 中写入，
+    即使 ResponseAgent 部分执行后失败，session 写入在缓存写入之前已完成。"""
     if state.get("response") and not state.get("cached", False):
         cache.put(state["customer_query"], state["response"])
-    try:
-        session_mgr.add_message(state.get("session_id", ""), state["response"], is_user=False)
-    except Exception:
-        pass
 
 
 # ===== 条件路由函数 =====
@@ -307,14 +376,15 @@ def select_collaboration_mode(state: AgentState) -> str:
 # ===== 构建图 =====
 
 def make_graph():
-    """构建 LangGraph 工作流图（v3.3 性能优化版）
+    """构建 LangGraph 工作流图（v3.5 RAG + Function Calling + ReAct 版）
     三层状态机架构：
       Layer 0: Cache Check（check_cache）— 缓存命中直接跳到 final_response
       Layer 1: Router（classify_query_node）— 双层意图识别 + 复杂度评分
-      Layer 2: Expert Agent（4 种协作模式节点）— 动态路由选择
+      Layer 2: Expert Agent（5 种协作模式节点）— 动态路由选择（含 ReAct 推理）
       Layer 3: ResponseAgent（final_response_node）— 缓存/会话/SLA/事件
 
     v3.3 优化：缓存检查前置，命中时跳过 LLM 路由调用（节省 2-8s）
+    v3.5 新增：react 节点支持 RAG + Function Calling 自主推理
     """
     workflow = StateGraph(AgentState)
 
@@ -325,6 +395,7 @@ def make_graph():
     workflow.add_node("parallel", parallel_node)
     workflow.add_node("consultation", consultation_node)
     workflow.add_node("hierarchical", hierarchical_node)
+    workflow.add_node("react", _make_collaboration_node("react"))
     workflow.add_node("final_response", final_response_node)
 
     # v3.3: 入口改为缓存检查（命中直接跳到 final_response，跳过 LLM 路由）
@@ -340,7 +411,7 @@ def make_graph():
         }
     )
 
-    # classify → 条件路由选择协作模式
+    # classify → 条件路由选择协作模式（v3.5: 含 react 模式）
     workflow.add_conditional_edges(
         "classify_query",
         select_collaboration_mode,
@@ -349,6 +420,7 @@ def make_graph():
             "parallel": "parallel",
             "consultation": "consultation",
             "hierarchical": "hierarchical",
+            "react": "react",
         }
     )
 
@@ -357,15 +429,16 @@ def make_graph():
     workflow.add_edge("parallel", "final_response")
     workflow.add_edge("consultation", "final_response")
     workflow.add_edge("hierarchical", "final_response")
+    workflow.add_edge("react", "final_response")
 
     # 结束
     workflow.set_finish_point("final_response")
 
     app = workflow.compile()
-    logger.info("[Graph] LangGraph v3.3 构建完成 - 缓存前置 + 原生异步 + 统一编排 + 指标采集")
+    logger.info("[Graph] LangGraph v3.6 构建完成 - 缓存前置 + 原生异步 + 5种协作模式 + RAG + 工具调用")
     return app
 
 
 if __name__ == "__main__":
     app = make_graph()
-    logger.info("多智能体客服系统 v3.0 启动成功")
+    logger.info("多智能体客服系统 v3.6 启动成功")

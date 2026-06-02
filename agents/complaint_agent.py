@@ -1,14 +1,8 @@
 """
-投诉处理专家智能体（v3.0 - 原生异步版）
-- async process() 消除死锁风险
-- 深度集成 MessageBus + SharedBlackboard
-- 漂移自动修复
+投诉处理专家智能体（v3.4 精简版）
 """
 from typing import Dict, Any
 from .base_agent import BaseAgent
-from logger import get_logger
-
-logger = get_logger("agent.complaint_agent")
 
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 专业领域：{self_expertise}
@@ -33,15 +27,9 @@ class ComplaintAgent(BaseAgent):
         )
 
     async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        # 投诉处理写入黑板，供其他 Agent 参考
         await self._write_blackboard("complaint.active", True, ttl=600)
 
-        system_prompt = _SYSTEM_PROMPT.format(
-            self_name=self.name, self_role=self.role,
-            self_expertise=", ".join(self.expertise)
-        )
-
         return await self._process_with_llm(
-            state, system_prompt,
+            state, self._format_system_prompt(_SYSTEM_PROMPT),
             fallback_response="非常抱歉给您带来不好的体验，我们会尽快为您处理。请告诉我具体问题。",
         )

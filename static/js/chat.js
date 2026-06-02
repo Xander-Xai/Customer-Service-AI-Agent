@@ -11,16 +11,18 @@ let progressStatusEl = null;  // 进度状态 DOM 引用
 
 // ===== 页面初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
-  // 连接 WebSocket
-  API.connect();
-
-  // 注册事件监听
+  // 注册事件监听（先注册再连接，避免丢失 onopen 事件）
   API.on('connected', handleWSConnected);
   API.on('disconnected', handleWSDisconnected);
+  API.on('ws_error', handleWSError);
   API.on('status', handleStatus);
   API.on('progress', handleProgress);
   API.on('response', handleResponse);
   API.on('error', handleError);
+  API.on('pending', handlePending);
+
+  // 连接 WebSocket
+  API.connect();
 
   // 加载会话列表
   loadSessionList();
@@ -42,7 +44,22 @@ function handleWSDisconnected(data) {
   const dot = document.getElementById('wsStatusDot');
   const text = document.getElementById('wsStatusText');
   dot.classList.add('disconnected');
-  text.textContent = data.code === 1000 ? '已断开' : '重连中...';
+  text.textContent = data.code === 1000 ? '已断开' : '连接断开，重连中...';
+}
+
+/** v3.6: WebSocket 连接错误反馈 */
+function handleWSError() {
+  const dot = document.getElementById('wsStatusDot');
+  const text = document.getElementById('wsStatusText');
+  dot.classList.add('disconnected');
+  text.textContent = '连接失败，重连中...';
+}
+
+/** v3.6: 消息暂存通知 */
+function handlePending(data) {
+  // 不中断用户操作，仅更新状态文字
+  const text = document.getElementById('wsStatusText');
+  text.textContent = '消息已暂存，等待连接...';
 }
 
 function handleStatus(data) {
@@ -67,9 +84,9 @@ function handleResponse(data) {
   const agentsUsed = data.agents_used || [];
   const resolutionStatus = data.resolution_status || '';
 
-  // 创建会话（首次消息时）
-  if (!currentSessionId) {
-    currentSessionId = data.session_id || generateSessionId();
+  // v3.6: 同步服务端 session_id（确保前后端一致）
+  if (!currentSessionId || currentSessionId !== data.session_id) {
+    currentSessionId = data.session_id || currentSessionId || generateSessionId();
   }
 
   // 渲染 AI 回复
@@ -362,7 +379,8 @@ async function loadSessionList() {
       const driftWarn = s.drift_count > 0 ? `⚠️ ${s.drift_count}次漂移` : '';
       return `
         <div class="session-item ${isActive ? 'active' : ''}"
-             onclick="selectSession('${s.session_id}')">
+             data-session-id="${escapeHtml(s.session_id)}"
+             onclick="selectSession('${escapeHtml(s.session_id)}')">
           <div class="session-item-title">${s.summary || '对话 ' + s.session_id.slice(0, 8)}</div>
           <div class="session-item-meta">
             <span>💬 ${s.message_count || 0}条</span>
@@ -403,12 +421,8 @@ async function selectSession(sessionId) {
     }
 
     // 更新侧边栏激活状态
-    document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
-    const items = document.querySelectorAll('.session-item');
-    items.forEach(el => {
-      if (el.onclick && el.onclick.toString().includes(sessionId)) {
-        el.classList.add('active');
-      }
+    document.querySelectorAll('.session-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.sessionId === sessionId);
     });
 
     loadSessionList();

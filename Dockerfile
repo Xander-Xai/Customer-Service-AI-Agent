@@ -6,11 +6,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制源码
+# 复制源码（仅必要文件）
 COPY . .
 
+# v3.4: 创建非 root 用户
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
 # 暴露端口
-# 8000: FastAPI WebSocket 服务（主服务）
 EXPOSE 8000
 
 # 环境变量
@@ -19,7 +23,7 @@ ENV PYTHONUNBUFFERED=1
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
-    CMD python -c "import httpx; r=httpx.get('http://localhost:8000/api/health'); assert r.status_code==200"
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"
 
-# 默认启动 FastAPI 服务（v3.0）
+# 启动 FastAPI 服务
 CMD ["python", "-m", "uvicorn", "api.app_factory:app", "--host", "0.0.0.0", "--port", "8000"]

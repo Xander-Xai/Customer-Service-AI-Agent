@@ -1,16 +1,21 @@
 """
-二级缓存系统（v3.0）
+二级缓存系统（v3.4 - jieba 中文分词优化版）
 L1: 精确缓存（MD5 哈希）- O(1) 查找
-L2: 语义缓存（Jaccard 相似度 + 倒排索引）- 动态阈值
+L2: 语义缓存（Jaccard 相似度 + 倒排索引 + jieba 分词）- 动态阈值
 + 结构化日志
+
+v3.4 优化：
+- L2 tokenize 改用 jieba 中文分词（与 session_manager 共享），提升中文语义匹配精度
+- 缓存淘汰策略优化：每次淘汰 5% 而非 20%，避免缓存雪崩
 """
 import hashlib
 import time
-import re
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, deque
 from typing import Dict, List, Optional, Tuple
 from logger import get_logger
 import config
+
+from session_manager import _tokenize_chinese as _tokenize
 
 logger = get_logger("cache")
 
@@ -25,7 +30,7 @@ class ResponseCache:
         self._l1: OrderedDict = OrderedDict()  # key -> (response, ts)
         self._l1_max = l1_max
         self._l2: Dict[str, Tuple[frozenset, str, float]] = {}
-        self._l2_order: List[str] = []
+        self._l2_order: deque = deque()  # v3.6: 改用 deque，淘汰从 O(n) 优化到 O(1)
         self._l2_max = l2_max
         self._inverted_index: Dict[str, set] = defaultdict(set)
         self._default_ttl = default_ttl
@@ -105,7 +110,7 @@ class ResponseCache:
             except Exception:
                 pass
 
-        tokens = self._tokenize(query)
+        tokens = _tokenize(query)
         if len(self._l2) >= self._l2_max:
             self._evict_l2()
         cache_key = f"k{len(self._l2_order)}"
@@ -123,6 +128,7 @@ class ResponseCache:
         self._l2.clear()
         self._l2_order.clear()
         self._inverted_index.clear()
+        self._redis = None  # v3.6: 重置 Redis 客户端
         logger.info("缓存已清空")
 
     def get_stats(self) -> Dict[str, int]:
@@ -137,7 +143,7 @@ class ResponseCache:
         }
 
     def _semantic_search(self, query: str) -> Optional[str]:
-        tokens = self._tokenize(query)
+        tokens = _tokenize(query)
         if not tokens:
             return None
         threshold = self._threshold_short if len(query) <= self._short_text_max_len else self._threshold_long
@@ -168,11 +174,6 @@ class ResponseCache:
         return hashlib.md5(text.encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _tokenize(text: str) -> frozenset:
-        words = re.findall(r"[\w一-鿿]+", text.lower())
-        return frozenset(words)
-
-    @staticmethod
     def _jaccard(set_a: frozenset, set_b: frozenset) -> float:
         if not set_a or not set_b:
             return 0.0
@@ -181,21 +182,22 @@ class ResponseCache:
         return inter / union if union > 0 else 0.0
 
     def _evict_l1(self):
-        """LRU 淘汰：移除最久未使用的 20% 条目（O(n) 但无排序开销）"""
+        """v3.4: LRU 淘汰 — 每次淘汰 5% 条目（避免 20% 淘汰导致缓存雪崩）"""
         if not self._l1:
             return
-        n = max(1, len(self._l1) // 5)
+        n = max(1, len(self._l1) // 20)  # v3.4: 从 1/5 改为 1/20
         for _ in range(n):
             self._l1.popitem(last=False)
 
     def _evict_l2(self):
+        """v3.4: L2 淘汰 — 每次淘汰 5% 条目"""
         if not self._l2_order:
             return
-        n = max(1, len(self._l2_order) // 5)
+        n = max(1, len(self._l2_order) // 20)  # v3.4: 从 1/5 改为 1/20
         for _ in range(n):
             if not self._l2_order:
                 break
-            old_key = self._l2_order.pop(0)
+            old_key = self._l2_order.popleft()  # v3.6: O(1) 淘汰（原 pop(0) 为 O(n)）
             if old_key in self._l2:
                 tokens = self._l2[old_key][0]
                 for t in tokens:

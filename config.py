@@ -63,7 +63,12 @@ RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
 RETRY_BASE_DELAY = float(os.getenv("RETRY_BASE_DELAY", "1.0"))
 
 # ===== 系统配置 =====
-VERSION = "3.0.0"
+VERSION = "3.6.0"
+
+# ===== v3.4: 安全配置 =====
+MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "2000"))   # 用户查询最大字符数
+MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "10000"))          # 最大内存会话数
+SESSION_IDLE_TTL = int(os.getenv("SESSION_IDLE_TTL", "3600"))   # 会话空闲过期时间（秒）
 
 
 # ===== 日志配置 =====
@@ -73,11 +78,14 @@ LOG_CONFIG = {
 }
 
 # ===== CORS 配置（v3.0 新增） =====
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 # ===== API 认证配置（v3.0 新增） =====
-API_KEY_ENABLED = os.getenv("API_KEY_ENABLED", "false").lower() == "true"
+API_KEY_ENABLED = os.getenv("API_KEY_ENABLED", "true").lower() == "true"
 API_KEY = os.getenv("API_KEY", "")
+if API_KEY_ENABLED and not API_KEY:
+    import logging
+    logging.warning("API_KEY_ENABLED=true but API_KEY is not set. Authentication will reject all requests.")
 
 # ===== ERP 模式配置（v3.0 新增） =====
 ERP_MODE = os.getenv("ERP_MODE", "mock")  # mock | real
@@ -88,3 +96,14 @@ ERP_DB_ID = os.getenv("ERP_DB_ID", "")
 
 # ===== Redis 配置（v3.0 新增） =====
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+
+# ===== v3.5: RAG 配置 =====
+RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
+RAG_N_RESULTS = int(os.getenv("RAG_N_RESULTS", "3"))
+
+# ===== v3.5: ReAct 配置 =====
+REACT_MAX_ITERATIONS = int(os.getenv("REACT_MAX_ITERATIONS", "5"))
+REACT_COMPLEXITY_THRESHOLD = int(os.getenv("REACT_COMPLEXITY_THRESHOLD", "60"))
+
+# ===== v3.5: 工具调用配置 =====
+TOOL_MAX_ROUNDS = int(os.getenv("TOOL_MAX_ROUNDS", "3"))

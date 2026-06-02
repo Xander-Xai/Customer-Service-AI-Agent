@@ -4,9 +4,15 @@
 .git
 .gitignore
 .env
+.env.*
 *.md
 doc/
 chat_sessions/
 .vscode/
 .idea/
 *.egg-info/
+test_*.py
+erp/test_*.py
+venv/
+.pytest_cache/
+htmlcov/

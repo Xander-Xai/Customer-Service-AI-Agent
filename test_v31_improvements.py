@@ -181,7 +181,7 @@ async def test_improvements():
         for i in range(10):
             sm.add_message("token_test", f"这是第{i+1}条消息，用于测试token级别的滑动窗口裁剪功能", is_user=(i % 2 == 0))
 
-        context = sm.get_conversation_context("token_test")
+        context = await sm.get_conversation_context("token_test")
         total_chars = sum(len(m.get("content", "")) for m in context)
         total_tokens = sum(_count_tokens(m.get("content", "")) for m in context)
         print(f"    消息总数: 10, 上下文消息数: {len(context)}, tokens: {total_tokens}, chars: {total_chars}")

@@ -79,7 +79,9 @@ class TestCacheStress:
                 tasks.append(reader(n))
             await asyncio.gather(*tasks)
 
-        asyncio.get_event_loop().run_until_complete(run())
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(run())
+        loop.close()
         print(f"\n    并发缓存: 10个并发任务完成，无异常")
 
 
@@ -221,10 +223,12 @@ class TestSessionStress:
                 sm.add_message(sid, f"消息 {j} from session {i}", is_user=(j % 2 == 0))
         create_time = time.time() - start
 
-        # 批量获取上下文
+        # 批量获取上下文（v3.4: get_conversation_context 改为 async）
         start = time.time()
+        loop = asyncio.new_event_loop()
         for i in range(100):
-            sm.get_conversation_context(f"stress_session_{i}")
+            loop.run_until_complete(sm.get_conversation_context(f"stress_session_{i}"))
+        loop.close()
         context_time = time.time() - start
 
         sessions = sm.list_sessions()

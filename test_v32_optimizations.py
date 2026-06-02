@@ -1,5 +1,5 @@
 """
-v3.2 优化专项测试
+v3.2 优化专项测试（v3.4: 适配 async API）
 覆盖：首次解决率增强、SLA 告警、模型熔断器
 无需 LLM API 和网络，纯逻辑测试
 
@@ -19,72 +19,79 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 # ===== 1. CircuitBreaker 熔断器测试 =====
 
 class TestCircuitBreaker:
-    """熔断器三态转换逻辑"""
+    """熔断器三态转换逻辑（v3.4: 所有方法改为 async）"""
 
     def _make_cb(self, fail_threshold=3, recovery_time=0):
         """创建测试用熔断器（recovery_time=0 便于测试）"""
         from core.monitoring import CircuitBreaker
         return CircuitBreaker(fail_threshold=fail_threshold, recovery_time=recovery_time)
 
-    def test_initial_state_closed(self):
+    @pytest.mark.asyncio
+    async def test_initial_state_closed(self):
         cb = self._make_cb()
         assert cb.state == "closed"
-        assert cb.should_allow() is True
+        assert await cb.should_allow() is True
 
-    def test_closed_to_open(self):
+    @pytest.mark.asyncio
+    async def test_closed_to_open(self):
         """连续失败达到阈值 → OPEN"""
         cb = self._make_cb(fail_threshold=3, recovery_time=60)  # 60s 恢复，测试时不会恢复
         for _ in range(3):
-            cb.record_failure()
+            await cb.record_failure()
         assert cb.state == "open"
-        assert cb.should_allow() is False
+        assert await cb.should_allow() is False
 
-    def test_open_to_half_open(self):
+    @pytest.mark.asyncio
+    async def test_open_to_half_open(self):
         """恢复时间后 → HALF_OPEN，允许探测"""
         cb = self._make_cb(fail_threshold=2, recovery_time=0)
-        cb.record_failure()
-        cb.record_failure()
+        await cb.record_failure()
+        await cb.record_failure()
         assert cb.state == "open"
         # recovery_time=0，立即进入 HALF_OPEN
-        assert cb.should_allow() is True
+        assert await cb.should_allow() is True
         assert cb.state == "half_open"
 
-    def test_half_open_success_to_closed(self):
+    @pytest.mark.asyncio
+    async def test_half_open_success_to_closed(self):
         """HALF_OPEN 探测成功 → CLOSED"""
         cb = self._make_cb(fail_threshold=2, recovery_time=0)
-        cb.record_failure()
-        cb.record_failure()
-        cb.should_allow()  # → HALF_OPEN
-        cb.record_success()
+        await cb.record_failure()
+        await cb.record_failure()
+        await cb.should_allow()  # → HALF_OPEN
+        await cb.record_success()
         assert cb.state == "closed"
         assert cb.consecutive_failures == 0
 
-    def test_half_open_failure_to_open(self):
+    @pytest.mark.asyncio
+    async def test_half_open_failure_to_open(self):
         """HALF_OPEN 探测失败 → 重新 OPEN"""
         cb = self._make_cb(fail_threshold=2, recovery_time=0)
-        cb.record_failure()
-        cb.record_failure()
-        cb.should_allow()  # → HALF_OPEN
-        cb.record_failure()  # 探测失败
+        await cb.record_failure()
+        await cb.record_failure()
+        await cb.should_allow()  # → HALF_OPEN
+        await cb.record_failure()  # 探测失败
         assert cb.state == "open"
 
-    def test_partial_failures_stay_closed(self):
+    @pytest.mark.asyncio
+    async def test_partial_failures_stay_closed(self):
         """失败次数未达阈值 → 保持 CLOSED"""
         cb = self._make_cb(fail_threshold=5)
-        cb.record_failure()
-        cb.record_failure()
+        await cb.record_failure()
+        await cb.record_failure()
         assert cb.state == "closed"
-        assert cb.should_allow() is True
+        assert await cb.should_allow() is True
 
-    def test_success_resets_counter(self):
+    @pytest.mark.asyncio
+    async def test_success_resets_counter(self):
         """成功调用重置连续失败计数"""
         cb = self._make_cb(fail_threshold=3)
-        cb.record_failure()
-        cb.record_failure()
-        cb.record_success()
+        await cb.record_failure()
+        await cb.record_failure()
+        await cb.record_success()
         assert cb.consecutive_failures == 0
-        cb.record_failure()
-        cb.record_failure()
+        await cb.record_failure()
+        await cb.record_failure()
         assert cb.state == "closed"  # 只有 2 次，未达阈值
 
     def test_get_status(self):
@@ -99,7 +106,7 @@ class TestCircuitBreaker:
 # ===== 2. SLAAlertManager 告警管理器测试 =====
 
 class TestSLAAlertManager:
-    """SLA 告警滑动窗口 + 冷却机制"""
+    """SLA 告警滑动窗口 + 冷却机制（v3.4: async record_request）"""
 
     def _make_metrics_and_alert_mgr(self):
         from core.monitoring import MetricsCollector, SLAAlertManager
@@ -113,7 +120,7 @@ class TestSLAAlertManager:
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
         # 录入正常请求
         for _ in range(10):
-            metrics.record_request(elapsed=10.0, session_id="s1")
+            await metrics.record_request(elapsed=10.0, session_id="s1")
         alert = await alert_mgr.check_and_alert(metrics)
         assert alert is None
 
@@ -123,7 +130,7 @@ class TestSLAAlertManager:
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
         # 录入高违约率请求（全部超时）
         for i in range(50):
-            metrics.record_request(elapsed=25.0, session_id=f"s{i}")
+            await metrics.record_request(elapsed=25.0, session_id=f"s{i}")
         alert = await alert_mgr.check_and_alert(metrics)
         assert alert is not None
         assert alert["type"] == "sla_violation_high"
@@ -136,17 +143,17 @@ class TestSLAAlertManager:
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
         alert_mgr.last_alert_time["sla_violation_high"] = time.time()  # 刚告警过
         for i in range(50):
-            metrics.record_request(elapsed=25.0, session_id=f"s{i}")
+            await metrics.record_request(elapsed=25.0, session_id=f"s{i}")
         alert = await alert_mgr.check_and_alert(metrics)
         assert alert is None  # 冷却期内，不告警
 
     @pytest.mark.asyncio
     async def test_severity_critical_at_extreme_rate(self):
         """极高违约率 → critical 级别"""
-        from multi_agent_customer_service import SLA_ALERT_THRESHOLD
+        from config import SLA_ALERT_THRESHOLD
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
         for i in range(50):
-            metrics.record_request(elapsed=25.0, session_id=f"s{i}")
+            await metrics.record_request(elapsed=25.0, session_id=f"s{i}")
         alert = await alert_mgr.check_and_alert(metrics)
         # 100% > threshold * 1.5 → critical
         if SLA_ALERT_THRESHOLD * 1.5 < 100.0:
@@ -163,10 +170,10 @@ class TestSLAAlertManager:
         assert alert_mgr.alerts[0]["index"] == 50  # 最早保留的是第 50 条
 
 
-# ===== 3. 增强首次解决率测试 =====
+# ===== 3. 增强首次解决率测试（v3.4: 修复投诉误判）=====
 
 class TestResolutionStatus:
-    """解决状态评估逻辑"""
+    """解决状态评估逻辑（v3.4: 投诉 hierarchical 不再自动标记为 escalated）"""
 
     def _make_response_agent(self):
         from agents.response_agent import ResponseAgent
@@ -205,10 +212,21 @@ class TestResolutionStatus:
         }
         assert agent._evaluate_resolution(state) == "uncertain"
 
-    def test_escalated_complaint_hierarchical(self):
+    def test_resolved_complaint_hierarchical(self):
+        """v3.4: hierarchical 模式成功处理投诉 → resolved（不再是 escalated）"""
         agent = self._make_response_agent()
         state = {
-            "response": "已为您安排专人跟进",
+            "response": "非常抱歉给您带来不好的体验，我们已安排专人跟进并提供补偿方案。",
+            "collaboration_mode": "hierarchical",
+            "query_type": "complaint",
+        }
+        assert agent._evaluate_resolution(state) == "resolved"
+
+    def test_escalated_explicit_handoff(self):
+        """v3.4: 仅当响应明确要求转人工时才标记为 escalated"""
+        agent = self._make_response_agent()
+        state = {
+            "response": "您的问题需要更高级别的处理，正在为您转接人工客服，请稍候。",
             "collaboration_mode": "hierarchical",
             "query_type": "complaint",
         }
@@ -218,23 +236,25 @@ class TestResolutionStatus:
 # ===== 4. MetricsCollector 增强 KPI 测试 =====
 
 class TestEnhancedKPI:
-    """增强版 KPI 统计逻辑"""
+    """增强版 KPI 统计逻辑（v3.4: async record_request）"""
 
-    def test_resolution_counts_tracked(self):
+    @pytest.mark.asyncio
+    async def test_resolution_counts_tracked(self):
         from core.monitoring import MetricsCollector
         m = MetricsCollector()
-        m.record_request(elapsed=10.0, session_id="s1", resolution_status="resolved")
-        m.record_request(elapsed=10.0, session_id="s2", resolution_status="uncertain")
-        m.record_request(elapsed=10.0, session_id="s3", resolution_status="failed")
-        m.record_request(elapsed=10.0, session_id="s4", resolution_status="escalated")
+        await m.record_request(elapsed=10.0, session_id="s1", resolution_status="resolved")
+        await m.record_request(elapsed=10.0, session_id="s2", resolution_status="uncertain")
+        await m.record_request(elapsed=10.0, session_id="s3", resolution_status="failed")
+        await m.record_request(elapsed=10.0, session_id="s4", resolution_status="escalated")
         assert m.resolution_counts == {"resolved": 1, "uncertain": 1, "failed": 1, "escalated": 1}
 
-    def test_kpi_includes_enhanced_fields(self):
+    @pytest.mark.asyncio
+    async def test_kpi_includes_enhanced_fields(self):
         from core.monitoring import MetricsCollector
         m = MetricsCollector()
-        m.record_request(elapsed=10.0, session_id="s1", resolution_status="resolved")
-        m.record_request(elapsed=10.0, session_id="s2", resolution_status="failed")
-        kpi = m.get_kpi_stats()
+        await m.record_request(elapsed=10.0, session_id="s1", resolution_status="resolved")
+        await m.record_request(elapsed=10.0, session_id="s2", resolution_status="failed")
+        kpi = await m.get_kpi_stats()
         # v3.2 新增字段
         assert "resolution_rate" in kpi
         assert "resolution_detail" in kpi
@@ -243,18 +263,19 @@ class TestEnhancedKPI:
         assert kpi["resolution_detail"]["resolved"] == 1
         assert kpi["resolution_detail"]["failed"] == 1
 
-    def test_sla_window_violation_rate(self):
+    @pytest.mark.asyncio
+    async def test_sla_window_violation_rate(self):
         from core.monitoring import MetricsCollector
         m = MetricsCollector()
         # 30 次超时 + 20 次正常 = 60% 违约率
         for _ in range(30):
-            m.record_request(elapsed=25.0, session_id="s1")
+            await m.record_request(elapsed=25.0, session_id="s1")
         for _ in range(20):
-            m.record_request(elapsed=10.0, session_id="s2")
-        rate = m.get_sla_window_violation_rate()
+            await m.record_request(elapsed=10.0, session_id="s2")
+        rate = await m.get_sla_window_violation_rate()
         # 窗口取最后 50 次（默认 SLA_ALERT_WINDOW=50）
         assert rate > 0  # 有违约
-        stats = m.get_stats()
+        stats = await m.get_stats()
         assert "window_violation_rate" in stats["sla"]
 
 
@@ -297,20 +318,21 @@ class TestCacheQualityFilter:
         # resolved → 写入缓存
         resolution = "resolved"
         if resolution == "resolved":
-            cache.put("问题A", "回答A")
-        assert cache.get("问题A") == "回答A"
+            cache.put("玫瑰精华液成分", "含有玫瑰精油和透明质酸")
+        assert cache.get("玫瑰精华液成分") == "含有玫瑰精油和透明质酸"
 
         # uncertain → 不写入缓存
         resolution = "uncertain"
         if resolution == "resolved":
-            cache.put("问题B", "回答B")
-        assert cache.get("问题B") is None
+            cache.put("绿茶洗面奶功效", "控油清洁")
+        # 使用完全不同的话题确保不会通过 L2 语义匹配
+        assert cache.get("绿茶洗面奶功效") is None
 
         # failed → 不写入缓存
         resolution = "failed"
         if resolution == "resolved":
-            cache.put("问题C", "回答C")
-        assert cache.get("问题C") is None
+            cache.put("玻尿酸面膜价格", "198元一盒")
+        assert cache.get("玻尿酸面膜价格") is None
 
 
 if __name__ == "__main__":

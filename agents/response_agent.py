@@ -1,23 +1,13 @@
 """
-响应处理智能体（v3.2 - Response Agent 增强版）
-职责：
-- 写入缓存（非缓存命中时）
-- 会话记录写入
-- SLA 监控日志
-- 广播响应完成事件
-- v3.2: 评估解决状态（resolved/uncertain/failed/escalated）
-
-补齐 Router → 专家 Agent → ResponseAgent 三层架构的最后一环
+响应处理智能体（v3.4 精简版）
+职责：缓存写入、会话记录、SLA 监控、事件广播、解决状态评估
 """
 from typing import Dict, Any
 from agents.base_agent import BaseAgent
-from core.message_bus import MessageBus, Message
+from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
 from session_manager import EnhancedSessionManager
 from cache.response_cache import ResponseCache
-from logger import get_logger
-
-logger = get_logger("agent.response")
 
 # 解决状态常量
 RESOLUTION_RESOLVED = "resolved"
@@ -25,11 +15,16 @@ RESOLUTION_UNCERTAIN = "uncertain"
 RESOLUTION_FAILED = "failed"
 RESOLUTION_ESCALATED = "escalated"
 
-# "不确定"响应的特征关键词（包含这些内容通常表示 AI 没有直接解决问题）
+# "不确定"响应的特征关键词
 UNCERTAIN_PHRASES = [
     "无法确定", "无法回答", "不确定", "建议您", "请咨询",
     "请联系", "转接人工", "转人工", "稍等", "请稍候",
     "我帮不了", "抱歉无法", "无法提供",
+]
+
+# "升级人工"响应的特征关键词（v3.4: 提取为模块常量）
+ESCALATION_PHRASES = [
+    "转接人工", "转人工客服", "人工客服介入", "升级处理", "高级客服",
 ]
 
 
@@ -91,12 +86,7 @@ class ResponseAgent(BaseAgent):
             else:
                 self.logger.debug(f"跳过缓存写入（status={resolution_status}）: {query[:30]}...")
 
-        # 3. 写入会话记录
-        if response and session_id:
-            try:
-                self._add_message_to_session(session_id, response, is_user=False)
-            except Exception as e:
-                self.logger.warning(f"会话记录写入失败: {e}")
+        # 3. 会话记录已由专家 Agent (_process_with_llm/_process_with_tools) 写入，此处不再重复
 
         # 4. SLA 监控日志
         self.logger.info(
@@ -117,24 +107,24 @@ class ResponseAgent(BaseAgent):
 
     def _evaluate_resolution(self, state: Dict[str, Any]) -> str:
         """
-        v3.2: 基于多维信号评估解决状态
-        - escalated: 升级到人工 → escalated
-- failed: 空响应 / 错误降级 → failed
+        v3.4: 基于多维信号评估解决状态（修复投诉误判为 escalated 的问题）
+        - escalated: 仅当响应明确要求转人工时才标记
+        - failed: 空响应 / 错误降级 → failed
         - uncertain: 响应过短 / 包含不确定短语 / 低置信度路由 → uncertain
         - resolved: Agent 正常返回有效响应 → resolved
         """
         response = state.get("response", "")
         mode = state.get("collaboration_mode", "")
 
-        # 升级场景
-        if mode == "hierarchical" and state.get("query_type") == "complaint":
-            return RESOLUTION_ESCALATED
-
         # 失败场景：空响应或错误降级
         if not response or response.strip() == "":
             return RESOLUTION_FAILED
         if response in ("处理出错，请重试", "处理出错"):
             return RESOLUTION_FAILED
+
+        # v3.4: 升级场景 — 仅基于响应内容判断（而非路由模式）
+        if any(phrase in response for phrase in ESCALATION_PHRASES):
+            return RESOLUTION_ESCALATED
 
         # 不确定场景：响应过短（< 15 字符，通常不是有效回答）
         if len(response.strip()) < 15:
@@ -145,5 +135,5 @@ class ResponseAgent(BaseAgent):
         if any(phrase in response_lower for phrase in UNCERTAIN_PHRASES):
             return RESOLUTION_UNCERTAIN
 
-        # 正常解决
+        # 正常解决（包括 hierarchical 模式成功处理的投诉）
         return RESOLUTION_RESOLVED

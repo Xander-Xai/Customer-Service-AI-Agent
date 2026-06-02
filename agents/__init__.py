@@ -1,4 +1,4 @@
-"""智能体包（二次开发版 v3.0）"""
+"""智能体包（v3.5 - 新增 ReActAgent）"""
 from .base_agent import BaseAgent
 from .product_agent import ProductAgent
 from .tech_agent import TechAgent
@@ -6,6 +6,7 @@ from .billing_agent import BillingAgent
 from .complaint_agent import ComplaintAgent
 from .general_agent import GeneralAgent
 from .response_agent import ResponseAgent
+from .react_agent import ReActAgent
 
 __all__ = [
     "BaseAgent",
@@ -15,4 +16,5 @@ __all__ = [
     "ComplaintAgent",
     "GeneralAgent",
     "ResponseAgent",
+    "ReActAgent",
 ]

@@ -1,9 +1,10 @@
 """
-4 种协作模式实现（v3.1 - Bus/Blackboard 集成版）
+4+1 种协作模式实现（v3.5: 新增 ReAct 推理模式）
 核心改造：
 - 移除 asyncio.to_thread，直接 await Agent（消除死锁风险）
 - 集成 MessageBus 事件发布 + SharedBlackboard 数据共享
 - 结构化日志
+- v3.5: ReActMode 支持 RAG + Function Calling 自主推理
 """
 import asyncio
 import time
@@ -71,14 +72,6 @@ class SequentialMode(CollaborationMode):
 
         start = time.time()
 
-        # 从 Blackboard 读取路由上下文
-        routing_context = {}
-        try:
-            if self.bb:
-                routing_context = await self.bb.read("last_routing", default={}) or {}
-        except Exception:
-            logger.debug("Sequential: 读取 Blackboard 路由上下文失败，跳过")
-
         await self._safe_publish("agent.start", "sequential_mode",
                                  {"agent": agent_name, "mode": "sequential"})
 
@@ -98,42 +91,60 @@ class SequentialMode(CollaborationMode):
 
 
 class ParallelMode(CollaborationMode):
-    """并行模式：多 Agent 同时处理 + 结果聚合"""
+    """并行模式：多 Agent 同时处理 + 结果聚合（v3.4: Semaphore 限流，v3.6: 超时保护）"""
+
+    _PARALLEL_TIMEOUT = 30.0  # v3.6: 并行执行总超时（秒）
 
     def __init__(self, max_workers: int = 5,
                  bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
         super().__init__(bus=bus, bb=bb)
         self.max_workers = max_workers
+        self._semaphore: Optional[asyncio.Semaphore] = None  # v3.4: 懒初始化
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """v3.4: 懒初始化信号量，限制并行 Agent 数量"""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.max_workers)
+        return self._semaphore
 
     async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
                       context: Dict[str, Any]) -> Dict[str, Any]:
         agent_names = context.get("agent_list", [])
         start = time.time()
+        sem = self._get_semaphore()  # v3.4: 获取信号量
 
         async def run_agent(name: str):
-            agent = agents.get(name)
-            if not agent:
-                return name, f"[{name}] Agent not found", 0
-            s = time.time()
+            async with sem:  # v3.4: 限制并行数
+                agent = agents.get(name)
+                if not agent:
+                    return name, f"[{name}] Agent not found", 0
+                s = time.time()
 
-            await self._safe_publish("agent.start", "parallel_mode",
-                                     {"agent": name, "mode": "parallel"})
+                await self._safe_publish("agent.start", "parallel_mode",
+                                         {"agent": name, "mode": "parallel"})
 
-            result = await agent.process_with_retry(dict(state))
-            elapsed = time.time() - s
+                result = await agent.process_with_retry(dict(state))
+                elapsed = time.time() - s
 
-            await self._safe_bb_write(
-                f"parallel.result.{name}",
-                {"response": result.get("response", ""), "elapsed": elapsed},
-            )
+                await self._safe_bb_write(
+                    f"parallel.result.{name}",
+                    {"response": result.get("response", ""), "elapsed": elapsed},
+                )
 
-            await self._safe_publish("agent.complete", "parallel_mode",
-                                     {"agent": name, "mode": "parallel", "elapsed": elapsed})
+                await self._safe_publish("agent.complete", "parallel_mode",
+                                         {"agent": name, "mode": "parallel", "elapsed": elapsed})
 
-            return name, result.get("response", ""), elapsed
+                return name, result.get("response", ""), elapsed
 
         tasks = [run_agent(n) for n in agent_names if n in agents]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self._PARALLEL_TIMEOUT,  # v3.6: 超时保护
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Parallel 执行超时 ({self._PARALLEL_TIMEOUT}s)")
+            results = []
 
         responses = []
         agents_used = []
@@ -217,7 +228,14 @@ class ConsultationMode(CollaborationMode):
                 return name, response
 
             tasks = [consult(n) for n in consultees if n in agents]
-            done = await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                done = await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=self.consult_timeout,  # v3.6: 强制超时，防止慢 Agent 阻塞
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Consultation 辅助 Agent 超时 ({self.consult_timeout}s)")
+                done = []
             for r in done:
                 if not isinstance(r, Exception):
                     consult_results.append(r)
@@ -259,7 +277,9 @@ class ConsultationMode(CollaborationMode):
 
 
 class HierarchicalMode(CollaborationMode):
-    """层次模式：协调者分配子任务给多个 Agent，汇总后输出"""
+    """层次模式：协调者分配子任务给多个 Agent，汇总后输出（v3.6: 超时保护）"""
+
+    _HIERARCHICAL_TIMEOUT = 30.0  # v3.6: 子任务执行总超时（秒）
 
     async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
                       context: Dict[str, Any]) -> Dict[str, Any]:
@@ -299,7 +319,14 @@ class HierarchicalMode(CollaborationMode):
             return name, response
 
         tasks = [run_subtask(n, q) for n, q in sub_tasks.items() if n in agents and q.strip()]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self._HIERARCHICAL_TIMEOUT,  # v3.6: 超时保护
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"Hierarchical 子任务执行超时 ({self._HIERARCHICAL_TIMEOUT}s)")
+            results = []
 
         sub_responses = []
         agents_used = []
@@ -330,5 +357,35 @@ class HierarchicalMode(CollaborationMode):
             "response": final.get("response", ""),
             "mode": "hierarchical",
             "agents_used": [coordinator_name] + agents_used,
+            "elapsed": elapsed,
+        }
+
+
+class ReActMode(SequentialMode):
+    """ReAct 推理模式（v3.5）：复用 SequentialMode 流程，仅覆盖 Agent 选择逻辑"""
+
+    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
+                      context: Dict[str, Any]) -> Dict[str, Any]:
+        agent_name = "react_agent"
+        agent = agents.get(agent_name)
+
+        if not agent:
+            primary = context.get("primary_agent", "general_agent")
+            agent = agents.get(primary)
+            if not agent:
+                return {"response": "无可用 Agent", "mode": "react", "agents_used": []}
+            agent_name = primary
+            logger.warning(f"ReActAgent 未注册，回退到 {primary}")
+
+        start = time.time()
+        await self._safe_publish("agent.start", "react_mode", {"agent": agent_name, "mode": "react"})
+        result = await agent.process_with_retry(dict(state))
+        elapsed = time.time() - start
+        await self._safe_publish("agent.complete", "react_mode", {"agent": agent_name, "mode": "react", "elapsed": elapsed})
+        logger.info(f"ReAct {agent_name} {elapsed:.1f}s")
+        return {
+            "response": result.get("response", ""),
+            "mode": "react",
+            "agents_used": [agent_name],
             "elapsed": elapsed,
         }
