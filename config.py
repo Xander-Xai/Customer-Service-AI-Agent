@@ -63,7 +63,7 @@ RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
 RETRY_BASE_DELAY = float(os.getenv("RETRY_BASE_DELAY", "1.0"))
 
 # ===== 系统配置 =====
-VERSION = "3.6.0"
+VERSION = "3.7.0"
 
 # ===== v3.4: 安全配置 =====
 MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "2000"))   # 用户查询最大字符数

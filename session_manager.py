@@ -326,7 +326,10 @@ class EnhancedSessionManager:
         """校验会话令牌是否匹配（防止非创建者访问会话）"""
         secret = self._get_token_secret()
         if not secret:
-            return True  # 未配置密钥时跳过校验（向后兼容）
+            # v3.8: 未配置密钥时拒绝验证，而非跳过（安全优先）
+            logger.warning("SESSION_TOKEN_SECRET 未配置，会话所有权验证被禁用，"
+                           "生产环境应配置 SESSION_TOKEN_SECRET")
+            return False  # 改为拒绝，而非放行
         if not token:
             return False
         expected = self.generate_session_token(session_id)
