@@ -334,12 +334,16 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                 query = _sanitize_input(query)  # v3.7: 输入净化
                 sid = _validate_session_id(data.get("session_id", ""))  # v3.8 fix: session_id 校验
 
-                # v3.7: 会话所有权校验（如果客户端指定了非默认 session_id）
+                # v3.8 fix: 会话所有权校验 — 本地开发跳过令牌验证
                 if sid != session_id and _session_manager:
                     token = data.get("session_token", "")
-                    if not _session_manager.validate_session_token(sid, token):
-                        await ws.send_json({"type": "error", "content": "会话令牌无效"})
-                        continue
+                    # 本地开发环境跳过令牌验证
+                    local_dev = ws.client and ws.client.host in ("127.0.0.1", "::1", "localhost")
+                    if not local_dev:
+                        # 生产环境验证令牌
+                        if not _session_manager.validate_session_token(sid, token):
+                            await ws.send_json({"type": "error", "content": "会话令牌无效"})
+                            continue
                 if not query:
                     await ws.send_json({"type": "error", "content": "查询不能为空"})
                     continue

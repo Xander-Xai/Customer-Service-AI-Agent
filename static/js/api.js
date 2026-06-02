@@ -127,10 +127,11 @@ const API = (() => {
    * @param {string} query - 用户提问
    * @param {string} sessionId - 会话 ID（可选）
    */
-  function sendWSMessage(query, sessionId) {
+  function sendWSMessage(query, sessionId, sessionToken) {
     const payload = {
       query: query,
-      session_id: sessionId || _sessionId || undefined
+      session_id: sessionId || _sessionId || undefined,
+      session_token: sessionToken || undefined  // v3.8: 会话所有权令牌
     };
 
     if (!_ws || _ws.readyState !== WebSocket.OPEN) {

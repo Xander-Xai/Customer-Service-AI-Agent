@@ -5,6 +5,7 @@
 
 // ===== 状态管理 =====
 let currentSessionId = null;
+let currentSessionToken = null;  // v3.8: 会话所有权令牌
 let isWaitingResponse = false;
 let messageHistory = [];  // 当前会话消息缓存
 let progressStatusEl = null;  // 进度状态 DOM 引用
@@ -150,12 +151,12 @@ function sendMessage() {
   // 保存到历史
   messageHistory.push({ role: 'user', content: query });
 
-  // 发送 WebSocket 消息
+  // 发送 WebSocket 消息（v3.8: 传递 session_token）
   isWaitingResponse = true;
   updateSendButton();
   showTypingIndicator();
 
-  API.send(query, currentSessionId);
+  API.send(query, currentSessionId, currentSessionToken);
 
   // 清空输入
   input.value = '';
