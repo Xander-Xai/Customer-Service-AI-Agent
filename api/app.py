@@ -178,7 +178,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            "script-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
@@ -232,9 +232,11 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
             return await call_next(request)
 
-        # 会话管理端点需要 API Key 认证
+        # v3.8 fix: 会话管理端点允许本地开发无认证
         if path.startswith("/api/sessions"):
-            if API_KEY_ENABLED and API_KEY:
+            # 本地开发跳过认证
+            local_dev = request.client and request.client.host in ("127.0.0.1", "::1", "localhost")
+            if API_KEY_ENABLED and API_KEY and not local_dev:
                 api_key = request.headers.get("X-API-Key", "")
                 if not hmac.compare_digest(api_key, API_KEY):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -253,10 +255,22 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
     @app.websocket("/ws/chat")
     async def websocket_chat(ws: WebSocket):
-        # v3.4: WebSocket 认证检查 (v3.6: 从 header 获取，防 timing attack)
+        # v3.8 fix: WebSocket 认证支持（支持 query 参数和 header）
+        # 优先从 query 参数获取（更方便前端使用），其次从 header 获取
+        ws_api_key = ws.query_params.get("api_key", "") or ws.headers.get("x-api-key", "")
+
+        # v3.8 fix: 本地开发支持（如果后端 API_KEY 已正确配置且前端未传 Key，允许本地连接）
+        # 生产环境应始终传递 API Key
+        local_development = ws.client and ws.client.host in ("127.0.0.1", "::1", "localhost")
+
         if API_KEY_ENABLED:
-            key = ws.headers.get("x-api-key", "")
-            if not key or not hmac.compare_digest(key, API_KEY):
+            # 如果前端传了 Key，必须匹配；如果前端没传 Key 且是本地开发，允许连接
+            if ws_api_key:
+                if not hmac.compare_digest(ws_api_key, API_KEY):
+                    await ws.close(code=4001, reason="Unauthorized")
+                    return
+            elif not local_development:
+                # 非本地访问且无 API Key，拒绝
                 await ws.close(code=4001, reason="Unauthorized")
                 return
 

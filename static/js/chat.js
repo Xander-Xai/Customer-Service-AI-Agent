@@ -11,6 +11,8 @@ let progressStatusEl = null;  // 进度状态 DOM 引用
 
 // ===== 页面初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('[Init] DOM loaded, setting up...');
+
   // 注册事件监听（先注册再连接，避免丢失 onopen 事件）
   API.on('connected', handleWSConnected);
   API.on('disconnected', handleWSDisconnected);
@@ -28,7 +30,13 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSessionList();
 
   // 聚焦输入框
-  document.getElementById('chatInput').focus();
+  const input = document.getElementById('chatInput');
+  if (input) {
+    input.focus();
+    console.log('[Init] Input focused, ready to type');
+  } else {
+    console.error('[Init] chatInput not found!');
+  }
 });
 
 // ===== WebSocket 事件处理 =====
@@ -84,9 +92,13 @@ function handleResponse(data) {
   const agentsUsed = data.agents_used || [];
   const resolutionStatus = data.resolution_status || '';
 
-  // v3.6: 同步服务端 session_id（确保前后端一致）
+  // v3.6: 同步服务端 session_id 和 session_token（确保前后端一致）
   if (!currentSessionId || currentSessionId !== data.session_id) {
     currentSessionId = data.session_id || currentSessionId || generateSessionId();
+  }
+  // v3.8: 保存 session_token 用于后续请求认证
+  if (data.session_token) {
+    currentSessionToken = data.session_token;
   }
 
   // 渲染 AI 回复
@@ -114,11 +126,19 @@ function handleError(data) {
 }
 
 // ===== 消息发送 =====
-
 function sendMessage() {
+  console.log('[sendMessage] called, isWaitingResponse:', isWaitingResponse);
   const input = document.getElementById('chatInput');
+  if (!input) {
+    console.error('[sendMessage] chatInput not found!');
+    return;
+  }
   const query = input.value.trim();
-  if (!query || isWaitingResponse) return;
+  console.log('[sendMessage] query:', query);
+  if (!query || isWaitingResponse) {
+    console.log('[sendMessage] blocked - empty or waiting');
+    return;
+  }
 
   // 隐藏欢迎界面
   const welcome = document.getElementById('welcomeScreen');
@@ -144,8 +164,8 @@ function sendMessage() {
 }
 
 // ===== 快捷提问 =====
-
 function useQuickPrompt(card) {
+  console.log('[useQuickPrompt] clicked:', card);
   const textMap = {
     '产品成分查询': '请问你们的精华液含有哪些主要成分？适合敏感肌使用吗？',
     '订单物流追踪': '我想查询一下最近的订单物流状态',
@@ -154,6 +174,7 @@ function useQuickPrompt(card) {
   };
   const title = card.querySelector('.quick-prompt-text').textContent;
   const query = textMap[title] || title;
+  console.log('[useQuickPrompt] title:', title, 'query:', query);
   document.getElementById('chatInput').value = query;
   sendMessage();
 }

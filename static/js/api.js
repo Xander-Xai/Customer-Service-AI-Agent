@@ -13,6 +13,9 @@ const API = (() => {
   const WS_RECONNECT_BASE = 2000;   // 初始重连延迟（ms）
   const WS_RECONNECT_MAX = 30000;   // 最大重连延迟（ms）
 
+  // v3.8: 本地开发允许无 API Key 连接（生产环境请配置 API_KEY）
+  const API_KEY = localStorage.getItem('api_key') || '';
+
   // ===== WebSocket 管理 =====
   let _ws = null;
   let _reconnectCount = 0;
@@ -38,7 +41,10 @@ const API = (() => {
     const wsUrl = `${protocol}//${location.host}/ws/chat`;
 
     try {
-      _ws = new WebSocket(wsUrl);
+      // v3.8: 认证支持：通过 URL 参数传递 API Key
+      const authUrl = API_KEY ? `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}` : wsUrl;
+      _ws = new WebSocket(authUrl);
+      console.log('[WS] 连接中...' + (API_KEY ? ' (已传 API Key)' : ' (无认证)'));
     } catch (e) {
       console.error('[WS] 创建连接失败:', e);
       _emit('ws_error', { error: e });

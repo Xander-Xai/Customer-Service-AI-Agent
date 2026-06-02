@@ -99,8 +99,6 @@ SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # TLS 配置
 TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")    # TLS 证书文件路径
 TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")      # TLS 私钥文件路径
-=======
->>>>>>> ad582bc (docs(task2): README 全面对齐到 v3.8 代码现状)
 
 
 # ===== 日志配置 =====
