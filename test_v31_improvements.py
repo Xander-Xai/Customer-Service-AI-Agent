@@ -7,10 +7,13 @@ import os
 import sys
 import asyncio
 
+import pytest  # v3.8 fix: 添加 pytest.mark.asyncio 支持
+
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 
+@pytest.mark.asyncio  # v3.8 fix: 添加 async 测试标记
 async def test_improvements():
     print("=" * 60)
     print("v3.1 改进项专项测试")

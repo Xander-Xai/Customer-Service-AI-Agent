@@ -193,7 +193,9 @@ class EnhancedSessionManager:
                 url = self.storage_config.get("url", _CFG_REDIS_URL)
                 self._redis_client = redis.Redis.from_url(url, decode_responses=True)
                 self._redis_client.ping()
-                logger.info(f"Redis 连接成功: {url}")
+                # 仅记录主机信息，不暴露完整 URL（可能含密码）
+                safe_url = url.split("@")[-1] if "@" in url else url
+                logger.info(f"Redis 连接成功: {safe_url}")
             except Exception as e:
                 logger.warning(f"Redis 连接失败，回退到内存模式: {e}")
                 self._redis_client = None

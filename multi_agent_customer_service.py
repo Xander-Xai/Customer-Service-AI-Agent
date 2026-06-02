@@ -22,10 +22,8 @@ v3.6 稳定化：
 import asyncio
 import time
 from typing import List, TypedDict
-from dotenv import load_dotenv
-from langgraph.graph import StateGraph
+from langgraph.graph import StateGraph, END  # END: LangGraph 终止节点
 
-load_dotenv()
 from config import (
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL,
     ROUTING_COMPLEXITY_THRESHOLD, CACHE_L1_MAX, CACHE_L2_MAX, CACHE_TTL,

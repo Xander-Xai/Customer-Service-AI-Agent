@@ -3,6 +3,7 @@
 对接金蝶 Cloud API（REST），实现商品/库存/订单/客户查询
 v3.4: 所有 FilterString 参数经过 sanitize_erp_input 净化，防 SQL 注入
 """
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,14 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     金蝶 Cloud API 真实适配器
     认证方式: AppID + AppSecret HMAC 签名
     """
+
+    # 金蝶 FilterString 安全字符白名单（仅允许字母、数字、中文、常见标点）
+    _SAFE_FILTER_RE = re.compile(r"[^a-zA-Z0-9一-鿿._\s]")
+
+    @classmethod
+    def _sanitize_filter_value(cls, value: str) -> str:
+        """清理 FilterString 中的用户输入，防止注入攻击"""
+        return cls._SAFE_FILTER_RE.sub("", value)
 
     def __init__(self, base_url: str, app_id: str, app_secret: str, db_id: str):
         self.base_url = base_url.rstrip("/")
@@ -79,6 +88,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
 
     async def query_product(self, keyword: str) -> List[Dict[str, Any]]:
         """查询商品信息（映射到金蝶物料表 BD_MATERIAL）"""
+        safe_keyword = self._sanitize_filter_value(keyword)
         try:
             safe_keyword = sanitize_erp_input(keyword)  # v3.4: 防注入
             result = await self._api_call(
@@ -104,9 +114,11 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
 
     async def query_inventory(self, product_id: str = "", keyword: str = "") -> List[Dict[str, Any]]:
         """查询库存（映射到金蝶库存查询 STK_INVENTORY）"""
+        safe_product_id = self._sanitize_filter_value(product_id)
+        safe_keyword = self._sanitize_filter_value(keyword)
         try:
-            safe_pid = sanitize_erp_input(product_id)  # v3.4: 防注入
-            safe_kw = sanitize_erp_input(keyword)      # v3.4: 防注入
+            safe_pid = sanitize_erp_input(product_id)  # v3.4: 防注入（白名单+转义）
+            safe_kw = sanitize_erp_input(keyword)      # v3.4: 防注入（白名单+转义）
             filter_str = f"FMaterialId.FNumber='{safe_pid}'" if product_id else f"FMaterialId.FName like '%{safe_kw}%'"
             result = await self._api_call(
                 "STK_INVENTORY", "BillQuery",
@@ -129,13 +141,15 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
 
     async def query_order(self, order_id: str = "", customer_id: str = "") -> List[Dict[str, Any]]:
         """查询订单（映射到金蝶销售订单 SAL_ORDER）"""
+        safe_order_id = self._sanitize_filter_value(order_id)
+        safe_customer_id = self._sanitize_filter_value(customer_id)
         try:
             filter_str = ""
             if order_id:
-                safe_oid = sanitize_erp_input(order_id)  # v3.4: 防注入
+                safe_oid = sanitize_erp_input(order_id)  # v3.4: 防注入（白名单+转义）
                 filter_str = f"FBillNo='{safe_oid}'"
             elif customer_id:
-                safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入
+                safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入（白名单+转义）
                 filter_str = f"FCUSTID.FNumber='{safe_cid}'"
             result = await self._api_call(
                 "SAL_ORDER", "BillQuery",
@@ -161,8 +175,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
 
     async def query_customer(self, customer_id: str) -> Optional[Dict[str, Any]]:
         """查询客户资料（映射到金蝶客户表 BD_CUSTOMER）"""
+        safe_customer_id = self._sanitize_filter_value(customer_id)
         try:
-            safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入
+            safe_cid = sanitize_erp_input(customer_id)  # v3.4: 防注入（白名单+转义）
             result = await self._api_call(
                 "BD_CUSTOMER", "BillQuery",
                 {"FormId": "BD_CUSTOMER", "FilterString": f"FNumber='{safe_cid}'"}

@@ -57,6 +57,17 @@ def _sanitize_input(text: str) -> str:
     return text.strip()
 
 
+# v3.8 fix: 会话 ID 校验正则（防止路径遍历和注入）
+_SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
+
+
+def _validate_session_id(sid: str) -> str:
+    """校验并清理 session_id，不合法则自动生成 UUID"""
+    if sid and _SESSION_ID_RE.match(sid):
+        return sid
+    return str(uuid.uuid4())
+
+
 # v3.7: WebSocket 连接跟踪（每 IP 连接数限制）
 _ws_connections: Dict[str, int] = defaultdict(int)
 _ws_lock = asyncio.Lock()  # v3.8 fix: atomic protection for _ws_connections read-modify-write
@@ -207,17 +218,15 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         if path.startswith("/static/"):
             return await call_next(request)
 
-        # v3.7: 监控敏感端点需要 Admin Token 或 API Key（Critical 修复）
+        # v3.7: 监控敏感端点需要 Admin Token 或 API Key
         if path in ("/api/metrics", "/api/kpi", "/api/circuit-breaker", "/api/alerts", "/api/cache/stats"):
             if MONITORING_ADMIN_TOKEN:
-                # 优先检查 Admin Token，其次检查 API Key（向后兼容）
                 admin_token = request.headers.get("X-Admin-Token", "")
                 api_key = request.headers.get("X-API-Key", "")
                 if not (hmac.compare_digest(admin_token, MONITORING_ADMIN_TOKEN) or
                         (API_KEY_ENABLED and api_key and hmac.compare_digest(api_key, API_KEY))):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            elif API_KEY_ENABLED:
-                # 未配置 Admin Token 时，回退到 API Key 认证
+            elif API_KEY_ENABLED and API_KEY:
                 api_key = request.headers.get("X-API-Key", "")
                 if not hmac.compare_digest(api_key, API_KEY):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -225,7 +234,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         # 会话管理端点需要 API Key 认证
         if path.startswith("/api/sessions"):
-            if API_KEY_ENABLED:
+            if API_KEY_ENABLED and API_KEY:
                 api_key = request.headers.get("X-API-Key", "")
                 if not hmac.compare_digest(api_key, API_KEY):
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
@@ -309,7 +318,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
                 query = data.get("query", "").strip()[:MAX_QUERY_LENGTH]
                 query = _sanitize_input(query)  # v3.7: 输入净化
-                sid = data.get("session_id", session_id)
+                sid = _validate_session_id(data.get("session_id", ""))  # v3.8 fix: session_id 校验
 
                 # v3.7: 会话所有权校验（如果客户端指定了非默认 session_id）
                 if sid != session_id and _session_manager:
@@ -317,7 +326,6 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                     if not _session_manager.validate_session_token(sid, token):
                         await ws.send_json({"type": "error", "content": "会话令牌无效"})
                         continue
-
                 if not query:
                     await ws.send_json({"type": "error", "content": "查询不能为空"})
                     continue
@@ -380,18 +388,18 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     @app.post("/api/chat")
     async def rest_chat(data: ChatRequest):
         query = _sanitize_input(data.query)[:MAX_QUERY_LENGTH]  # v3.7: 输入净化 + 长度限制
-        sid = data.session_id or str(uuid.uuid4())
+        sid = _validate_session_id(data.session_id)  # v3.8 fix: session_id 校验
         if not query:
             return JSONResponse({"error": "query 不能为空"}, status_code=400)
-        # v3.7: 会话所有权校验（客户端指定 session_id 时需携带令牌）
-        if data.session_id and _session_manager:
-            token = data.session_token or ""  # v3.8 fix: direct access (Pydantic field always exists)
-            if not _session_manager.validate_session_token(sid, token):
+        # v3.7: 会话所有权校验（仅当客户端显式指定 session_id 时验证令牌）
+        client_provided_sid = bool(data.session_id)  # 校验前检查原始请求值
+        if client_provided_sid and _session_manager:
+            if not _session_manager.validate_session_token(sid, data.session_token or ""):
                 return JSONResponse({"error": "会话令牌无效"}, status_code=403)
         try:
             result = await _run_graph(sid, query)
             # v3.7: 返回会话令牌（首次请求时生成）
-            if _session_manager and not data.session_id:
+            if _session_manager and not client_provided_sid:
                 result["session_token"] = _session_manager.generate_session_token(sid)
             return result
         except Exception as e:

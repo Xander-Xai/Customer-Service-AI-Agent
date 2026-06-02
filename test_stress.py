@@ -307,7 +307,7 @@ class TestAPIStress:
     """FastAPI 端点在并发请求下的表现"""
 
     def test_sequential_chat_requests(self, graph_app):
-        """顺序多轮 chat 请求"""
+        """顺序多轮 chat 请求（v3.8: 复用会话需携带 session_token）"""
         from multi_agent_customer_service import session_mgr, cache, metrics, bus
         from api.app import create_app
         from fastapi.testclient import TestClient
@@ -320,9 +320,18 @@ class TestAPIStress:
         queries = ["你好", "有什么产品", "价格多少"]
         times = []
 
-        for q in queries:
+        # v3.8: 首请求不携带 session_id，获取 session_id + session_token
+        first_resp = client.post("/api/chat", json={"query": queries[0]}, headers=headers)
+        assert first_resp.status_code == 200, f"首请求失败: {first_resp.text}"
+        first_data = first_resp.json()
+        sid = first_data.get("session_id") or first_data.get("session", {}).get("session_id", "api_stress")
+        token = first_data.get("session_token", "")
+        assert sid, "首响应无 session_id"
+
+        # 后续请求携带 session_id + session_token
+        for q in queries[1:]:
             start = time.time()
-            resp = client.post("/api/chat", json={"query": q, "session_id": "api_stress"}, headers=headers)
+            resp = client.post("/api/chat", json={"query": q, "session_id": sid, "session_token": token}, headers=headers)
             elapsed = time.time() - start
             times.append(elapsed)
             assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
