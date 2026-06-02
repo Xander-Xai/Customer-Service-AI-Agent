@@ -289,19 +289,19 @@ class TestRouterDegradation:
         from router.query_router import QueryRouter
         router = QueryRouter()
         # 直接调用规则分类
-        result = router._rule_classify("这款面膜多少钱？")
+        result = router._rule_classify_and_score("这款面膜多少钱？")[0]
         assert result == "product_info"
 
     def test_rule_classify_complaint(self):
         from router.query_router import QueryRouter
         router = QueryRouter()
-        result = router._rule_classify("我要投诉你们的服务态度太差了")
+        result = router._rule_classify_and_score("我要投诉你们的服务态度太差了")[0]
         assert result == "complaint"
 
     def test_rule_classify_no_match(self):
         from router.query_router import QueryRouter
         router = QueryRouter()
-        result = router._rule_classify("你好啊")
+        result = router._rule_classify_and_score("你好啊")[0]
         assert result is None  # 无匹配返回 None
 
 

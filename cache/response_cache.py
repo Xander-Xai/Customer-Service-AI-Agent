@@ -31,6 +31,7 @@ class ResponseCache:
         self._l1_max = l1_max
         self._l2: Dict[str, Tuple[frozenset, str, float]] = {}
         self._l2_order: deque = deque()  # v3.6: 改用 deque，淘汰从 O(n) 优化到 O(1)
+        self._l2_counter = 0  # v3.7: 单调递增计数器，防止淘汰后键碰撞
         self._l2_max = l2_max
         self._inverted_index: Dict[str, set] = defaultdict(set)
         self._default_ttl = default_ttl
@@ -113,7 +114,8 @@ class ResponseCache:
         tokens = _tokenize(query)
         if len(self._l2) >= self._l2_max:
             self._evict_l2()
-        cache_key = f"k{len(self._l2_order)}"
+        self._l2_counter += 1
+        cache_key = f"k{self._l2_counter}"
         self._l2[cache_key] = (tokens, response, now)
         self._l2_order.append(cache_key)
         for t in tokens:

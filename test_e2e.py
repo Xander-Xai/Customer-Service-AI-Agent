@@ -104,9 +104,13 @@ def fastapi_app(graph_app):
 
 @pytest.fixture
 def client(fastapi_app):
-    """创建 HTTP 测试客户端"""
+    """创建 HTTP 测试客户端（携带 API Key 以通过认证）"""
     from fastapi.testclient import TestClient
-    return TestClient(fastapi_app)
+    from config import API_KEY_ENABLED, API_KEY
+    headers = {}
+    if API_KEY_ENABLED and API_KEY:
+        headers["X-API-Key"] = API_KEY
+    return TestClient(fastapi_app, headers=headers)
 
 
 # ===== 1. 模块导入测试 =====
@@ -337,7 +341,6 @@ class TestSessionManager:
         session_mgr.create_session("list2")
         sessions = session_mgr.list_sessions()
         # list_sessions 返回 dict 列表，每个含 session_id 字段
-        session_ids = [s.get("session_id", s.get("id", "")) for s in sessions] if sessions and isinstance(sessions[0], dict) else sessions
         has_list1 = any("list1" in str(s) for s in sessions)
         has_list2 = any("list2" in str(s) for s in sessions)
         assert has_list1
@@ -435,7 +438,7 @@ class TestCommunication:
         async def handler(msg):
             received.append(msg.payload)
 
-        bus.subscribe("test.event", handler)
+        await bus.subscribe("test.event", handler)
         await bus.publish(Message(
             msg_type=MessageType.BROADCAST,
             topic="test.event",
@@ -451,8 +454,8 @@ class TestCommunication:
         async def handler(msg):
             received.append(msg.payload)
 
-        bus.subscribe("test.unsub", handler)
-        bus.unsubscribe("test.unsub", handler)
+        await bus.subscribe("test.unsub", handler)
+        await bus.unsubscribe("test.unsub", handler)
         await bus.publish(Message(
             msg_type=MessageType.BROADCAST,
             topic="test.unsub",
@@ -685,7 +688,7 @@ class TestPerformance:
         async def handler(msg):
             received.append(msg.payload)
 
-        bus.subscribe("concurrent.test", handler)
+        await bus.subscribe("concurrent.test", handler)
 
         async def publish_task(i):
             await bus.publish(Message(
@@ -743,201 +746,6 @@ class TestMetrics:
         assert "ai_handled_rate" in kpi
 
 
-# ===== 独立运行入口（不依赖 pytest）=====
-
-def _run_standalone():
-    """无 pytest 时的独立运行模式"""
-    import traceback as tb
-
-    passed = 0
-    failed = 0
-    skipped = 0
-
-    def run_test(name, func, *args):
-        nonlocal passed, failed, skipped
-        try:
-            result = func(*args)
-            if asyncio.iscoroutine(result):
-                result = asyncio.get_event_loop().run_until_complete(result)
-            passed += 1
-            print(f"    ✅ {name}")
-        except AssertionError as e:
-            failed += 1
-            print(f"    ❌ {name}: {e}")
-        except Exception as e:
-            skipped += 1
-            print(f"    ⏭️  {name}: {type(e).__name__}: {e}")
-
-    # 初始化
-    from multi_agent_customer_service import (
-        make_graph, initialize_agents, initialize_router, cache, metrics, bus, bb
-    )
-    from session_manager import EnhancedSessionManager
-    from erp.kingdee_adapter import KingdeeMockAdapter
-
-    graph_app = make_graph()
-    agents = initialize_agents()
-    router = initialize_router()
-    sm = EnhancedSessionManager(window_size=5, max_tokens=2000)
-    erp = KingdeeMockAdapter()
-
-    # 测试不依赖 LLM 的模块
-    print("\n" + "=" * 60)
-    print("端到端集成测试 (独立模式)")
-    print("=" * 60)
-
-    # 1. 导入测试
-    print("\n[1] 模块导入测试")
-    from agents import ProductAgent, TechAgent, BillingAgent, ComplaintAgent, GeneralAgent
-    print("    ✅ 全部 Agent 导入成功")
-    passed += 1
-
-    # 2. 缓存测试
-    print("\n[2] 二级缓存测试")
-    c = cache.__class__(l1_max=50, l2_max=200, default_ttl=60)
-    c.put("测试问题", "测试回答")
-    run_test("L1 精确缓存命中", lambda: c.get("测试问题") == "测试回答" or (_ for _ in ()).throw(AssertionError("缓存未命中")))
-    run_test("L1 精确缓存未命中", lambda: c.get("不存在") is None or (_ for _ in ()).throw(AssertionError("应返回 None")))
-    run_test("缓存统计", lambda: "l1_size" in c.get_stats() or (_ for _ in ()).throw(AssertionError("缺少 l1_size")))
-
-    # TTL 测试
-    from cache.response_cache import ResponseCache
-    c2 = ResponseCache(l1_max=10, l2_max=10, default_ttl=1)
-    c2.put("过期测试", "值")
-    assert c2.get("过期测试") == "值"
-    time.sleep(1.1)
-    run_test("缓存 TTL 过期", lambda: c2.get("过期测试") is None or (_ for _ in ()).throw(AssertionError("应过期")))
-
-    # 3. 会话管理测试
-    print("\n[3] 会话管理测试")
-    sm2 = EnhancedSessionManager(window_size=5, max_tokens=2000)
-    sm2.create_session("e2e_s1")
-    sm2.add_message("e2e_s1", "你好", is_user=True)
-    sm2.add_message("e2e_s1", "您好", is_user=False)
-    run_test("创建会话", lambda: sm2.get_session("e2e_s1") is not None or (_ for _ in ()).throw(AssertionError("会话不存在")))
-    run_test("添加消息", lambda: len(sm2.get_session("e2e_s1")["messages"]) == 2 or (_ for _ in ()).throw(AssertionError("消息数不对")))
-
-    # 滑动窗口
-    sm3 = EnhancedSessionManager(window_size=3, max_tokens=2000)
-    sm3.create_session("e2e_win")
-    for i in range(10):
-        sm3.add_message("e2e_win", f"消息{i}", is_user=(i % 2 == 0))
-    ctx = asyncio.get_event_loop().run_until_complete(sm3.get_conversation_context("e2e_win"))
-    run_test("滑动窗口裁剪", lambda: (_ for _ in ()).throw(AssertionError(f"窗口过大: {len(ctx)}")) if len(ctx) > 3 else True)
-
-    # 4. 漂移检测测试
-    print("\n[4] 漂移检测测试")
-    sm4 = EnhancedSessionManager(window_size=5, max_tokens=2000)
-
-    # 话题漂移
-    sm4.create_session("e2e_topic")
-    sm4.add_message("e2e_topic", "玫瑰精华液多少钱", is_user=True)
-    sm4.add_message("e2e_topic", "298元", is_user=False)
-    r = sm4.detect_drift("e2e_topic", "你们公司地址在哪")
-    run_test("话题漂移检测", lambda: r["has_drift"] or (_ for _ in ()).throw(AssertionError("未检测到话题漂移")))
-
-    # 矛盾检测
-    sm4.create_session("e2e_contra")
-    sm4.add_message("e2e_contra", "这个产品是正品吗", is_user=True)
-    sm4.add_message("e2e_contra", "是的，保证正品", is_user=False)
-    r = sm4.detect_drift("e2e_contra", "我觉得这是假货")
-    types = [d["type"] for d in r.get("drifts", [])]
-    run_test("矛盾检测", lambda: "contradiction" in types or (_ for _ in ()).throw(AssertionError(f"未检测到矛盾: {types}")))
-
-    # 重复检测
-    sm4.create_session("e2e_repeat")
-    sm4.add_message("e2e_repeat", "玫瑰精华液多少钱", is_user=True)
-    sm4.add_message("e2e_repeat", "298元", is_user=False)
-    r = sm4.detect_drift("e2e_repeat", "玫瑰精华液多少钱")
-    types = [d["type"] for d in r.get("drifts", [])]
-    run_test("重复提问检测", lambda: "repetition" in types or (_ for _ in ()).throw(AssertionError(f"未检测到重复: {types}")))
-
-    # 漂移升级
-    sm4.create_session("e2e_esc")
-    sm4.add_message("e2e_esc", "问题", is_user=True)
-    sm4.add_message("e2e_esc", "回答", is_user=False)
-    for i in range(6):
-        sm4.sessions["e2e_esc"]["drift_log"].append({"type": "topic_drift", "detail": f"t{i}"})
-    r = sm4.detect_drift("e2e_esc", "随便问")
-    run_test("漂移升级机制", lambda: r.get("escalation", {}).get("escalate") or (_ for _ in ()).throw(AssertionError("未触发升级")))
-
-    # 5. 通信层测试
-    print("\n[5] 通信层测试")
-    from core.message_bus import MessageBus, Message, MessageType
-    _bus = MessageBus()
-    _received = []
-
-    async def _handler(msg):
-        _received.append(msg.payload)
-
-    _bus.subscribe("e2e.topic", _handler)
-    asyncio.get_event_loop().run_until_complete(
-        _bus.publish(Message(msg_type=MessageType.BROADCAST, topic="e2e.topic", payload="hello"))
-    )
-    run_test("MessageBus 发布/订阅", lambda: _received == ["hello"] or (_ for _ in ()).throw(AssertionError(f"收到: {_received}")))
-
-    from core.shared_blackboard import SharedBlackboard
-    _bb = SharedBlackboard()
-    asyncio.get_event_loop().run_until_complete(_bb.write("e2e.key", "e2e.val", ttl=60))
-    val = asyncio.get_event_loop().run_until_complete(_bb.read("e2e.key"))
-    run_test("SharedBlackboard 读写", lambda: val == "e2e.val" or (_ for _ in ()).throw(AssertionError(f"值: {val}")))
-
-    # 6. ERP 适配器测试
-    print("\n[6] ERP 适配器测试")
-    products = asyncio.get_event_loop().run_until_complete(erp.query_product("精华"))
-    run_test("ERP 商品查询", lambda: len(products) > 0 or (_ for _ in ()).throw(AssertionError("无结果")))
-    orders = asyncio.get_event_loop().run_until_complete(erp.query_order(order_id="ORD20260530001"))
-    run_test("ERP 订单查询", lambda: len(orders) > 0 or (_ for _ in ()).throw(AssertionError("无结果")))
-    customer = asyncio.get_event_loop().run_until_complete(erp.query_customer("C001"))
-    run_test("ERP 客户查询", lambda: customer is not None and customer["name"] == "王女士" or (_ for _ in ()).throw(AssertionError(f"客户: {customer}")))
-
-    # 7. 指标采集测试
-    print("\n[7] 指标采集测试")
-    from core.monitoring import MetricsCollector
-    m = MetricsCollector()
-    asyncio.get_event_loop().run_until_complete(m.record_request(2.5, agent="产品专家", mode="sequential"))
-    asyncio.get_event_loop().run_until_complete(m.record_request(5.1, agent="账单专家", mode="consultation"))
-    stats = asyncio.get_event_loop().run_until_complete(m.get_stats())
-    run_test("指标记录", lambda: stats["total_requests"] == 2 or (_ for _ in ()).throw(AssertionError(f"请求数: {stats['total_requests']}")))
-    run_test("平均响应时间", lambda: stats["avg_response_time"] > 0 or (_ for _ in ()).throw(AssertionError("平均时间为 0")))
-
-    m2 = MetricsCollector()
-    asyncio.get_event_loop().run_until_complete(m2.record_request(0.1, cached=True))
-    asyncio.get_event_loop().run_until_complete(m2.record_request(1.0, cached=False))
-    stats2 = asyncio.get_event_loop().run_until_complete(m2.get_stats())
-    run_test("缓存命中率", lambda: stats2["cache_hit_rate"] == 50.0 or (_ for _ in ()).throw(AssertionError(f"命中率: {stats2['cache_hit_rate']}")))
-
-    # 8. 性能基准
-    print("\n[8] 性能基准测试")
-    c3 = ResponseCache(l1_max=50, l2_max=200, default_ttl=60)
-    c3.put("perf", "val")
-    start = time.time()
-    for _ in range(100):
-        c3.get("perf")
-    elapsed = time.time() - start
-    run_test("缓存 100 次查找 < 0.1s", lambda: elapsed < 0.1 or (_ for _ in ()).throw(AssertionError(f"耗时: {elapsed:.3f}s")))
-
-    _bb2 = SharedBlackboard()
-    async def _bb_stress():
-        for i in range(50):
-            await _bb2.write(f"stress.{i}", f"v{i}", ttl=60)
-        results = await _bb2.read_prefix("stress.")
-        assert len(results) == 50
-    run_test("黑板 50 次并发写入", lambda: asyncio.get_event_loop().run_until_complete(_bb_stress()))
-
-    # 总结
-    print("\n" + "=" * 60)
-    print(f"测试结果: {passed} 通过, {failed} 失败, {skipped} 跳过")
-    print("=" * 60)
-
-    if failed > 0:
-        sys.exit(1)
-
-
 if __name__ == "__main__":
-    try:
-        import pytest
-        pytest.main([__file__, "-v", "--tb=short"])
-    except ImportError:
-        print("pytest 未安装，使用独立运行模式\n")
-        _run_standalone()
+    import pytest
+    pytest.main([__file__, "-v"])

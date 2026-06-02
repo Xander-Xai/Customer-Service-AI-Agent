@@ -40,8 +40,18 @@ services:
       - MAX_QUERY_LENGTH=2000
       - MAX_SESSIONS=10000
       - SESSION_IDLE_TTL=3600
+      # v3.7: 安全加固配置
+      - MONITORING_ADMIN_TOKEN=${MONITORING_ADMIN_TOKEN:-}
+      - WS_MAX_CONNECTIONS_PER_IP=${WS_MAX_CONNECTIONS_PER_IP:-5}
+      - WS_MESSAGE_RATE_LIMIT=${WS_MESSAGE_RATE_LIMIT:-10}
+      - WS_IDLE_TIMEOUT=${WS_IDLE_TIMEOUT:-300}
+      - SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-}
+      - TLS_CERT_FILE=${TLS_CERT_FILE:-}
+      - TLS_KEY_FILE=${TLS_KEY_FILE:-}
     volumes:
       - ./chat_sessions:/app/chat_sessions
+      # v3.7: TLS 证书挂载（可选）
+      - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
     depends_on:
       redis:
         condition: service_healthy

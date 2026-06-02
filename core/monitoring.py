@@ -28,6 +28,8 @@ from config import (
     HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS,
 )
 
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
+
 logger = get_logger("monitoring")
 
 
@@ -399,15 +401,21 @@ class OpenAICompatibleClient:
 
     @staticmethod
     def _format_messages(messages) -> list:
-        """统一消息格式化"""
-        role_map = {"human": "user", "ai": "assistant", "system": "system"}
+        """统一消息格式化（v3.7: 支持 ToolMessage 和 AIMessage.tool_calls）"""
         formatted = []
         for msg in messages:
-            if hasattr(msg, 'content'):
-                role = role_map.get(getattr(msg, 'type', 'user'), "user")
-                formatted.append({"role": role, "content": msg.content})
+            if hasattr(msg, 'type') and msg.type == 'tool':
+                formatted.append({"role": "tool", "content": msg.content, "tool_call_id": getattr(msg, 'tool_call_id', '')})
+            elif hasattr(msg, 'tool_calls') and msg.tool_calls:
+                formatted.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
+            elif isinstance(msg, SystemMessage):
+                formatted.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, HumanMessage):
+                formatted.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                formatted.append({"role": "assistant", "content": msg.content})
             else:
-                formatted.append({"role": "user", "content": str(msg)})
+                formatted.append({"role": "user", "content": str(msg.content)})
         return formatted
 
     async def _get_async_client(self) -> httpx.AsyncClient:
@@ -495,4 +503,5 @@ class OpenAICompatibleClient:
 
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
-        raise Exception(f"API call failed after {self.max_retries} attempts: {last_error}")
+        # v3.7: 不向调用方泄露内部错误细节（URL、状态码、响应体）
+        raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")

@@ -207,7 +207,7 @@ class TestLogicFixes:
         from router.query_router import QueryRouter
         router = QueryRouter()
         # 直接测试规则分类（不需要 LLM）
-        result = router._rule_classify("我要退款")
+        result = router._rule_classify_and_score("我要退款")[0]
         assert result == "billing"
 
     def test_session_manager_async_context(self):

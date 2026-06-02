@@ -70,6 +70,19 @@ MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "2000"))   # 用户查询�
 MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "10000"))          # 最大内存会话数
 SESSION_IDLE_TTL = int(os.getenv("SESSION_IDLE_TTL", "3600"))   # 会话空闲过期时间（秒）
 
+# ===== v3.7: 安全加固配置 =====
+# 监控端点管理 Token（/api/metrics, /api/kpi 等敏感端点需要此 Token）
+MONITORING_ADMIN_TOKEN = os.getenv("MONITORING_ADMIN_TOKEN", "")
+# WebSocket 连接限制
+WS_MAX_CONNECTIONS_PER_IP = int(os.getenv("WS_MAX_CONNECTIONS_PER_IP", "5"))   # 每 IP 最大 WS 连接数
+WS_MESSAGE_RATE_LIMIT = int(os.getenv("WS_MESSAGE_RATE_LIMIT", "10"))         # 每分钟每连接最大消息数
+WS_IDLE_TIMEOUT = int(os.getenv("WS_IDLE_TIMEOUT", "300"))                    # WS 空闲超时（秒）
+# 会话令牌签名密钥（用于防会话劫持）
+SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
+# TLS 配置
+TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")    # TLS 证书文件路径
+TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")      # TLS 私钥文件路径
+
 
 # ===== 日志配置 =====
 LOG_CONFIG = {
@@ -84,8 +97,7 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o
 API_KEY_ENABLED = os.getenv("API_KEY_ENABLED", "true").lower() == "true"
 API_KEY = os.getenv("API_KEY", "")
 if API_KEY_ENABLED and not API_KEY:
-    import logging
-    logging.warning("API_KEY_ENABLED=true but API_KEY is not set. Authentication will reject all requests.")
+    raise ValueError("API_KEY_ENABLED=true requires a non-empty API_KEY. Set API_KEY in .env or disable authentication with API_KEY_ENABLED=false")
 
 # ===== ERP 模式配置（v3.0 新增） =====
 ERP_MODE = os.getenv("ERP_MODE", "mock")  # mock | real

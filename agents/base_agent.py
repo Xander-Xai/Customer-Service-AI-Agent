@@ -314,7 +314,8 @@ class BaseAgent(ABC):
                     try:
                         result = await self.tool_registry.execute(p["name"], p["args"])
                     except Exception as e:
-                        result = f"工具执行错误: {e}"
+                        self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
+                        result = "工具暂时不可用，请稍后重试"
                     messages.append(ToolMessage(content=result, tool_call_id=p["id"]))
                     self.logger.info(f"[ToolCall] {p['name']}({p['args']}) -> {len(str(result))} chars")
             else:

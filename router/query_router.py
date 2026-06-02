@@ -2,7 +2,7 @@
 双层查询路由器（v3.0 → v3.3 性能优化版）
 优化：
 - 正则模式预编译（避免每次调用 re.search 编译开销）
-- _rule_classify 和 _score_complexity 合并为单次遍历
+- _rule_classify_and_score 合并了规则分类与复杂度评分为单次遍历
 - LLM 分类与规则分类并行执行
 """
 import re
@@ -130,7 +130,7 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
             return {"query_type": "general_inquiry", "confidence": 0.3, "raw": raw}
         except Exception as e:
             logger.error(f"LLM 分类失败: {e}")
-            return {"query_type": "general_inquiry", "confidence": 0.1, "raw": str(e)}
+            return {"query_type": "general_inquiry", "confidence": 0.1, "raw": "llm_error"}
 
     def _rule_classify_and_score(self, query: str, context: str = "") -> Tuple[Optional[str], Dict[str, int], int]:
         """
@@ -179,8 +179,3 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
             complexity += 20
 
         return best_intent, scores, min(complexity, 100)
-
-    def _rule_classify(self, query: str, context: str = "") -> Optional[str]:
-        """向后兼容：仅返回最佳意图（不含复杂度评分）"""
-        best_intent, _, _ = self._rule_classify_and_score(query, context)
-        return best_intent

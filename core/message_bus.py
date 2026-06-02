@@ -4,7 +4,7 @@
 新增：结构化日志
 """
 import asyncio, uuid, time
-from typing import Any, Callable, Coroutine, Dict, List
+from typing import Any, Callable, Coroutine, Dict, List, Optional
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
@@ -38,22 +38,31 @@ Handler = Callable[[Message], Coroutine]
 
 
 class MessageBus:
-    """异步消息总线（Mesh 拓扑）"""
+    """异步消息总线（Mesh 拓扑，v3.7: asyncio.Lock 保护并发安全）"""
 
     def __init__(self):
         self._subscribers: Dict[str, List[Handler]] = {}
         self._message_log: deque = deque(maxlen=_MESSAGE_LOG_MAXLEN)
+        self._lock: Optional[asyncio.Lock] = None  # 懒初始化
 
-    def subscribe(self, topic: str, handler: Handler):
-        self._subscribers.setdefault(topic, []).append(handler)
-        logger.debug(f"订阅: topic={topic}")
+    def _ensure_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
-    def unsubscribe(self, topic: str, handler: Handler):
-        if topic in self._subscribers:
-            self._subscribers[topic] = [h for h in self._subscribers[topic] if h is not handler]
+    async def subscribe(self, topic: str, handler: Handler):
+        async with self._ensure_lock():
+            self._subscribers.setdefault(topic, []).append(handler)
+            logger.debug(f"订阅: topic={topic}")
+
+    async def unsubscribe(self, topic: str, handler: Handler):
+        async with self._ensure_lock():
+            if topic in self._subscribers:
+                self._subscribers[topic] = [h for h in self._subscribers[topic] if h is not handler]
 
     async def publish(self, message: Message):
         self._message_log.append(message)
-        handlers = self._subscribers.get(message.topic, [])
+        async with self._ensure_lock():
+            handlers = list(self._subscribers.get(message.topic, []))
         if handlers:
             await asyncio.gather(*[h(message) for h in handlers], return_exceptions=True)

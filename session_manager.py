@@ -17,6 +17,8 @@ import re
 import time
 import uuid
 import json
+import hmac
+import hashlib
 from typing import Dict, List, Any, Optional
 from collections import deque
 
@@ -172,8 +174,6 @@ class EnhancedSessionManager:
     def _validate_storage_config(self):
         defaults = {
             "redis": {"url": _CFG_REDIS_URL, "ttl": 86400},
-            "mongodb": {"connection_string": "mongodb://localhost:27017"},
-            "postgres": {"connection_string": "postgresql://localhost:5432"},
             "file": {"storage_dir": "./chat_sessions"},
         }
         cfg = defaults.get(self.storage_backend, {})
@@ -302,6 +302,35 @@ class EnhancedSessionManager:
         }
         logger.debug(f"创建会话: {session_id}")
         return session_id
+
+    # ---- 会话所有权令牌（v3.7: 防会话劫持）----
+
+    @staticmethod
+    def _get_token_secret() -> str:
+        """获取令牌签名密钥（运行时从 config 读取，支持动态配置）"""
+        import config
+        return config.SESSION_TOKEN_SECRET
+
+    def generate_session_token(self, session_id: str) -> str:
+        """为新会话生成 HMAC 所有权令牌，客户端需携带此令牌才能操作会话"""
+        secret = self._get_token_secret()
+        if not secret:
+            return ""  # 未配置密钥时返回空（向后兼容，不强制校验）
+        return hmac.new(
+            secret.encode("utf-8"),
+            session_id.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()[:32]
+
+    def validate_session_token(self, session_id: str, token: str) -> bool:
+        """校验会话令牌是否匹配（防止非创建者访问会话）"""
+        secret = self._get_token_secret()
+        if not secret:
+            return True  # 未配置密钥时跳过校验（向后兼容）
+        if not token:
+            return False
+        expected = self.generate_session_token(session_id)
+        return hmac.compare_digest(token, expected)
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         if not _SESSION_ID_PATTERN.match(session_id):
