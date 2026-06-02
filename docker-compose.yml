@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # ===== 主应用服务 =====
+  customer-service:
+    build: .
+    container_name: customer-service-ai
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
+      - ROUTING_COMPLEXITY_THRESHOLD=50
+      - CACHE_L1_MAX=500
+      - CACHE_L2_MAX=2000
+      - CACHE_TTL=3600
+      - SESSION_WINDOW_SIZE=10
+      - SESSION_STORAGE_BACKEND=${SESSION_STORAGE_BACKEND:-memory}
+      - HTTPX_MAX_CONNECTIONS=100
+      - HTTPX_KEEPALIVE_CONNECTIONS=20
+      - RETRY_MAX_ATTEMPTS=3
+      - RETRY_BASE_DELAY=1.0
+      - LOG_LEVEL=INFO
+      - CORS_ORIGINS=*
+      - API_KEY_ENABLED=false
+      - API_KEY=${API_KEY:-}
+      - ERP_MODE=mock
+      - REDIS_URL=redis://redis:6379
+      # v3.2: SLA 告警配置
+      - SLA_ALERT_WINDOW=50
+      - SLA_ALERT_THRESHOLD=30.0
+      - SLA_ALERT_COOLDOWN=300
+      # v3.2: 熔断器配置
+      - CIRCUIT_BREAKER_FAIL_THRESHOLD=5
+      - CIRCUIT_BREAKER_RECOVERY_TIME=60
+      # v3.2: 分层超时配置
+      - LLM_ROUTER_TIMEOUT=8.0
+    volumes:
+      - ./chat_sessions:/app/chat_sessions
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/api/health'); assert r.status_code==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - cs-network
+
+  # ===== Redis 服务（可选：Session/Cache 持久化后端）=====
+  redis:
+    image: redis:7-alpine
+    container_name: customer-service-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - cs-network
+
+volumes:
+  redis-data:
+
+networks:
+  cs-network:
+    driver: bridge

@@ -1,0 +1,56 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ===== 虚拟环境 =====
+.venv/
+venv/
+env/
+
+# ===== 环境变量 =====
+.env
+.env.local
+.env.production
+
+# ===== IDE =====
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# ===== 测试 / 缓存 =====
+.pytest_cache/
+.coverage
+htmlcov/
+.coverage.*
+
+# ===== 运行时数据 =====
+*.db
+*.sqlite
+*.sqlite3
+chat_sessions/
+data/
+*.checkpoint
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+*.bak
+*.log
+temp/
+tmp/
+
+# ===== LangGraph =====
+.langgraph/
+langgraph_cache/
+.langgraph_api
+
+# ===== 系统文件 =====
+.DS_Store
+Thumbs.db
+*~

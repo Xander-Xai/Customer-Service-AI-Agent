@@ -1,0 +1,25 @@
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+sqlalchemy>=2.0.25
+openai>=1.12.0
+chromadb>=0.4.22
+python-multipart>=0.0.6
+websockets>=12.0
+python-dotenv>=1.0.0
+httpx>=0.26.0
+pydantic>=2.5.0
+
+# ===== LangGraph / LangChain =====
+langgraph>=0.2.0
+langchain-core>=0.3.0
+langchain-community>=0.3.0
+
+# ===== 会话管理（滑动窗口 + 历史摘要）=====
+tiktoken>=0.7.0
+jieba>=0.42.1
+
+# ===== Redis 持久化后端（Session + Cache）=====
+redis>=5.0.0
+
+# ===== 工具库 =====
+aiofiles>=23.2.1
