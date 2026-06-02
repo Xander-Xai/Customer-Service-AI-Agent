@@ -82,7 +82,7 @@ RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 # ===== 系统配置 =====
 VERSION = "3.8.0"
 
-# ===== v3.4: 安全配置 =====
+# ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
 MAX_SESSIONS = _int_env("MAX_SESSIONS", 10000)
 SESSION_IDLE_TTL = _int_env("SESSION_IDLE_TTL", 3600)
@@ -99,6 +99,8 @@ SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # TLS 配置
 TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")    # TLS 证书文件路径
 TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")      # TLS 私钥文件路径
+=======
+>>>>>>> ad582bc (docs(task2): README 全面对齐到 v3.8 代码现状)
 
 
 # ===== 日志配置 =====
