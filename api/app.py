@@ -140,12 +140,14 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next):
-        # v3.7: 仅跳过前端页面和静态资源，监控端点也受限流保护
+        # v3.7: 仅跳过前端页面、静态资源、WebSocket 和健康检查
         if request.url.path == "/":
             return await call_next(request)
         if request.url.path.startswith("/static/"):
             return await call_next(request)
         if request.url.path.startswith("/ws/"):
+            return await call_next(request)
+        if request.url.path == "/api/health":
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()

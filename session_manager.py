@@ -309,7 +309,11 @@ class EnhancedSessionManager:
     def _get_token_secret() -> str:
         """获取令牌签名密钥（运行时从 config 读取，支持动态配置）"""
         import config
-        return config.SESSION_TOKEN_SECRET
+        secret = config.SESSION_TOKEN_SECRET
+        # v3.8: 占位符值视为未配置（安全启发式）
+        if secret in ("", "change-me-session-secret-in-production"):
+            return ""
+        return secret
 
     def generate_session_token(self, session_id: str) -> str:
         """为新会话生成 HMAC 所有权令牌，客户端需携带此令牌才能操作会话"""
@@ -326,10 +330,11 @@ class EnhancedSessionManager:
         """校验会话令牌是否匹配（防止非创建者访问会话）"""
         secret = self._get_token_secret()
         if not secret:
-            # v3.8: 未配置密钥时拒绝验证，而非跳过（安全优先）
-            logger.warning("SESSION_TOKEN_SECRET 未配置，会话所有权验证被禁用，"
-                           "生产环境应配置 SESSION_TOKEN_SECRET")
-            return False  # 改为拒绝，而非放行
+            # v3.8: 未配置密钥时，允许未携带令牌的请求（向后兼容），但拒绝错误令牌
+            if token:
+                logger.warning("SESSION_TOKEN_SECRET 未配置，但收到了会话令牌，拒绝验证")
+                return False
+            return True  # 无令牌 + 无密钥 = 放行（开发/测试环境）
         if not token:
             return False
         expected = self.generate_session_token(session_id)

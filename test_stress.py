@@ -99,7 +99,7 @@ class TestBusStress:
         async def handler(msg):
             received.append(msg.payload)
 
-        bus.subscribe("stress.topic", handler)
+        await bus.subscribe("stress.topic", handler)
 
         start = time.time()
         for i in range(100):
@@ -125,7 +125,7 @@ class TestBusStress:
                 async def handler(msg):
                     counters[t] += 1
                 return handler
-            bus.subscribe(topic, await make_handler(topic))
+            await bus.subscribe(topic, await make_handler(topic))
 
         async def publish_all():
             tasks = []
@@ -268,7 +268,7 @@ class TestAgentStress:
         """顺序模式下多轮请求"""
         from multi_agent_customer_service import make_graph, initialize_agents
         app = make_graph()
-        initialize_agents()
+        await initialize_agents()
 
         queries = [
             "你好",
@@ -311,19 +311,21 @@ class TestAPIStress:
         from multi_agent_customer_service import session_mgr, cache, metrics, bus
         from api.app import create_app
         from fastapi.testclient import TestClient
+        from config import API_KEY
 
         app = create_app(graph_app, session_manager=session_mgr, response_cache=cache, metrics=metrics, message_bus=bus)
-        client = TestClient(app)
+        client = TestClient(app, raise_server_exceptions=True)
+        headers = {"X-API-Key": API_KEY}
 
         queries = ["你好", "有什么产品", "价格多少"]
         times = []
 
         for q in queries:
             start = time.time()
-            resp = client.post("/api/chat", json={"query": q, "session_id": "api_stress"})
+            resp = client.post("/api/chat", json={"query": q, "session_id": "api_stress"}, headers=headers)
             elapsed = time.time() - start
             times.append(elapsed)
-            assert resp.status_code == 200
+            assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
 
         avg = statistics.mean(times)
         print(f"\n    API 顺序3轮: 平均 {avg:.2f}s, 范围 [{min(times):.2f}s, {max(times):.2f}s]")

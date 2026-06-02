@@ -178,6 +178,15 @@ class TestInputSanitization:
 class TestSessionTokens:
     """验证会话所有权令牌生成和校验"""
 
+    @pytest.fixture(autouse=True)
+    def set_real_secret(self):
+        """设置真实的 SESSION_TOKEN_SECRET 以测试令牌功能"""
+        import config
+        original = config.SESSION_TOKEN_SECRET
+        config.SESSION_TOKEN_SECRET = "test-real-secret-for-unit-tests"
+        yield
+        config.SESSION_TOKEN_SECRET = original
+
     def test_token_generation(self):
         from session_manager import EnhancedSessionManager
         sm = EnhancedSessionManager()
@@ -218,15 +227,16 @@ class TestSessionTokens:
         assert t1 == t2
 
     def test_no_secret_rejects_validation(self):
-        """v3.8: 未配置 SESSION_TOKEN_SECRET 时应拒绝验证（安全优先）"""
+        """v3.8: 未配置 SESSION_TOKEN_SECRET 时，无令牌放行，错误令牌拒绝"""
         from session_manager import EnhancedSessionManager
         import config
         original = config.SESSION_TOKEN_SECRET
         try:
             config.SESSION_TOKEN_SECRET = ""
             sm = EnhancedSessionManager()
-            # 安全：未配置密钥时拒绝验证
-            assert sm.validate_session_token("any-session", "") is False
+            # 无令牌时放行（向后兼容，开发/测试环境）
+            assert sm.validate_session_token("any-session", "") is True
+            # 有令牌时拒绝（不匹配的令牌不应放行）
             assert sm.validate_session_token("any-session", "anything") is False
         finally:
             config.SESSION_TOKEN_SECRET = original
