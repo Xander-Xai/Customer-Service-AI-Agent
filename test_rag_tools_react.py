@@ -463,9 +463,9 @@ class TestGraphIntegration:
         assert len(agent.tool_registry.list_tools()) == 4
 
     def test_version_updated(self):
-        """版本号已更新为 3.7.0"""
+        """版本号已更新为 3.8.0"""
         from config import VERSION
-        assert VERSION == "3.7.0"
+        assert VERSION == "3.8.0"
 
 
 # ===== 9. 协作模式测试 =====

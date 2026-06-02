@@ -204,4 +204,6 @@ class ResponseCache:
                 tokens = self._l2[old_key][0]
                 for t in tokens:
                     self._inverted_index[t].discard(old_key)
+                    if not self._inverted_index[t]:  # v3.8 fix: clean empty sets to prevent memory leak
+                        del self._inverted_index[t]
                 del self._l2[old_key]

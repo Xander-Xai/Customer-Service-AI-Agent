@@ -12,16 +12,22 @@ class SharedBlackboard:
     def __init__(self):
         self._data: Dict[str, Any] = {}
         self._timestamps: Dict[str, float] = {}
-        self._lock = asyncio.Lock()
+        self._lock = None  # v3.8 fix: lazy init to avoid wrong event loop binding
+
+    def _ensure_lock(self):
+        """v3.8 fix: lazy Lock initialization (matching MetricsCollector/CircuitBreaker pattern)"""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def write(self, key: str, value: Any, ttl: Optional[float] = None):
-        async with self._lock:
+        async with self._ensure_lock():
             self._data[key] = value
             self._timestamps[key] = time.time() + (ttl if ttl else float("inf"))
             logger.debug(f"写入: key={key}")
 
     async def read(self, key: str, default: Any = None) -> Any:
-        async with self._lock:
+        async with self._ensure_lock():
             ts = self._timestamps.get(key, 0)
             if ts < time.time():
                 self._data.pop(key, None)
@@ -30,7 +36,7 @@ class SharedBlackboard:
             return self._data.get(key, default)
 
     async def read_prefix(self, prefix: str) -> Dict[str, Any]:
-        async with self._lock:
+        async with self._ensure_lock():
             now = time.time()
             return {k: v for k, v in self._data.items()
                     if k.startswith(prefix) and self._timestamps.get(k, float("inf")) > now}

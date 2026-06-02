@@ -59,6 +59,7 @@ def _sanitize_input(text: str) -> str:
 
 # v3.7: WebSocket 连接跟踪（每 IP 连接数限制）
 _ws_connections: Dict[str, int] = defaultdict(int)
+_ws_lock = asyncio.Lock()  # v3.8 fix: atomic protection for _ws_connections read-modify-write
 
 
 class ChatRequest(BaseModel):
@@ -173,6 +174,8 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
             "frame-ancestors 'none'"
         )
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"  # v3.8: disable browser features
+        response.headers["X-XSS-Protection"] = "0"  # v3.8: disable legacy XSS filter (modern best practice)
         return response
 
     # 前端静态资源（v3.3: 暗色主题 UI）
@@ -250,10 +253,11 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         # v3.7: 每 IP 连接数限制（防连接耗尽攻击）
         client_ip = ws.client.host if ws.client else "unknown"
-        if _ws_connections[client_ip] >= WS_MAX_CONNECTIONS_PER_IP:
-            await ws.close(code=4029, reason="Too many connections")
-            return
-        _ws_connections[client_ip] += 1
+        async with _ws_lock:  # v3.8 fix: atomic read-modify-write for connection counter
+            if _ws_connections[client_ip] >= WS_MAX_CONNECTIONS_PER_IP:
+                await ws.close(code=4029, reason="Too many connections")
+                return
+            _ws_connections[client_ip] += 1
 
         await ws.accept()
         session_id = str(uuid.uuid4())
@@ -273,8 +277,8 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                     status_messages.append(f"{agent_name}正在处理...")
                 elif topic == "agent.completed":
                     status_messages.append(f"{agent_name}处理完成")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Bus 事件处理异常: {e}")
 
         if _bus:
             await _bus.subscribe("agent.processing", on_agent_event)
@@ -362,10 +366,14 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         except WebSocketDisconnect:
             logger.info(f"[WS] 断开: {session_id}")
         finally:
-            _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
+            async with _ws_lock:  # v3.8 fix: atomic decrement
+                _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
             if _bus:
-                await _bus.unsubscribe("agent.processing", on_agent_event)
-                await _bus.unsubscribe("agent.completed", on_agent_event)
+                try:
+                    await _bus.unsubscribe("agent.processing", on_agent_event)
+                    await _bus.unsubscribe("agent.completed", on_agent_event)
+                except Exception as e:
+                    logger.warning(f"[WS] Bus 取消订阅失败 session={session_id}: {e}")
 
     # ------ REST API ------
 
@@ -377,7 +385,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
             return JSONResponse({"error": "query 不能为空"}, status_code=400)
         # v3.7: 会话所有权校验（客户端指定 session_id 时需携带令牌）
         if data.session_id and _session_manager:
-            token = data.session_token if hasattr(data, 'session_token') else ""
+            token = data.session_token or ""  # v3.8 fix: direct access (Pydantic field always exists)
             if not _session_manager.validate_session_token(sid, token):
                 return JSONResponse({"error": "会话令牌无效"}, status_code=403)
         try:
@@ -534,8 +542,8 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                     sender="api_feedback",
                     payload={"session_id": session_id, "resolved": resolved, "comment": comment},
                 ))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Feedback Bus 事件发布失败: {e}")
 
         logger.info(f"[Feedback] session={session_id} resolved={resolved} comment={comment[:50]}")
         return {"status": "ok", "session_id": session_id, "resolved": resolved}
@@ -545,6 +553,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     @app.get("/api/alerts")
     async def get_alerts(limit: int = 20):
         """获取最近的 SLA 告警记录"""
+        limit = min(max(limit, 1), 100)  # v3.8 fix: bound limit parameter
         if _sla_alert_mgr:
             return {"alerts": _sla_alert_mgr.get_alerts(limit=limit)}
         return {"alerts": [], "message": "alert manager not initialized"}

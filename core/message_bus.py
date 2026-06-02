@@ -61,8 +61,8 @@ class MessageBus:
                 self._subscribers[topic] = [h for h in self._subscribers[topic] if h is not handler]
 
     async def publish(self, message: Message):
-        self._message_log.append(message)
         async with self._ensure_lock():
+            self._message_log.append(message)  # v3.8 fix: moved inside lock for atomicity
             handlers = list(self._subscribers.get(message.topic, []))
         if handlers:
             await asyncio.gather(*[h(message) for h in handlers], return_exceptions=True)

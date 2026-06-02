@@ -101,7 +101,7 @@ class CosmeticsKnowledgeBase:
         if collection.count() == 0:
             return []
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()  # v3.8 fix: use get_running_loop (get_event_loop deprecated in 3.10+)
             result = await loop.run_in_executor(
                 None,
                 lambda: collection.query(query_texts=[query_text], n_results=n_results)

@@ -168,6 +168,9 @@ class EnhancedSessionManager:
         self.max_tokens = max_tokens or _CFG_SESSION_MAX_TOKENS
         self.llm = llm
         self.sessions: Dict[str, Dict[str, Any]] = {}
+        self._create_count = 0  # v3.8 fix: explicit init (was hasattr dynamic)
+        import threading
+        self._session_lock = threading.Lock()  # v3.8 fix: protect sessions dict from concurrent mutation
         self._validate_storage_config()
         logger.info(f"初始化完成 backend={storage_backend} window={window_size} max_tokens={self.max_tokens}")
 
@@ -207,8 +210,8 @@ class EnhancedSessionManager:
                 try:
                     with open(fp, "r", encoding="utf-8") as f:
                         return json.load(f)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"加载会话文件失败 session={session_id}: {e}")
         return []
 
     def _save_to_file(self, session_id: str, messages: List):
@@ -234,7 +237,7 @@ class EnhancedSessionManager:
         expired = [sid for sid, s in self.sessions.items()
                    if now - s.get("last_activity", 0) > idle_ttl]
         for sid in expired:
-            self.delete_session(sid)
+            self._delete_session_unlocked(sid)
 
         # 如果仍然超过上限，淘汰最旧的会话
         if len(self.sessions) >= max_sessions:
@@ -244,7 +247,7 @@ class EnhancedSessionManager:
             )
             to_remove = len(self.sessions) - max_sessions + 1
             for sid, _ in sorted_sessions[:to_remove]:
-                self.delete_session(sid)
+                self._delete_session_unlocked(sid)
             logger.warning(f"[Session] 会话数超限，淘汰 {to_remove} 个旧会话")
 
     def create_session(self, session_id: str = None) -> str:
@@ -255,12 +258,12 @@ class EnhancedSessionManager:
             logger.warning("Invalid session_id format, generated new UUID")
         messages = self._create_memory_backend(session_id)
 
-        # v3.6: 节流淘汰（每 50 次创建检查一次，避免 O(N) 扫描）
-        if not hasattr(self, '_create_count'):
-            self._create_count = 0
-        self._create_count += 1
-        if self._create_count % 50 == 0:
-            self._evict_idle_sessions()
+        # v3.8 fix: protect sessions dict with threading.Lock
+        with self._session_lock:
+            # v3.6: 节流淘汰（每 50 次创建检查一次，避免 O(N) 扫描）
+            self._create_count += 1
+            if self._create_count % 50 == 0:
+                self._evict_idle_sessions()
 
         # Redis 后端：尝试从 Redis 加载已有会话
         if self.storage_backend == "redis":
@@ -585,9 +588,15 @@ class EnhancedSessionManager:
         }
 
     def list_sessions(self) -> List[Dict[str, Any]]:
-        return [self.get_session_info(sid) for sid in self.sessions]
+        with self._session_lock:
+            return [self.get_session_info(sid) for sid in self.sessions]
 
     def delete_session(self, session_id: str):
+        with self._session_lock:
+            self._delete_session_unlocked(session_id)
+
+    def _delete_session_unlocked(self, session_id: str):
+        """v3.8: internal delete without lock (called by _evict_idle_sessions which already holds lock)"""
         if session_id in self.sessions:
             self.sessions[session_id]["messages"].clear()
             del self.sessions[session_id]
@@ -599,8 +608,8 @@ class EnhancedSessionManager:
                 try:
                     r.delete(f"session:{session_id}:messages")
                     r.delete(f"session:{session_id}:meta")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Redis 会话清理失败 session={session_id}: {e}")
 
 
 # 默认实例

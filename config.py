@@ -1,5 +1,5 @@
 """
-配置文件（二次开发版 v3.0）
+配置文件（v3.8）
 新增：结构化日志、CORS配置、ERP模式、API认证、监控指标
 """
 import os
@@ -7,76 +7,93 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+
+def _int_env(key: str, default: int) -> int:
+    """v3.8 fix: safe int env conversion (prevents ValueError on invalid input)"""
+    try:
+        return int(os.getenv(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
+def _float_env(key: str, default: float) -> float:
+    """v3.8 fix: safe float env conversion"""
+    try:
+        return float(os.getenv(key, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 # ===== OpenAI 兼容 API 配置 =====
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-8B")
 
 # ===== HTTP 请求配置 =====
-HTTP_TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
+HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 30)
 HTTP_HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "MultiAgentCustomerService/3.0.0"
 }
 
 # ===== 路由配置 =====
-ROUTING_COMPLEXITY_THRESHOLD = int(os.getenv("ROUTING_COMPLEXITY_THRESHOLD", "50"))
+ROUTING_COMPLEXITY_THRESHOLD = _int_env("ROUTING_COMPLEXITY_THRESHOLD", 50)
 
 # ===== 缓存配置 =====
-CACHE_L1_MAX = int(os.getenv("CACHE_L1_MAX", "500"))
-CACHE_L2_MAX = int(os.getenv("CACHE_L2_MAX", "2000"))
-CACHE_TTL = int(os.getenv("CACHE_TTL", "3600"))
-CACHE_SEMANTIC_THRESHOLD_SHORT = float(os.getenv("CACHE_SEMANTIC_THRESHOLD_SHORT", "0.7"))
-CACHE_SEMANTIC_THRESHOLD_LONG = float(os.getenv("CACHE_SEMANTIC_THRESHOLD_LONG", "0.5"))
+CACHE_L1_MAX = _int_env("CACHE_L1_MAX", 500)
+CACHE_L2_MAX = _int_env("CACHE_L2_MAX", 2000)
+CACHE_TTL = _int_env("CACHE_TTL", 3600)
+CACHE_SEMANTIC_THRESHOLD_SHORT = _float_env("CACHE_SEMANTIC_THRESHOLD_SHORT", 0.7)
+CACHE_SEMANTIC_THRESHOLD_LONG = _float_env("CACHE_SEMANTIC_THRESHOLD_LONG", 0.5)
 
 # ===== 会话配置 =====
-SESSION_WINDOW_SIZE = int(os.getenv("SESSION_WINDOW_SIZE", "10"))
+SESSION_WINDOW_SIZE = _int_env("SESSION_WINDOW_SIZE", 10)
 SESSION_STORAGE_BACKEND = os.getenv("SESSION_STORAGE_BACKEND", "memory")
-SESSION_MAX_TOKENS = int(os.getenv("SESSION_MAX_TOKENS", "4000"))
-SESSION_SUMMARY_MAX_CHARS = int(os.getenv("SESSION_SUMMARY_MAX_CHARS", "500"))
+SESSION_MAX_TOKENS = _int_env("SESSION_MAX_TOKENS", 4000)
+SESSION_SUMMARY_MAX_CHARS = _int_env("SESSION_SUMMARY_MAX_CHARS", 500)
 
 # ===== 漂移检测配置 =====
-DRIFT_TOPIC_JACCARD_THRESHOLD = float(os.getenv("DRIFT_TOPIC_JACCARD_THRESHOLD", "0.15"))
-DRIFT_REPETITION_THRESHOLD = float(os.getenv("DRIFT_REPETITION_THRESHOLD", "0.8"))
-DRIFT_ESCALATION_THRESHOLD = int(os.getenv("DRIFT_ESCALATION_THRESHOLD", "5"))
+DRIFT_TOPIC_JACCARD_THRESHOLD = _float_env("DRIFT_TOPIC_JACCARD_THRESHOLD", 0.15)
+DRIFT_REPETITION_THRESHOLD = _float_env("DRIFT_REPETITION_THRESHOLD", 0.8)
+DRIFT_ESCALATION_THRESHOLD = _int_env("DRIFT_ESCALATION_THRESHOLD", 5)
 
 # ===== 连接池配置（httpx） =====
-HTTPX_MAX_CONNECTIONS = int(os.getenv("HTTPX_MAX_CONNECTIONS", "100"))
-HTTPX_KEEPALIVE_CONNECTIONS = int(os.getenv("HTTPX_KEEPALIVE_CONNECTIONS", "20"))
+HTTPX_MAX_CONNECTIONS = _int_env("HTTPX_MAX_CONNECTIONS", 100)
+HTTPX_KEEPALIVE_CONNECTIONS = _int_env("HTTPX_KEEPALIVE_CONNECTIONS", 20)
 
 # ===== 响应时长 SLA 配置（v3.1 补充） =====
-RESPONSE_TIME_TARGET_MIN = float(os.getenv("RESPONSE_TIME_TARGET_MIN", "5.0"))
-RESPONSE_TIME_TARGET_MAX = float(os.getenv("RESPONSE_TIME_TARGET_MAX", "20.0"))
+RESPONSE_TIME_TARGET_MIN = _float_env("RESPONSE_TIME_TARGET_MIN", 5.0)
+RESPONSE_TIME_TARGET_MAX = _float_env("RESPONSE_TIME_TARGET_MAX", 20.0)
 
 # ===== SLA 告警配置（v3.2 新增）=====
-SLA_ALERT_WINDOW = int(os.getenv("SLA_ALERT_WINDOW", "50"))           # 滑动窗口大小（最近 N 次请求）
-SLA_ALERT_THRESHOLD = float(os.getenv("SLA_ALERT_THRESHOLD", "30.0")) # 违约率阈值（%），超过则告警
-SLA_ALERT_COOLDOWN = int(os.getenv("SLA_ALERT_COOLDOWN", "300"))      # 同类告警冷却时间（秒）
+SLA_ALERT_WINDOW = _int_env("SLA_ALERT_WINDOW", 50)
+SLA_ALERT_THRESHOLD = _float_env("SLA_ALERT_THRESHOLD", 30.0)
+SLA_ALERT_COOLDOWN = _int_env("SLA_ALERT_COOLDOWN", 300)
 
 # ===== 模型熔断器配置（v3.2 新增）=====
-CIRCUIT_BREAKER_FAIL_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAIL_THRESHOLD", "5"))  # 连续失败次数触发熔断
-CIRCUIT_BREAKER_RECOVERY_TIME = int(os.getenv("CIRCUIT_BREAKER_RECOVERY_TIME", "60"))   # 熔断恢复时间（秒）
-LLM_ROUTER_TIMEOUT = float(os.getenv("LLM_ROUTER_TIMEOUT", "8.0"))   # 路由 LLM 调用超时（秒）
+CIRCUIT_BREAKER_FAIL_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAIL_THRESHOLD", 5)
+CIRCUIT_BREAKER_RECOVERY_TIME = _int_env("CIRCUIT_BREAKER_RECOVERY_TIME", 60)
+LLM_ROUTER_TIMEOUT = _float_env("LLM_ROUTER_TIMEOUT", 8.0)
 
 # ===== 重试配置 =====
-RETRY_MAX_ATTEMPTS = int(os.getenv("RETRY_MAX_ATTEMPTS", "3"))
-RETRY_BASE_DELAY = float(os.getenv("RETRY_BASE_DELAY", "1.0"))
+RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
+RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "3.7.0"
+VERSION = "3.8.0"
 
 # ===== v3.4: 安全配置 =====
-MAX_QUERY_LENGTH = int(os.getenv("MAX_QUERY_LENGTH", "2000"))   # 用户查询最大字符数
-MAX_SESSIONS = int(os.getenv("MAX_SESSIONS", "10000"))          # 最大内存会话数
-SESSION_IDLE_TTL = int(os.getenv("SESSION_IDLE_TTL", "3600"))   # 会话空闲过期时间（秒）
+MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
+MAX_SESSIONS = _int_env("MAX_SESSIONS", 10000)
+SESSION_IDLE_TTL = _int_env("SESSION_IDLE_TTL", 3600)
 
 # ===== v3.7: 安全加固配置 =====
 # 监控端点管理 Token（/api/metrics, /api/kpi 等敏感端点需要此 Token）
 MONITORING_ADMIN_TOKEN = os.getenv("MONITORING_ADMIN_TOKEN", "")
 # WebSocket 连接限制
-WS_MAX_CONNECTIONS_PER_IP = int(os.getenv("WS_MAX_CONNECTIONS_PER_IP", "5"))   # 每 IP 最大 WS 连接数
-WS_MESSAGE_RATE_LIMIT = int(os.getenv("WS_MESSAGE_RATE_LIMIT", "10"))         # 每分钟每连接最大消息数
-WS_IDLE_TIMEOUT = int(os.getenv("WS_IDLE_TIMEOUT", "300"))                    # WS 空闲超时（秒）
+WS_MAX_CONNECTIONS_PER_IP = _int_env("WS_MAX_CONNECTIONS_PER_IP", 5)
+WS_MESSAGE_RATE_LIMIT = _int_env("WS_MESSAGE_RATE_LIMIT", 10)
+WS_IDLE_TIMEOUT = _int_env("WS_IDLE_TIMEOUT", 300)
 # 会话令牌签名密钥（用于防会话劫持）
 SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # TLS 配置
@@ -111,11 +128,11 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 
 # ===== v3.5: RAG 配置 =====
 RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
-RAG_N_RESULTS = int(os.getenv("RAG_N_RESULTS", "3"))
+RAG_N_RESULTS = _int_env("RAG_N_RESULTS", 3)
 
 # ===== v3.5: ReAct 配置 =====
-REACT_MAX_ITERATIONS = int(os.getenv("REACT_MAX_ITERATIONS", "5"))
-REACT_COMPLEXITY_THRESHOLD = int(os.getenv("REACT_COMPLEXITY_THRESHOLD", "60"))
+REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 5)
+REACT_COMPLEXITY_THRESHOLD = _int_env("REACT_COMPLEXITY_THRESHOLD", 60)
 
 # ===== v3.5: 工具调用配置 =====
-TOOL_MAX_ROUNDS = int(os.getenv("TOOL_MAX_ROUNDS", "3"))
+TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
