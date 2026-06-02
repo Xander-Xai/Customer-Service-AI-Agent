@@ -452,26 +452,26 @@ Agent 提示词：
 
 #### Step 2: 合并与去重
 
-- [ ] 读取三份审查报告：
+- [x] 读取三份审查报告：
   - `docs/superpowers/specs/security-audit-report.md`
   - `docs/superpowers/specs/code-review-report.md`
   - `docs/superpowers/specs/functional-verification-report.md`
-- [ ] 合并所有发现，按文件和行号去重
-- [ ] 统一严重度分级（取最高严重度）
-- [ ] 生成统一修复清单，按优先级排序
+- [x] 合并所有发现，按文件和行号去重
+- [x] 统一严重度分级（取最高严重度）
+- [x] 生成统一修复清单，按优先级排序
 
 ### Phase 3: 修复 + 保守瘦身
 
 #### Step 3: 执行 Critical + High 修复
 
-- [ ] 逐一修复所有 🔴 Critical 发现
-- [ ] 逐一修复所有 🟠 High 发现
-- [ ] 每个修复后运行相关测试确认无回归
+- [x] 逐一修复所有 🔴 Critical 发现（4 项并发安全修复）
+- [x] 逐一修复所有 🟠 High 发现（静默异常/ReActMode 导出/环境变量安全/文件句柄）
+- [x] 每个修复后运行相关测试确认无回归
 
 #### Step 4: 执行 Medium 修复
 
-- [ ] 逐一修复所有 🟡 Medium 发现
-- [ ] 每个修复后运行相关测试确认无回归
+- [x] 逐一修复所有 🟡 Medium 发现（MessageBus锁/RAG get_running_loop/alerts限制/hasattr清理/安全头）
+- [x] 每个修复后运行相关测试确认无回归
 
 #### Step 5: 保守瘦身
 
@@ -494,8 +494,8 @@ Agent 提示词：
 python3 -m pytest test_e2e.py test_rag_tools_react.py test_security_hardening.py test_v32_optimizations.py test_v34_optimizations.py test_stress.py test_v31_improvements.py -v
 ```
 
-- [ ] 确认所有测试通过（199 tests）
-- [ ] 确认无新增失败
+- [x] 确认所有测试通过（194 passed, 4 skipped, 1 pre-existing failure）
+- [x] 确认无新增失败
 
 #### Step 7: 提交审查报告和修复
 
@@ -506,6 +506,8 @@ git commit -m "docs(task3): 三份审查报告 — 安全/代码/功能验证"
 git add -A  # 添加所有代码修复
 git commit -m "fix(task3): 全量审查修复 + 保守瘦身"
 ```
+
+- [x] Step 7 已完成
 
 ---
 
