@@ -1,8 +1,8 @@
-# 多智能体客服系统 (Customer Service AI Agent v3.7)
+# 多智能体客服系统 (Customer Service AI Agent v3.8)
 
 面向化妆品生产企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent → 响应处理。
 
-> **v3.7** 完成安全加固 + 结构性重构；**v3.6** 完成 RAG 知识库 + Function Calling + ReAct 推理；当前稳定版 **182 tests passed, 4 skipped**。
+> **v3.8** 完成安全审计修复 + 测试修复；**v3.7** 完成安全加固 + 结构性重构；当前稳定版 **199 tests passed**。
 
 ---
 
@@ -232,9 +232,9 @@ Thought → Action（RAG 检索 / ERP 工具调用）→ Observation → Loop �
 | **注入防护** | ERP 输入消毒（白名单 + LIKE 通配符转义）+ Prompt XML 标签隔离 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
 | **安全头** | HSTS / CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy |
-| **会话安全** | session_id UUID 格式校验，防路径遍历 |
+| **会话安全** | session_id UUID 格式校验 + 会话令牌签名验证，防路径遍历 |
 | **CORS** | 默认 `http://localhost:8000`，不再使用通配符 `*` |
-| **v3.7 新增** | 监控端点 Token + WebSocket 连接限制 + 会话令牌签名 + TLS 支持 |
+| **监控保护** | 监控端点 Admin Token 认证 + WebSocket 每 IP 连接限制 + TLS 支持 |
 
 ---
 
@@ -337,6 +337,8 @@ ws.onmessage = (event) => {
 
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
+| `GET` | `/` | 前端页面 | 无 |
+| `WS` | `/ws/chat` | WebSocket 实时对话 | API Key |
 | `POST` | `/api/chat` | 同步对话接口 | API Key |
 | `GET` | `/api/health` | 健康检查 | 无 |
 | `GET` | `/api/metrics` | 性能监控 | Admin Token |
@@ -377,7 +379,7 @@ customer-service-ai-agent/
 │   ├── response_agent.py             # 响应处理 Agent（139 行）
 │   └── react_agent.py                # ReAct 推理 Agent（74 行）
 ├── router/                           # 双层查询路由器
-│   └── query_router.py               # LLM Router ∥ Rule Classifier（184 行）
+│   └── query_router.py               # LLM Router ∥ Rule Classifier（181 行）
 ├── collaboration/                    # 协作模式编排
 │   ├── modes.py                      # 5 种模式实现（391 行）
 │   └── orchestrator.py               # 统一模式选择（108 行）
@@ -394,17 +396,17 @@ customer-service-ai-agent/
 │   ├── tool_registry.py              # 工具注册中心（70 行）
 │   └── erp_tools.py                  # ERP 工具封装（147 行）
 ├── erp/                              # 金蝶 ERP 集成
-│   ├── __init__.py                   # 抽象接口 + 输入消毒
-│   ├── factory.py                    # 适配器工厂
-│   ├── kingdee_adapter.py           # Mock 适配器
-│   └── kingdee_real_adapter.py      # 真实金蝶 API
+│   ├── __init__.py                   # 抽象接口 + 输入消毒（40 行）
+│   ├── factory.py                    # 适配器工厂（69 行）
+│   ├── kingdee_adapter.py           # Mock 适配器（74 行）
+│   └── kingdee_real_adapter.py      # 真实金蝶 API（188 行）
 ├── api/                              # FastAPI 服务层
 │   ├── app.py                        # FastAPI 应用（639 行）
-│   └── app_factory.py                # uvicorn 入口
-├── session_manager.py                # 会话管理（599 行）
+│   └── app_factory.py                # uvicorn 入口（29 行）
+├── session_manager.py                # 会话管理（607 行）
 ├── multi_agent_customer_service.py   # LangGraph 图构建（444 行）
-├── config.py                         # 统一配置（121 行）
-├── logger.py                         # 结构化日志
+├── config.py                         # 统一配置（120 行）
+├── logger.py                         # 结构化日志（22 行）
 ├── langgraph.json                    # LangGraph CLI 配置
 ├── Dockerfile                        # Docker 构建
 ├── docker-compose.yml                # Docker Compose
@@ -424,29 +426,26 @@ customer-service-ai-agent/
 
 ### 测试套件
 
-| 测试文件 | 测试数 | 覆盖范围 |
-|---------|--------|---------|
-| `test_e2e.py` | 68 | 端到端：导入/图构建/路由/缓存/会话/漂移/通信/ERP/协作/API/性能/指标 |
-| `test_rag_tools_react.py` | 43 | v3.5：工具注册/ERP 工具/知识库/种子数据/FC 格式/ReAct/图集成/RAG |
-| `test_v32_optimizations.py` | 27 | v3.2：CircuitBreaker 状态机/SLA 告警/首次解决率 |
-| `test_v34_optimizations.py` | 17 | v3.4：并发安全/安全加固/中文缓存/逻辑修复/安全头 |
-| `test_stress.py` | 12 | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/Agent 顺序/API 压力 |
-| `test_v31_improvements.py` | 9 | v3.1：jieba 回退/矛盾检测/意图漂移/token 计数/漂移升级/客户资料 |
-| `test_security_hardening.py` | ~10 | v3.7：安全加固专项测试 |
+| 测试文件 | 覆盖范围 |
+|---------|---------|
+| `test_e2e.py` | 端到端：导入/图构建/路由/缓存/会话/漂移/通信/ERP/协作/API/性能/指标 |
+| `test_rag_tools_react.py` | 工具注册/ERP 工具/知识库/种子数据/FC 格式/ReAct/图集成/RAG |
+| `test_v32_optimizations.py` | CircuitBreaker 状态机/SLA 告警/首次解决率 |
+| `test_v34_optimizations.py` | 并发安全/安全加固/中文缓存/逻辑修复/安全头 |
+| `test_stress.py` | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/Agent 顺序/API 压力 |
+| `test_v31_improvements.py` | jieba 回退/矛盾检测/意图漂移/token 计数/漂移升级/客户资料 |
+| `test_security_hardening.py` | 安全加固：监控端点认证/WS 限流/会话所有权/错误脱敏/输入净化/MessageBus 并发安全 |
 
-**总计：182 tests passed, 4 skipped**
+**总计：199 tests passed**
 
 ### 运行测试
 
 ```bash
 # 全量测试
-python3 -m pytest test_e2e.py test_rag_tools_react.py test_v32_optimizations.py test_v34_optimizations.py -v
+python3 -m pytest test_e2e.py test_rag_tools_react.py test_v32_optimizations.py test_v34_optimizations.py test_security_hardening.py -v
 
 # 压力测试
 python3 -m pytest test_stress.py -v
-
-# 安全测试
-python3 -m pytest test_security_hardening.py -v
 
 # 单个测试文件
 python3 -m pytest test_e2e.py -v -k "test_router"
@@ -460,6 +459,11 @@ python3 -m pytest test_e2e.py --cov=. --cov-report=html
 ---
 
 ## 📋 变更日志
+
+### v3.8 (2026-06-03)
+- 安全审计修复：会话令牌验证加固
+- 修复所有测试失败，更新测试用例
+- 安全修复加固：全面安全审计后的问题修复
 
 ### v3.7 (2026-06-03)
 - 安全加固：监控端点 Token + WebSocket 连接限制 + 会话令牌签名
@@ -498,12 +502,36 @@ python3 -m pytest test_e2e.py --cov=. --cov-report=html
 | `CACHE_L1_MAX` | 500 | L1 精确缓存容量 |
 | `CACHE_L2_MAX` | 2000 | L2 语义缓存容量 |
 | `CACHE_TTL` | 3600 | 缓存过期时间（秒） |
+| `CACHE_SEMANTIC_THRESHOLD_SHORT` | 0.7 | 短文本语义相似度阈值 |
+| `CACHE_SEMANTIC_THRESHOLD_LONG` | 0.5 | 长文本语义相似度阈值 |
 | `SESSION_WINDOW_SIZE` | 10 | 滑动窗口大小 |
 | `SESSION_MAX_TOKENS` | 4000 | 上下文最大 token |
+| `SESSION_STORAGE_BACKEND` | memory | 会话存储后端（memory/file/redis） |
+| `SESSION_SUMMARY_MAX_CHARS` | 500 | 摘要最大字符数 |
+| `DRIFT_TOPIC_JACCARD_THRESHOLD` | 0.15 | 话题漂移阈值 |
+| `DRIFT_REPETITION_THRESHOLD` | 0.8 | 重复提问阈值 |
+| `DRIFT_ESCALATION_THRESHOLD` | 5 | 漂移升级阈值（累计次数） |
 | `CIRCUIT_BREAKER_FAIL_THRESHOLD` | 5 | 熔断触发失败次数 |
 | `CIRCUIT_BREAKER_RECOVERY_TIME` | 60 | 熔断恢复时间（秒） |
+| `SLA_ALERT_WINDOW` | 50 | SLA 滑动窗口大小 |
+| `SLA_ALERT_THRESHOLD` | 30.0 | SLA 违约率告警阈值（%） |
+| `SLA_ALERT_COOLDOWN` | 300 | SLA 告警冷却时间（秒） |
+| `LLM_ROUTER_TIMEOUT` | 8.0 | 路由 LLM 调用超时（秒） |
 | `REACT_MAX_ITERATIONS` | 5 | ReAct 最大推理步数 |
+| `REACT_COMPLEXITY_THRESHOLD` | 60 | ReAct 触发复杂度阈值 |
 | `TOOL_MAX_ROUNDS` | 3 | 工具调用最大轮数 |
+| `RETRY_MAX_ATTEMPTS` | 3 | 最大重试次数 |
+| `RETRY_BASE_DELAY` | 1.0 | 基础退避延迟（秒） |
+| `HTTPX_MAX_CONNECTIONS` | 100 | httpx 最大连接数 |
+| `HTTPX_KEEPALIVE_CONNECTIONS` | 20 | httpx 保活连接数 |
+| `RESPONSE_TIME_TARGET_MIN` | 5.0 | 最小响应时间 SLA（秒） |
+| `RESPONSE_TIME_TARGET_MAX` | 20.0 | 最大响应时间 SLA（秒） |
+| `MAX_QUERY_LENGTH` | 2000 | 用户查询最大字符数 |
+| `MAX_SESSIONS` | 10000 | 最大内存会话数 |
+| `SESSION_IDLE_TTL` | 3600 | 会话空闲过期时间（秒） |
+| `WS_MAX_CONNECTIONS_PER_IP` | 5 | 每 IP 最大 WebSocket 连接数 |
+| `WS_MESSAGE_RATE_LIMIT` | 10 | 每分钟每连接最大消息数 |
+| `WS_IDLE_TIMEOUT` | 300 | WebSocket 空闲超时（秒） |
 
 ---
 
