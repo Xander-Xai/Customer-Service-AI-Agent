@@ -4,8 +4,8 @@
  */
 
 // ===== 状态管理 =====
-let currentSessionId = null;
-let currentSessionToken = null;  // v3.8: 会话所有权令牌
+let currentSessionId = localStorage.getItem('currentSessionId') || null;
+let currentSessionToken = localStorage.getItem('currentSessionToken') || null;  // v3.8: 会话所有权令牌（持久化）
 let isWaitingResponse = false;
 let messageHistory = [];  // 当前会话消息缓存
 let progressStatusEl = null;  // 进度状态 DOM 引用
@@ -96,10 +96,12 @@ function handleResponse(data) {
   // v3.6: 同步服务端 session_id 和 session_token（确保前后端一致）
   if (!currentSessionId || currentSessionId !== data.session_id) {
     currentSessionId = data.session_id || currentSessionId || generateSessionId();
+    localStorage.setItem('currentSessionId', currentSessionId);
   }
   // v3.8: 保存 session_token 用于后续请求认证
   if (data.session_token) {
     currentSessionToken = data.session_token;
+    localStorage.setItem('currentSessionToken', data.session_token);
   }
 
   // 渲染 AI 回复
@@ -419,6 +421,9 @@ async function loadSessionList() {
 
 async function selectSession(sessionId) {
   currentSessionId = sessionId;
+  currentSessionToken = null;  // 切换会话时清除旧 token
+  localStorage.setItem('currentSessionId', sessionId);
+  localStorage.removeItem('currentSessionToken');
   messageHistory = [];
 
   try {
@@ -710,9 +715,31 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+/** 清洗响应内容：移除系统消息、调试代码等垃圾内容 */
+function sanitizeResponse(text) {
+  if (!text) return '';
+  // 移除 "systemsystem" 或 "system" 开头的重复内容
+  text = text.replace(/^(system\s*system|system)/i, '');
+  // 移除数字开头的行（如 "1\n"）
+  text = text.replace(/^\d+\s*$/gm, '');
+  // 移除 React/JSX 代码片段
+  text = text.replace(/\.createElement\([^)]*\)[^;]*/g, '');
+  text = text.replace(/dangerouslySetInnerHTML[^;]*/g, '');
+  text = text.replace(/console\.log\([^)]*\)[^;]*/g, '');
+  text = text.replace(/JSON\.stringify[^;]*/g, '');
+  // 移除其他调试代码
+  text = text.replace(/\/\/.*$/gm, ''); // 单行注释
+  text = text.replace(/\/\*[\s\S]*?\*\//g, ''); // 块注释
+  // 清理多余空行
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text.trim();
+}
+
 /** 简易 Markdown 渲染（加粗、换行、代码块、列表） */
 function renderMarkdown(text) {
   if (!text) return '';
+  // v3.8: 先清洗响应内容
+  text = sanitizeResponse(text);
   let html = escapeHtml(text);
   // 代码块
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:var(--bg-base);padding:10px;border-radius:6px;overflow-x:auto;font-size:12px;margin:8px 0"><code>$2</code></pre>');

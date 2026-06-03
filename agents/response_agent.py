@@ -1,7 +1,8 @@
 """
-响应处理智能体（v3.4 精简版）
-职责：缓存写入、会话记录、SLA 监控、事件广播、解决状态评估
+响应处理智能体（v3.8 清洗版）
+职责：缓存写入、会话记录、SLA 监控、事件广播、解决状态评估 + 响应清洗
 """
+import re
 from typing import Dict, Any
 from agents.base_agent import BaseAgent
 from core.message_bus import MessageBus
@@ -22,10 +23,48 @@ UNCERTAIN_PHRASES = [
     "我帮不了", "抱歉无法", "无法提供",
 ]
 
-# "升级人工"响应的特征关键词（v3.4: 提取为模块常量）
+# "升级人工"响应的特征关键词
 ESCALATION_PHRASES = [
     "转接人工", "转人工客服", "人工客服介入", "升级处理", "高级客服",
 ]
+
+# ===== v3.8: 响应清洗正则 =====
+# 移除 "systemsystem" 或 "system" 开头的重复内容
+_RE_SYSTEM_PREFIX = re.compile(r"^(system\s*system|system)\s*", re.IGNORECASE)
+# 移除数字开头的单独行（如 "1\n"）
+_RE_BARE_NUMBER = re.compile(r"^\d+\s*$", re.MULTILINE)
+# 移除 React/JSX 代码片段
+_RE_REACT_CREATEELEMENT = re.compile(r"\.createElement\([^)]*\)[^;]*")
+_RE_REACT_DANGEROUSLY = re.compile(r"dangerouslySetInnerHTML[^;]*")
+_RE_REACT_CONSOLE = re.compile(r"console\.log\([^)]*\)[^;]*")
+_RE_REACT_JSON = re.compile(r"JSON\.stringify[^;]*")
+# 移除单行注释和块注释
+_RE_LINE_COMMENT = re.compile(r"//.*$", re.MULTILINE)
+_RE_BLOCK_COMMENT = re.compile(r"/\*[\s\S]*?\*/")
+# 移除常见调试前缀（如 `>`, `>>>`, `<<<`）
+_RE_PROMPT_ARTIFACT = re.compile(r"^[><]{2,}\s*", re.MULTILINE)
+# 清理多余空行
+_RE_MULTIPLE_NEWLINES = re.compile(r"\n{3,}")
+
+
+def _sanitize_response(text: str) -> str:
+    """
+    清洗 LLM 响应内容：移除系统消息、调试代码等垃圾内容。
+    """
+    if not text:
+        return text
+
+    text = _RE_SYSTEM_PREFIX.sub("", text)
+    text = _RE_BARE_NUMBER.sub("", text)
+    text = _RE_REACT_CREATEELEMENT.sub("", text)
+    text = _RE_REACT_DANGEROUSLY.sub("", text)
+    text = _RE_REACT_CONSOLE.sub("", text)
+    text = _RE_REACT_JSON.sub("", text)
+    text = _RE_LINE_COMMENT.sub("", text)
+    text = _RE_BLOCK_COMMENT.sub("", text)
+    text = _RE_PROMPT_ARTIFACT.sub("", text)
+    text = _RE_MULTIPLE_NEWLINES.sub("\n\n", text)
+    return text.strip()
 
 
 class ResponseAgent(BaseAgent):
@@ -55,12 +94,11 @@ class ResponseAgent(BaseAgent):
 
     async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        ResponseAgent 核心处理流程（v3.2: 增强解决状态评估）：
-        1. 评估解决状态（resolved/uncertain/failed/escalated）
-        2. 写入缓存（非缓存命中时）
-        3. 写入会话记录
-        4. SLA 监控日志
-        5. 广播响应完成事件
+        ResponseAgent 核心处理流程（v3.8: 增加响应清洗）：
+        1. 响应清洗（移除垃圾内容）
+        2. 评估解决状态
+        3. 写入缓存
+        4. 广播响应完成事件
         """
         response = state.get("response", "")
         query = state.get("customer_query", "")
@@ -70,7 +108,14 @@ class ResponseAgent(BaseAgent):
         agent = state.get("current_agent", "unknown")
         agents_used = state.get("agents_used", [])
 
-        # 1. v3.2: 评估解决状态
+        # v3.8: 清洗响应内容（移除调试代码、系统消息等）
+        if response:
+            cleaned = _sanitize_response(response)
+            if cleaned:
+                state["response"] = cleaned
+                response = cleaned
+
+        # 1. 评估解决状态
         resolution_status = self._evaluate_resolution(state)
         state["resolution_status"] = resolution_status
 

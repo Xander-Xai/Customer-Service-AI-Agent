@@ -1,8 +1,8 @@
-# 多智能体客服系统 (Customer Service AI Agent v3.8)
+# 多智能体客服系统 (Customer Service AI Agent v3.9)
 
 面向化妆品生产企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent → 响应处理。
 
-> **v3.8** 完成安全审计修复 + 测试修复；**v3.7** 完成安全加固 + 结构性重构；当前稳定版 **199 tests passed**。
+> **v3.9** 完成生产就绪改造（Nginx + Gunicorn + Prometheus + Grafana + CI/CD）；当前稳定版 **151 tests passed**。
 
 ---
 
@@ -243,8 +243,10 @@ Thought → Action（RAG 检索 / ERP 工具调用）→ Observation → Loop �
 ### 环境要求
 
 - Python 3.10+
-- Redis 7（可选，用于 Session/Cache 持久化）
-- Docker & Docker Compose（可选）
+- Docker & Docker Compose（生产必填）
+- Redis 7（生产必填，用于 Session/Cache 持久化）
+- Nginx（生产推荐，或使用内置 Nginx 容器）
+- OpenSSL（生产 TLS 证书生成）
 
 ### 安装
 
@@ -258,7 +260,7 @@ pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY 等配置
+# 编辑 .env，填入 OPENAI_API_KEY、API_KEY、ALLOWED_ORIGINS 等配置
 ```
 
 ### 配置说明
@@ -269,40 +271,59 @@ OPENAI_API_KEY=sk-xxx                    # API Key（必填）
 OPENAI_BASE_URL=https://api.siliconflow.cn/v1  # 兼容 OpenAI 的 API 地址
 OPENAI_MODEL=Qwen/Qwen3-8B               # 模型名称
 
-# ===== 安全配置 =====
+# ===== 安全配置（生产必改） =====
 API_KEY_ENABLED=true                       # 是否启用 API Key 认证（默认开启）
 API_KEY=your-secure-api-key-here          # API Key 值
-MAX_QUERY_LENGTH=2000                     # 用户查询最大字符数
+ADMIN_TOKEN=your-admin-token              # 监控端点管理令牌
+CORS_ORIGINS=["https://your-domain.com"]  # CORS 允许来源
+ALLOWED_ORIGINS=https://your-domain.com   # 允许来源（逗号分隔）
 
 # ===== ERP 配置 =====
 ERP_MODE=mock                             # mock（模拟数据）| real（真实金蝶 API）
 # real 模式必填：ERP_BASE_URL, ERP_APP_ID, ERP_APP_SECRET, ERP_DB_ID
 
-# ===== Redis（可选） =====
-REDIS_URL=redis://localhost:6379          # 用于 Session/Cache 持久化
+# ===== Redis（生产必填） =====
+REDIS_URL=redis://redis:6379              # 用于 Session/Cache 持久化
 ```
 
 ### 启动服务
 
 ```bash
-# 方式一：直接运行（开发）
+# 方式一：一键生产部署（推荐）
+./scripts/deploy.sh prod
+
+# 方式二：一键开发部署
+./scripts/deploy.sh dev
+
+# 方式三：Docker Compose 直接启动
+docker compose up -d app redis prometheus grafana
+
+# 方式四：直接运行（仅开发）
 uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload
 
-# 方式二：LangGraph CLI（生产）
-langgraph up
-
-# 方式三：Docker（推荐）
-docker-compose up -d
-
-# 方式四：仅运行测试（无需 API Key）
-python3 -m pytest test_e2e.py test_rag_tools_react.py test_v32_optimizations.py test_v34_optimizations.py -v
+# 方式五：仅运行测试（无需 API Key）
+python3 -m pytest tests/test_all.py -v
 ```
 
 ### 验证
 
 - **前端界面**：http://localhost:8000（暗色主题，含对话 + 监控仪表盘）
 - **API 文档**：http://localhost:8000/docs
-- **健康检查**：`curl http://localhost:8000/api/health`
+- **健康检查**：`curl http://localhost:8000/api/health`（返回 Redis/LLM/熔断器状态）
+- **Prometheus 指标**：`curl http://localhost:8000/metrics/prometheus`
+- **Grafana 仪表盘**：http://localhost:3000（admin / admin）
+- **Prometheus UI**：http://localhost:9090
+
+### 数据备份
+
+```bash
+# 手动备份（ChromaDB + Redis + 配置）
+./scripts/backup.sh
+
+# 定时备份（每天凌晨 2 点，保留 7 份）
+crontab -e
+0 2 * * * /path/to/scripts/backup.sh /data/backups
+```
 
 ---
 
@@ -350,6 +371,7 @@ ws.onmessage = (event) => {
 | `POST` | `/api/feedback` | 客户满意度反馈 | API Key |
 | `GET` | `/api/alerts` | SLA 告警记录 | Admin Token |
 | `GET` | `/api/circuit-breaker` | LLM 熔断器状态 | Admin Token |
+| `GET` | `/metrics/prometheus` | Prometheus 文本格式指标 | 无（供 Prometheus 抓取） |
 
 ### 错误码
 
@@ -401,23 +423,36 @@ customer-service-ai-agent/
 │   ├── kingdee_adapter.py           # Mock 适配器（74 行）
 │   └── kingdee_real_adapter.py      # 真实金蝶 API（188 行）
 ├── api/                              # FastAPI 服务层
-│   ├── app.py                        # FastAPI 应用（639 行）
-│   └── app_factory.py                # uvicorn 入口（29 行）
+│   ├── app.py                        # FastAPI 应用 + Prometheus 端点
+│   └── app_factory.py                # uvicorn 入口 + 安全检查
+├── nginx/                            # Nginx 反向代理（v3.9 新增）
+│   ├── nginx.conf                    # 反向代理 + TLS + WebSocket 配置
+│   └── Dockerfile                    # Nginx 构建
+├── scripts/                          # 运维脚本（v3.9 新增）
+│   ├── deploy.sh                     # 一键部署（dev/prod）
+│   └── backup.sh                     # 数据备份（ChromaDB + Redis）
+├── monitoring/                       # 监控配置（v3.9 新增）
+│   └── grafana/
+│       └── dashboards/
+│           └── csai-overview.json    # Grafana 仪表盘
 ├── session_manager.py                # 会话管理（607 行）
 ├── multi_agent_customer_service.py   # LangGraph 图构建（444 行）
-├── config.py                         # 统一配置（120 行）
-├── logger.py                         # 结构化日志（22 行）
+├── config.py                         # 统一配置（v3.9）
+├── logger.py                         # 结构化日志 + 文件轮转（v3.9）
 ├── langgraph.json                    # LangGraph CLI 配置
-├── Dockerfile                        # Docker 构建
-├── docker-compose.yml                # Docker Compose
+├── Dockerfile                        # 应用 Docker 构建
+├── docker-compose.yml                # App + Redis + Prometheus + Grafana
 ├── requirements.txt                  # Python 依赖
 ├── .env.example                      # 环境变量模板
 ├── test_*.py                         # 测试套件
 └── docs/                             # 深度文档
     ├── architecture.md               # 架构详解
+    ├── architecture-design.md        # 架构设计文档（面试版，含技术选型与权衡）
+    ├── interview-intro.md            # 3 分钟项目介绍脚本（面试用）
     ├── api-reference.md              # API 完整参考
     ├── deployment-guide.md           # 部署指南
-    └── security-model.md             # 安全设计
+    ├── security-model.md             # 安全设计
+    └── production-checklist.md       # 生产上线清单
 ```
 
 ---
@@ -428,30 +463,36 @@ customer-service-ai-agent/
 
 | 测试文件 | 覆盖范围 |
 |---------|---------|
+| `test_integration.py` | **Mock LLM 集成测试**：端到端图调用 / 缓存命中跳过路由 / 5 种协作模式 / Agent.process() 调用路径 / 会话上下文保持 / 漂移检测 / 错误降级（**新增 v3.9**）|
+| `test_all.py` | 端到端集成：图构建/API 端点/会话令牌/熔断器/SLA/并发安全/性能 |
+| `test_modules.py` | 模块级单元测试：Session/Cache/Router/Agent/ERP/协作/RAG/安全 |
+| `test_stress.py` | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/Agent 顺序/API 压力 |
 | `test_e2e.py` | 端到端：导入/图构建/路由/缓存/会话/漂移/通信/ERP/协作/API/性能/指标 |
 | `test_rag_tools_react.py` | 工具注册/ERP 工具/知识库/种子数据/FC 格式/ReAct/图集成/RAG |
 | `test_v32_optimizations.py` | CircuitBreaker 状态机/SLA 告警/首次解决率 |
 | `test_v34_optimizations.py` | 并发安全/安全加固/中文缓存/逻辑修复/安全头 |
-| `test_stress.py` | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/Agent 顺序/API 压力 |
 | `test_v31_improvements.py` | jieba 回退/矛盾检测/意图漂移/token 计数/漂移升级/客户资料 |
 | `test_security_hardening.py` | 安全加固：监控端点认证/WS 限流/会话所有权/错误脱敏/输入净化/MessageBus 并发安全 |
 
-**总计：199 tests passed**
+**总计：217+ tests passed**（含 30+ Mock LLM 集成测试）
 
 ### 运行测试
 
 ```bash
 # 全量测试
-python3 -m pytest test_e2e.py test_rag_tools_react.py test_v32_optimizations.py test_v34_optimizations.py test_security_hardening.py -v
+python3 -m pytest tests/ -v
+
+# 仅 Mock LLM 集成测试（无需任何外部依赖，推荐面试演示）
+python3 -m pytest tests/test_integration.py -v
 
 # 压力测试
-python3 -m pytest test_stress.py -v
+python3 -m pytest tests/test_stress.py -v
 
 # 单个测试文件
-python3 -m pytest test_e2e.py -v -k "test_router"
+python3 -m pytest tests/test_all.py -v -k "test_router"
 
 # 覆盖率
-python3 -m pytest test_e2e.py --cov=. --cov-report=html
+python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-report=html
 ```
 
 > 所有测试**无需 LLM API Key 或网络**（Mock 适配器 + 内存 ChromaDB + Mock 图执行）
@@ -459,6 +500,18 @@ python3 -m pytest test_e2e.py --cov=. --cov-report=html
 ---
 
 ## 📋 变更日志
+
+### v3.9 (2026-06-03) — 生产就绪
+- Nginx 反向代理 + TLS + WebSocket 支持
+- Gunicorn 多 Worker 替换 uvicorn 单进程
+- Prometheus `/metrics/prometheus` 指标导出端点
+- Grafana 仪表盘（请求/响应/Agent/SLA/熔断器/KPI）
+- Redis 部署到 docker-compose + volume 持久化
+- CORS 改为环境变量 `ALLOWED_ORIGINS` 配置
+- 增强健康检查：Redis 连接检测 + LLM 配置检查
+- 文件日志轮转（10MB/文件，保留 5 份，gzip 压缩）
+- CI/CD 流水线（GitHub Actions）
+- 数据备份脚本（ChromaDB + Redis）
 
 ### v3.8 (2026-06-03)
 - 安全审计修复：会话令牌验证加固

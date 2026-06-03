@@ -1,5 +1,5 @@
 """
-多智能体客服系统（v3.6 稳定版）
+药妆智多星多智能体客服系统（v3.8 稳定版）
 LangGraph 状态机 + 双层路由 + 5种协作模式 + 二级缓存 + 通信总线 + RAG + 工具调用
 
 v3.0 核心改造：
@@ -13,11 +13,12 @@ v3.5 新增：
 - Function Calling：Agent 可自主调用 ERP 工具
 - ReAct 推理模式：第 5 种协作模式，适用于复杂多步骤查询
 
-v3.6 稳定化：
+v3.8 稳定化：
 - 前端 WebSocket 修复 + 暗色主题
 - 安全加固：限流/认证/输入验证/注入防护/安全头
 - 并发安全：asyncio.Lock 初始化保护
 - 代码瘦身：消除重复代码，统一模板方法
+- 响应清洗：移除 LLM 响应中的调试代码
 """
 import asyncio
 import time
@@ -439,4 +440,4 @@ def make_graph():
 
 if __name__ == "__main__":
     app = make_graph()
-    logger.info("多智能体客服系统 v3.6 启动成功")
+    logger.info("药妆智多星多智能体客服系统 v3.8 启动成功")
