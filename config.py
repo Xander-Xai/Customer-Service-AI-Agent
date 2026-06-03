@@ -1,6 +1,6 @@
 """
-配置文件（v3.8）
-新增：结构化日志、CORS配置、ERP模式、API认证、监控指标
+配置文件（v3.9 — 生产就绪版）
+新增：Prometheus 指标、增强健康检查、CORS 环境变量、日志轮转
 """
 import os
 from dotenv import load_dotenv

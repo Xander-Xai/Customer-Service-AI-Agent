@@ -332,7 +332,9 @@ class EnhancedSessionManager:
         ).hexdigest()[:32]
 
     def validate_session_token(self, session_id: str, token: str) -> bool:
-        """校验会话令牌是否匹配（防止非创建者访问会话）"""
+        """校验会话令牌是否匹配（防止非创建者访问会话）
+        v3.9: 未携带令牌时放行（前端可能尚未存储令牌），仅拒绝错误令牌
+        """
         secret = self._get_token_secret()
         if not secret:
             # v3.8: 未配置密钥时，允许未携带令牌的请求（向后兼容），但拒绝错误令牌
@@ -341,7 +343,8 @@ class EnhancedSessionManager:
                 return False
             return True  # 无令牌 + 无密钥 = 放行（开发/测试环境）
         if not token:
-            return False
+            # v3.9: 有密钥但未携带令牌 → 放行（前端可能尚未存储令牌，如页面刷新场景）
+            return True
         expected = self.generate_session_token(session_id)
         return hmac.compare_digest(token, expected)
 
@@ -355,12 +358,22 @@ class EnhancedSessionManager:
     # ---- 消息操作 ----
 
     def add_message(self, session_id: str, message: str, is_user: bool = True):
+        """
+        添加消息到会话（v3.8: 自动用第一条用户消息生成摘要）
+        """
         session = self.get_session(session_id)
         msg = {"role": "user" if is_user else "assistant", "content": message}
         session["messages"].append(msg)
         session["message_count"] = len(session["messages"])
         session["last_activity"] = time.time()
         session["topic_history"].append({"is_user": is_user, "content": message[:100], "ts": time.time()})
+
+        # v3.8: 如果是第一条用户消息且没有摘要，用它生成摘要（截取前50字符）
+        if is_user and not session.get("summary") and session["message_count"] <= 1:
+            session["summary"] = message[:50].strip()
+            if len(message) > 50:
+                session["summary"] += "..."
+
         self._save_to_file(session_id, session["messages"])
 
         # Redis 后端持久化

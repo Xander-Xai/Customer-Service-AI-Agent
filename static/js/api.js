@@ -24,6 +24,34 @@ const API = (() => {
   let _sessionId = null;
   let _pendingMessages = [];  // v3.6: 消息队列（连接未就绪时暂存）
   let _connectionReady = false;
+  let _heartbeatTimer = null;  // v3.8: 心跳定时器
+  const _HEARTBEAT_INTERVAL = 30000;  // v3.8: 客户端主动心跳间隔（30秒）
+
+  /**
+   * v3.8: 启动心跳定时器
+   */
+  function _startHeartbeat() {
+    _stopHeartbeat();
+    _heartbeatTimer = setInterval(() => {
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        try {
+          _ws.send(JSON.stringify({ type: 'ping' }));
+        } catch (e) {
+          console.error('[WS] 心跳发送失败:', e);
+        }
+      }
+    }, _HEARTBEAT_INTERVAL);
+  }
+
+  /**
+   * v3.8: 停止心跳定时器
+   */
+  function _stopHeartbeat() {
+    if (_heartbeatTimer) {
+      clearInterval(_heartbeatTimer);
+      _heartbeatTimer = null;
+    }
+  }
 
   /**
    * 建立 WebSocket 连接
@@ -59,11 +87,20 @@ const API = (() => {
       console.log('[WS] 已连接');
       // v3.6: 发送队列中的暂存消息
       _flushPendingMessages();
+      // v3.8: 启动心跳
+      _startHeartbeat();
     };
 
     _ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        // v3.8: 心跳响应 — 服务端发送 ping，客户端回复 pong 保持连接
+        if (data.type === 'ping') {
+          if (_ws && _ws.readyState === WebSocket.OPEN) {
+            _ws.send(JSON.stringify({ type: 'pong' }));
+          }
+          return;
+        }
         _emit(data.type, data);
       } catch (e) {
         console.error('[WS] 消息解析失败:', e);
@@ -72,6 +109,7 @@ const API = (() => {
 
     _ws.onclose = (event) => {
       _connectionReady = false;
+      _stopHeartbeat();  // v3.8: 停止心跳
       _emit('disconnected', { code: event.code, reason: event.reason });
       console.log('[WS] 断开连接', event.code, event.reason);
 
@@ -158,6 +196,7 @@ const API = (() => {
    * 关闭 WebSocket 连接
    */
   function disconnectWS() {
+    _stopHeartbeat();  // v3.8: 停止心跳
     if (_reconnectTimer) {
       clearTimeout(_reconnectTimer);
       _reconnectTimer = null;
@@ -200,11 +239,12 @@ const API = (() => {
 
   /**
    * 通用请求方法（v3.6: API Key 认证支持）
+   * v3.8: 支持 X-Session-Token header（会话所有权校验）
    */
-  async function _request(method, path, body = null) {
+  async function _request(method, path, body = null, extraHeaders = {}) {
     const opts = {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
     };
     if (body) opts.body = JSON.stringify(body);
 
@@ -231,11 +271,19 @@ const API = (() => {
   /** 会话列表 */
   function getSessions() { return _request('GET', '/api/sessions'); }
 
-  /** 会话详情 */
-  function getSession(sessionId) { return _request('GET', `/api/sessions/${sessionId}`); }
+  /** 会话详情（v3.8: 携带 session_token 用于所有权校验） */
+  function getSession(sessionId) {
+    const token = localStorage.getItem('currentSessionToken') || '';
+    return _request('GET', `/api/sessions/${sessionId}`, null,
+      token ? { 'X-Session-Token': token } : {});
+  }
 
-  /** 删除会话 */
-  function deleteSession(sessionId) { return _request('DELETE', `/api/sessions/${sessionId}`); }
+  /** 删除会话（v3.8: 携带 session_token） */
+  function deleteSession(sessionId) {
+    const token = localStorage.getItem('currentSessionToken') || '';
+    return _request('DELETE', `/api/sessions/${sessionId}`, null,
+      token ? { 'X-Session-Token': token } : {});
+  }
 
   /** SLA 告警 */
   function getAlerts(limit = 20) { return _request('GET', `/api/alerts?limit=${limit}`); }
