@@ -21,11 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Fixtures
 # ============================================================================
 
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+# 使用 pytest-asyncio 默认的 event_loop 处理
+# 移除自定义 event_loop fixture 以避免与 pytest-asyncio 0.21+ 冲突
 
 
 @pytest.fixture(scope="session")
