@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
-    loop.loop = loop
+    loop.close()
 
 
 @pytest.fixture(scope="session")
