@@ -12,12 +12,10 @@ class SharedBlackboard:
     def __init__(self):
         self._data: Dict[str, Any] = {}
         self._timestamps: Dict[str, float] = {}
-        self._lock = None  # v3.8 fix: lazy init to avoid wrong event loop binding
+        self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
 
     def _ensure_lock(self):
-        """v3.8 fix: lazy Lock initialization (matching MetricsCollector/CircuitBreaker pattern)"""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
         return self._lock
 
     async def write(self, key: str, value: Any, ttl: Optional[float] = None):

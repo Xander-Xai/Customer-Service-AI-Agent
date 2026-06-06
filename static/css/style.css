@@ -1056,6 +1056,122 @@ a:hover { color: var(--primary-hover); }
   to { background-position: -200% 0; }
 }
 
+/* ===== v4.1: 图片上传相关样式 ===== */
+
+/* 附件按钮 */
+.btn-attach {
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.btn-attach:hover {
+  color: var(--primary);
+  background: var(--primary-subtle);
+}
+
+/* 拖拽悬停状态 */
+.chat-input-wrapper.drag-over {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--primary-glow), var(--shadow-glow) !important;
+  background: var(--primary-subtle);
+}
+
+/* 图片预览区域 */
+.image-preview-area {
+  padding: 8px 0;
+  margin-bottom: 4px;
+}
+
+.image-preview-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.image-preview-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-hover);
+  flex-shrink: 0;
+}
+
+.image-preview-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.image-preview-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.image-preview-size {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.image-preview-remove {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.image-preview-remove:hover {
+  background: var(--error-bg);
+  color: var(--error);
+}
+
+/* 用户消息中的图片缩略图 */
+.message-image-preview {
+  margin-bottom: 8px;
+}
+
+.message-image-preview img {
+  max-width: 240px;
+  max-height: 240px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.message.user .message-image-preview img {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 1200px) {
   .monitor-grid {

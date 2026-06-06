@@ -350,25 +350,27 @@ class TestDriftDetection:
         self.session_id = "drift-test"
         self.sm.create_session(self.session_id)
 
-    def test_repetition_detection(self):
+    @pytest.mark.asyncio
+    async def test_repetition_detection(self):
         """重复提问检测"""
         query = "这款面霜适合油性皮肤吗？"
-        self.sm.add_message(self.session_id, query, is_user=True)
-        self.sm.add_message(self.session_id, "适合的，这款面霜质地清爽。", is_user=False)
-        self.sm.add_message(self.session_id, query, is_user=True)
+        await self.sm.add_message(self.session_id, query, is_user=True)
+        await self.sm.add_message(self.session_id, "适合的，这款面霜质地清爽。", is_user=False)
+        await self.sm.add_message(self.session_id, query, is_user=True)
 
-        drift = self.sm.detect_drift(self.session_id, query)
+        drift = await self.sm.detect_drift(self.session_id, query)
         # 重复提问阈值为 0.8，相同字符串的相似度为 1.0
         assert drift.get("has_drift") or len(drift.get("drifts", [])) > 0
 
-    def test_topic_drift_detection(self):
+    @pytest.mark.asyncio
+    async def test_topic_drift_detection(self):
         """话题漂移检测：从产品问题突然切换到完全不相关的主题"""
         # 先建立话题上下文
-        self.sm.add_message(self.session_id, "精华液的成分有哪些？", is_user=True)
-        self.sm.add_message(self.session_id, "包含玻尿酸和烟酰胺。", is_user=False)
+        await self.sm.add_message(self.session_id, "精华液的成分有哪些？", is_user=True)
+        await self.sm.add_message(self.session_id, "包含玻尿酸和烟酰胺。", is_user=False)
 
         # 切换到完全不同的话题
-        drift = self.sm.detect_drift(self.session_id, "今天天气怎么样？")
+        drift = await self.sm.detect_drift(self.session_id, "今天天气怎么样？")
         # 话题漂移应该被检测到（Jaccard 相似度很低）
         if drift.get("drifts"):
             assert any(d.get("type") in ("topic", "intent") for d in drift["drifts"])

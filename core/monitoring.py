@@ -13,13 +13,14 @@ v3.4 优化：
 """
 import time
 import json
+import os
 import random
 import asyncio
 import httpx
 from collections import deque
 from typing import Dict, List, Any, Optional
 
-from logger import get_logger
+from logger import get_logger, get_trace_id
 from config import (
     RESPONSE_TIME_TARGET_MAX, RESPONSE_TIME_TARGET_MIN,
     SLA_ALERT_WINDOW, SLA_ALERT_THRESHOLD, SLA_ALERT_COOLDOWN,
@@ -38,7 +39,7 @@ class MetricsCollector:
     """系统性能指标实时采集（v3.4: asyncio.Lock 保护并发安全）"""
 
     def __init__(self):
-        self._lock = None  # v3.5: 懒初始化，避免跨事件循环问题
+        self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
         self.total_requests = 0
         self.total_errors = 0
         self.response_times = deque(maxlen=200)  # 自动截断，保留最近 200 条
@@ -64,9 +65,7 @@ class MetricsCollector:
         self._sla_window = deque(maxlen=SLA_ALERT_WINDOW)  # 自动截断
 
     def _ensure_lock(self):
-        """懒初始化锁，避免在非事件循环上下文创建 Lock"""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
         return self._lock
 
     async def record_request(self, elapsed: float, agent: str = "", mode: str = "", cached: bool = False,
@@ -248,13 +247,11 @@ class CircuitBreaker:
         self.last_failure_time = 0.0
         self.total_failures = 0
         self.total_successes = 0
-        self._lock = None  # v3.5: 懒初始化，避免跨事件循环问题
+        self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
         self._half_open_permits = 0  # H2: 控制 HALF_OPEN 探测次数
 
     def _ensure_lock(self):
-        """懒初始化锁，避免在非事件循环上下文创建 Lock"""
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
         return self._lock
 
     async def record_success(self):
@@ -338,9 +335,10 @@ class SLAAlertManager:
             if time.time() - last_time < SLA_ALERT_COOLDOWN:
                 return None
 
+            severity = "critical" if window_rate > SLA_ALERT_THRESHOLD * 2 else "warning"
             alert = {
                 "type": alert_key,
-                "severity": "warning" if window_rate < SLA_ALERT_THRESHOLD * 1.5 else "critical",
+                "severity": severity,
                 "message": f"SLA 违约率 {window_rate}% 超过阈值 {SLA_ALERT_THRESHOLD}%（最近 {SLA_ALERT_WINDOW} 次请求）",
                 "window_rate": window_rate,
                 "threshold": SLA_ALERT_THRESHOLD,
@@ -353,7 +351,7 @@ class SLAAlertManager:
                 self.alerts = self.alerts[-self.ALERT_HISTORY_MAX:]
             self.last_alert_time[alert_key] = time.time()
 
-            logger.warning(f"[SLA-Alert] {alert['message']} (severity={alert['severity']})")
+            logger.warning(f"[SLA-Alert] {alert['message']} (severity={severity})")
 
             if self.bus:
                 try:
@@ -366,6 +364,17 @@ class SLAAlertManager:
                     ))
                 except Exception:
                     pass
+
+            # 分级通知路由
+            try:
+                from alerts.notifier import alert_notifier
+                await alert_notifier.send_alert(
+                    title=f"SLA 告警 [{severity.upper()}]",
+                    content=alert["message"],
+                    severity=severity,
+                )
+            except Exception as e:
+                logger.debug(f"[SLA-Alert] 通知发送失败: {e}")
 
             return alert
         return None
@@ -385,7 +394,7 @@ class CustomResponse:
 class OpenAICompatibleClient:
     """OpenAI 兼容异步客户端（v3.4: 熔断器 async 调用 + 实例级连接池隔离）"""
     _client_pools: Dict[str, httpx.AsyncClient] = {}  # v3.4: 按 base_url 隔离连接池
-    _pool_lock: Optional[asyncio.Lock] = None  # v3.5: 连接池并发安全
+    _pool_lock: asyncio.Lock = asyncio.Lock()  # P1-2: 直接初始化，消除竞态
 
     def __init__(self, api_key: str, base_url: str, model: str,
                  circuit_breaker: Optional[CircuitBreaker] = None):
@@ -401,7 +410,8 @@ class OpenAICompatibleClient:
 
     @staticmethod
     def _format_messages(messages) -> list:
-        """统一消息格式化（v3.7: 支持 ToolMessage 和 AIMessage.tool_calls）"""
+        """统一消息格式化（v3.7: 支持 ToolMessage 和 AIMessage.tool_calls）
+        v4.1: 支持多模态消息格式（content 为 list 时保持原样传递）"""
         formatted = []
         for msg in messages:
             if hasattr(msg, 'type') and msg.type == 'tool':
@@ -411,7 +421,11 @@ class OpenAICompatibleClient:
             elif isinstance(msg, SystemMessage):
                 formatted.append({"role": "system", "content": msg.content})
             elif isinstance(msg, HumanMessage):
-                formatted.append({"role": "user", "content": msg.content})
+                # v4.1: 多模态支持 — 如果 content 是 list（包含 text + image_url），保持原样
+                if isinstance(msg.content, list):
+                    formatted.append({"role": "user", "content": msg.content})
+                else:
+                    formatted.append({"role": "user", "content": msg.content})
             elif isinstance(msg, AIMessage):
                 formatted.append({"role": "assistant", "content": msg.content})
             else:
@@ -420,8 +434,6 @@ class OpenAICompatibleClient:
 
     async def _get_async_client(self) -> httpx.AsyncClient:
         """v3.5: 连接池并发安全（pool lock 保护）"""
-        if OpenAICompatibleClient._pool_lock is None:
-            OpenAICompatibleClient._pool_lock = asyncio.Lock()
         async with OpenAICompatibleClient._pool_lock:
             pool_key = self.base_url
             client = OpenAICompatibleClient._client_pools.get(pool_key)
@@ -454,6 +466,9 @@ class OpenAICompatibleClient:
             raise Exception("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
 
         payload = {"model": self.model, "messages": self._format_messages(messages)}
+        # v4.1: 设置 max_tokens 防止响应被截断（可通过 LLM_MAX_TOKENS 环境变量覆盖）
+        if "max_tokens" not in payload:
+            payload["max_tokens"] = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
         if tools:
             payload["tools"] = tools
         client = await self._get_async_client()
@@ -491,17 +506,87 @@ class OpenAICompatibleClient:
                 last_error = e
                 # v3.5: 模型不支持 tools 时自动降级（仅对 HTTPStatusError 400/422）
                 if isinstance(e, httpx.HTTPStatusError) and tools and e.response.status_code in (400, 422):
-                    logger.warning(f"[LLM] 模型不支持 tools 参数，降级为普通调用: {e}")
+                    logger.warning(f"[LLM] [{get_trace_id()}] 模型不支持 tools 参数，降级为普通调用: {e}")
                     del payload["tools"]
                     tools = None
                     continue
                 if attempt == self.max_retries - 1:
                     break
-                delay = self.base_delay * (2 ** attempt) + random.uniform(0, 0.3)
-                logger.warning(f"[LLM-async] retry {attempt+1}/{self.max_retries}: {e}, wait {delay:.1f}s")
+                max_delay = 10.0  # 最大单次重试延迟 10 秒
+                delay = min(self.base_delay * (2 ** attempt) + random.uniform(0, 0.3), max_delay)
+                logger.warning(f"[LLM-async] [{get_trace_id()}] retry {attempt+1}/{self.max_retries}: {e}, wait {delay:.1f}s")
                 await asyncio.sleep(delay)
 
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
         # v3.7: 不向调用方泄露内部错误细节（URL、状态码、响应体）
         raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
+
+    async def async_invoke_stream(self, messages, timeout: Optional[float] = None):
+        """v4.2: 真流式调用，使用 SSE 逐 chunk 接收 LLM 响应。
+
+        Yields:
+            str: 每个 SSE chunk 中 delta.content 的文本片段。
+
+        使用方式:
+            async for chunk in client.async_invoke_stream(messages):
+                print(chunk, end="", flush=True)
+        """
+        if self.circuit_breaker and not await self.circuit_breaker.should_allow():
+            raise Exception("CircuitBreaker OPEN: LLM 流式调用已熔断")
+
+        payload = {
+            "model": self.model,
+            "messages": self._format_messages(messages),
+            "stream": True,
+            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "4096")),
+        }
+        client = await self._get_async_client()
+        call_timeout = httpx.Timeout(timeout or self.timeout)
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    json=payload, headers=self.headers, timeout=call_timeout,
+                ) as resp:
+                    resp.raise_for_status()
+                    if self.circuit_breaker:
+                        await self.circuit_breaker.record_success()
+
+                    async for line in resp.aiter_lines():
+                        if not line:
+                            continue
+                        # SSE 格式: "data: {json}" 或 "data: [DONE]"
+                        if line.startswith("data: "):
+                            data = line[6:]
+                            if data.strip() == "[DONE]":
+                                return
+                            try:
+                                chunk = json.loads(data)
+                                choices = chunk.get("choices", [])
+                                if choices:
+                                    delta = choices[0].get("delta", {})
+                                    content = delta.get("content", "")
+                                    if content:
+                                        yield content
+                            except json.JSONDecodeError:
+                                continue
+                return  # 正常结束
+            except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                last_error = e
+                if attempt == self.max_retries - 1:
+                    break
+                max_delay = 10.0
+                delay = min(self.base_delay * (2 ** attempt) + random.uniform(0, 0.3), max_delay)
+                logger.warning(
+                    f"[LLM-stream] [{get_trace_id()}] retry {attempt+1}/{self.max_retries}: {e}, "
+                    f"wait {delay:.1f}s"
+                )
+                await asyncio.sleep(delay)
+
+        if self.circuit_breaker:
+            await self.circuit_breaker.record_failure()
+        raise Exception(f"LLM 流式调用失败（已重试 {self.max_retries} 次），请稍后重试")

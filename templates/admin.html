@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - 药妆智多星</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <style>
+    .admin-layout { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+    .admin-title { font-size: 22px; font-weight: 600; color: #fff; }
+    .admin-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+    .admin-card { background: #12121a; border: 1px solid #2a2a3a; border-radius: 12px; padding: 24px; }
+    .admin-card h3 { font-size: 16px; color: #fff; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .admin-stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a1a2e; font-size: 13px; }
+    .admin-stat:last-child { border-bottom: none; }
+    .admin-stat .label { color: #888; }
+    .admin-stat .value { color: #e0e0e0; font-weight: 500; }
+    .btn-sm { padding: 6px 14px; font-size: 12px; border-radius: 6px; border: 1px solid #333; background: #1a1a2e; color: #e0e0e0; cursor: pointer; }
+    .btn-sm:hover { background: #252540; border-color: #6366f1; }
+    .btn-sm.primary { background: #6366f1; border-color: #6366f1; color: #fff; }
+    .btn-sm.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+    .data-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .data-table th { text-align: left; padding: 10px 12px; color: #888; border-bottom: 1px solid #2a2a3a; font-weight: 500; }
+    .data-table td { padding: 10px 12px; border-bottom: 1px solid #1a1a2e; color: #ccc; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 500; }
+    .tag-admin { background: #6366f1; color: #fff; }
+    .tag-user { background: #333; color: #aaa; }
+    .tag-active { background: #166534; color: #4ade80; }
+    .empty-state { text-align: center; padding: 40px; color: #555; }
+    .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 13px; z-index: 9999; display: none; }
+    .toast.success { background: #166534; }
+    .toast.error { background: #991b1b; }
+  </style>
+</head>
+<body>
+  <header class="nav-header">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">🤖</div>
+      <span class="nav-logo-text">药妆智多星</span>
+      <span class="nav-logo-version">v4.1</span>
+    </div>
+    <nav class="nav-links">
+      <a class="nav-link" href="/">💬 对话</a>
+      <a class="nav-link" href="/admin.html">⚙️ 管理</a>
+    </nav>
+    <div class="nav-status">
+      <span id="userDisplay" style="font-size:13px;color:#888"></span>
+      <button class="btn-sm" id="logoutBtn" style="margin-left:8px">退出</button>
+    </div>
+  </header>
+
+  <div class="admin-layout">
+    <div class="admin-header">
+      <div class="admin-title">⚙️ 系统管理</div>
+    </div>
+
+    <div class="admin-grid">
+      <!-- 用户管理 -->
+      <div class="admin-card" style="grid-column: 1 / -1">
+        <h3>👥 用户管理</h3>
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>注册时间</th></tr></thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- 知识库 -->
+      <div class="admin-card">
+        <h3>📚 知识库管理</h3>
+        <div id="knowledgeStats"></div>
+        <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm primary" id="btnReseedKnowledge">🔄 重新种子</button>
+          <button class="btn-sm" id="btnSyncFromErp">📥 从ERP同步</button>
+          <button class="btn-sm" id="btnRefreshKnowledge">🔄 刷新</button>
+        </div>
+      </div>
+
+      <!-- 告警配置 -->
+      <div class="admin-card">
+        <h3>🔔 告警通知</h3>
+        <div id="alertConfig"></div>
+        <div style="margin-top:16px">
+          <button class="btn-sm primary" id="btnTestAlert">📤 测试告警</button>
+        </div>
+      </div>
+
+      <!-- 审计日志 -->
+      <div class="admin-card" style="grid-column: 1 / -1">
+        <h3>📋 审计日志</h3>
+        <table class="data-table">
+          <thead><tr><th>时间</th><th>操作</th><th>详情</th><th>IP</th></tr></thead>
+          <tbody id="auditTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- v4.1: 系统监控 -->
+      <div class="admin-card">
+        <h3>📊 系统状态</h3>
+        <div id="systemHealth"></div>
+      </div>
+
+      <!-- v4.1: 运行指标 -->
+      <div class="admin-card">
+        <h3>📈 运行指标</h3>
+        <div id="metricsStats"></div>
+      </div>
+
+      <!-- v4.1: 反馈统计 -->
+      <div class="admin-card">
+        <h3>💬 用户反馈</h3>
+        <div id="feedbackStats"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const TOKEN = localStorage.getItem('token');
+    if (!TOKEN) window.location.href = '/login.html';
+
+    const headers = {
+      'Authorization': 'Bearer ' + TOKEN,
+      'Content-Type': 'application/json',
+    };
+
+    function showToast(msg, type = 'success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast ' + type;
+      t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 3000);
+    }
+
+    function logout() {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login.html';
+    }
+
+    async function api(path, options = {}) {
+      const resp = await fetch(path, { headers, ...options });
+      if (resp.status === 401) { logout(); return null; }
+      return resp.json();
+    }
+
+    // ── 加载用户信息 ──
+    async function loadUserInfo() {
+      const me = await api('/api/auth/me');
+      if (me) {
+        document.getElementById('userDisplay').textContent = `${me.display_name || me.username} (${me.role})`;
+        if (me.role !== 'admin') {
+          showToast('需要管理员权限', 'error');
+          setTimeout(() => window.location.href = '/', 1000);
+        }
+      }
+    }
+
+    // ── HTML 转义（防 XSS）──
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // ── 用户列表 ──
+    async function loadUsers() {
+      const data = await api('/api/auth/users');
+      if (!data) return;
+      const tbody = document.getElementById('usersTableBody');
+      tbody.innerHTML = data.users.map(u => `
+        <tr>
+          <td>${esc(String(u.user_id))}</td>
+          <td>${esc(u.username)}</td>
+          <td>${esc(u.display_name || '')}</td>
+          <td><span class="tag tag-${esc(u.role)}">${esc(u.role)}</span></td>
+          <td><span class="tag tag-active">${u.is_active ? '启用' : '禁用'}</span></td>
+          <td>${u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN') : '-'}</td>
+        </tr>
+      `).join('');
+    }
+
+    // ── 知识库 ──
+    async function loadKnowledgeStats() {
+      const data = await api('/api/knowledge/stats');
+      if (!data) return;
+      const el = document.getElementById('knowledgeStats');
+      if (!data.available) {
+        el.innerHTML = '<div class="admin-stat"><span class="label">状态</span><span class="value" style="color:#ef4444">不可用</span></div>';
+        return;
+      }
+      el.innerHTML = `
+        <div class="admin-stat"><span class="label">产品知识</span><span class="value">${data.collections.product_knowledge} 条</span></div>
+        <div class="admin-stat"><span class="label">FAQ</span><span class="value">${data.collections.faq} 条</span></div>
+        <div class="admin-stat"><span class="label">技术支持</span><span class="value">${data.collections.tech_support} 条</span></div>
+        <div class="admin-stat"><span class="label">总计</span><span class="value" style="color:#6366f1">${data.total} 条</span></div>
+      `;
+    }
+
+    async function reseedKnowledge() {
+      if (!confirm('确定重新种子？这会覆盖现有数据。')) return;
+      const data = await api('/api/knowledge/seed', { method: 'POST' });
+      showToast(data?.message || '操作完成');
+      loadKnowledgeStats();
+    }
+
+    async function syncFromErp() {
+      showToast('正在从 ERP 同步...', 'success');
+      const data = await api('/api/knowledge/sync', { method: 'POST' });
+      showToast(data?.message || '同步完成');
+      loadKnowledgeStats();
+    }
+
+    // ── 告警配置 ──
+    async function loadAlertConfig() {
+      const data = await api('/api/alerts/config');
+      if (!data) return;
+      const el = document.getElementById('alertConfig');
+      el.innerHTML = `
+        <div class="admin-stat"><span class="label">Webhook 数量</span><span class="value">${data.webhooks.length} 个</span></div>
+        <div class="admin-stat"><span class="label">邮件通知</span><span class="value">${data.email_enabled ? '✅ 已配置' : '❌ 未配置'}</span></div>
+        ${data.email_to.length ? `<div class="admin-stat"><span class="label">通知邮箱</span><span class="value">${data.email_to.join(', ')}</span></div>` : ''}
+      `;
+    }
+
+    async function testAlert() {
+      const data = await api('/api/alerts/test', {
+        method: 'POST',
+        body: JSON.stringify({ title: '测试告警', content: '这是来自管理后台的测试告警', severity: 'info' }),
+      });
+      showToast(data?.message || '测试告警已发送');
+    }
+
+    // ── 审计日志 ──
+    async function loadAuditLog() {
+      const data = await api('/api/auth/audit?limit=30');
+      if (!data) return;
+      const tbody = document.getElementById('auditTableBody');
+      tbody.innerHTML = data.logs.map(l => `
+        <tr>
+          <td>${new Date(l.timestamp * 1000).toLocaleString('zh-CN')}</td>
+          <td>${esc(l.action)}</td>
+          <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(l.detail || '')}</td>
+          <td>${esc(l.ip_address || '')}</td>
+        </tr>
+      `).join('');
+    }
+
+    // ── 初始化 ──
+    (async () => {
+      await loadUserInfo();
+      await Promise.all([loadUsers(), loadKnowledgeStats(), loadAlertConfig(), loadAuditLog()]);
+      await Promise.all([loadSystemHealth(), loadMetricsStats(), loadFeedbackStats()]);
+    })();
+
+    // CSP 安全：通过 addEventListener 绑定事件（替代内联 onclick）
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('logoutBtn').addEventListener('click', logout);
+      document.getElementById('btnReseedKnowledge').addEventListener('click', reseedKnowledge);
+      document.getElementById('btnSyncFromErp').addEventListener('click', syncFromErp);
+      document.getElementById('btnRefreshKnowledge').addEventListener('click', loadKnowledgeStats);
+      document.getElementById('btnTestAlert').addEventListener('click', testAlert);
+    });
+
+    // ── v4.1: 系统健康 ──
+    async function loadSystemHealth() {
+      try {
+        const resp = await fetch('/api/health');
+        const data = await resp.json();
+        const el = document.getElementById('systemHealth');
+        if (!el) return;
+        const s = data.status || 'unknown';
+        const color = s === 'healthy' ? '#4ade80' : s === 'degraded' ? '#fbbf24' : '#f87171';
+        el.innerHTML = `
+          <div class="admin-stat"><span class="label">状态</span><span class="value" style="color:${color}">${s}</span></div>
+          <div class="admin-stat"><span class="label">版本</span><span class="value">${data.version || '-'}</span></div>
+          <div class="admin-stat"><span class="label">模式</span><span class="value">${data.mode || '-'}</span></div>
+          <div class="admin-stat"><span class="label">Redis</span><span class="value">${data.components?.redis?.connected ? '✅' : '❌'}</span></div>
+          <div class="admin-stat"><span class="label">熔断器</span><span class="value">${data.components?.circuit_breaker?.state || '-'}</span></div>
+          <div class="admin-stat"><span class="label">LLM</span><span class="value">${data.components?.llm?.configured ? '✅ 已配置' : '❌ 未配置'}</span></div>
+        `;
+      } catch (e) { console.error('Health check failed:', e); }
+    }
+
+    // ── v4.1: 运行指标 ──
+    async function loadMetricsStats() {
+      try {
+        const resp = await api('/api/metrics');
+        if (!resp) return;
+        const m = resp.metrics || {};
+        const el = document.getElementById('metricsStats');
+        if (!el) return;
+        el.innerHTML = `
+          <div class="admin-stat"><span class="label">总请求</span><span class="value">${m.total_requests || 0}</span></div>
+          <div class="admin-stat"><span class="label">错误数</span><span class="value">${m.total_errors || 0}</span></div>
+          <div class="admin-stat"><span class="label">平均响应</span><span class="value">${(m.avg_response_time || 0).toFixed(2)}s</span></div>
+          <div class="admin-stat"><span class="label">缓存命中率</span><span class="value">${(m.cache_hit_rate || 0).toFixed(1)}%</span></div>
+          <div class="admin-stat"><span class="label">SLA 违约率</span><span class="value">${(m.sla?.violation_rate || 0).toFixed(1)}%</span></div>
+        `;
+      } catch (e) { console.error('Metrics load failed:', e); }
+    }
+
+    // ── v4.1: 反馈统计 ──
+    async function loadFeedbackStats() {
+      try {
+        const resp = await api('/api/feedback/stats');
+        if (!resp) return;
+        const el = document.getElementById('feedbackStats');
+        if (!el) return;
+        el.innerHTML = `
+          <div class="admin-stat"><span class="label">总反馈</span><span class="value">${resp.total || 0}</span></div>
+          <div class="admin-stat"><span class="label">👍 好评</span><span class="value" style="color:#4ade80">${resp.positive || 0}</span></div>
+          <div class="admin-stat"><span class="label">👎 差评</span><span class="value" style="color:#f87171">${resp.negative || 0}</span></div>
+          <div class="admin-stat"><span class="label">好评率</span><span class="value">${((resp.rate || 0) * 100).toFixed(1)}%</span></div>
+        `;
+      } catch (e) { console.error('Feedback stats load failed:', e); }
+    }
+  </script>
+</body>
+</html>

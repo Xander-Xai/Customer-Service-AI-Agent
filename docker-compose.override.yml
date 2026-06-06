@@ -1,0 +1,37 @@
+# ===== 开发环境自动加载（docker-compose 会自动合并此文件）=====
+# 用法: docker compose up app   （自动加载 override）
+version: '3.8'
+
+services:
+  # ===== 主应用（开发模式：uvicorn 热重载）=====
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_MODE: dev
+    container_name: customer-service-ai-dev
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - DEV_MODE=true
+      - LOG_LEVEL=DEBUG
+      - LOG_FORMAT=text
+      - API_KEY_ENABLED=false
+      - SESSION_STORAGE_BACKEND=memory
+      - ERP_MODE=mock
+    volumes:
+      # 挂载源码实现热重载
+      - .:/app
+    command: >
+      uvicorn api.app_factory:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app
+      --log-level debug
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/api/health'); assert r.status_code==200"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -1,18 +1,54 @@
-﻿__pycache__
-*.pyc
-*.pyo
+# 版本控制
 .git
 .gitignore
+.claude
+
+# 环境配置（包含密钥）
 .env
 .env.*
-*.md
-doc/
+!.env.example
+*.generated
+
+# 测试和开发
+tests/
+docs/
+__pycache__
+*.pyc
+.pytest_cache
+
+# 日志和数据
+logs/
+data/
 chat_sessions/
+*.db
+
+# CI/CD
+.github/
+
+# IDE
 .vscode/
 .idea/
-*.egg-info/
-test_*.py
-erp/test_*.py
-venv/
-.pytest_cache/
-htmlcov/
+*.swp
+
+# AI music（无关文件）
+AI music/
+
+# Docker compose 配置
+docker-compose*.yml
+Makefile
+
+# 个人工具配置
+CLAUDE.md
+.claude/
+.admin_password
+
+# 运行时数据
+logs/
+loki/
+monitoring/
+chroma_db/
+
+# 杂项
+*.md
+!README.md
+LICENSE
