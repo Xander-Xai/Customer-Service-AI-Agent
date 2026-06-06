@@ -1264,7 +1264,7 @@ class TestReActAgent:
         from agents.react_agent import ReActAgent
         agent = ReActAgent()
         assert agent.name == "ReAct推理专家"
-        assert agent.max_iterations == 5
+        assert agent.max_iterations == 3
 
     def test_inherits_base_agent(self):
         from agents.react_agent import ReActAgent

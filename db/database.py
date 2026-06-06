@@ -38,6 +38,8 @@ if _is_postgresql:
 else:
     DATABASE_URL = f"sqlite:///{_DB_PATH}"
     _DB_TYPE = "sqlite"
+    # 确保数据库目录存在（引擎创建前必须就绪）
+    os.makedirs(_DB_DIR, exist_ok=True)
     logger.info(f"使用 SQLite 数据库: {_DB_PATH}")
 
 # ===== 引擎创建 =====
