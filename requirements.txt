@@ -22,5 +22,23 @@ jieba>=0.42.1
 # ===== Redis 持久化后端（Session + Cache）=====
 redis>=5.0.0
 
+# ===== v4.0: 用户认证 + 数据库 =====
+# SQLAlchemy 已在上面（用于 ORM）
+
+# ===== v4.1: 数据库迁移 =====
+alembic>=1.13.0
+
 # ===== 工具库 =====
 aiofiles>=23.2.1
+
+# ===== v4.1: PostgreSQL 支持 =====
+psycopg2-binary>=2.9.9
+
+# ===== 可选: OpenTelemetry 分布式追踪 =====
+# 取消注释以启用 OpenTelemetry（需设置 OPENTELEMETRY_ENABLED=true）
+# opentelemetry-api>=1.22.0
+# opentelemetry-sdk>=1.22.0
+# opentelemetry-instrumentation-fastapi>=0.43b0
+# opentelemetry-instrumentation-httpx>=0.43b0
+# opentelemetry-instrumentation-sqlalchemy>=0.43b0
+# opentelemetry-exporter-otlp>=1.22.0

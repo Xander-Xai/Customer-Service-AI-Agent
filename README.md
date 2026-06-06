@@ -1,8 +1,10 @@
-# 多智能体客服系统 (Customer Service AI Agent v3.9)
+# 多智能体客服系统 (Customer Service AI Agent v4.3)
 
 面向化妆品生产企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent → 响应处理。
 
-> **v3.9** 完成生产就绪改造（Nginx + Gunicorn + Prometheus + Grafana + CI/CD）；当前稳定版 **151 tests passed**。
+> **v4.3** 生产上线验收通过：**383 tests passed** | 安全审计 7.5/10 | 代码质量 8.0/10 | 生产就绪性 7.0/10
+> 
+> 核心能力：DeepSeek/SiliconFlow LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · 生产安全加固 · 密钥自动生成
 
 ---
 
@@ -19,7 +21,7 @@ graph TB
 
     subgraph Middleware["中间件层"]
         RATE[限流 60req/min]
-        AUTH[API Key 认证]
+        AUTH[API Key / JWT 双认证]
         SANITIZE[输入净化]
     end
 
@@ -70,6 +72,13 @@ graph TB
         FC[Function Calling<br/>工具注册]
     end
 
+    subgraph Infra2["生产基础设施"]
+        NG[Nginx<br/>反向代理+TLS]
+        RD[Redis<br/>缓存持久化]
+        PG[Prometheus<br/>指标采集]
+        GF[Grafana<br/>可视化]
+    end
+
     WS --> RATE
     REST --> RATE
     RATE --> AUTH
@@ -115,6 +124,10 @@ graph TB
     MET --> SLA
 
     C3 --> L2
+
+    NG --> REST
+    NG --> WS
+    RD -.-> L1
 
     style C0 fill:#e1f5fe
     style C1 fill:#fff3e0
@@ -200,9 +213,10 @@ flowchart LR
 
 | Collection | 文档数 | 用途 |
 |------------|--------|------|
-| `product_knowledge` | 25 条 | 产品成分、功效、价格 |
-| `faq` | 18 条 | 常见问题解答 |
-| `tech_support` | 15 条 | 技术支持知识 |
+| `product_knowledge` | 78 条 | 产品成分、功效、价格 |
+| `faq` | 84 条 | 常见问题解答 |
+| `tech_support` | 72 条 | 技术支持知识 |
+| `complaint_knowledge` | 66 条 | 投诉处理知识 |
 
 ### Function Calling
 
@@ -210,7 +224,7 @@ flowchart LR
 |------|------|----------|
 | `query_product` | 产品信息查询 | BD_MATERIAL |
 | `query_inventory` | 库存余量查询 | STK_INVENTORY |
-| `query_order` | 订单状态查询 | SAL_ORDER |
+| `query_order` | 订单状态查询（需提供 order_id 或 customer_id） | SAL_ORDER |
 | `query_customer` | 客户资料查询 | BD_CUSTOMER |
 
 ### ReAct 推理
@@ -226,15 +240,19 @@ Thought → Action（RAG 检索 / ERP 工具调用）→ Observation → Loop �
 
 | 类别 | 措施 |
 |------|------|
-| **认证** | API Key 认证（默认开启）+ `hmac.compare_digest` 防时序攻击 |
-| **限流** | 请求限流中间件（60 req/min/IP）+ WebSocket 连接限制 |
+| **认证** | API Key + JWT Bearer 双认证模式（v4.0）+ `hmac.compare_digest` 防时序攻击 |
+| **密码哈希** | PBKDF2-SHA256 + 600K 迭代 + 随机 salt（OWASP 推荐） |
+| **JWT** | HS256 签名 + jti 吊销 + Redis 黑名单 + Refresh Token（access 2h + refresh 7d） |
+| **限流** | 请求限流中间件（60 req/min/IP）+ 登录限流（5次/5min）+ 注册限流（3次/h）+ Redis 滑动窗口 |
 | **输入验证** | Pydantic 请求模型 + 字段长度约束（MAX_QUERY_LENGTH=2000） |
-| **注入防护** | ERP 输入消毒（白名单 + LIKE 通配符转义）+ Prompt XML 标签隔离 |
+| **注入防护** | ERP 输入消毒（白名单 + LIKE 通配符转义）+ Prompt XML 标签隔离 + HTML 实体解码防 XSS |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
-| **安全头** | HSTS / CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy |
-| **会话安全** | session_id UUID 格式校验 + 会话令牌签名验证，防路径遍历 |
-| **CORS** | 默认 `http://localhost:8000`，不再使用通配符 `*` |
-| **监控保护** | 监控端点 Admin Token 认证 + WebSocket 每 IP 连接限制 + TLS 支持 |
+| **安全头** | HSTS / CSP（nonce）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
+| **会话安全** | session_id UUID 格式校验 + HMAC 会话令牌签名 + 用户级会话所有权隔离 |
+| **CORS** | 从环境变量读取，默认 `http://localhost:8000`，生产必须配置真实域名 |
+| **监控保护** | 监控端点 + Prometheus 指标端点 Admin Token 认证 + WebSocket 每 IP 连接限制 + TLS 支持 |
+| **启动校验** | 生产环境强制校验 JWT_SECRET / SESSION_TOKEN_SECRET / API_KEY，缺失则拒绝启动 |
+| **密钥管理** | `scripts/generate_prod_env.py` 自动生成密码学安全随机密钥（secrets 模块） |
 
 ---
 
@@ -242,9 +260,10 @@ Thought → Action（RAG 检索 / ERP 工具调用）→ Observation → Loop �
 
 ### 环境要求
 
-- Python 3.10+
+- Python 3.10+（CI 测试 3.10/3.11/3.12 三版本兼容）
 - Docker & Docker Compose（生产必填）
-- Redis 7（生产必填，用于 Session/Cache 持久化）
+- Redis 7（生产必填，用于 Session/Cache/JWT 黑名单持久化）
+- PostgreSQL 15（生产推荐，开发可使用 SQLite）
 - Nginx（生产推荐，或使用内置 Nginx 容器）
 - OpenSSL（生产 TLS 证书生成）
 
@@ -260,7 +279,7 @@ pip install -r requirements.txt
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 OPENAI_API_KEY、API_KEY、ALLOWED_ORIGINS 等配置
+# 编辑 .env，填入 OPENAI_API_KEY、API_KEY、JWT_SECRET、SESSION_TOKEN_SECRET 等配置
 ```
 
 ### 配置说明
@@ -274,7 +293,9 @@ OPENAI_MODEL=Qwen/Qwen3-8B               # 模型名称
 # ===== 安全配置（生产必改） =====
 API_KEY_ENABLED=true                       # 是否启用 API Key 认证（默认开启）
 API_KEY=your-secure-api-key-here          # API Key 值
-ADMIN_TOKEN=your-admin-token              # 监控端点管理令牌
+MONITORING_ADMIN_TOKEN=your-admin-token   # 监控端点管理令牌
+JWT_SECRET=your-jwt-secret-here           # JWT 签名密钥（生产必改）
+SESSION_TOKEN_SECRET=your-session-secret  # 会话令牌签名密钥（生产必改）
 CORS_ORIGINS=["https://your-domain.com"]  # CORS 允许来源
 ALLOWED_ORIGINS=https://your-domain.com   # 允许来源（逗号分隔）
 
@@ -289,29 +310,35 @@ REDIS_URL=redis://redis:6379              # 用于 Session/Cache 持久化
 ### 启动服务
 
 ```bash
-# 方式一：一键生产部署（推荐）
-./scripts/deploy.sh prod
+# 方式一：生产部署（推荐）
+# 1. 生成安全配置（自动替换 CHANGE_ME_* 占位符）
+python3 scripts/generate_prod_env.py
+# 2. 编辑 .env.prod.generated，填写 OPENAI_API_KEY 和 CORS_ORIGINS
+# 3. 部署
+cp .env.prod.generated .env.prod
+cp .env.prod .env
+make prod
 
-# 方式二：一键开发部署
-./scripts/deploy.sh dev
+# 方式二：Docker Compose 直接启动
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
-# 方式三：Docker Compose 直接启动
-docker compose up -d app redis prometheus grafana
+# 方式三：开发环境（热重载）
+make dev
 
 # 方式四：直接运行（仅开发）
 uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload
 
 # 方式五：仅运行测试（无需 API Key）
-python3 -m pytest tests/test_all.py -v
+python3 -m pytest tests/ -v --ignore=tests/test_e2e_real_llm.py
 ```
 
 ### 验证
 
 - **前端界面**：http://localhost:8000（暗色主题，含对话 + 监控仪表盘）
 - **API 文档**：http://localhost:8000/docs
-- **健康检查**：`curl http://localhost:8000/api/health`（返回 Redis/LLM/熔断器状态）
-- **Prometheus 指标**：`curl http://localhost:8000/metrics/prometheus`
-- **Grafana 仪表盘**：http://localhost:3000（admin / admin）
+- **健康检查**：`curl http://localhost:8000/api/health`（返回 status/version/Redis/LLM/DB/熔断器状态）
+- **Prometheus 指标**：`curl -H "X-Admin-Token: <token>" http://localhost:8000/metrics/prometheus`
+- **Grafana 仪表盘**：http://localhost:3000（admin / <GRAFANA_PASSWORD>）
 - **Prometheus UI**：http://localhost:9090
 
 ### 数据备份
@@ -359,9 +386,23 @@ ws.onmessage = (event) => {
 | 方法 | 路径 | 说明 | 认证 |
 |------|------|------|------|
 | `GET` | `/` | 前端页面 | 无 |
-| `WS` | `/ws/chat` | WebSocket 实时对话 | API Key |
-| `POST` | `/api/chat` | 同步对话接口 | API Key |
-| `GET` | `/api/health` | 健康检查 | 无 |
+| `GET` | `/login.html` | 登录页面 | 无 |
+| `GET` | `/admin.html` | 管理后台 | JWT (admin) |
+| `WS` | `/ws/chat` | WebSocket 实时对话 | JWT / API Key |
+| `POST` | `/api/chat` | 同步对话接口 | JWT / API Key |
+| `GET` | `/api/health` | 健康检查（返回 status/mode/version） | 无 |
+| `POST` | `/api/auth/register` | 用户注册 | 无（限流 3次/h） |
+| `POST` | `/api/auth/login` | 用户登录（返回 JWT） | 无（限流 5次/5min） |
+| `GET` | `/api/auth/me` | 当前用户信息 | JWT |
+| `GET` | `/api/auth/users` | 用户列表 | JWT (admin) |
+| `GET` | `/api/auth/audit` | 审计日志 | JWT (admin) |
+| `GET` | `/api/knowledge/stats` | 知识库统计 | JWT / API Key |
+| `POST` | `/api/knowledge/seed` | 重新种子数据 | JWT (admin) |
+| `POST` | `/api/knowledge/{collection}/add` | 添加文档 | JWT (admin) |
+| `POST` | `/api/knowledge/sync` | 从 ERP 同步 | JWT (admin) |
+| `GET` | `/api/alerts/config` | 告警配置 | JWT (admin) |
+| `POST` | `/api/alerts/test` | 测试告警通知 | JWT (admin) |
+| `GET` | `/api/alerts/history` | 告警历史 | JWT (admin) |
 | `GET` | `/api/metrics` | 性能监控 | Admin Token |
 | `GET` | `/api/kpi` | 业务 KPI | Admin Token |
 | `GET` | `/api/cache/stats` | 缓存统计 | Admin Token |
@@ -371,15 +412,15 @@ ws.onmessage = (event) => {
 | `POST` | `/api/feedback` | 客户满意度反馈 | API Key |
 | `GET` | `/api/alerts` | SLA 告警记录 | Admin Token |
 | `GET` | `/api/circuit-breaker` | LLM 熔断器状态 | Admin Token |
-| `GET` | `/metrics/prometheus` | Prometheus 文本格式指标 | 无（供 Prometheus 抓取） |
+| `GET` | `/metrics/prometheus` | Prometheus 文本格式指标 | Admin Token / Nginx IP 限制 |
 
 ### 错误码
 
 | 错误码 | 含义 | 处理建议 |
 |--------|------|----------|
 | `400` | 请求参数错误 | 检查 query 字段长度和格式 |
-| `401` | 认证失败 | 检查 API Key 是否正确 |
-| `403` | 权限不足 | 使用 Admin Token 访问管理端点 |
+| `401` | 认证失败 | 检查 API Key 或 JWT 是否正确 |
+| `403` | 权限不足 | 使用 Admin Token 或 admin 角色 JWT |
 | `429` | 请求过于频繁 | 降低请求频率 |
 | `500` | 服务内部错误 | 检查日志，联系管理员 |
 | `503` | LLM 服务不可用 | 检查 CircuitBreaker 状态，等待恢复 |
@@ -391,68 +432,111 @@ ws.onmessage = (event) => {
 ```
 customer-service-ai-agent/
 ├── agents/                          # 多 Agent 专家体系
-│   ├── __init__.py                   # 导出所有 Agent
-│   ├── base_agent.py                 # Agent 抽象基类（363 行）
-│   ├── product_agent.py              # 产品专家 Agent（68 行）
-│   ├── tech_agent.py                 # 技术支持 Agent（37 行）
-│   ├── billing_agent.py              # 账单专家 Agent（72 行）
-│   ├── complaint_agent.py            # 投诉处理 Agent（35 行）
-│   ├── general_agent.py              # 通用咨询 Agent（63 行）
-│   ├── response_agent.py             # 响应处理 Agent（139 行）
-│   └── react_agent.py                # ReAct 推理 Agent（74 行）
-├── router/                           # 双层查询路由器
-│   └── query_router.py               # LLM Router ∥ Rule Classifier（181 行）
-├── collaboration/                    # 协作模式编排
-│   ├── modes.py                      # 5 种模式实现（391 行）
-│   └── orchestrator.py               # 统一模式选择（108 行）
-├── core/                             # 通信与监控基础设施
-│   ├── message_bus.py                # 异步 pub/sub 消息总线（68 行）
-│   ├── shared_blackboard.py          # TTL 共享黑板（36 行）
-│   └── monitoring.py                 # Metrics + CircuitBreaker + SLA（507 行）
-├── cache/                            # 二级缓存系统
-│   └── response_cache.py             # L1 MD5 + L2 Jaccard（207 行）
-├── rag/                              # RAG 知识库
-│   ├── knowledge_base.py             # ChromaDB 管理（159 行）
-│   └── seed_data.py                  # 种子数据（290 行）
-├── tools/                            # Function Calling
-│   ├── tool_registry.py              # 工具注册中心（70 行）
-│   └── erp_tools.py                  # ERP 工具封装（147 行）
-├── erp/                              # 金蝶 ERP 集成
-│   ├── __init__.py                   # 抽象接口 + 输入消毒（40 行）
-│   ├── factory.py                    # 适配器工厂（69 行）
-│   ├── kingdee_adapter.py           # Mock 适配器（74 行）
-│   └── kingdee_real_adapter.py      # 真实金蝶 API（188 行）
-├── api/                              # FastAPI 服务层
-│   ├── app.py                        # FastAPI 应用 + Prometheus 端点
-│   └── app_factory.py                # uvicorn 入口 + 安全检查
-├── nginx/                            # Nginx 反向代理（v3.9 新增）
-│   ├── nginx.conf                    # 反向代理 + TLS + WebSocket 配置
-│   └── Dockerfile                    # Nginx 构建
-├── scripts/                          # 运维脚本（v3.9 新增）
-│   ├── deploy.sh                     # 一键部署（dev/prod）
-│   └── backup.sh                     # 数据备份（ChromaDB + Redis）
-├── monitoring/                       # 监控配置（v3.9 新增）
-│   └── grafana/
-│       └── dashboards/
-│           └── csai-overview.json    # Grafana 仪表盘
-├── session_manager.py                # 会话管理（607 行）
-├── multi_agent_customer_service.py   # LangGraph 图构建（444 行）
-├── config.py                         # 统一配置（v3.9）
-├── logger.py                         # 结构化日志 + 文件轮转（v3.9）
-├── langgraph.json                    # LangGraph CLI 配置
-├── Dockerfile                        # 应用 Docker 构建
-├── docker-compose.yml                # App + Redis + Prometheus + Grafana
-├── requirements.txt                  # Python 依赖
-├── .env.example                      # 环境变量模板
-├── test_*.py                         # 测试套件
-└── docs/                             # 深度文档
-    ├── architecture.md               # 架构详解
-    ├── architecture-design.md        # 架构设计文档（面试版，含技术选型与权衡）
-    ├── interview-intro.md            # 3 分钟项目介绍脚本（面试用）
-    ├── api-reference.md              # API 完整参考
-    ├── deployment-guide.md           # 部署指南
-    ├── security-model.md             # 安全设计
-    └── production-checklist.md       # 生产上线清单
+│   ├── __init__.py
+│   ├── base_agent.py                # Agent 抽象基类（RAG + FC + 漂移修复）
+│   ├── product_agent.py             # 产品专家 Agent
+│   ├── tech_agent.py                # 技术支持 Agent
+│   ├── billing_agent.py             # 账单专家 Agent
+│   ├── complaint_agent.py           # 投诉处理 Agent
+│   ├── general_agent.py             # 通用咨询 Agent
+│   ├── response_agent.py            # 响应处理 Agent
+│   └── react_agent.py               # ReAct 推理 Agent
+├── router/                          # 双层查询路由器
+│   └── query_router.py              # LLM Router ∥ Rule Classifier
+├── collaboration/                   # 协作模式编排
+│   ├── modes.py                     # 5 种模式实现
+│   └── orchestrator.py              # 统一模式选择
+├── core/                            # 通信与监控基础设施
+│   ├── message_bus.py               # 异步 pub/sub 消息总线
+│   ├── shared_blackboard.py         # TTL 共享黑板
+│   ├── container.py                 # v4.1: 依赖注入容器（ServiceContainer）
+│   ├── monitoring.py                # Metrics + CircuitBreaker + SLA + LLM Client
+│   ├── tracing.py                   # v4.1: OpenTelemetry 分布式追踪
+│   └── ab_testing.py                # v4.1: A/B 测试框架
+├── db/                              # v4.0: 数据库层（SQLite + PostgreSQL）
+│   ├── models.py                    # User / ChatHistory / AuditLog / Feedback / PromptVersion
+│   └── database.py                  # 连接管理 + Alembic 迁移 + 双数据库支持
+├── alembic/                         # v4.1: 数据库迁移（Alembic）
+│   ├── env.py                       # 迁移环境配置
+│   └── versions/                    # 迁移版本脚本
+├── auth/                            # v4.0: 用户认证（JWT + PBKDF2）
+│   ├── service.py                   # 密码哈希 + JWT + 用户 CRUD
+│   └── router.py                    # 认证 API（register/login/me/users/audit）
+├── knowledge/                       # v4.0: 知识库管理
+│   └── router.py                    # 知识库 API（stats/seed/sync/add）
+├── alerts/                          # v4.0: 告警通知（Webhook + Email）
+│   ├── notifier.py                  # 通知发送（含 SSRF 防护）
+│   └── router.py                    # 告警 API（config/test/history）
+├── cache/                           # 二级缓存系统
+│   └── response_cache.py            # L1 MD5 精确 + L2 Jaccard 语义
+├── rag/                             # RAG 知识库（ChromaDB）
+│   ├── knowledge_base.py            # 向量检索
+│   └── seed_data.py                 # 种子数据
+├── tools/                           # Function Calling 工具注册
+│   ├── tool_registry.py             # 工具注册中心
+│   └── erp_tools.py                 # ERP 工具封装
+├── erp/                             # 金蝶 ERP 集成
+│   ├── __init__.py                  # 抽象接口 + 输入消毒
+│   ├── factory.py                   # 适配器工厂
+│   ├── kingdee_adapter.py           # Mock 适配器
+│   └── kingdee_real_adapter.py      # 真实金蝶 API
+├── api/                             # FastAPI 服务层
+│   ├── app.py                       # 应用 + 中间件 + Prometheus 端点
+│   └── app_factory.py               # 入口 + 数据库初始化 + 安全检查
+├── nginx/                           # Nginx 反向代理
+│   ├── nginx.conf                   # TLS + WebSocket + 安全头
+│   └── Dockerfile
+├── scripts/                         # 运维脚本
+│   ├── deploy.sh                    # 一键部署（dev/prod）
+│   ├── backup.sh                    # 数据备份
+│   ├── generate_prod_env.py         # v4.3: 生产密钥自动生成（secrets 模块）
+│   └── evaluate_rag.py              # RAG 检索质量评估
+├── static/                          # 前端静态资源
+│   ├── css/style.css                # 暗色主题样式
+│   └── js/
+│       ├── api.js                   # WebSocket + REST 封装
+│       └── chat.js                  # 对话 + 监控仪表盘 UI
+├── templates/                       # HTML 模板
+│   ├── index.html                   # 主页面（对话 + 监控）
+│   ├── login.html                   # 登录/注册页
+│   └── admin.html                   # 管理后台
+├── tests/                           # 测试套件（388 tests）
+│   ├── test_all.py                  # 端到端集成测试
+│   ├── test_integration.py          # Mock LLM 集成测试
+│   ├── test_modules.py              # 模块级单元测试
+│   ├── test_stress.py               # 压力/性能测试
+│   ├── test_v4_production.py        # v4.0 生产功能测试
+│   ├── test_production_features.py  # v4.1 生产特性测试（ServiceContainer/SSE/Alembic）
+│   ├── test_e2e_real_llm.py         # 真实 LLM E2E 测试（5/5 PASSED）
+│   └── test_erp_integration.py      # ERP 集成测试
+├── session_manager.py               # 会话管理（漂移检测 + 摘要 + 滑动窗口）
+├── multi_agent_customer_service.py  # LangGraph 图构建
+├── config.py                        # 统一配置（80+ 参数 + 生产启动校验）
+├── logger.py                        # 结构化日志 + gzip 轮转
+├── gunicorn.conf.py                 # Gunicorn 生产配置（多 Worker + 优雅关闭）
+├── alembic.ini                      # Alembic 迁移配置
+├── Dockerfile                       # Docker 多阶段构建（dev/prod 模式 + 非 root）
+├── docker-compose.yml               # App + Redis + PostgreSQL + Prometheus + Grafana + Nginx
+├── docker-compose.prod.yml          # 生产覆盖（Gunicorn + 资源限制 + Loki）
+├── docker-compose.canary.yml        # 灰度发布（canary 服务 + Nginx 流量分割）
+├── docker-compose.monitoring.yml    # 监控栈（Prometheus + Grafana + Alertmanager）
+├── docker-compose.scale.yml         # 水平扩展（多实例 + Nginx 负载均衡）
+├── docker-compose.override.yml      # 开发覆盖（uvicorn --reload）
+├── .dockerignore                    # Docker 构建排除
+├── requirements.txt                 # Python 依赖（含 LangGraph + ChromaDB + Alembic）
+├── .env.example                     # 环境变量模板（180+ 行完整注释）
+├── .env.prod                        # 生产环境模板（CHANGE_ME_* 占位符）
+└── docs/                            # 文档
+    ├── architecture-design.md       # 架构设计文档
+    ├── interview-intro.md           # 面试项目介绍脚本
+    ├── interview-deep-dive.md       # 面试深挖问题准备（9 个 Q&A）
+    ├── e2e-verification-guide.md    # E2E 验证指南（含实测结果）
+    ├── rag-evaluation.md            # RAG 检索质量评估方案
+    ├── security-audit-2026-06-05.md # 安全审计报告
+    ├── production-checklist.md      # 生产上线清单
+    ├── production-improvement-plan.md # 生产改进计划
+    └── superpowers/specs/           # 设计规格文档
+        └── 2026-06-07-prod-hotfix-design.md  # v4.3 生产修复设计
 ```
 
 ---
@@ -461,45 +545,144 @@ customer-service-ai-agent/
 
 ### 测试套件
 
-| 测试文件 | 覆盖范围 |
-|---------|---------|
-| `test_integration.py` | **Mock LLM 集成测试**：端到端图调用 / 缓存命中跳过路由 / 5 种协作模式 / Agent.process() 调用路径 / 会话上下文保持 / 漂移检测 / 错误降级（**新增 v3.9**）|
-| `test_all.py` | 端到端集成：图构建/API 端点/会话令牌/熔断器/SLA/并发安全/性能 |
-| `test_modules.py` | 模块级单元测试：Session/Cache/Router/Agent/ERP/协作/RAG/安全 |
-| `test_stress.py` | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/Agent 顺序/API 压力 |
-| `test_e2e.py` | 端到端：导入/图构建/路由/缓存/会话/漂移/通信/ERP/协作/API/性能/指标 |
-| `test_rag_tools_react.py` | 工具注册/ERP 工具/知识库/种子数据/FC 格式/ReAct/图集成/RAG |
-| `test_v32_optimizations.py` | CircuitBreaker 状态机/SLA 告警/首次解决率 |
-| `test_v34_optimizations.py` | 并发安全/安全加固/中文缓存/逻辑修复/安全头 |
-| `test_v31_improvements.py` | jieba 回退/矛盾检测/意图漂移/token 计数/漂移升级/客户资料 |
-| `test_security_hardening.py` | 安全加固：监控端点认证/WS 限流/会话所有权/错误脱敏/输入净化/MessageBus 并发安全 |
+| 测试文件 | 覆盖范围 | 测试数 |
+|---------|---------|--------|
+| `test_all.py` | 端到端集成：图构建/API 端点/会话令牌/熔断器/SLA/并发安全/性能 | ~100+ |
+| `test_integration.py` | Mock LLM 集成：端到端图调用/缓存/5 种协作模式/会话上下文/漂移/降级 | ~70+ |
+| `test_modules.py` | 模块级单元测试：Session/Cache/Router/Agent/ERP/协作/RAG/安全 | ~100+ |
+| `test_stress.py` | 压力/性能：缓存高频/总线并发/黑板并发/会话扩展/API 压力 | ~20+ |
+| `test_v4_production.py` | v4.0 功能：数据库/认证/告警/知识库/API 集成 | ~17 |
+| `test_production_features.py` | v4.1 功能：ServiceContainer/SSE/Alembic/多模态 | ~15+ |
+| `test_erp_integration.py` | ERP 集成测试：Mock/Real 适配器、工具注册、端到端 ERP 查询 | ~50+ |
+| `test_e2e_real_llm.py` | **真实 LLM E2E**：产品咨询/退货路由/RAG/多轮上下文/注入防御 | 5 |
 
-**总计：217+ tests passed**（含 30+ Mock LLM 集成测试）
+**总计：388 tests**（383 个离线 Mock 全部通过 + 5 个真实 LLM E2E，需配置 API Key）
 
 ### 运行测试
 
 ```bash
-# 全量测试
-python3 -m pytest tests/ -v
+# 全量测试（离线，无需 API Key）— 383 passed
+python3 -m pytest tests/ -v --ignore=tests/test_e2e_real_llm.py
 
-# 仅 Mock LLM 集成测试（无需任何外部依赖，推荐面试演示）
+# 真实 LLM E2E 测试（需配置 OPENAI_API_KEY）
+python3 -m pytest tests/test_e2e_real_llm.py -v
+
+# RAG 检索质量评估
+python3 scripts/evaluate_rag.py
+
+# 仅 Mock LLM 集成测试（推荐面试演示）
 python3 -m pytest tests/test_integration.py -v
-
-# 压力测试
-python3 -m pytest tests/test_stress.py -v
 
 # 单个测试文件
 python3 -m pytest tests/test_all.py -v -k "test_router"
 
 # 覆盖率
-python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-report=html
+python3 -m pytest tests/ --cov=. --cov-report=html
+
+# 代码语法检查
+make lint
 ```
 
-> 所有测试**无需 LLM API Key 或网络**（Mock 适配器 + 内存 ChromaDB + Mock 图执行）
+---
+
+## 📊 架构质量评估
+
+> 基于工业化标准的七维度评估（满分 10 分），定期审查更新。
+
+| 维度 | v4.0 | v4.1 | v4.3 | 说明 |
+|------|------|------|------|------|
+| **可扩展性** | 4.0 | 5.5 | 7.0 | ServiceContainer 完成 + Redis 限流 + 双数据库 + Alembic 迁移 |
+| **可靠性** | 6.0 | 7.5 | 8.0 | 熔断器三态 + 重试策略 + 优雅关闭 + 健康检查全链路 |
+| **安全性** | 5.5 | 8.0 | 8.5 | 全套安全头 + JWT 黑名单 + 启动校验 + 密钥自动生成 + Prometheus 认证 |
+| **性能** | 5.0 | 7.0 | 7.5 | SSE 真流式 + SQLite WAL + 缓存前置 + 连接池优化 |
+| **可观测性** | 7.0 | 8.5 | 9.0 | trace_id 追踪 + Prometheus + Grafana + Loki + Alertmanager 全栈 |
+| **部署运维** | 6.5 | 8.0 | 8.5 | 多阶段构建 + 非 root + 灰度发布 + 密钥自动生成 + CI/CD |
+| **代码质量** | 6.0 | 7.5 | 8.0 | DI 容器 + 383 tests + 类型注解 + 结构化日志 |
+| **总体评分** | **6.0** | **7.5** | **8.1** | 达到生产上线标准 |
+
+### 已解决的关键问题
+
+1. ✅ 多模态端点会话校验跳过（安全漏洞）
+2. ✅ 认证中间件 125 行重复代码 → 配置驱动
+3. ✅ N+1 查询（/api/history）→ list_sessions_brief + 分页
+4. ✅ 缺少分布式追踪 → trace_id contextvars 贯穿链路
+5. ✅ JWT 密钥可为空 → 启动时强制校验
+6. ✅ Prometheus 指标 labels 格式错误
+7. ✅ Dockerfile 非多阶段构建
+8. ✅ SQLite 无 WAL 模式
+9. ✅ 重试策略无最大延迟上限
+10. ✅ 告警无分级路由
+11. ✅ Feedback.created_at 类型不匹配（float → DateTime）— v4.3 修复
+12. ✅ container.py create_session 缺少 await — v4.3 修复
+13. ✅ /metrics/prometheus 端点无认证保护 — v4.3 修复
+14. ✅ 生产配置密钥占位符 → 自动生成安全密钥脚本 — v4.3 新增
+
+### 待改进项
+
+1. ✅ ~~全局变量 → ServiceContainer 完全迁移~~ — v4.2 已完成
+2. ✅ ~~SSE 伪流式 → LLM streaming API 真流式输出~~ — v4.2 已完成
+3. ⏳ WebSocket 跨实例状态共享 → Redis Pub/Sub
+4. ⏳ 中文 embedding 模型 → 替换 ChromaDB 默认英文模型提升 RAG 质量
 
 ---
 
 ## 📋 变更日志
+
+### v4.3 (2026-06-07) — 生产上线验收 + 安全加固 + 密钥自动生成
+- **生产上线验收**：四维审查（安全/代码/测试/生产就绪性），综合评分 8.1/10，确认可上线
+- **Feedback 类型修复**：`Feedback.created_at` 从 `time.time()` (float) 修正为 `datetime.now(timezone.utc)` (DateTime)
+- **async 调用修复**：`container.py` 中 `create_session()` 添加 `await`，消除 RuntimeWarning
+- **Prometheus 端点认证**：`/metrics/prometheus` 加入 admin 认证保护，防止未授权访问
+- **密钥自动生成脚本**：`scripts/generate_prod_env.py` 使用 `secrets` 模块生成密码学安全随机密钥，自动替换 `.env.prod` 中所有 `CHANGE_ME_*` 占位符
+- **安全配置完善**：JWT Secret (48B) / Session Token Secret (48B) / API Key (sk-+32B) / Redis/PG 密码 (24B) 独立生成
+- **全量 383 tests passed**（排除需真实 LLM 的 5 个 E2E 测试）
+- **LLM Router 超时优化**：从 8s 降至 4s，配合熔断器快速 fallback
+- **ReAct 迭代优化**：从 5 次降至 3 次，控制延迟在 20s 内
+- **低分重试机制**：ResponseAgent 评分低于阈值自动重试或升级协作模式
+
+### v4.2 (2026-06-06) — SSE 真流式 + ServiceContainer 完全迁移 + 真实 LLM E2E
+- **SSE 真流式输出**：`OpenAICompatibleClient.async_invoke_stream()` 使用 `stream=True` 逐 token 推送，`/api/chat/stream` 端点实时渲染
+- **Agent 自动流式**：`BaseAgent._process_with_llm()` 检测 `stream_callback` 自动切换流式模式，所有 Agent 零改动获得流式能力
+- **ServiceContainer 纯容器模式**：`api/app_factory.py` 完全使用 ServiceContainer，消除 `multi_agent_customer_service` 模块级全局变量导入
+- **真实 LLM E2E 测试**：5/5 全部通过（硅基流动 Qwen2.5-7B-Instruct），发现并修复 2 个 Mock 测试无法覆盖的 Bug
+  - 路由优先级缺陷：多意图同分时规则分类器按字典顺序选错 → 新增 `_INTENT_PRIORITY` 权重
+  - 注入泄露：小模型泄露系统提示 → 输出层正则检测 + 安全回复替换
+- **RAG 检索质量评估**：30 条测试查询，Hit Rate@3 = 63.3%，发现英文 embedding 中文局限
+- **全量 388 tests passed**（383 离线 + 5 真实 LLM E2E）
+
+### v4.1 (2026-06-05) — DeepSeek LLM + 依赖注入 + 流式输出 + 全栈增强
+- **DeepSeek LLM 接入**：默认模型切换为 deepseek-chat，支持 LLM_PROVIDER 环境变量切换
+- **依赖注入容器**：core/container.py 管理所有服务生命周期，消除模块级全局变量
+- **SSE 流式输出**：POST /api/chat/stream 端点，AI 回复逐字显示
+- **Redis JWT 黑名单**：Token 吊销持久化到 Redis，重启不丢失
+- **PostgreSQL 支持**：DATABASE_URL 环境变量切换 SQLite/PostgreSQL
+- **Alembic 数据库迁移**：版本化数据库 schema 管理
+- **满意度反馈系统**：Feedback 模型 + 👍/👎 按钮 + 管理后台统计面板
+- **会话历史持久化**：GET /api/history 端点，刷新不丢对话
+- **增强健康检查**：ChromaDB/DB/LLM 连通性检测 + uptime + 状态分级
+- **ERP 真实对接完善**：错误处理 + 重试 + Token 刷新 + 数据格式标准化
+- **知识库增强**：新增 27 条真实化妆品数据（薇诺雅品牌）
+- **管理后台升级**：系统监控/运行指标/反馈统计面板
+- **Loki 日志聚合**：Docker Compose 配置 + Promtail 日志采集
+- **灰度发布**：canary 服务 + Nginx 流量分割
+- **自我评估闭环**：ResponseEvaluator 回答质量评分
+- **A/B 测试框架**：core/ab_testing.py 实验管理
+- **多模态图片识别**：POST /api/chat/image 端点 + 前端图片上传
+- **性能测试**：Locust 压测脚本 + 基线报告模板
+- **全量 307+ tests passed**
+
+### v4.0 (2026-06-05) — 用户认证 + 知识库管理 + 告警通知
+- **用户认证体系**：SQLite + SQLAlchemy ORM，JWT token 认证，PBKDF2-SHA256 密码哈希（600K 迭代）
+- **双认证模式**：API Key（系统间调用）+ JWT Bearer（终端用户），互不干扰
+- **登录/注册**：暗色主题登录页，自动跳转，生产环境隐藏默认账号提示
+- **管理后台**：用户管理 / 知识库管理 / 告警配置 / 审计日志（含 XSS 防护）
+- **知识库管理 API**：查看统计 / 重新种子 / 从 ERP 同步 / 添加文档
+- **告警通知**：Webhook（钉钉/企业微信/飞书）+ SMTP 邮件通知（含 SSRF 防护）
+- **审计日志**：记录注册/登录等关键操作
+- **前端集成**：主页面显示用户名、管理入口、退出按钮
+- **安全修复**：Nginx upstream 修正、ERP 空参数防护、演示账号环境隔离、XSS 全面转义
+- **生产加固**：.dockerignore、Dockerfile 条件安装 dev 依赖、限流器定期清理
+- **全量 319 tests passed**
 
 ### v3.9 (2026-06-03) — 生产就绪
 - Nginx 反向代理 + TLS + WebSocket 支持
@@ -516,7 +699,6 @@ python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-
 ### v3.8 (2026-06-03)
 - 安全审计修复：会话令牌验证加固
 - 修复所有测试失败，更新测试用例
-- 安全修复加固：全面安全审计后的问题修复
 
 ### v3.7 (2026-06-03)
 - 安全加固：监控端点 Token + WebSocket 连接限制 + 会话令牌签名
@@ -527,7 +709,6 @@ python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-
 - 前端 WebSocket 修复 + 暗色主题
 - 安全加固：限流/认证/输入验证/注入防护/安全头
 - 并发安全：asyncio.Lock 初始化保护
-- 代码瘦身：消除重复代码，统一模板方法
 
 ### v3.5 (2026-06-02)
 - RAG 知识库（ChromaDB）：产品成分/FAQ/技术支持检索增强
@@ -546,8 +727,6 @@ python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-
 ---
 
 ## 🔧 配置参考
-
-详细配置说明见 [docs/configuration.md](docs/configuration.md)。
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
@@ -569,8 +748,8 @@ python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-
 | `SLA_ALERT_WINDOW` | 50 | SLA 滑动窗口大小 |
 | `SLA_ALERT_THRESHOLD` | 30.0 | SLA 违约率告警阈值（%） |
 | `SLA_ALERT_COOLDOWN` | 300 | SLA 告警冷却时间（秒） |
-| `LLM_ROUTER_TIMEOUT` | 8.0 | 路由 LLM 调用超时（秒） |
-| `REACT_MAX_ITERATIONS` | 5 | ReAct 最大推理步数 |
+| `LLM_ROUTER_TIMEOUT` | 4.0 | 路由 LLM 调用超时（秒，v4.3 从 8s 降至 4s） |
+| `REACT_MAX_ITERATIONS` | 3 | ReAct 最大推理步数（v4.3 从 5 降至 3） |
 | `REACT_COMPLEXITY_THRESHOLD` | 60 | ReAct 触发复杂度阈值 |
 | `TOOL_MAX_ROUNDS` | 3 | 工具调用最大轮数 |
 | `RETRY_MAX_ATTEMPTS` | 3 | 最大重试次数 |
@@ -585,6 +764,28 @@ python3 -m pytest tests/test_modules.py tests/test_integration.py --cov=. --cov-
 | `WS_MAX_CONNECTIONS_PER_IP` | 5 | 每 IP 最大 WebSocket 连接数 |
 | `WS_MESSAGE_RATE_LIMIT` | 10 | 每分钟每连接最大消息数 |
 | `WS_IDLE_TIMEOUT` | 300 | WebSocket 空闲超时（秒） |
+| `JWT_SECRET` | - | JWT 签名密钥（生产必改） |
+| `SESSION_TOKEN_SECRET` | - | 会话令牌签名密钥（生产必改） |
+| `JWT_EXPIRE_HOURS` | 72 | JWT token 有效期（小时） |
+| `DB_DIR` | data | SQLite 数据库目录 |
+| `ALERT_WEBHOOKS` | - | 告警 Webhook（JSON 数组） |
+| `SMTP_HOST` | - | 邮件 SMTP 服务器 |
+| `ALERT_EMAIL_TO` | - | 告警邮件收件人（逗号分隔） |
+| `DATABASE_URL` | - | 数据库 URL（空=SQLite，生产建议 PostgreSQL） |
+| `LLM_PROVIDER` | siliconflow | LLM 提供商（siliconflow/deepseek/openai/custom） |
+| `SSE_ENABLED` | true | SSE 流式输出开关 |
+| `SSE_CHUNK_SIZE` | 50 | 每次发送的字符数 |
+| `AB_TEST_ENABLED` | false | A/B 测试开关 |
+| `MULTIMODAL_ENABLED` | false | 多模态图片识别开关 |
+| `JWT_ACCESS_EXPIRE_HOURS` | 2 | access_token 有效期（小时） |
+| `JWT_REFRESH_EXPIRE_HOURS` | 168 | refresh_token 有效期（小时，默认 7 天） |
+| `EVAL_RETRY_THRESHOLD` | 30 | 低分重试触发阈值 |
+| `MODE_UPGRADE_ENABLED` | true | 低分自动升级协作模式 |
+| `SLA_SEQUENTIAL_MAX` | 15.0 | Sequential 模式 SLA 超时（秒） |
+| `SLA_PARALLEL_MAX` | 20.0 | Parallel 模式 SLA 超时（秒） |
+| `SLA_CONSULTATION_MAX` | 25.0 | Consultation 模式 SLA 超时（秒） |
+| `SLA_HIERARCHICAL_MAX` | 30.0 | Hierarchical 模式 SLA 超时（秒） |
+| `SLA_REACT_MAX` | 30.0 | ReAct 模式 SLA 超时（秒） |
 
 ---
 

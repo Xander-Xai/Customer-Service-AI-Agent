@@ -1,10 +1,11 @@
 """
-4+1 种协作模式实现（v3.5: 新增 ReAct 推理模式）
+4+1 种协作模式实现（v4.3: 独立 SLA 超时 + ReAct 推理模式）
 核心改造：
 - 移除 asyncio.to_thread，直接 await Agent（消除死锁风险）
 - 集成 MessageBus 事件发布 + SharedBlackboard 数据共享
 - 结构化日志
 - v3.5: ReActMode 支持 RAG + Function Calling 自主推理
+- v4.3: 各模式独立 SLA 超时配置
 """
 import asyncio
 import time
@@ -12,6 +13,7 @@ from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 from core.message_bus import MessageBus, Message, MessageType
 from core.shared_blackboard import SharedBlackboard
+from config import SLA_PARALLEL_MAX, SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX
 from logger import get_logger
 
 logger = get_logger("collaboration.modes")
@@ -93,7 +95,7 @@ class SequentialMode(CollaborationMode):
 class ParallelMode(CollaborationMode):
     """并行模式：多 Agent 同时处理 + 结果聚合（v3.4: Semaphore 限流，v3.6: 超时保护）"""
 
-    _PARALLEL_TIMEOUT = 30.0  # v3.6: 并行执行总超时（秒）
+    _PARALLEL_TIMEOUT = SLA_PARALLEL_MAX  # v4.3: 使用配置化超时
 
     def __init__(self, max_workers: int = 5,
                  bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
@@ -174,7 +176,7 @@ class ParallelMode(CollaborationMode):
 class ConsultationMode(CollaborationMode):
     """咨询模式：主 Agent 处理 + 向辅助 Agent 请求补充信息"""
 
-    def __init__(self, consult_timeout: float = 15.0,
+    def __init__(self, consult_timeout: float = SLA_CONSULTATION_MAX,
                  bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
         super().__init__(bus=bus, bb=bb)
         self.consult_timeout = consult_timeout
@@ -279,7 +281,7 @@ class ConsultationMode(CollaborationMode):
 class HierarchicalMode(CollaborationMode):
     """层次模式：协调者分配子任务给多个 Agent，汇总后输出（v3.6: 超时保护）"""
 
-    _HIERARCHICAL_TIMEOUT = 30.0  # v3.6: 子任务执行总超时（秒）
+    _HIERARCHICAL_TIMEOUT = SLA_HIERARCHICAL_MAX  # v4.3: 使用配置化超时
 
     async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
                       context: Dict[str, Any]) -> Dict[str, Any]:

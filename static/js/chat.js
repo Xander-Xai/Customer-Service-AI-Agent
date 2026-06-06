@@ -1,6 +1,7 @@
 /**
  * 智能对话主界面 - 交互逻辑
  * WebSocket 实时对话 + Agent 状态可视化 + 会话管理
+ * v4.0: 集成用户认证状态
  */
 
 // ===== 状态管理 =====
@@ -9,10 +10,17 @@ let currentSessionToken = localStorage.getItem('currentSessionToken') || null;  
 let isWaitingResponse = false;
 let messageHistory = [];  // 当前会话消息缓存
 let progressStatusEl = null;  // 进度状态 DOM 引用
+let selectedImageFile = null;  // v4.1: 选中的待发送图片文件
 
 // ===== 页面初始化 =====
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Init] DOM loaded, setting up...');
+
+  // CSP 安全：优先绑定所有 DOM 事件（确保按钮始终可点击）
+  _initEventListeners();
+
+  // v4.0: 检查登录状态
+  _initAuthState();
 
   // 注册事件监听（先注册再连接，避免丢失 onopen 事件）
   API.on('connected', handleWSConnected);
@@ -38,7 +46,124 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.error('[Init] chatInput not found!');
   }
+
+  // v4.1: 初始化图片拖拽上传
+  _initDragAndDrop();
 });
+
+/**
+ * CSP 安全：集中绑定所有 DOM 事件处理器
+ * 替代 HTML 中的 onclick/onsubmit/onkeydown/oninput/onchange 属性
+ */
+function _initEventListeners() {
+  // 导航按钮
+  document.querySelectorAll('.nav-link[data-page]').forEach(btn => {
+    btn.addEventListener('click', () => switchPage(btn.dataset.page));
+  });
+
+  // 退出按钮
+  const logoutBtn = document.getElementById('logoutBtn');
+  if (logoutBtn) logoutBtn.addEventListener('click', logout);
+
+  // 新建对话
+  const btnNewChat = document.getElementById('btnNewChat');
+  if (btnNewChat) btnNewChat.addEventListener('click', startNewChat);
+
+  // 快捷提问卡片
+  const promptCards = document.querySelectorAll('.quick-prompt-card');
+  promptCards.forEach(card => {
+    card.addEventListener('click', () => useQuickPrompt(card));
+  });
+
+  // 图片上传按钮
+  const btnAttach = document.getElementById('btnAttach');
+  if (btnAttach) btnAttach.addEventListener('click', triggerImageUpload);
+
+  // 图片移除按钮
+  const imagePreviewRemove = document.getElementById('imagePreviewRemove');
+  if (imagePreviewRemove) imagePreviewRemove.addEventListener('click', clearImageSelection);
+
+  // 发送按钮
+  const btnSend = document.getElementById('btnSend');
+  if (btnSend) btnSend.addEventListener('click', sendMessage);
+
+  // 输入框键盘事件
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', handleInputKeydown);
+    chatInput.addEventListener('input', () => autoResizeInput(chatInput));
+  }
+
+  // 文件选择器
+  const imageFileInput = document.getElementById('imageFileInput');
+  if (imageFileInput) imageFileInput.addEventListener('change', handleImageSelect);
+
+  // 监控刷新按钮
+  const btnRefreshMonitor = document.getElementById('btnRefreshMonitor');
+  if (btnRefreshMonitor) btnRefreshMonitor.addEventListener('click', refreshMonitorData);
+
+  // 关闭会话详情面板
+  const btnClosePanel = document.getElementById('btnClosePanel');
+  if (btnClosePanel) btnClosePanel.addEventListener('click', closeSessionPanel);
+
+  console.log('[Init] 事件绑定完成:', {
+    navButtons: document.querySelectorAll('.nav-link[data-page]').length,
+    promptCards: promptCards.length,
+    btnSend: !!btnSend,
+    chatInput: !!chatInput,
+  });
+}
+
+// ===== v4.0: 用户认证状态 =====
+function _initAuthState() {
+  const token = localStorage.getItem('token');
+  const userRaw = localStorage.getItem('user');
+
+  if (!token || !userRaw) {
+    // 未登录 → 跳转登录页
+    window.location.href = '/login.html';
+    return;
+  }
+
+  try {
+    const user = JSON.parse(userRaw);
+    const userInfo = document.getElementById('userInfo');
+    const adminLink = document.getElementById('adminLink');
+    const logoutBtn = document.getElementById('logoutBtn');
+
+    if (userInfo) {
+      userInfo.textContent = `👤 ${user.display_name || user.username}`;
+    }
+    if (adminLink && user.role === 'admin') {
+      adminLink.style.display = 'inline';
+    }
+    if (logoutBtn) {
+      logoutBtn.style.display = 'inline-block';
+    }
+  } catch (e) {
+    console.error('[Auth] 用户信息解析失败:', e);
+    window.location.href = '/login.html';
+  }
+}
+
+function logout() {
+  // v4.0: 调用后端 logout API 吊销 token，然后清除本地存储
+  const token = localStorage.getItem('token');
+  if (token) {
+    fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token },
+    }).catch(() => {}).finally(() => {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login.html';
+    });
+  } else {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login.html';
+  }
+}
 
 // ===== WebSocket 事件处理 =====
 
@@ -137,8 +262,8 @@ function sendMessage() {
     return;
   }
   const query = input.value.trim();
-  console.log('[sendMessage] query:', query);
-  if (!query || isWaitingResponse) {
+  console.log('[sendMessage] query:', query, 'hasImage:', !!selectedImageFile);
+  if ((!query && !selectedImageFile) || isWaitingResponse) {
     console.log('[sendMessage] blocked - empty or waiting');
     return;
   }
@@ -147,13 +272,57 @@ function sendMessage() {
   const welcome = document.getElementById('welcomeScreen');
   if (welcome) welcome.style.display = 'none';
 
-  // 渲染用户消息
-  appendUserMessage(query);
+  // 渲染用户消息（含图片缩略图）
+  const imageFile = selectedImageFile;
+  appendUserMessage(query, imageFile);
 
   // 保存到历史
-  messageHistory.push({ role: 'user', content: query });
+  messageHistory.push({ role: 'user', content: query, hasImage: !!imageFile });
 
-  // 发送 WebSocket 消息（v3.8: 传递 session_token）
+  // 清空输入和图片选择
+  input.value = '';
+  autoResizeInput(input);
+  clearImageSelection();
+
+  // v4.1: 有图片时使用多模态 REST API
+  if (imageFile) {
+    isWaitingResponse = true;
+    updateSendButton();
+    showTypingIndicator();
+
+    API.sendChatWithImage(query, imageFile, currentSessionId).then(result => {
+      removeTypingIndicator();
+      isWaitingResponse = false;
+      updateSendButton();
+
+      // 同步 session 信息
+      if (!currentSessionId || currentSessionId !== result.session_id) {
+        currentSessionId = result.session_id || currentSessionId;
+        localStorage.setItem('currentSessionId', currentSessionId);
+      }
+      if (result.session_token) {
+        currentSessionToken = result.session_token;
+        localStorage.setItem('currentSessionToken', result.session_token);
+      }
+
+      appendAssistantMessage(result.response || '图片分析完成', {
+        agent: '', elapsed: result.elapsed || 0, mode: '', cached: false, agentsUsed: [], resolutionStatus: ''
+      });
+
+      messageHistory.push({ role: 'assistant', content: result.response });
+      loadSessionList();
+    }).catch(err => {
+      removeTypingIndicator();
+      isWaitingResponse = false;
+      updateSendButton();
+      appendSystemMessage('图片发送失败: ' + (err.message || '未知错误'));
+    });
+
+    input.focus();
+    return;
+  }
+
+  // 无图片：使用 WebSocket
   isWaitingResponse = true;
   updateSendButton();
   showTypingIndicator();
@@ -179,18 +348,26 @@ function useQuickPrompt(card) {
   const query = textMap[title] || title;
   console.log('[useQuickPrompt] title:', title, 'query:', query);
   document.getElementById('chatInput').value = query;
+  updateSendButton();  // 确保发送按钮启用
   sendMessage();
 }
 
 // ===== 消息渲染 =====
 
-function appendUserMessage(content) {
+function appendUserMessage(content, imageFile) {
   const container = document.getElementById('chatMessages');
+  // v4.1: 如果有图片，显示缩略图
+  let imageHtml = '';
+  if (imageFile) {
+    const objectUrl = URL.createObjectURL(imageFile);
+    imageHtml = `<div class="message-image-preview"><img src="${objectUrl}" alt="用户图片"></div>`;
+  }
   const html = `
     <div class="message user">
       <div class="message-avatar">👤</div>
       <div class="message-content">
-        <div class="message-bubble">${escapeHtml(content)}</div>
+        ${imageHtml}
+        ${content ? `<div class="message-bubble">${escapeHtml(content)}</div>` : ''}
       </div>
     </div>
   `;
@@ -222,13 +399,14 @@ function appendAssistantMessage(content, meta = {}) {
     'hierarchical': '层级协作',
   };
 
-  // 构建 Agent 流转轨迹
+  // 构建 Agent 流转轨迹（v4.0: Agent 名称转义防 XSS）
   let agentFlowHtml = '';
   if (meta.agentsUsed && meta.agentsUsed.length > 1) {
     const steps = meta.agentsUsed.map((a, i) => {
       const icon = agentIcons[a] || '🤖';
       const cls = i === meta.agentsUsed.length - 1 ? 'active' : 'completed';
-      return `<div class="agent-flow-step ${cls}">${icon} ${a}</div>`;
+      const safeName = escapeHtml(a);
+      return `<div class="agent-flow-step ${cls}">${icon} ${safeName}</div>`;
     }).join('<span class="agent-flow-arrow">→</span>');
     agentFlowHtml = `<div class="agent-flow">${steps}</div>`;
   }
@@ -253,10 +431,10 @@ function appendAssistantMessage(content, meta = {}) {
           </span>
         </div>
         <div class="feedback-bar">
-          <button class="btn-feedback positive" onclick="sendFeedback(this, true)" title="有帮助">
+          <button class="btn-feedback positive" title="有帮助">
             👍 有帮助
           </button>
-          <button class="btn-feedback negative" onclick="sendFeedback(this, false)" title="没帮助">
+          <button class="btn-feedback negative" title="没帮助">
             👎 没帮助
           </button>
         </div>
@@ -264,6 +442,16 @@ function appendAssistantMessage(content, meta = {}) {
     </div>
   `;
   container.insertAdjacentHTML('beforeend', html);
+
+  // CSP 安全：为反馈按钮绑定事件（替代内联 onclick）
+  const lastMsg = container.lastElementChild;
+  if (lastMsg) {
+    const positiveBtn = lastMsg.querySelector('.btn-feedback.positive');
+    const negativeBtn = lastMsg.querySelector('.btn-feedback.negative');
+    if (positiveBtn) positiveBtn.addEventListener('click', () => sendFeedback(positiveBtn, true));
+    if (negativeBtn) negativeBtn.addEventListener('click', () => sendFeedback(negativeBtn, false));
+  }
+
   scrollToBottom();
 }
 
@@ -334,7 +522,8 @@ function removeProgressStatus() {
 
 function sendFeedback(btn, resolved) {
   if (!currentSessionId) return;
-  API.submitFeedback(currentSessionId, resolved).then(() => {
+  const rating = resolved ? 1 : -1;
+  API.submitRating(currentSessionId, rating).then(() => {
     const bar = btn.parentElement;
     bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
   }).catch(() => {
@@ -358,22 +547,22 @@ function startNewChat() {
         基于多智能体协作，为您提供产品咨询、技术支持、订单查询、投诉处理等一站式服务
       </p>
       <div class="quick-prompts">
-        <div class="quick-prompt-card" onclick="useQuickPrompt(this)">
+        <div class="quick-prompt-card" data-title="产品成分查询">
           <div class="quick-prompt-icon">🧴</div>
           <div class="quick-prompt-text">产品成分查询</div>
           <div class="quick-prompt-desc">了解产品成分、功效和适用肤质</div>
         </div>
-        <div class="quick-prompt-card" onclick="useQuickPrompt(this)">
+        <div class="quick-prompt-card" data-title="订单物流追踪">
           <div class="quick-prompt-icon">📦</div>
           <div class="quick-prompt-text">订单物流追踪</div>
           <div class="quick-prompt-desc">查询订单状态、发货和物流信息</div>
         </div>
-        <div class="quick-prompt-card" onclick="useQuickPrompt(this)">
+        <div class="quick-prompt-card" data-title="使用方法指导">
           <div class="quick-prompt-icon">🔧</div>
           <div class="quick-prompt-text">使用方法指导</div>
           <div class="quick-prompt-desc">产品搭配、使用顺序和注意事项</div>
         </div>
-        <div class="quick-prompt-card" onclick="useQuickPrompt(this)">
+        <div class="quick-prompt-card" data-title="投诉与退款">
           <div class="quick-prompt-icon">⚠️</div>
           <div class="quick-prompt-text">投诉与退款</div>
           <div class="quick-prompt-desc">问题反馈、退款退货流程咨询</div>
@@ -381,6 +570,11 @@ function startNewChat() {
       </div>
     </div>
   `;
+
+  // CSP 安全：为快捷提问卡片绑定点击事件（替代内联 onclick）
+  container.querySelectorAll('.quick-prompt-card').forEach(card => {
+    card.addEventListener('click', () => useQuickPrompt(card));
+  });
 
   // 取消侧边栏激活状态
   document.querySelectorAll('.session-item').forEach(el => el.classList.remove('active'));
@@ -403,9 +597,8 @@ async function loadSessionList() {
       const driftWarn = s.drift_count > 0 ? `⚠️ ${s.drift_count}次漂移` : '';
       return `
         <div class="session-item ${isActive ? 'active' : ''}"
-             data-session-id="${escapeHtml(s.session_id)}"
-             onclick="selectSession('${escapeHtml(s.session_id)}')">
-          <div class="session-item-title">${s.summary || '对话 ' + s.session_id.slice(0, 8)}</div>
+             data-session-id="${escapeHtml(s.session_id)}">
+          <div class="session-item-title">${escapeHtml(s.summary || '对话 ' + s.session_id.slice(0, 8))}</div>
           <div class="session-item-meta">
             <span>💬 ${s.message_count || 0}条</span>
             <span>${timeStr}</span>
@@ -414,6 +607,11 @@ async function loadSessionList() {
         </div>
       `;
     }).join('');
+
+    // CSP 安全：为会话项绑定点击事件（替代内联 onclick）
+    list.querySelectorAll('.session-item').forEach(item => {
+      item.addEventListener('click', () => selectSession(item.dataset.sessionId));
+    });
   } catch (e) {
     console.error('加载会话列表失败:', e);
   }
@@ -561,7 +759,7 @@ function renderAgentChart(data) {
     <div class="bar-item">
       <div class="bar-value">${count}</div>
       <div class="bar-fill ${colors[i % colors.length]}" style="height:${(count / maxVal) * 100}%"></div>
-      <div class="bar-label">${name}</div>
+      <div class="bar-label">${escapeHtml(name)}</div>
     </div>
   `).join('');
 }
@@ -584,7 +782,7 @@ function renderModeChart(data) {
     <div class="bar-item">
       <div class="bar-value">${count}</div>
       <div class="bar-fill ${modeColors[name] || 'primary'}" style="height:${(count / maxVal) * 100}%"></div>
-      <div class="bar-label">${modeLabels[name] || name}</div>
+      <div class="bar-label">${escapeHtml(modeLabels[name] || name)}</div>
     </div>
   `).join('');
 }
@@ -646,7 +844,7 @@ function renderSessionsTable(sessions) {
     const driftWarn = s.drift_escalation;
     return `
       <tr>
-        <td style="font-family:monospace;font-size:12px">${(s.session_id || '').slice(0, 12)}...</td>
+        <td style="font-family:monospace;font-size:12px">${escapeHtml((s.session_id || '').slice(0, 12))}...</td>
         <td>${s.message_count || 0}</td>
         <td>${s.drift_count || 0}</td>
         <td>${s.last_activity ? formatTime(s.last_activity) : '--'}</td>
@@ -683,6 +881,121 @@ function closeSessionPanel() {
 
 // ===== 工具函数 =====
 
+// ===== v4.1: 图片上传功能 =====
+
+/**
+ * 触发文件选择对话框
+ */
+function triggerImageUpload() {
+  const input = document.getElementById('imageFileInput');
+  if (input) input.click();
+}
+
+/**
+ * 处理文件选择（点击按钮选择图片）
+ */
+function handleImageSelect(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  _validateAndSetImage(file);
+  // 清空 input 以便重复选择同一文件
+  event.target.value = '';
+}
+
+/**
+ * 验证图片文件并设置预览
+ */
+function _validateAndSetImage(file) {
+  // 验证 MIME 类型
+  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowedTypes.includes(file.type)) {
+    appendSystemMessage('不支持的图片格式，请上传 JPEG、PNG 或 WebP 格式的图片');
+    return;
+  }
+  // 验证大小（5MB）
+  const maxSize = 5 * 1024 * 1024;
+  if (file.size > maxSize) {
+    appendSystemMessage(`图片大小超过限制（最大 5MB），当前大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`);
+    return;
+  }
+
+  selectedImageFile = file;
+  _showImagePreview(file);
+  updateSendButton();
+}
+
+/**
+ * 显示图片预览
+ */
+function _showImagePreview(file) {
+  const area = document.getElementById('imagePreviewArea');
+  const thumb = document.getElementById('imagePreviewThumb');
+  const nameEl = document.getElementById('imagePreviewName');
+  const sizeEl = document.getElementById('imagePreviewSize');
+
+  if (!area || !thumb) return;
+
+  thumb.src = URL.createObjectURL(file);
+  nameEl.textContent = file.name || '图片';
+  sizeEl.textContent = _formatFileSize(file.size);
+  area.style.display = 'block';
+}
+
+/**
+ * 清除图片选择
+ */
+function clearImageSelection() {
+  selectedImageFile = null;
+  const area = document.getElementById('imagePreviewArea');
+  const thumb = document.getElementById('imagePreviewThumb');
+  if (area) area.style.display = 'none';
+  if (thumb && thumb.src) {
+    URL.revokeObjectURL(thumb.src);
+    thumb.src = '';
+  }
+  updateSendButton();
+}
+
+/**
+ * 格式化文件大小
+ */
+function _formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+/**
+ * 初始化拖拽上传
+ */
+function _initDragAndDrop() {
+  const wrapper = document.getElementById('chatInputWrapper');
+  const chatArea = document.querySelector('.chat-area');
+  if (!wrapper || !chatArea) return;
+
+  // 阻止默认拖拽行为（允许放置）
+  const preventDefaults = (e) => { e.preventDefault(); e.stopPropagation(); };
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(ev => {
+    chatArea.addEventListener(ev, preventDefaults, false);
+  });
+
+  // 拖拽进入/悬停视觉反馈
+  ['dragenter', 'dragover'].forEach(ev => {
+    chatArea.addEventListener(ev, () => { wrapper.classList.add('drag-over'); }, false);
+  });
+  ['dragleave', 'drop'].forEach(ev => {
+    chatArea.addEventListener(ev, () => { wrapper.classList.remove('drag-over'); }, false);
+  });
+
+  // 处理文件放置
+  chatArea.addEventListener('drop', (e) => {
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files.length > 0) {
+      _validateAndSetImage(files[0]);
+    }
+  }, false);
+}
+
 function handleInputKeydown(event) {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
@@ -699,7 +1012,7 @@ function autoResizeInput(el) {
 function updateSendButton() {
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('btnSend');
-  btn.disabled = !input.value.trim() || isWaitingResponse;
+  btn.disabled = (!input.value.trim() && !selectedImageFile) || isWaitingResponse;
 }
 
 function scrollToBottom() {
@@ -715,21 +1028,14 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-/** 清洗响应内容：移除系统消息、调试代码等垃圾内容 */
+/**
+ * 轻量清洗：后端 response_agent 已做完整清洗，前端仅处理传输中可能引入的噪声
+ * v4.3: 移除与后端重复的激进正则，避免双重删除导致内容缺失
+ */
 function sanitizeResponse(text) {
   if (!text) return '';
-  // 移除 "systemsystem" 或 "system" 开头的重复内容
-  text = text.replace(/^(system\s*system|system)/i, '');
-  // 移除数字开头的行（如 "1\n"）
-  text = text.replace(/^\d+\s*$/gm, '');
-  // 移除 React/JSX 代码片段
-  text = text.replace(/\.createElement\([^)]*\)[^;]*/g, '');
-  text = text.replace(/dangerouslySetInnerHTML[^;]*/g, '');
-  text = text.replace(/console\.log\([^)]*\)[^;]*/g, '');
-  text = text.replace(/JSON\.stringify[^;]*/g, '');
-  // 移除其他调试代码
-  text = text.replace(/\/\/.*$/gm, ''); // 单行注释
-  text = text.replace(/\/\*[\s\S]*?\*\//g, ''); // 块注释
+  // 移除 "systemsystem" 或 "system" 开头的重复内容（传输噪声）
+  text = text.replace(/^(system\s*system|system)\s*/i, '');
   // 清理多余空行
   text = text.replace(/\n{3,}/g, '\n\n');
   return text.trim();

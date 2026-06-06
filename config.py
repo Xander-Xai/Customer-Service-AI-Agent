@@ -1,11 +1,17 @@
 """
-配置文件（v3.9 — 生产就绪版）
-新增：Prometheus 指标、增强健康检查、CORS 环境变量、日志轮转
+配置文件（v4.1 — 接入 DeepSeek + 依赖注入 + 流式输出版）
+支持 DEV / PROD / TEST 三套配置，通过 .env 文件切换
 """
 import os
+import sys
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+
+# ===== v4.1: 环境标识（启动时输出）=====
+_DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
+_ENV_LABEL = "DEV" if _DEV_MODE else "PROD"
+print(f"[config] 🔄 Environment: {_ENV_LABEL} (DEV_MODE={_DEV_MODE})", file=sys.stderr)
 
 
 def _int_env(key: str, default: int) -> int:
@@ -24,10 +30,11 @@ def _float_env(key: str, default: float) -> float:
         return default
 
 
-# ===== OpenAI 兼容 API 配置 =====
+# ===== OpenAI 兼容 API 配置（v4.1: 默认硅基流动）=====
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "siliconflow")  # siliconflow | deepseek | openai | custom
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-8B")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
 # ===== HTTP 请求配置 =====
 HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 30)
@@ -73,14 +80,14 @@ SLA_ALERT_COOLDOWN = _int_env("SLA_ALERT_COOLDOWN", 300)
 # ===== 模型熔断器配置（v3.2 新增）=====
 CIRCUIT_BREAKER_FAIL_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAIL_THRESHOLD", 5)
 CIRCUIT_BREAKER_RECOVERY_TIME = _int_env("CIRCUIT_BREAKER_RECOVERY_TIME", 60)
-LLM_ROUTER_TIMEOUT = _float_env("LLM_ROUTER_TIMEOUT", 8.0)
+LLM_ROUTER_TIMEOUT = _float_env("LLM_ROUTER_TIMEOUT", 4.0)  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
 
 # ===== 重试配置 =====
 RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "3.8.0"
+VERSION = "4.3.0"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
@@ -131,8 +138,111 @@ RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存�
 RAG_N_RESULTS = _int_env("RAG_N_RESULTS", 3)
 
 # ===== v3.5: ReAct 配置 =====
-REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 5)
+REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 3)  # v4.3: 从 5 降至 3，控制延迟在 20s 内
 REACT_COMPLEXITY_THRESHOLD = _int_env("REACT_COMPLEXITY_THRESHOLD", 60)
 
 # ===== v3.5: 工具调用配置 =====
 TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
+
+# ===== v4.0: 用户认证配置 =====
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_EXPIRE_HOURS = _int_env("JWT_EXPIRE_HOURS", 72)
+JWT_ACCESS_EXPIRE_HOURS = _int_env("JWT_ACCESS_EXPIRE_HOURS", 2)     # P2-3: access_token 短生命周期
+JWT_REFRESH_EXPIRE_HOURS = _int_env("JWT_REFRESH_EXPIRE_HOURS", 168)  # P2-3: refresh_token 7天
+# v4.0: 本地开发模式（仅开发环境设置此变量为 true，生产环境禁止）
+DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
+
+# ===== v4.0: 数据库配置 =====
+DB_DIR = os.getenv("DB_DIR", "data")
+DB_PATH = os.getenv("DB_PATH", os.path.join(DB_DIR, "csai.db"))
+
+# ===== v4.0: 告警通知配置 =====
+ALERT_WEBHOOKS = os.getenv("ALERT_WEBHOOKS", "")  # JSON 数组: [{"name":"钉钉","url":"...","type":"dingtalk"}]
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = _int_env("SMTP_PORT", 587)
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+ALERT_EMAIL_FROM = os.getenv("ALERT_EMAIL_FROM", "")
+ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
+
+# ===== v4.1: 数据库配置（PostgreSQL + SQLite 兼容）=====
+DATABASE_URL = os.getenv("DATABASE_URL", "")  # 为空则使用 SQLite
+ALEMBIC_CONFIG_PATH = os.getenv("ALEMBIC_CONFIG_PATH", "alembic.ini")
+
+# ===== v4.1: SSE 流式输出配置 =====
+SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
+SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
+
+# ===== v4.1: 多模态配置 =====
+MULTIMODAL_ENABLED = os.getenv("MULTIMODAL_ENABLED", "false").lower() == "true"
+MAX_IMAGE_SIZE_MB = _int_env("MAX_IMAGE_SIZE_MB", 5)
+ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
+
+# ===== v4.1: Redis 用途扩展 =====
+REDIS_JWT_PREFIX = os.getenv("REDIS_JWT_PREFIX", "csai:jwt:blacklist:")
+REDIS_RATE_PREFIX = os.getenv("REDIS_RATE_PREFIX", "csai:rate:")
+REDIS_SESSION_PREFIX = os.getenv("REDIS_SESSION_PREFIX", "csai:session:")
+
+# ===== v4.1: A/B 测试配置 =====
+AB_TEST_ENABLED = os.getenv("AB_TEST_ENABLED", "false").lower() == "true"
+
+# ===== v4.1: 自我评估配置 =====
+EVAL_LOW_SCORE_THRESHOLD = _int_env("EVAL_LOW_SCORE_THRESHOLD", 40)  # 低于此分触发告警
+EVAL_ALERT_ENABLED = os.getenv("EVAL_ALERT_ENABLED", "true").lower() == "true"
+
+# ===== v4.3: 低分重试与模式升级配置 =====
+EVAL_RETRY_THRESHOLD = _int_env("EVAL_RETRY_THRESHOLD", 30)  # 低于此分触发自动重试/升级
+EVAL_RETRY_ENABLED = os.getenv("EVAL_RETRY_ENABLED", "true").lower() == "true"
+MODE_UPGRADE_ENABLED = os.getenv("MODE_UPGRADE_ENABLED", "true").lower() == "true"
+
+# ===== v4.3: 各协作模式独立 SLA 超时（秒）=====
+SLA_SEQUENTIAL_MAX = _float_env("SLA_SEQUENTIAL_MAX", 15.0)
+SLA_PARALLEL_MAX = _float_env("SLA_PARALLEL_MAX", 20.0)
+SLA_CONSULTATION_MAX = _float_env("SLA_CONSULTATION_MAX", 25.0)
+SLA_HIERARCHICAL_MAX = _float_env("SLA_HIERARCHICAL_MAX", 30.0)
+SLA_REACT_MAX = _float_env("SLA_REACT_MAX", 30.0)
+
+
+# ===== P0-3: 生产环境关键配置启动校验 =====
+def validate_required_config():
+    """生产环境启动时校验关键配置项非空非占位符"""
+    # v4.3 安全加固：生产环境禁止 DEV_MODE
+    if _DEV_MODE:
+        # 检测是否为生产环境（通过多个信号判断）
+        _is_production = (
+            os.getenv("APP_MODE", "").lower() == "prod"
+            or os.getenv("LOG_FORMAT", "").lower() == "json"
+            or os.getenv("ENVIRONMENT", "").lower() == "production"
+        )
+        if _is_production:
+            raise RuntimeError(
+                "🚨 安全错误: 生产环境(APP_MODE=prod/LOG_FORMAT=json/ENVIRONMENT=production)下禁止 DEV_MODE=true！"
+                "请设置 DEV_MODE=false 后重启。"
+            )
+        return  # 非生产环境的开发模式跳过后续校验
+
+    _PLACEHOLDER_PREFIXES = (
+        "your-", "change-me", "sk-placeholder", "sk-xxx", "sk-your",
+        "sk-test-placeholder", "sk-tnwwg",  # 匹配已知旧占位符
+    )
+    errors = []
+
+    # LLM API Key
+    if not OPENAI_API_KEY or any(OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES):
+        errors.append("OPENAI_API_KEY 未配置或使用占位符")
+
+    # JWT Secret
+    if not JWT_SECRET or JWT_SECRET in ("", "change-me-in-production", "dev-jwt-secret-do-not-use-in-prod", "your-jwt-secret-change-in-production"):
+        errors.append("JWT_SECRET 未配置或使用默认值")
+
+    # Session Token Secret
+    if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production", "dev-session-secret-do-not-use-in-prod", "your-session-secret-change-in-production"):
+        errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值")
+
+    if errors:
+        for err in errors:
+            print(f"🚨 配置校验失败: {err}", file=sys.stderr)
+        raise SystemExit(f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件")
+
+
+validate_required_config()

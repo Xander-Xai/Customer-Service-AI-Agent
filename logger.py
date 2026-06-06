@@ -1,10 +1,12 @@
 """
-统一日志模块（v3.9 — 生产就绪版）
+统一日志模块（v4.1 — 生产就绪版 + 分布式追踪）
 - 文件日志轮转（10MB/文件，保留 5 份）
 - JSON 结构化格式（生产环境可选）
 - gzip 压缩历史日志
 - 同时输出到 stderr + 文件
+- 分布式追踪：contextvars 自动注入 trace_id
 """
+import contextvars
 import gzip
 import json
 import logging
@@ -14,6 +16,20 @@ import time
 from pathlib import Path
 
 from config import LOG_CONFIG
+
+
+# ===== 分布式追踪上下文变量 =====
+_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar('trace_id', default='')
+
+
+def set_trace_id(trace_id: str):
+    """设置当前请求的 trace_id"""
+    _trace_id_var.set(trace_id)
+
+
+def get_trace_id() -> str:
+    """获取当前请求的 trace_id"""
+    return _trace_id_var.get()
 
 
 class _GzipRotatingFileHandler(logging.handlers.RotatingFileHandler):
@@ -46,9 +62,22 @@ class _JSONFormatter(logging.Formatter):
             "func": record.funcName,
             "line": record.lineno,
         }
+
+        # 添加 trace_id（如果存在，用于分布式追踪）
+        if hasattr(record, "trace_id") and record.trace_id:
+            log_data["trace_id"] = record.trace_id
+
         if record.exc_info and record.exc_info[0]:
             log_data["exception"] = self.formatException(record.exc_info)
         return json.dumps(log_data, ensure_ascii=False)
+
+
+class _TraceFilter(logging.Filter):
+    """自动注入 trace_id 到每条日志记录"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.trace_id = _trace_id_var.get()
+        return True
 
 
 # 日志目录
@@ -68,12 +97,13 @@ def _setup_file_handler(logger_instance: logging.Logger, level: int):
             encoding="utf-8",
         )
         file_handler.setLevel(level)
+        file_handler.addFilter(_TraceFilter())
 
         # 生产环境使用 JSON 格式，开发环境使用文本格式
         use_json = os.getenv("LOG_FORMAT", "text").lower() == "json"
         file_handler.setFormatter(
             _JSONFormatter() if use_json else logging.Formatter(
-                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s")
             )
         )
 
@@ -85,22 +115,28 @@ def _setup_file_handler(logger_instance: logging.Logger, level: int):
 
 def get_logger(name: str) -> logging.Logger:
     """
-    获取指定模块的 logger（v3.9: 生产就绪）
+    获取指定模块的 logger（v4.1: 生产就绪 + 分布式追踪）
     - stderr 输出（开发友好）
     - 文件轮转 + gzip 压缩（生产持久化）
     - JSON 结构化（可选，LOG_FORMAT=json 启用）
+    - 自动注入 trace_id（分布式追踪）
     """
     logger = logging.getLogger(name)
     if not logger.handlers:
         level = getattr(logging, LOG_CONFIG.get("level", "INFO").upper(), logging.INFO)
         logger.setLevel(level)
 
+        # 分布式追踪过滤器（自动注入 trace_id）
+        trace_filter = _TraceFilter()
+        logger.addFilter(trace_filter)
+
         # 1) stderr 输出（始终启用）
         stderr_handler = logging.StreamHandler()
         stderr_handler.setLevel(level)
+        stderr_handler.addFilter(trace_filter)
         stderr_handler.setFormatter(
             logging.Formatter(
-                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s")
             )
         )
         logger.addHandler(stderr_handler)

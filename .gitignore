@@ -16,6 +16,11 @@ env/
 .env
 .env.local
 .env.production
+.env.dev
+.env.prod
+.env.test
+.env.prod.generated
+*.generated
 
 # ===== IDE =====
 .vscode/
@@ -36,6 +41,11 @@ htmlcov/
 chat_sessions/
 data/
 *.checkpoint
+logs/
+loki/
+monitoring/
+chroma_db/
+.admin_password
 
 # ===== 临时文件 =====
 *.tmp
@@ -55,3 +65,9 @@ langgraph_cache/
 Thumbs.db
 *~
 .claude/
+
+# ===== 个人工具配置 =====
+CLAUDE.md
+
+# ===== 无关文件 =====
+AI music/

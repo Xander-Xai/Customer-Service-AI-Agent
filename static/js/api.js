@@ -13,7 +13,8 @@ const API = (() => {
   const WS_RECONNECT_BASE = 2000;   // 初始重连延迟（ms）
   const WS_RECONNECT_MAX = 30000;   // 最大重连延迟（ms）
 
-  // v3.8: 本地开发允许无 API Key 连接（生产环境请配置 API_KEY）
+  // v4.0: 优先使用 JWT token，回退到 API Key
+  const JWT_TOKEN = localStorage.getItem('token') || '';
   const API_KEY = localStorage.getItem('api_key') || '';
 
   // ===== WebSocket 管理 =====
@@ -35,7 +36,7 @@ const API = (() => {
     _heartbeatTimer = setInterval(() => {
       if (_ws && _ws.readyState === WebSocket.OPEN) {
         try {
-          _ws.send(JSON.stringify({ type: 'ping' }));
+          _ws.send(JSON.stringify({ type: 'pong' }));
         } catch (e) {
           console.error('[WS] 心跳发送失败:', e);
         }
@@ -69,10 +70,16 @@ const API = (() => {
     const wsUrl = `${protocol}//${location.host}/ws/chat`;
 
     try {
-      // v3.8: 认证支持：通过 URL 参数传递 API Key
-      const authUrl = API_KEY ? `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}` : wsUrl;
+      // v4.0: 认证支持：优先 JWT token，回退到 API Key
+      let authUrl = wsUrl;
+      const jwtToken = localStorage.getItem('token');
+      if (jwtToken) {
+        authUrl = `${wsUrl}?token=${encodeURIComponent(jwtToken)}`;
+      } else if (API_KEY) {
+        authUrl = `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}`;
+      }
       _ws = new WebSocket(authUrl);
-      console.log('[WS] 连接中...' + (API_KEY ? ' (已传 API Key)' : ' (无认证)'));
+      console.log('[WS] 连接中...' + (jwtToken ? ' (JWT)' : API_KEY ? ' (API Key)' : ' (无认证)'));
     } catch (e) {
       console.error('[WS] 创建连接失败:', e);
       _emit('ws_error', { error: e });
@@ -238,7 +245,7 @@ const API = (() => {
   // ===== REST API 封装 =====
 
   /**
-   * 通用请求方法（v3.6: API Key 认证支持）
+   * 通用请求方法（v4.0: JWT + API Key 双认证支持）
    * v3.8: 支持 X-Session-Token header（会话所有权校验）
    */
   async function _request(method, path, body = null, extraHeaders = {}) {
@@ -246,6 +253,13 @@ const API = (() => {
       method,
       headers: { 'Content-Type': 'application/json', ...extraHeaders },
     };
+    // v4.0: 自动附加 JWT token 或 API Key
+    const token = localStorage.getItem('token');
+    if (token) {
+      opts.headers['Authorization'] = 'Bearer ' + token;
+    } else if (API_KEY) {
+      opts.headers['X-API-Key'] = API_KEY;
+    }
     if (body) opts.body = JSON.stringify(body);
 
     const resp = await fetch(path, opts);
@@ -296,9 +310,96 @@ const API = (() => {
     return _request('POST', '/api/feedback', { session_id: sessionId, resolved, comment });
   }
 
+  /** v4.1: 提交反馈评分（点赞/点踩） */
+  function submitRating(sessionId, rating, comment = '') {
+    return _request('POST', '/api/feedback', { session_id: sessionId, rating, resolved: rating > 0, comment });
+  }
+
+  /** v4.1: 获取反馈统计 */
+  function getFeedbackStats() { return _request('GET', '/api/feedback/stats'); }
+
+  /** v4.1: 获取历史会话列表 */
+  function getHistory() { return _request('GET', '/api/history'); }
+
+  /** v4.1: 获取会话消息历史 */
+  function getHistoryMessages(sessionId) {
+    const token = localStorage.getItem('currentSessionToken') || '';
+    return _request('GET', `/api/history/${sessionId}/messages`, null,
+      token ? { 'X-Session-Token': token } : {});
+  }
+
+  /** v4.1: SSE 流式对话 */
+  function sendChatStream(query, sessionId, sessionToken, onChunk, onDone, onError) {
+    const token = localStorage.getItem('token');
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    fetch('/api/chat/stream', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ query, session_id: sessionId, session_token: sessionToken }),
+    }).then(response => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      function read() {
+        reader.read().then(({ done, value }) => {
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop(); // 保留未完成的行
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'chunk' && onChunk) onChunk(data.content);
+              else if (data.type === 'done' && onDone) onDone(data);
+              else if (data.type === 'error' && onError) onError(data.content);
+              else if (data.type === 'status' || data.type === 'progress') {
+                // 可以通过回调处理进度
+              }
+            } catch (e) { /* 忽略解析错误 */ }
+          }
+          read();
+        }).catch(err => { if (onError) onError(err.message); });
+      }
+      read();
+    }).catch(err => { if (onError) onError(err.message); });
+  }
+
   /** REST 对话（备用，主用 WebSocket） */
   function sendChat(query, sessionId) {
     return _request('POST', '/api/chat', { query, session_id: sessionId });
+  }
+
+  /** v4.1: 多模态对话（图片 + 文字，使用 FormData 上传） */
+  function sendChatWithImage(query, imageFile, sessionId) {
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    formData.append('query', query || '');
+    formData.append('session_id', sessionId || '');
+
+    const headers = {};
+    const token = localStorage.getItem('token');
+    if (token) {
+      headers['Authorization'] = 'Bearer ' + token;
+    } else if (API_KEY) {
+      headers['X-API-Key'] = API_KEY;
+    }
+
+    return fetch('/api/chat/image', {
+      method: 'POST',
+      headers,
+      body: formData,
+    }).then(async resp => {
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(err.error || `HTTP ${resp.status}`);
+      }
+      return resp.json();
+    });
   }
 
   // ===== 公开接口 =====
@@ -324,6 +425,12 @@ const API = (() => {
     getAlerts,
     getCircuitBreaker,
     submitFeedback,
+    submitRating,       // v4.1
+    getFeedbackStats,   // v4.1
+    getHistory,         // v4.1
+    getHistoryMessages, // v4.1
+    sendChatStream,     // v4.1
+    sendChatWithImage,  // v4.1
     sendChat,
   };
 })();

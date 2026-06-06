@@ -15,7 +15,30 @@ mkdir -p "${BACKUP_DIR}"
 
 echo "[$(date)] 开始备份 → ${BACKUP_DIR}"
 
-# ── 1. ChromaDB 知识库备份 ──
+# ── 1. PostgreSQL 数据库备份 ──
+DATABASE_URL="${DATABASE_URL:-}"
+if [ -n "${DATABASE_URL}" ] && echo "${DATABASE_URL}" | grep -q "^postgresql"; then
+    if command -v pg_dump &>/dev/null; then
+        echo "  [PostgreSQL] 备份数据库"
+        # 从 DATABASE_URL 解析连接信息
+        PG_HOST=$(echo "${DATABASE_URL}" | sed -E 's|.*@([^:/]+)(:[0-9]+)?/.*|\1|')
+        PG_PORT=$(echo "${DATABASE_URL}" | sed -E 's|.*:([0-9]+)/.*|\1|')
+        PG_USER=$(echo "${DATABASE_URL}" | sed -E 's|.*//([^:]+):.*|\1|')
+        PG_DB=$(echo "${DATABASE_URL}" | sed -E 's|.*/([^?]+).*|\1|')
+        [ -z "${PG_PORT}" ] && PG_PORT=5432
+        PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_dump -h "${PG_HOST}" -p "${PG_PORT}" -U "${PG_USER}" -d "${PG_DB}" \
+            --format=custom --compress=9 \
+            -f "${BACKUP_DIR}/postgres_${PG_DB}.dump" 2>/dev/null && \
+            echo "  [PostgreSQL] 完成" || \
+            echo "  [PostgreSQL] 备份失败（请检查连接配置）"
+    else
+        echo "  [PostgreSQL] pg_dump 未安装，跳过"
+    fi
+else
+    echo "  [PostgreSQL] DATABASE_URL 未配置或非 PostgreSQL，跳过"
+fi
+
+# ── 2. ChromaDB 知识库备份 ──
 CHROMA_DIR="./chroma_db"
 if [ -d "${CHROMA_DIR}" ]; then
     echo "  [ChromaDB] 备份 ${CHROMA_DIR}"

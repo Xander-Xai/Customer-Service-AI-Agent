@@ -1,17 +1,18 @@
 """
-协作编排器（v3.5: 新增 ReAct 推理模式选择）
+协作编排器（v4.3: 新增运行时模式升级 + ReAct 推理模式选择）
 核心改造：
 - 统一模式选择逻辑（消除与 multi_agent_customer_service.py 的重复）
 - graph 节点直接委托 orchestrator
 - 结构化日志
 - v3.5: 高复杂度多领域查询路由到 ReAct 模式
+- v4.3: 运行时模式升级（低质量响应自动升级到更复杂模式）
 """
 from typing import Any, Dict, Tuple, List
 from .modes import SequentialMode, ParallelMode, ConsultationMode, HierarchicalMode, ReActMode
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
 from session_manager import INTENT_KEYWORDS
-from config import REACT_COMPLEXITY_THRESHOLD
+from config import REACT_COMPLEXITY_THRESHOLD, MODE_UPGRADE_ENABLED
 from logger import get_logger
 
 logger = get_logger("collaboration.orchestrator")
@@ -106,3 +107,55 @@ class CollaborationOrchestrator:
 
         # 默认：顺序模式
         return "sequential", {"primary_agent": primary_agent}
+
+    def upgrade_mode(self, current_mode: str, state: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+        """
+        v4.3: 运行时模式升级。
+        当低质量响应触发时，自动升级到更复杂的协作模式重新处理。
+        升级路径：sequential → consultation → parallel → react
+        """
+        if not MODE_UPGRADE_ENABLED:
+            return current_mode, {}
+
+        primary_agent = state.get("current_agent", "general_agent")
+        query = state.get("customer_query", "")
+
+        # 升级路径映射
+        upgrade_map = {
+            "sequential": "consultation",
+            "consultation": "parallel",
+            "parallel": "react",
+        }
+
+        new_mode = upgrade_map.get(current_mode)
+        if not new_mode or new_mode == current_mode:
+            # 已是最复杂模式，无法继续升级
+            logger.info(f"[ModeUpgrade] {current_mode} 已是最复杂模式，跳过升级")
+            return current_mode, {}
+
+        # 构建升级后的上下文
+        if new_mode == "consultation":
+            consult_map = {
+                "product_agent": ["tech_agent"],
+                "billing_agent": ["product_agent"],
+                "tech_agent": ["product_agent"],
+                "complaint_agent": ["product_agent"],
+                "general_agent": ["product_agent"],
+            }
+            consultees = consult_map.get(primary_agent, ["product_agent"])
+            context = {"primary_agent": primary_agent, "consult_agents": consultees}
+        elif new_mode == "parallel":
+            # 并行模式：添加相关 Agent
+            agent_list = [primary_agent]
+            if primary_agent != "product_agent":
+                agent_list.append("product_agent")
+            if primary_agent != "tech_agent":
+                agent_list.append("tech_agent")
+            context = {"agent_list": agent_list[:3]}
+        elif new_mode == "react":
+            context = {"primary_agent": primary_agent}
+        else:
+            context = {"primary_agent": primary_agent}
+
+        logger.info(f"[ModeUpgrade] {current_mode} → {new_mode} (agent={primary_agent})")
+        return new_mode, context

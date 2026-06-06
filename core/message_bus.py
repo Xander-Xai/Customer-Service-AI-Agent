@@ -43,11 +43,10 @@ class MessageBus:
     def __init__(self):
         self._subscribers: Dict[str, List[Handler]] = {}
         self._message_log: deque = deque(maxlen=_MESSAGE_LOG_MAXLEN)
-        self._lock: Optional[asyncio.Lock] = None  # 懒初始化
+        self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
 
     def _ensure_lock(self) -> asyncio.Lock:
-        if self._lock is None:
-            self._lock = asyncio.Lock()
+        """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
         return self._lock
 
     async def subscribe(self, topic: str, handler: Handler):

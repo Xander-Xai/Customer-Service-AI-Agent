@@ -1,7 +1,7 @@
 """
-ChromaDB 知识库管理器（v3.5）
+ChromaDB 知识库管理器（v4.3）
 基于向量检索的 RAG 检索增强生成。
-使用 chromadb 默认 embedding（all-MiniLM-L6-v2），无需外部 API。
+v4.3: 更换为中文 embedding 模型（BAAI/bge-small-zh-v1.5），提升中文语义检索精度。
 """
 import asyncio
 from typing import Any, Dict, List, Optional
@@ -20,19 +20,54 @@ class CosmeticsKnowledgeBase:
         """
         try:
             import chromadb
+            from chromadb.utils import embedding_functions
+
+            # v4.3: 使用中文 embedding 模型提升语义检索精度
+            self._embed_fn = self._create_embedding_function()
+
             if persist_directory:
                 self._client = chromadb.PersistentClient(path=persist_directory)
             else:
                 self._client = chromadb.Client()
             self._collections: Dict[str, Any] = {}
             self._available = True
-            logger.info(f"ChromaDB 初始化成功 (persist={persist_directory})")
+            logger.info(f"ChromaDB 初始化成功 (persist={persist_directory}, embedding={self._embed_fn_name})")
         except ImportError:
             self._available = False
             logger.warning("chromadb 未安装，RAG 功能不可用")
         except Exception as e:
             self._available = False
             logger.error(f"ChromaDB 初始化失败: {e}")
+
+    @staticmethod
+    def _create_embedding_function():
+        """v4.3: 创建中文 embedding 函数，按优先级尝试多种模型"""
+        from chromadb.utils import embedding_functions
+
+        # 优先级 1: BAAI/bge-small-zh-v1.5（专为中文优化的轻量模型）
+        # 优先级 2: shibing624/text2vec-base-chinese（通用中文向量模型）
+        # 优先级 3: ChromaDB 默认模型（fallback）
+        models_to_try = [
+            ("BAAI/bge-small-zh-v1.5", "bge-small-zh"),
+            ("shibing624/text2vec-base-chinese", "text2vec-chinese"),
+        ]
+        for model_name, label in models_to_try:
+            try:
+                ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+                    model_name=model_name
+                )
+                CosmeticsKnowledgeBase._embed_fn_name = label
+                logger.info(f"中文 embedding 模型加载成功: {model_name}")
+                return ef
+            except Exception as e:
+                logger.debug(f"模型 {model_name} 加载失败: {e}，尝试下一个")
+
+        # Fallback: ChromaDB 默认（all-MiniLM-L6-v2）
+        CosmeticsKnowledgeBase._embed_fn_name = "default(all-MiniLM-L6-v2)"
+        logger.warning("中文 embedding 模型不可用，回退到 ChromaDB 默认模型")
+        return embedding_functions.DefaultEmbeddingFunction()
+
+    _embed_fn_name: str = "unknown"  # 类变量，记录实际使用的模型名
 
     @property
     def available(self) -> bool:
@@ -43,7 +78,10 @@ class CosmeticsKnowledgeBase:
         if not self._available:
             return None
         if name not in self._collections:
-            self._collections[name] = self._client.get_or_create_collection(name=name)
+            kwargs = {"name": name}
+            if hasattr(self, '_embed_fn') and self._embed_fn is not None:
+                kwargs["embedding_function"] = self._embed_fn
+            self._collections[name] = self._client.get_or_create_collection(**kwargs)
             count = self._collections[name].count()
             logger.debug(f"Collection '{name}' 已加载 ({count} docs)")
         return self._collections[name]

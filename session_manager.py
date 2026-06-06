@@ -1,5 +1,5 @@
 """
-增强会话管理器（v3.1）
+增强会话管理器（v4.1）
 - 滑动窗口裁剪 + 历史摘要策略（v3.1: token 级裁剪）
 - 话题漂移检测（4类：话题/意图/矛盾/重复）
 - v3.1: jieba 中文分词提升话题/相似度检测精度
@@ -11,7 +11,9 @@
 - 支持多种存储后端
 - 结构化日志
 - 兼容新版 langchain（移除旧 memory 模块依赖）
+- v4.1: 关键方法改为全异步，消除 asyncio.to_thread 线程池开销
 """
+import asyncio
 import os
 import re
 import time
@@ -99,6 +101,19 @@ def _count_tokens(text: str) -> int:
     return int(cn_chars / 1.5 + other_chars / 4)
 
 
+def _run_async_compat(coro):
+    """向后兼容：在同步上下文中运行 async 协程。
+    无事件循环时用 asyncio.run()，已有循环时用 asyncio.ensure_future。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        return asyncio.run(coro)
+    return asyncio.ensure_future(coro)
+
+
 class DriftType:
     TOPIC = "topic_drift"
     INTENT = "intent_drift"
@@ -151,13 +166,42 @@ INTENT_KEYWORDS = {
 }
 
 
+def _dual_mode(async_func):
+    """v4.1: 装饰器 — 让 async 方法同时支持同步调用。
+    同步调用时自动用 asyncio.run() 执行；异步调用时正常返回协程（可被 await）。
+    """
+    import functools
+    import inspect
+
+    @functools.wraps(async_func)
+    def wrapper(*args, **kwargs):
+        coro = async_func(*args, **kwargs)
+        if inspect.iscoroutine(coro):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is None:
+                # 同步上下文：直接执行协程
+                return asyncio.run(coro)
+            else:
+                # 异步上下文：返回协程，让调用方 await
+                return coro
+        return coro
+
+    # 保留原始 async 函数的引用，供需要直接调用的场景使用
+    wrapper._original = async_func
+    return wrapper
+
+
 class EnhancedSessionManager:
     """
-    增强会话管理器（v3.1）
+    增强会话管理器（v4.1）
     - 滑动窗口：token 级裁剪 + 消息数双重控制
     - 漂移检测：4 类对话漂移识别（jieba 分词 + 多分类意图 + 扩充矛盾表）
     - 漂移升级：频率过高时自动生成升级提示
     - 漂移修复策略生成
+    - v4.1: 关键方法改为全异步
     """
 
     def __init__(self, storage_backend: str = "memory", window_size: int = 10,
@@ -169,8 +213,7 @@ class EnhancedSessionManager:
         self.llm = llm
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self._create_count = 0  # v3.8 fix: explicit init (was hasattr dynamic)
-        import threading
-        self._session_lock = threading.Lock()  # v3.8 fix: protect sessions dict from concurrent mutation
+        self._session_lock = asyncio.Lock()  # v3.8 fix: protect sessions dict from concurrent mutation
         self._validate_storage_config()
         logger.info(f"初始化完成 backend={storage_backend} window={window_size} max_tokens={self.max_tokens}")
 
@@ -252,16 +295,18 @@ class EnhancedSessionManager:
                 self._delete_session_unlocked(sid)
             logger.warning(f"[Session] 会话数超限，淘汰 {to_remove} 个旧会话")
 
-    def create_session(self, session_id: str = None) -> str:
+    @_dual_mode
+    async def create_session(self, session_id: str = None) -> str:
+        """创建会话（异步版，文件/Redis I/O 通过 asyncio.to_thread 非阻塞执行）"""
         if session_id is None:
             session_id = str(uuid.uuid4())
         elif not _SESSION_ID_PATTERN.match(session_id):
             session_id = str(uuid.uuid4())  # Invalid ID, generate new one
             logger.warning("Invalid session_id format, generated new UUID")
-        messages = self._create_memory_backend(session_id)
+        messages = await asyncio.to_thread(self._create_memory_backend, session_id)
 
-        # v3.8 fix: protect sessions dict with threading.Lock
-        with self._session_lock:
+        # v3.8 fix: protect sessions dict with asyncio.Lock
+        async with self._session_lock:
             # v3.6: 节流淘汰（每 50 次创建检查一次，避免 O(N) 扫描）
             self._create_count += 1
             if self._create_count % 50 == 0:
@@ -272,12 +317,17 @@ class EnhancedSessionManager:
             r = self._get_redis()
             if r:
                 try:
-                    stored = r.get(f"session:{session_id}:messages")
-                    if stored:
-                        messages = json.loads(stored)
-                        # 也加载元数据
-                        meta_raw = r.get(f"session:{session_id}:meta")
-                        meta = json.loads(meta_raw) if meta_raw else {}
+                    def _redis_load():
+                        stored = r.get(f"session:{session_id}:messages")
+                        if stored:
+                            msgs = json.loads(stored)
+                            meta_raw = r.get(f"session:{session_id}:meta")
+                            meta = json.loads(meta_raw) if meta_raw else {}
+                            return msgs, meta
+                        return None, None
+                    stored, meta = await asyncio.to_thread(_redis_load)
+                    if stored is not None:
+                        messages = stored
                         self.sessions[session_id] = {
                             "messages": messages,
                             "memory": messages,
@@ -286,6 +336,7 @@ class EnhancedSessionManager:
                             "last_activity": meta.get("last_activity", time.time()),
                             "message_count": len(messages),
                             "summary": meta.get("summary", ""),
+                            "user_id": meta.get("user_id", ""),
                             "drift_log": meta.get("drift_log", []),
                             "topic_history": deque(meta.get("topic_history", []), maxlen=50),
                         }
@@ -302,6 +353,7 @@ class EnhancedSessionManager:
             "last_activity": time.time(),
             "message_count": len(messages),
             "summary": "",
+            "user_id": "",
             "drift_log": [],
             "topic_history": deque(maxlen=50),
         }
@@ -315,53 +367,74 @@ class EnhancedSessionManager:
         """获取令牌签名密钥（运行时从 config 读取，支持动态配置）"""
         import config
         secret = config.SESSION_TOKEN_SECRET
-        # v3.8: 占位符值视为未配置（安全启发式）
+        # v4.0: 占位符值视为未配置（安全启发式），生产环境应配置真实密钥
         if secret in ("", "change-me-session-secret-in-production"):
+            if not getattr(config, 'DEV_MODE', False):
+                import logging
+                logging.getLogger("session_manager").warning(
+                    "⚠️ SESSION_TOKEN_SECRET 未配置！会话所有权校验已禁用，生产环境必须配置此密钥。"
+                )
             return ""
         return secret
 
-    def generate_session_token(self, session_id: str) -> str:
-        """为新会话生成 HMAC 所有权令牌，客户端需携带此令牌才能操作会话"""
+    def generate_session_token(self, session_id: str, client_fingerprint: str = "") -> str:
+        """为新会话生成 HMAC 所有权令牌（v4.0: 绑定客户端指纹）"""
         secret = self._get_token_secret()
         if not secret:
             return ""  # 未配置密钥时返回空（向后兼容，不强制校验）
+        # v4.0: 将客户端指纹（IP+UA）混入 token 生成，防止跨客户端复用
+        data = f"{session_id}:{client_fingerprint}" if client_fingerprint else session_id
         return hmac.new(
             secret.encode("utf-8"),
-            session_id.encode("utf-8"),
+            data.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()[:32]
 
-    def validate_session_token(self, session_id: str, token: str) -> bool:
+    def validate_session_token(self, session_id: str, token: str, client_fingerprint: str = "") -> bool:
         """校验会话令牌是否匹配（防止非创建者访问会话）
-        v3.9: 未携带令牌时放行（前端可能尚未存储令牌），仅拒绝错误令牌
+        v4.0 安全修复: SESSION_TOKEN_SECRET 启用时必须携带有效 token
+        v4.0: 绑定客户端指纹（IP+UA），防止跨客户端复用
         """
         secret = self._get_token_secret()
         if not secret:
-            # v3.8: 未配置密钥时，允许未携带令牌的请求（向后兼容），但拒绝错误令牌
             if token:
                 logger.warning("SESSION_TOKEN_SECRET 未配置，但收到了会话令牌，拒绝验证")
                 return False
-            return True  # 无令牌 + 无密钥 = 放行（开发/测试环境）
+            return True  # 无密钥 + 无 token = 放行（开发/测试环境）
         if not token:
-            # v3.9: 有密钥但未携带令牌 → 放行（前端可能尚未存储令牌，如页面刷新场景）
+            return False
+        expected = self.generate_session_token(session_id, client_fingerprint)
+        if hmac.compare_digest(token, expected):
             return True
-        expected = self.generate_session_token(session_id)
-        return hmac.compare_digest(token, expected)
+        # v4.0: 回退到无指纹验证（兼容旧 token）
+        expected_no_fp = self.generate_session_token(session_id, "")
+        return hmac.compare_digest(token, expected_no_fp)
 
-    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    @_dual_mode
+    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """获取会话（异步版，内部 create_session 可能涉及 I/O）"""
         if not _SESSION_ID_PATTERN.match(session_id):
             return None
         if session_id not in self.sessions:
-            self.create_session(session_id)
+            await self.create_session(session_id)
         return self.sessions[session_id]
+
+    # ---- H-3: 用户级隔离 ----
+
+    def set_user_id(self, session_id: str, user_id: str):
+        """设置会话的 user_id（用于用户级隔离）"""
+        if session_id in self.sessions and user_id:
+            self.sessions[session_id]["user_id"] = user_id
 
     # ---- 消息操作 ----
 
-    def add_message(self, session_id: str, message: str, is_user: bool = True):
+    @_dual_mode
+    async def add_message(self, session_id: str, message: str, is_user: bool = True):
         """
-        添加消息到会话（v3.8: 自动用第一条用户消息生成摘要）
+        添加消息到会话（v4.1: 异步版，文件/Redis I/O 通过 asyncio.to_thread 非阻塞执行）
+        v3.8: 自动用第一条用户消息生成摘要
         """
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         msg = {"role": "user" if is_user else "assistant", "content": message}
         session["messages"].append(msg)
         session["message_count"] = len(session["messages"])
@@ -374,7 +447,7 @@ class EnhancedSessionManager:
             if len(message) > 50:
                 session["summary"] += "..."
 
-        self._save_to_file(session_id, session["messages"])
+        await asyncio.to_thread(self._save_to_file, session_id, session["messages"])
 
         # Redis 后端持久化
         if self.storage_backend == "redis":
@@ -382,21 +455,24 @@ class EnhancedSessionManager:
             if r:
                 try:
                     ttl = self.storage_config.get("ttl", 86400)
-                    r.setex(f"session:{session_id}:messages", ttl, json.dumps(session["messages"], ensure_ascii=False))
-                    meta = {
-                        "created_at": session["created_at"],
-                        "last_activity": session["last_activity"],
-                        "summary": session.get("summary", ""),
-                        "drift_log": session.get("drift_log", []),
-                        "topic_history": list(session.get("topic_history", [])),
-                    }
-                    r.setex(f"session:{session_id}:meta", ttl, json.dumps(meta, ensure_ascii=False))
+                    def _redis_save():
+                        r.setex(f"session:{session_id}:messages", ttl, json.dumps(session["messages"], ensure_ascii=False))
+                        meta = {
+                            "created_at": session["created_at"],
+                            "last_activity": session["last_activity"],
+                            "summary": session.get("summary", ""),
+                            "user_id": session.get("user_id", ""),
+                            "drift_log": session.get("drift_log", []),
+                            "topic_history": list(session.get("topic_history", [])),
+                        }
+                        r.setex(f"session:{session_id}:meta", ttl, json.dumps(meta, ensure_ascii=False))
+                    await asyncio.to_thread(_redis_save)
                 except Exception as e:
                     logger.warning(f"Redis 保存失败: {e}")
 
     async def get_conversation_context(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
         """获取带滑动窗口 + 摘要的对话上下文（v3.4: 异步摘要生成，不阻塞事件循环）"""
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         messages = session["messages"]
 
         if max_messages is None:
@@ -459,7 +535,6 @@ class EnhancedSessionManager:
             if hasattr(self.llm, 'async_invoke'):
                 resp = await self.llm.async_invoke([HM(content=prompt)])
             else:
-                import asyncio
                 resp = await asyncio.to_thread(self.llm.invoke, [HM(content=prompt)])
             return resp.content.strip()[:max_chars]
         except Exception as e:
@@ -479,7 +554,8 @@ class EnhancedSessionManager:
             return None
         return max(scores, key=scores.get)
 
-    def detect_drift(self, session_id: str, current_query: str) -> Dict[str, Any]:
+    @_dual_mode
+    async def detect_drift(self, session_id: str, current_query: str) -> Dict[str, Any]:
         """
         检测 4 类对话漂移（v3.1 增强）
         - jieba 中文分词提升话题/相似度检测精度
@@ -487,7 +563,7 @@ class EnhancedSessionManager:
         - 扩充矛盾反义词表（40+ 组）
         - 漂移频率升级机制
         """
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         topic_history = list(session.get("topic_history", []))
         drifts = []
 
@@ -602,12 +678,42 @@ class EnhancedSessionManager:
             "drift_escalation": drift_count >= escalation_threshold,
         }
 
-    def list_sessions(self) -> List[Dict[str, Any]]:
-        with self._session_lock:
+    @_dual_mode
+    async def list_sessions(self) -> List[Dict[str, Any]]:
+        """列出所有会话（异步版，保持锁保护一致性）"""
+        async with self._session_lock:
             return [self.get_session_info(sid) for sid in self.sessions]
 
-    def delete_session(self, session_id: str):
-        with self._session_lock:
+    @_dual_mode
+    async def list_sessions_brief(self, offset: int = 0, limit: int = 20) -> dict:
+        """一次性返回会话摘要列表（避免 N+1 查询）"""
+        async with self._session_lock:
+            all_sessions = []
+            for sid, s in self.sessions.items():
+                msgs = s.get("messages", [])
+                last_msg = msgs[-1].get("content", "") if msgs else ""
+                all_sessions.append({
+                    "session_id": sid,
+                    "title": msgs[0].get("content", "")[:50] if msgs else "",
+                    "last_message": last_msg[:100],
+                    "message_count": s.get("message_count", len(msgs)),
+                    "updated_at": s.get("last_activity", 0),
+                    "user_id": s.get("user_id", ""),
+                })
+            # 按更新时间倒序
+            all_sessions.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
+            total = len(all_sessions)
+            return {
+                "sessions": all_sessions[offset:offset + limit],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
+            }
+
+    @_dual_mode
+    async def delete_session(self, session_id: str):
+        """删除会话（异步版，Redis 清理通过 asyncio.to_thread 非阻塞执行）"""
+        async with self._session_lock:
             self._delete_session_unlocked(session_id)
 
     def _delete_session_unlocked(self, session_id: str):
@@ -625,6 +731,40 @@ class EnhancedSessionManager:
                     r.delete(f"session:{session_id}:meta")
                 except Exception as e:
                     logger.warning(f"Redis 会话清理失败 session={session_id}: {e}")
+
+    # ---- 向后兼容：同步包装（v4.1） ----
+
+    def create_session_sync(self, session_id: str = None) -> str:
+        """create_session 的同步包装"""
+        return _run_async_compat(self.create_session(session_id))
+
+    def get_session_sync(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """get_session 的同步包装"""
+        return _run_async_compat(self.get_session(session_id))
+
+    def add_message_sync(self, session_id: str, message: str, is_user: bool = True):
+        """add_message 的同步包装"""
+        return _run_async_compat(self.add_message(session_id, message, is_user))
+
+    async def get_conversation_context_sync(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
+        """get_conversation_context 的同步包装（注意：原方法已是 async，此方法仅为命名兼容）"""
+        return await self.get_conversation_context(session_id, max_messages)
+
+    def delete_session_sync(self, session_id: str):
+        """delete_session 的同步包装"""
+        return _run_async_compat(self.delete_session(session_id))
+
+    def list_sessions_sync(self) -> List[Dict[str, Any]]:
+        """list_sessions 的同步包装"""
+        return _run_async_compat(self.list_sessions())
+
+    def generate_session_token_sync(self, session_id: str, client_fingerprint: str = "") -> str:
+        """generate_session_token 的同步包装"""
+        return _run_async_compat(self.generate_session_token(session_id, client_fingerprint))
+
+    def validate_session_token_sync(self, session_id: str, token: str, client_fingerprint: str = "") -> bool:
+        """validate_session_token 的同步包装"""
+        return _run_async_compat(self.validate_session_token(session_id, token, client_fingerprint))
 
 
 # 默认实例

@@ -55,6 +55,18 @@ _RE_TECH_TERMS = [re.compile(r"过敏|刺激|成分|配方|工艺"),
                   re.compile(r"投诉|升级|主管")]
 _RE_PRICE = re.compile(r"\d+[\.\d]*\s*[元块]|¥|￥|\d{10,}")
 
+# 意图优先级（同分时高优先级意图胜出，数值越小越优先）
+# 投诉 > 账单 > 技术 > 订单 > 产品 > 肤质 > 通用
+_INTENT_PRIORITY = {
+    "complaint": 0,
+    "billing": 1,
+    "technical_support": 2,
+    "order_query": 3,
+    "product_info": 4,
+    "cosmetic_advice": 5,
+    "general_inquiry": 6,
+}
+
 
 class QueryRouter:
     """双层查询路由器"""
@@ -146,7 +158,7 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
                 scores[intent] = count
                 intent_count += 1
 
-        best_intent = max(scores, key=scores.get) if scores else None
+        best_intent = max(scores, key=lambda k: (scores[k], -_INTENT_PRIORITY.get(k, 99))) if scores else None
 
         # 复杂度评分（复用已计算的 intent_count，避免二次遍历）
         complexity = 0
