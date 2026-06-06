@@ -173,7 +173,7 @@ class ResponseCache:
 
     @staticmethod
     def _md5(text: str) -> str:
-        return hashlib.md5(text.encode("utf-8")).hexdigest()
+        return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     @staticmethod
     def _jaccard(set_a: frozenset, set_b: frozenset) -> float:
