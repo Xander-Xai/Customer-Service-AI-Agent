@@ -13,6 +13,10 @@ os.environ.setdefault("API_KEY_ENABLED", "false")
 os.environ.setdefault("API_KEY", "test-key")
 os.environ.setdefault("SESSION_TOKEN_SECRET", "test-secret")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
+
+# 确保数据库表在测试前已创建
+from db.database import init_db
+init_db()
 os.environ.setdefault("DEV_MODE", "true")
 
 
