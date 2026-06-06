@@ -18,7 +18,7 @@ env/
 .env.production
 .env.dev
 .env.prod
-.env.test
+!.env.test
 .env.prod.generated
 *.generated
 
