@@ -231,9 +231,11 @@ def validate_required_config():
     if not OPENAI_API_KEY or any(OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES):
         errors.append("OPENAI_API_KEY 未配置或使用占位符")
 
-    # JWT Secret
+    # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
     if not JWT_SECRET or JWT_SECRET in ("", "change-me-in-production", "dev-jwt-secret-do-not-use-in-prod", "your-jwt-secret-change-in-production"):
         errors.append("JWT_SECRET 未配置或使用默认值")
+    elif len(JWT_SECRET) < 32:
+        errors.append(f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥")
 
     # Session Token Secret
     if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production", "dev-session-secret-do-not-use-in-prod", "your-session-secret-change-in-production"):

@@ -32,7 +32,7 @@ class CollaborationMode(ABC):
         """执行协作"""
 
     async def _safe_publish(self, topic: str, sender: str, payload: dict):
-        """安全发布 MessageBus 事件（静默失败）"""
+        """安全发布 MessageBus 事件（静默失败，debug 日志含异常详情）"""
         try:
             if self.bus:
                 await self.bus.publish(Message(
@@ -41,24 +41,24 @@ class CollaborationMode(ABC):
                     sender=sender,
                     payload=payload,
                 ))
-        except Exception:
-            logger.debug(f"{sender}: 发布 {topic} 事件失败，跳过")
+        except Exception as e:
+            logger.debug(f"{sender}: 发布 {topic} 事件失败: {e}")
 
     async def _safe_bb_write(self, key: str, value: Any, ttl: float = 300.0):
-        """安全写入 SharedBlackboard（静默失败）"""
+        """安全写入 SharedBlackboard（静默失败，debug 日志含异常详情）"""
         try:
             if self.bb:
                 await self.bb.write(key, value, ttl=ttl)
-        except Exception:
-            logger.debug(f"写入 Blackboard 失败 ({key})，跳过")
+        except Exception as e:
+            logger.debug(f"写入 Blackboard 失败 ({key}): {e}")
 
     async def _safe_bb_read_prefix(self, prefix: str) -> dict:
-        """安全读取 SharedBlackboard 前缀数据（静默失败）"""
+        """安全读取 SharedBlackboard 前缀数据（静默失败，debug 日志含异常详情）"""
         try:
             if self.bb:
                 return await self.bb.read_prefix(prefix)
-        except Exception:
-            logger.debug(f"读取 Blackboard 失败 ({prefix}*)，跳过")
+        except Exception as e:
+            logger.debug(f"读取 Blackboard 失败 ({prefix}*): {e}")
         return {}
 
 
@@ -221,8 +221,8 @@ class ConsultationMode(CollaborationMode):
                             receiver=primary,
                             payload={"response": response, "agent": name},
                         ))
-                except Exception:
-                    logger.debug(f"Consultation: 发送补充信息到主 Agent 失败 ({name} -> {primary})，跳过")
+                except Exception as e:
+                    logger.debug(f"Consultation: 发送补充信息失败 ({name} -> {primary}): {e}")
 
                 await self._safe_publish("consultation.consultee.complete", "consultation_mode",
                                          {"agent": name, "primary": primary})

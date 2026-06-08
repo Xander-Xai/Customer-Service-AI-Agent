@@ -7,7 +7,7 @@
 """
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional
 
 from db.database import get_db
@@ -35,6 +35,17 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_]+$")
     password: str = Field(..., min_length=6, max_length=64)
     display_name: str = Field(default="", max_length=64)
+
+    @validator("password")
+    def password_complexity(cls, v):
+        """v5.0: 要求至少包含两类字符（字母+数字、字母+特殊字符等）"""
+        has_letter = any(c.isalpha() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+        has_special = any(not c.isalnum() for c in v)
+        classes = sum([has_letter, has_digit, has_special])
+        if classes < 2:
+            raise ValueError("密码需包含至少两类字符（字母、数字、特殊字符）")
+        return v
 
 
 class LoginRequest(BaseModel):

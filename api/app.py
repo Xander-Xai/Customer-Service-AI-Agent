@@ -885,28 +885,9 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                 circuit_breaker=_cb,
             )
 
-            # 直接构造 OpenAI 格式的 messages，绕过 _format_messages（因为它会转换 content 列表为字符串）
-            payload = {
-                "model": client.model,
-                "messages": multimodal_messages,
-            }
-            http_client = await client._get_async_client()
-            resp = await http_client.post(
-                f"{client.base_url}/chat/completions",
-                json=payload,
-                headers=client.headers,
-                timeout=httpx.Timeout(client.timeout),
-            )
-            resp.raise_for_status()
-            result = resp.json()
-
-            if "choices" in result and result["choices"]:
-                content = result["choices"][0].get("message", {}).get("content", "") or ""
-            else:
-                content = "抱歉，无法分析该图片，请稍后重试。"
-
-            if client.circuit_breaker:
-                await client.circuit_breaker.record_success()
+            # 使用 async_invoke_raw 直接传递多模态消息（跳过 _format_messages）
+            response = await client.async_invoke_raw(multimodal_messages)
+            content = response.content or "抱歉，无法分析该图片，请稍后重试。"
 
         except Exception as e:
             logger.error(f"多模态 LLM 调用失败: {e}", exc_info=True)
