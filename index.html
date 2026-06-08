@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>药妆智多星 - 智能客服系统</title>
+</head>
+<body>
+  <!-- 跳转链接（无障碍） -->
+  <a href="#chatInput" class="skip-link">跳到内容</a>
+
+  <!-- 顶部导航 -->
+  <header class="nav-header" aria-label="主导航">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">🤖</div>
+      <span class="nav-logo-text">药妆智多星</span>
+      <span class="nav-logo-version">v5.0</span>
+    </div>
+    <nav class="nav-links" aria-label="页面导航">
+      <button class="nav-link active" data-page="chat">
+        💬 对话
+      </button>
+      <button class="nav-link" data-page="monitor">
+        📊 监控
+      </button>
+    </nav>
+    <div class="nav-status">
+      <div class="status-indicator">
+        <span class="status-dot" id="wsStatusDot"></span>
+        <span id="wsStatusText">连接中...</span>
+      </div>
+      <span id="userInfo" style="font-size:12px;color:#888;margin-left:12px"></span>
+      <a href="/admin.html" id="adminLink" style="font-size:12px;color:#6366f1;margin-left:8px;display:none">⚙️ 管理</a>
+      <button id="logoutBtn" style="font-size:11px;color:#888;background:none;border:1px solid #333;border-radius:4px;padding:2px 8px;margin-left:8px;cursor:pointer;display:none">退出</button>
+    </div>
+  </header>
+
+  <!-- 主布局 -->
+  <div class="app-layout" id="chatPage">
+    <!-- 侧边栏：会话历史 -->
+    <aside class="sidebar" aria-label="会话历史">
+      <div class="sidebar-header">
+        <div class="sidebar-title">会话历史</div>
+        <button class="btn-new-chat" id="btnNewChat">
+          ＋ 新建对话
+        </button>
+      </div>
+      <div class="session-list" id="sessionList">
+        <!-- 动态填充 -->
+      </div>
+    </aside>
+
+    <!-- 聊天主区域 -->
+    <main class="chat-area">
+      <div class="chat-messages" id="chatMessages" role="log" aria-live="polite" aria-label="对话消息">
+        <!-- 欢迎界面（由 JS 动态渲染） -->
+      </div>
+
+      <!-- 输入区域 -->
+      <div class="chat-input-area">
+        <div class="image-preview-area" id="imagePreviewArea" style="display:none">
+          <div class="image-preview-container">
+            <img class="image-preview-thumb" id="imagePreviewThumb" src="" alt="预览">
+            <div class="image-preview-info">
+              <span class="image-preview-name" id="imagePreviewName"></span>
+              <span class="image-preview-size" id="imagePreviewSize"></span>
+            </div>
+            <button class="image-preview-remove" id="imagePreviewRemove" title="移除图片" aria-label="移除图片">✕</button>
+          </div>
+        </div>
+        <div class="chat-input-wrapper" id="chatInputWrapper">
+          <button class="btn-attach" id="btnAttach" title="上传图片" aria-label="上传图片">
+            📎
+          </button>
+          <textarea
+            class="chat-input"
+            id="chatInput"
+            placeholder="输入您的问题..."
+            rows="1"
+            aria-label="输入消息"
+            aria-describedby="inputHint"
+          ></textarea>
+          <button class="btn-send" id="btnSend" disabled aria-label="发送消息">
+            ➤
+          </button>
+        </div>
+        <div class="input-hint" id="inputHint">按 Enter 发送，Shift + Enter 换行 · 可拖拽图片到输入区 · <span class="input-help-hint" id="btnShortcuts">快捷键 <kbd>?</kbd></span></div>
+        <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/webp" style="display:none">
+      </div>
+    </main>
+  </div>
+
+  <!-- 监控页面（初始隐藏） -->
+  <div id="monitorPage" style="display:none;">
+    <div class="monitor-layout page-transition">
+      <div class="monitor-grid" id="metricCards"></div>
+      <div class="monitor-grid">
+        <div class="metric-card card-wide" id="agentChartCard">
+          <div class="card-header"><div class="card-title">📊 Agent 负载分布</div></div>
+          <div class="bar-chart" id="agentChart"></div>
+        </div>
+        <div class="metric-card card-wide" id="modeChartCard">
+          <div class="card-header"><div class="card-title">🔄 协作模式分布</div></div>
+          <div class="bar-chart" id="modeChart"></div>
+        </div>
+      </div>
+      <div class="monitor-grid">
+        <div class="metric-card" id="slaCard">
+          <div class="card-header"><div class="card-title">⏱️ SLA 达标率</div></div>
+          <div style="display:flex;align-items:center;gap:24px;justify-content:center">
+            <div class="donut-chart" id="slaDonut">
+              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="SLA 达标率">
+                <circle class="donut-bg" cx="50" cy="50" r="42"/>
+                <circle class="donut-fill" id="slaFill" cx="50" cy="50" r="42" stroke="var(--success)" stroke-dasharray="0 264"/>
+              </svg>
+              <div class="donut-label">
+                <div class="donut-value" id="slaValue">--</div>
+                <div class="donut-desc">达标率</div>
+              </div>
+            </div>
+            <div>
+              <div style="margin-bottom:8px"><span class="status-tag healthy" id="slaStatus">--</span></div>
+              <div class="metric-detail" id="slaDetail">目标: 5s - 20s</div>
+            </div>
+          </div>
+        </div>
+        <div class="metric-card" id="cacheCard">
+          <div class="card-header"><div class="card-title">💾 缓存命中率</div></div>
+          <div style="text-align:center">
+            <div class="donut-chart" id="cacheDonut">
+              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="缓存命中率">
+                <circle class="donut-bg" cx="50" cy="50" r="42"/>
+                <circle class="donut-fill" id="cacheFill" cx="50" cy="50" r="42" stroke="var(--primary)" stroke-dasharray="0 264"/>
+              </svg>
+              <div class="donut-label">
+                <div class="donut-value" id="cacheValue">--</div>
+                <div class="donut-desc">命中率</div>
+              </div>
+            </div>
+            <div class="metric-detail" id="cacheDetail">L1: -- / L2: --</div>
+          </div>
+        </div>
+        <div class="metric-card" id="resolutionCard">
+          <div class="card-header"><div class="card-title">✅ 首次解决率</div></div>
+          <div style="text-align:center">
+            <div class="donut-chart" id="resolutionDonut">
+              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="首次解决率">
+                <circle class="donut-bg" cx="50" cy="50" r="42"/>
+                <circle class="donut-fill" id="resolutionFill" cx="50" cy="50" r="42" stroke="var(--success)" stroke-dasharray="0 264"/>
+              </svg>
+              <div class="donut-label">
+                <div class="donut-value" id="resolutionValue">--</div>
+                <div class="donut-desc">解决率</div>
+              </div>
+            </div>
+            <div class="metric-detail" id="resolutionDetail">--</div>
+          </div>
+        </div>
+        <div class="metric-card" id="aiCard">
+          <div class="card-header"><div class="card-title">🤖 AI 处理率</div></div>
+          <div style="text-align:center">
+            <div class="donut-chart" id="aiDonut">
+              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="AI 处理率">
+                <circle class="donut-bg" cx="50" cy="50" r="42"/>
+                <circle class="donut-fill" id="aiFill" cx="50" cy="50" r="42" stroke="var(--info)" stroke-dasharray="0 264"/>
+              </svg>
+              <div class="donut-label">
+                <div class="donut-value" id="aiValue">--</div>
+                <div class="donut-desc">AI 处理</div>
+              </div>
+            </div>
+            <div class="metric-detail" id="aiDetail">--</div>
+          </div>
+        </div>
+      </div>
+      <div class="monitor-grid">
+        <div class="metric-card card-wide" id="sessionsCard">
+          <div class="card-header">
+            <div class="card-title">📋 最近会话</div>
+            <button class="nav-link" id="btnRefreshMonitor" style="padding:4px 10px;font-size:11px">🔄 刷新</button>
+          </div>
+          <table class="data-table" id="sessionsTable">
+            <thead><tr><th>会话 ID</th><th>消息数</th><th>漂移次数</th><th>最后活动</th><th>状态</th></tr></thead>
+            <tbody id="sessionsTableBody"></tbody>
+          </table>
+        </div>
+        <div class="metric-card card-wide" id="alertsCard">
+          <div class="card-header"><div class="card-title">🔔 SLA 告警</div></div>
+          <div id="alertsList"><div style="text-align:center;padding:20px;color:var(--text-muted)">暂无告警</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 会话详情侧面板 -->
+  <div class="session-detail-panel" id="sessionDetailPanel" role="dialog" aria-modal="false" aria-label="会话详情">
+    <div class="panel-header">
+      <span style="font-weight:600">会话详情</span>
+      <button class="panel-close" id="btnClosePanel" aria-label="关闭面板">✕</button>
+    </div>
+    <div id="sessionDetailContent" style="padding:16px"></div>
+  </div>
+
+  <!-- 快捷键帮助弹窗 -->
+  <div class="shortcuts-overlay" id="shortcutsOverlay" role="dialog" aria-modal="true" aria-label="键盘快捷键">
+    <div class="shortcuts-modal">
+      <h3>⌨️ 键盘快捷键</h3>
+      <div class="shortcut-row"><span class="shortcut-desc">发送消息</span><span class="shortcut-key"><kbd>Enter</kbd></span></div>
+      <div class="shortcut-row"><span class="shortcut-desc">换行</span><span class="shortcut-key"><kbd>Shift</kbd> + <kbd>Enter</kbd></span></div>
+      <div class="shortcut-row"><span class="shortcut-desc">聚焦输入框</span><span class="shortcut-key"><kbd>/</kbd></span></div>
+      <div class="shortcut-row"><span class="shortcut-desc">新建对话</span><span class="shortcut-key"><kbd>Ctrl</kbd> + <kbd>N</kbd></span></div>
+      <div class="shortcut-row"><span class="shortcut-desc">显示/关闭此帮助</span><span class="shortcut-key"><kbd>?</kbd></span></div>
+      <div class="shortcut-row"><span class="shortcut-desc">关闭弹窗</span><span class="shortcut-key"><kbd>Esc</kbd></span></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

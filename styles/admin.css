@@ -1,0 +1,130 @@
+/* ===== 管理后台 ===== */
+.admin-layout {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.admin-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 20px;
+}
+
+.admin-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+}
+
+.admin-card h3 {
+  font-size: 16px;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--bg-elevated);
+  font-size: 13px;
+}
+
+.admin-stat:last-child {
+  border-bottom: none;
+}
+
+.admin-stat .label {
+  color: var(--text-secondary);
+}
+
+.admin-stat .value {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-hover);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-sm:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+
+.btn-sm.primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.btn-sm.primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-sm.danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+}
+
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tag-admin { background: var(--primary); color: #fff; }
+.tag-user { background: var(--bg-hover); color: var(--text-secondary); }
+.tag-active { background: var(--success-bg); color: var(--success); }
+
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-size: 13px;
+  z-index: 9999;
+  display: none;
+  box-shadow: var(--shadow-lg);
+  animation: pageIn var(--duration-normal) var(--ease-out);
+}
+
+.toast.success { background: #166534; }
+.toast.error { background: #991b1b; }
+

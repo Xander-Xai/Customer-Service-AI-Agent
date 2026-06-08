@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理后台 - 药妆智多星</title>
+</head>
+<body>
+  <header class="nav-header" aria-label="主导航">
+    <div class="nav-logo">
+      <div class="nav-logo-icon">🤖</div>
+      <span class="nav-logo-text">药妆智多星</span>
+      <span class="nav-logo-version">v5.0</span>
+    </div>
+    <nav class="nav-links" aria-label="页面导航">
+      <a class="nav-link" href="/">💬 对话</a>
+      <a class="nav-link" href="/admin.html">⚙️ 管理</a>
+    </nav>
+    <div class="nav-status">
+      <span id="userDisplay" style="font-size:13px;color:#888"></span>
+      <button class="btn-sm" id="logoutBtn" style="margin-left:8px">退出</button>
+    </div>
+  </header>
+
+  <div class="admin-layout">
+    <div class="admin-header">
+      <div class="admin-title">⚙️ 系统管理</div>
+    </div>
+
+    <div class="admin-grid">
+      <div class="admin-card" style="grid-column: 1 / -1">
+        <h3>👥 用户管理</h3>
+        <table class="data-table">
+          <thead><tr><th>ID</th><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>注册时间</th></tr></thead>
+          <tbody id="usersTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-card">
+        <h3>📚 知识库管理</h3>
+        <div id="knowledgeStats"></div>
+        <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-sm primary" id="btnReseedKnowledge">🔄 重新种子</button>
+          <button class="btn-sm" id="btnSyncFromErp">📥 从ERP同步</button>
+          <button class="btn-sm" id="btnRefreshKnowledge">🔄 刷新</button>
+        </div>
+      </div>
+
+      <div class="admin-card">
+        <h3>🔔 告警通知</h3>
+        <div id="alertConfig"></div>
+        <div style="margin-top:16px">
+          <button class="btn-sm primary" id="btnTestAlert">📤 测试告警</button>
+        </div>
+      </div>
+
+      <div class="admin-card" style="grid-column: 1 / -1">
+        <h3>📋 审计日志</h3>
+        <table class="data-table">
+          <thead><tr><th>时间</th><th>操作</th><th>详情</th><th>IP</th></tr></thead>
+          <tbody id="auditTableBody"></tbody>
+        </table>
+      </div>
+
+      <div class="admin-card">
+        <h3>📊 系统状态</h3>
+        <div id="systemHealth"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>📈 运行指标</h3>
+        <div id="metricsStats"></div>
+      </div>
+
+      <div class="admin-card">
+        <h3>💬 用户反馈</h3>
+        <div id="feedbackStats"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module" src="/src/admin.js"></script>
+</body>
+</html>

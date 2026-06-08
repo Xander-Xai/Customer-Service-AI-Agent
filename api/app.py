@@ -371,49 +371,41 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     static_dir = os.path.join(project_root, "static")
     templates_dir = os.path.join(project_root, "templates")
+    dist_dir = os.path.join(project_root, "static", "dist")
 
     if os.path.isdir(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
         logger.info(f"静态资源已挂载: {static_dir}")
 
+    def _serve_html(request: Request, file_path: str, fallback_msg: str):
+        """读取 HTML 文件并注入 CSP nonce"""
+        if os.path.exists(file_path):
+            nonce = getattr(request.state, "csp_nonce", "")
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if nonce:
+                content = content.replace("<script", f'<script nonce="{nonce}"')
+            return HTMLResponse(content=content)
+        return HTMLResponse(f"<h1>{fallback_msg}</h1>", status_code=404)
+
+    def _html_path(filename: str) -> str:
+        """优先从 Vite 构建产物目录获取 HTML，回退到 templates/"""
+        dist_path = os.path.join(dist_dir, filename)
+        if os.path.exists(dist_path):
+            return dist_path
+        return os.path.join(templates_dir, filename)
+
     @app.get("/", response_class=HTMLResponse)
     async def serve_index(request: Request):
-        index_path = os.path.join(templates_dir, "index.html")
-        if os.path.exists(index_path):
-            nonce = getattr(request.state, "csp_nonce", "")
-            with open(index_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            # M3: 注入 CSP nonce 到 script 标签
-            if nonce:
-                content = content.replace("<script", f'<script nonce="{nonce}"')
-            return HTMLResponse(content=content)
-        return HTMLResponse("<h1>前端文件未找到</h1>", status_code=404)
+        return _serve_html(request, _html_path("index.html"), "前端文件未找到")
 
-    # v4.1: 登录页面路由
     @app.get("/login.html", response_class=HTMLResponse)
     async def serve_login(request: Request):
-        login_path = os.path.join(templates_dir, "login.html")
-        if os.path.exists(login_path):
-            nonce = getattr(request.state, "csp_nonce", "")
-            with open(login_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if nonce:
-                content = content.replace("<script", f'<script nonce="{nonce}"')
-            return HTMLResponse(content=content)
-        return HTMLResponse("<h1>登录页面未找到</h1>", status_code=404)
+        return _serve_html(request, _html_path("login.html"), "登录页面未找到")
 
-    # v4.1: 管理后台路由
     @app.get("/admin.html", response_class=HTMLResponse)
     async def serve_admin(request: Request):
-        admin_path = os.path.join(templates_dir, "admin.html")
-        if os.path.exists(admin_path):
-            nonce = getattr(request.state, "csp_nonce", "")
-            with open(admin_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if nonce:
-                content = content.replace("<script", f'<script nonce="{nonce}"')
-            return HTMLResponse(content=content)
-        return HTMLResponse("<h1>管理后台未找到</h1>", status_code=404)
+        return _serve_html(request, _html_path("admin.html"), "管理后台未找到")
 
     # ── API Key 认证中间件（v4.1: 配置驱动，消除重复代码）──
     @app.middleware("http")

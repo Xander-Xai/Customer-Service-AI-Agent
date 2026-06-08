@@ -1,0 +1,26 @@
+/* ===== 响应式 ===== */
+@media (max-width: 1200px) {
+  .monitor-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .card-full { grid-column: span 2; }
+}
+
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .monitor-sidebar { display: none; }
+  .monitor-grid { grid-template-columns: 1fr; }
+  .card-wide, .card-full { grid-column: span 1; }
+  .quick-prompts { grid-template-columns: 1fr; }
+  .message { max-width: 95%; }
+}
+
+/* ===== 管理后台响应式 ===== */
+@media (max-width: 768px) {
+  .admin-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-layout {
+    padding: 16px;
+  }
+}

@@ -7,6 +7,10 @@ dist/
 build/
 *.egg
 
+# ===== Node.js =====
+node_modules/
+static/dist/
+
 # ===== 虚拟环境 =====
 .venv/
 venv/
