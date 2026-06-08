@@ -8,14 +8,18 @@
 - tech_support.json — 技术支持文档（35 条）
 - complaint_knowledge.json — 投诉处理知识（38 条）
 """
-import os
+
 import json
+import os
+
 from logger import get_logger
 
 logger = get_logger("seed_data")
 
 # 种子数据目录
-_SEED_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "seed")
+_SEED_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "seed"
+)
 
 # 收集名称 → JSON 文件映射
 _SEED_FILES = {
@@ -32,7 +36,7 @@ def _load_seed_file(filename: str) -> list:
     if not os.path.exists(filepath):
         logger.warning(f"种子数据文件不存在: {filepath}")
         return []
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         return json.load(f)
 
 

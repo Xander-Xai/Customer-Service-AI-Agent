@@ -2,6 +2,7 @@
 WebSocket 实时对话路由
 从 api/app.py create_app() 提取，通过 request.app.state 访问依赖。
 """
+
 import asyncio
 import hmac
 import time
@@ -11,18 +12,23 @@ from typing import Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from api.utils import sanitize_input, validate_session_id
 from config import (
-    API_KEY_ENABLED, API_KEY, DEV_MODE, MAX_QUERY_LENGTH,
-    WS_MAX_CONNECTIONS_PER_IP, WS_MESSAGE_RATE_LIMIT, WS_IDLE_TIMEOUT,
+    API_KEY,
+    API_KEY_ENABLED,
+    DEV_MODE,
+    MAX_QUERY_LENGTH,
+    WS_IDLE_TIMEOUT,
+    WS_MAX_CONNECTIONS_PER_IP,
+    WS_MESSAGE_RATE_LIMIT,
 )
 from logger import get_logger
-from api.utils import sanitize_input, validate_session_id
 
 router = APIRouter()
 logger = get_logger("api.ws")
 
 # ── WebSocket 连接跟踪 ──
-_ws_connections: Dict[str, int] = defaultdict(int)
+_ws_connections: dict[str, int] = defaultdict(int)
 _ws_lock = asyncio.Lock()
 _ws_conn_counter = 0
 
@@ -52,6 +58,7 @@ async def periodic_ws_cleanup():
 
 # ── WebSocket 认证 ──
 
+
 async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
     """WebSocket 首条消息认证。返回 (ws_api_key, session_token, ws_jwt_payload) 或抛出异常。"""
     if not (API_KEY_ENABLED and not DEV_MODE and not ws_api_key):
@@ -71,6 +78,7 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
             raise ValueError("Missing credentials")
 
         from auth.service import decode_token
+
         payload = decode_token(ws_jwt)
         if not payload:
             await ws.send_json({"type": "error", "message": "认证失败: 无效的 token"})
@@ -92,6 +100,7 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
 
 
 # ── WebSocket 实时对话 ──
+
 
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
@@ -225,19 +234,21 @@ async def websocket_chat(ws: WebSocket):
                 result = await run_graph(sid, query)
                 notify_task.cancel()
 
-                await ws.send_json({
-                    "type": "response",
-                    "content": result.get("response", ""),
-                    "agent": result.get("current_agent", ""),
-                    "elapsed": result.get("elapsed", 0),
-                    "mode": result.get("collaboration_mode", "sequential"),
-                    "cached": result.get("cached", False),
-                    "agents_used": result.get("agents_used", []),
-                    "processing_time": result.get("elapsed", 0),
-                    "resolution_status": result.get("resolution_status", ""),
-                    "session_id": sid,
-                    "session_token": session_token,
-                })
+                await ws.send_json(
+                    {
+                        "type": "response",
+                        "content": result.get("response", ""),
+                        "agent": result.get("current_agent", ""),
+                        "elapsed": result.get("elapsed", 0),
+                        "mode": result.get("collaboration_mode", "sequential"),
+                        "cached": result.get("cached", False),
+                        "agents_used": result.get("agents_used", []),
+                        "processing_time": result.get("elapsed", 0),
+                        "resolution_status": result.get("resolution_status", ""),
+                        "session_id": sid,
+                        "session_token": session_token,
+                    }
+                )
             except Exception as e:
                 notify_task.cancel()
                 logger.error(f"WS 处理失败: {e}", exc_info=True)

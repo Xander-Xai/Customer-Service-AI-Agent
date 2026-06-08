@@ -3,7 +3,10 @@ ERP 集成测试（v4.1）
 测试 KingdeeRealAdapter 的数据格式兼容性、重试逻辑、Token 过期处理
 所有测试使用 Mock，不需要真实 API
 """
+
 import asyncio
+import os
+import sys
 import time
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -11,15 +14,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-import os
-import sys
-
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from erp.kingdee_adapter import KingdeeMockAdapter
 from erp.kingdee_real_adapter import KingdeeRealAdapter, _exponential_backoff
-
 
 # ============================================================================
 # Fixtures
@@ -208,34 +207,63 @@ class TestMockVsRealFormat:
 
         # MockAdapter 的返回字段
         mock_row = {
-            "id": "P001", "name": "test", "category": "test",
-            "price": 1.0, "specs": "test", "ingredients": "test", "suitable": "test",
+            "id": "P001",
+            "name": "test",
+            "category": "test",
+            "price": 1.0,
+            "specs": "test",
+            "ingredients": "test",
+            "suitable": "test",
         }
         assert set(mock_row.keys()) == real_keys
 
     def test_inventory_keys_match(self):
         real_keys = {"product_id", "product_name", "stock", "warehouse", "updated"}
-        mapped = KingdeeRealAdapter._map_inventory({
-            "FMaterialId": {"FNumber": "X", "FName": "Y"},
-            "FQty": 1, "FStockId": {"FName": "Z"}, "FDate": "D",
-        })
+        mapped = KingdeeRealAdapter._map_inventory(
+            {
+                "FMaterialId": {"FNumber": "X", "FName": "Y"},
+                "FQty": 1,
+                "FStockId": {"FName": "Z"},
+                "FDate": "D",
+            }
+        )
         assert set(mapped.keys()) == real_keys
 
     def test_order_keys_match(self):
-        real_keys = {"order_id", "customer_id", "customer_name", "total", "status", "tracking", "created", "items"}
-        mapped = KingdeeRealAdapter._map_order({
-            "FBillNo": "X", "FCUSTID": {"FNumber": "A", "FName": "B"},
-            "FOrderAmount": 1, "FStatus": "S", "FTrackingNo": "T",
-            "FDate": "D", "BillEntry": [],
-        })
+        real_keys = {
+            "order_id",
+            "customer_id",
+            "customer_name",
+            "total",
+            "status",
+            "tracking",
+            "created",
+            "items",
+        }
+        mapped = KingdeeRealAdapter._map_order(
+            {
+                "FBillNo": "X",
+                "FCUSTID": {"FNumber": "A", "FName": "B"},
+                "FOrderAmount": 1,
+                "FStatus": "S",
+                "FTrackingNo": "T",
+                "FDate": "D",
+                "BillEntry": [],
+            }
+        )
         assert set(mapped.keys()) == real_keys
 
     def test_customer_keys_match(self):
         real_keys = {"id", "name", "phone", "level", "address"}
-        mapped = KingdeeRealAdapter._map_customer({
-            "FNumber": "X", "FName": "Y", "FPhoneNumber": "Z",
-            "FVIPLevel": "V", "FAddress": "A",
-        })
+        mapped = KingdeeRealAdapter._map_customer(
+            {
+                "FNumber": "X",
+                "FName": "Y",
+                "FPhoneNumber": "Z",
+                "FVIPLevel": "V",
+                "FAddress": "A",
+            }
+        )
         assert set(mapped.keys()) == real_keys
 
 
@@ -320,10 +348,12 @@ class TestRetryLogic:
         error_resp = _make_http_response(500)
         ok_resp = _make_http_response(200, {"Data": {"Rows": []}})
 
-        real_adapter._client = _make_mock_client(post_side_effect=[
-            httpx.HTTPStatusError("500", request=MagicMock(), response=error_resp),
-            ok_resp,
-        ])
+        real_adapter._client = _make_mock_client(
+            post_side_effect=[
+                httpx.HTTPStatusError("500", request=MagicMock(), response=error_resp),
+                ok_resp,
+            ]
+        )
 
         result = await real_adapter._api_call("BD_MATERIAL", "BillQuery", {"FormId": "BD_MATERIAL"})
         assert result == {"Data": {"Rows": []}}
@@ -339,11 +369,13 @@ class TestRetryLogic:
         ok_resp = _make_http_response(200, {"Data": {"Rows": [{"FName": "test"}]}})
 
         # 第一次调用返回 401，第二次（刷新 token）返回新 token，第三次（重试）返回成功
-        real_adapter._client = _make_mock_client(post_side_effect=[
-            httpx.HTTPStatusError("401", request=MagicMock(), response=error_resp),
-            token_resp,
-            ok_resp,
-        ])
+        real_adapter._client = _make_mock_client(
+            post_side_effect=[
+                httpx.HTTPStatusError("401", request=MagicMock(), response=error_resp),
+                token_resp,
+                ok_resp,
+            ]
+        )
 
         result = await real_adapter._api_call("BD_MATERIAL", "BillQuery", {"FormId": "BD_MATERIAL"})
         assert result["Data"]["Rows"][0]["FName"] == "test"
@@ -589,7 +621,6 @@ class TestQueryOrder:
 
 
 class TestQueryCustomer:
-
     @pytest.mark.asyncio
     async def test_returns_none_for_empty_id(self, real_adapter: KingdeeRealAdapter):
         result = await real_adapter.query_customer("")
@@ -600,13 +631,15 @@ class TestQueryCustomer:
         real_adapter._token = "valid_token"
         real_adapter._token_expires = time.time() + 3600
 
-        api_rows = [{
-            "FNumber": "C001",
-            "FName": "王女士",
-            "FPhoneNumber": "138****1234",
-            "FVIPLevel": "VIP",
-            "FAddress": "上海",
-        }]
+        api_rows = [
+            {
+                "FNumber": "C001",
+                "FName": "王女士",
+                "FPhoneNumber": "138****1234",
+                "FVIPLevel": "VIP",
+                "FAddress": "上海",
+            }
+        ]
         resp = _make_http_response(200, {"Data": {"Rows": api_rows}})
         real_adapter._client = _make_mock_client(post_return=resp)
 
@@ -633,7 +666,6 @@ class TestQueryCustomer:
 
 
 class TestClose:
-
     @pytest.mark.asyncio
     async def test_close_cleans_up(self, real_adapter: KingdeeRealAdapter):
         real_adapter._token = "test_token"

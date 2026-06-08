@@ -2,12 +2,15 @@
 告警通知发送器（v4.0 — Webhook + Email）
 支持钉钉 / 企业微信 / 飞书 Webhook，以及 SMTP 邮件通知。
 """
-import os
-import json
-import time
+
 import asyncio
+import json
+import os
+import time
+from typing import Any, Dict, List, Optional
+
 import httpx
-from typing import Dict, Any, Optional, List
+
 from logger import get_logger
 
 logger = get_logger("alerts.notifier")
@@ -17,10 +20,12 @@ class AlertNotifier:
     """告警通知发送器"""
 
     def __init__(self):
-        self.webhooks: List[Dict[str, str]] = []  # [{"name": "...", "url": "...", "type": "dingtalk|wecom|feishu"}]
+        self.webhooks: list[
+            dict[str, str]
+        ] = []  # [{"name": "...", "url": "...", "type": "dingtalk|wecom|feishu"}]
         self.email_enabled = False
-        self.email_config: Dict[str, str] = {}
-        self.alert_history: List[Dict[str, Any]] = []
+        self.email_config: dict[str, str] = {}
+        self.alert_history: list[dict[str, Any]] = []
         self._load_config()
 
     def _load_config(self):
@@ -40,7 +45,9 @@ class AlertNotifier:
             "smtp_user": os.getenv("SMTP_USER", ""),
             "smtp_password": os.getenv("SMTP_PASSWORD", ""),
             "from_addr": os.getenv("ALERT_EMAIL_FROM", ""),
-            "to_addrs": [a.strip() for a in os.getenv("ALERT_EMAIL_TO", "").split(",") if a.strip()],
+            "to_addrs": [
+                a.strip() for a in os.getenv("ALERT_EMAIL_TO", "").split(",") if a.strip()
+            ],
         }
         self.email_enabled = bool(
             self.email_config["smtp_host"]
@@ -77,7 +84,7 @@ class AlertNotifier:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _send_webhook(self, webhook: Dict[str, str], alert: Dict[str, Any]):
+    async def _send_webhook(self, webhook: dict[str, str], alert: dict[str, Any]):
         """发送 Webhook 通知"""
         import ipaddress
         from urllib.parse import urlparse
@@ -94,7 +101,13 @@ class AlertNotifier:
                 logger.warning(f"Webhook URL 拒绝: 非法 scheme {parsed.scheme}")
                 return
             hostname = parsed.hostname or ""
-            blocked_hosts = {"169.254.169.254", "metadata.google.internal", "localhost", "127.0.0.1", "0.0.0.0"}
+            blocked_hosts = {
+                "169.254.169.254",
+                "metadata.google.internal",
+                "localhost",
+                "127.0.0.1",
+                "0.0.0.0",
+            }
             if hostname in blocked_hosts:
                 logger.warning(f"Webhook URL 拒绝: 被禁止的主机 {hostname}")
                 return
@@ -109,16 +122,27 @@ class AlertNotifier:
             logger.warning(f"Webhook URL 解析失败: {url[:50]}")
             return
 
-        severity_emoji = {"critical": "🔴", "warning": "🟡", "info": "🟢"}.get(alert["severity"], "⚪")
+        severity_emoji = {"critical": "🔴", "warning": "🟡", "info": "🟢"}.get(
+            alert["severity"], "⚪"
+        )
         text = f"{severity_emoji} **{alert['title']}**\n\n{alert['content']}\n\n⏰ {time.strftime('%Y-%m-%d %H:%M:%S')}"
 
         try:
             if wh_type == "dingtalk":
-                payload = {"msgtype": "markdown", "markdown": {"title": alert["title"], "text": text}}
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {"title": alert["title"], "text": text},
+                }
             elif wh_type == "wecom":
                 payload = {"msgtype": "markdown", "markdown": {"content": text}}
             elif wh_type == "feishu":
-                payload = {"msg_type": "interactive", "card": {"header": {"title": {"tag": "plain_text", "content": alert["title"]}}, "elements": [{"tag": "markdown", "content": alert["content"]}]}}
+                payload = {
+                    "msg_type": "interactive",
+                    "card": {
+                        "header": {"title": {"tag": "plain_text", "content": alert["title"]}},
+                        "elements": [{"tag": "markdown", "content": alert["content"]}],
+                    },
+                }
             else:
                 payload = {"text": text}
 
@@ -127,18 +151,24 @@ class AlertNotifier:
                 if resp.status_code == 200:
                     logger.info(f"Webhook 告警发送成功: {webhook.get('name', wh_type)}")
                 else:
-                    logger.warning(f"Webhook 告警发送失败 ({resp.status_code}): {webhook.get('name', wh_type)}")
+                    logger.warning(
+                        f"Webhook 告警发送失败 ({resp.status_code}): {webhook.get('name', wh_type)}"
+                    )
         except Exception as e:
             logger.warning(f"Webhook 告警发送异常: {e}")
 
-    async def _send_email(self, alert: Dict[str, Any]):
+    async def _send_email(self, alert: dict[str, Any]):
         """发送邮件通知"""
         try:
             import smtplib
-            from email.mime.text import MIMEText
             from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
 
-            severity_label = {"critical": "【严重】", "warning": "【警告】", "info": "【信息】"}.get(alert["severity"], "")
+            severity_label = {
+                "critical": "【严重】",
+                "warning": "【警告】",
+                "info": "【信息】",
+            }.get(alert["severity"], "")
             msg = MIMEMultipart()
             msg["From"] = self.email_config["from_addr"]
             msg["To"] = ", ".join(self.email_config["to_addrs"])
@@ -148,22 +178,35 @@ class AlertNotifier:
             msg.attach(MIMEText(body, "plain", "utf-8"))
 
             def _send():
-                with smtplib.SMTP(self.email_config["smtp_host"], self.email_config["smtp_port"]) as server:
+                with smtplib.SMTP(
+                    self.email_config["smtp_host"], self.email_config["smtp_port"]
+                ) as server:
                     server.starttls()
                     server.login(self.email_config["smtp_user"], self.email_config["smtp_password"])
-                    server.sendmail(self.email_config["from_addr"], self.email_config["to_addrs"], msg.as_string())
+                    server.sendmail(
+                        self.email_config["from_addr"],
+                        self.email_config["to_addrs"],
+                        msg.as_string(),
+                    )
 
             await asyncio.to_thread(_send)
             logger.info("邮件告警发送成功")
         except Exception as e:
             logger.warning(f"邮件告警发送失败: {e}")
 
-    def get_history(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_history(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.alert_history[-limit:]
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         return {
-            "webhooks": [{"name": w.get("name", ""), "type": w.get("type", ""), "url": w.get("url", "")[:20] + "..."} for w in self.webhooks],
+            "webhooks": [
+                {
+                    "name": w.get("name", ""),
+                    "type": w.get("type", ""),
+                    "url": w.get("url", "")[:20] + "...",
+                }
+                for w in self.webhooks
+            ],
             "email_enabled": self.email_enabled,
             "email_to": self.email_config.get("to_addrs", []),
         }

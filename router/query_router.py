@@ -5,11 +5,14 @@
 - _rule_classify_and_score 合并了规则分类与复杂度评分为单次遍历
 - LLM 分类与规则分类并行执行
 """
-import re
+
 import json
-from typing import Any, Dict, Optional, Tuple
+import re
 from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple
+
 from langchain_core.messages import HumanMessage, SystemMessage
+
 from config import LLM_ROUTER_TIMEOUT
 from logger import get_logger
 
@@ -19,6 +22,7 @@ logger = get_logger("router")
 @dataclass
 class RoutingResult:
     """路由结果"""
+
     query_type: str = "general_inquiry"
     agent_name: str = "general_agent"
     complexity: int = 0
@@ -41,7 +45,9 @@ INTENT_AGENT_MAP = {
 
 # 规则模式匹配表（预编译正则，避免每次调用编译开销）
 _RULE_PATTERNS = {
-    "product_info": [re.compile(r"产品|商品|精华|面膜|洁面|面霜|化妆水|价格|多少钱|成分|功效|推荐")],
+    "product_info": [
+        re.compile(r"产品|商品|精华|面膜|洁面|面霜|化妆水|价格|多少钱|成分|功效|推荐")
+    ],
     "technical_support": [re.compile(r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存")],
     "billing": [re.compile(r"退款|退货|发票|付款|支付|账单|费用|订单|物流|快递|发货")],
     "complaint": [re.compile(r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|质量.*问题")],
@@ -50,9 +56,11 @@ _RULE_PATTERNS = {
 }
 
 # 复杂度评分用的预编译正则
-_RE_TECH_TERMS = [re.compile(r"过敏|刺激|成分|配方|工艺"),
-                  re.compile(r"退款|发票|对公|分期"),
-                  re.compile(r"投诉|升级|主管")]
+_RE_TECH_TERMS = [
+    re.compile(r"过敏|刺激|成分|配方|工艺"),
+    re.compile(r"退款|发票|对公|分期"),
+    re.compile(r"投诉|升级|主管"),
+]
 _RE_PRICE = re.compile(r"\d+[\.\d]*\s*[元块]|¥|￥|\d{10,}")
 
 # 意图优先级（同分时高优先级意图胜出，数值越小越优先）
@@ -93,8 +101,10 @@ class QueryRouter:
         fast_path = complexity < self.complexity_threshold
         agent_name = INTENT_AGENT_MAP.get(final_type, "general_agent")
 
-        logger.debug(f"route: type={final_type} agent={agent_name} complexity={complexity} "
-                     f"confidence={llm_result.get('confidence', 0):.2f} rule_override={rule_override}")
+        logger.debug(
+            f"route: type={final_type} agent={agent_name} complexity={complexity} "
+            f"confidence={llm_result.get('confidence', 0):.2f} rule_override={rule_override}"
+        )
 
         return RoutingResult(
             query_type=final_type,
@@ -106,7 +116,7 @@ class QueryRouter:
             rule_override=rule_override,
         )
 
-    async def _llm_classify(self, query: str, context: str = "") -> Dict[str, Any]:
+    async def _llm_classify(self, query: str, context: str = "") -> dict[str, Any]:
         if not self.llm:
             return {"query_type": "general_inquiry", "confidence": 0.5, "raw": "no_llm"}
 
@@ -129,7 +139,7 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
             # v3.4: 使用 json.JSONDecoder.raw_decode 替代贪婪正则，更稳健
             try:
                 decoder = json.JSONDecoder()
-                obj, _ = decoder.raw_decode(raw[raw.index('{'):])
+                obj, _ = decoder.raw_decode(raw[raw.index("{") :])
                 obj["raw"] = raw
                 return obj
             except (ValueError, KeyError):
@@ -144,12 +154,14 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
             logger.error(f"LLM 分类失败: {e}")
             return {"query_type": "general_inquiry", "confidence": 0.1, "raw": "llm_error"}
 
-    def _rule_classify_and_score(self, query: str, context: str = "") -> Tuple[Optional[str], Dict[str, int], int]:
+    def _rule_classify_and_score(
+        self, query: str, context: str = ""
+    ) -> tuple[str | None, dict[str, int], int]:
         """
         合并规则分类与复杂度评分为单次遍历（v3.3 优化）
         返回 (best_intent, intent_scores, complexity)
         """
-        scores: Dict[str, int] = {}
+        scores: dict[str, int] = {}
         intent_count = 0
 
         for intent, patterns in _RULE_PATTERNS.items():
@@ -158,7 +170,9 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
                 scores[intent] = count
                 intent_count += 1
 
-        best_intent = max(scores, key=lambda k: (scores[k], -_INTENT_PRIORITY.get(k, 99))) if scores else None
+        best_intent = (
+            max(scores, key=lambda k: (scores[k], -_INTENT_PRIORITY.get(k, 99))) if scores else None
+        )
 
         # 复杂度评分（复用已计算的 intent_count，避免二次遍历）
         complexity = 0

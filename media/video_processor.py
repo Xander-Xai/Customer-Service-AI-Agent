@@ -7,6 +7,7 @@ VideoProcessor — 视频抽帧处理（v5.1）
 - 帧转 base64 data URL
 - 大小限制
 """
+
 import base64
 import io
 import logging
@@ -35,7 +36,7 @@ class VideoProcessor:
         self.max_frames = max_frames
         self.interval_sec = interval_sec
 
-    def validate(self, data: bytes, content_type: str) -> Optional[str]:
+    def validate(self, data: bytes, content_type: str) -> str | None:
         """校验视频文件，返回错误信息或 None"""
         if content_type not in ALLOWED_VIDEO_TYPES:
             return f"不支持的视频格式: {content_type}，支持: MP4/WebM/MOV"
@@ -45,7 +46,7 @@ class VideoProcessor:
             return "视频文件为空"
         return None
 
-    def extract_frames(self, video_bytes: bytes, content_type: str) -> List[str]:
+    def extract_frames(self, video_bytes: bytes, content_type: str) -> list[str]:
         """
         从视频中提取关键帧，返回 base64 data URL 列表
 
@@ -68,10 +69,13 @@ class VideoProcessor:
             import cv2
             import numpy as np
         except ImportError:
-            raise ImportError("opencv-python-headless 未安装，请运行: pip install opencv-python-headless")
+            raise ImportError(
+                "opencv-python-headless 未安装，请运行: pip install opencv-python-headless"
+            )
 
         # 写入临时文件（OpenCV 需要文件路径）
         import tempfile
+
         ext_map = {"video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov"}
         ext = ext_map.get(content_type, ".mp4")
 
@@ -117,8 +121,9 @@ class VideoProcessor:
     def get_video_info(video_bytes: bytes) -> dict:
         """获取视频基本信息"""
         try:
-            import cv2
             import tempfile
+
+            import cv2
 
             with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as tmp:
                 tmp.write(video_bytes)
@@ -130,7 +135,8 @@ class VideoProcessor:
                     "fps": cap.get(cv2.CAP_PROP_FPS),
                     "total_frames": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
                     "duration_sec": round(
-                        int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 25), 1
+                        int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 25),
+                        1,
                     ),
                     "size_bytes": len(video_bytes),
                     "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
@@ -138,4 +144,7 @@ class VideoProcessor:
                 cap.release()
                 return info
         except Exception:
-            return {"size_bytes": len(video_bytes), "size_mb": round(len(video_bytes) / 1024 / 1024, 2)}
+            return {
+                "size_bytes": len(video_bytes),
+                "size_mb": round(len(video_bytes) / 1024 / 1024, 2),
+            }

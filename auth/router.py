@@ -5,14 +5,24 @@
 - GET  /api/auth/me — 当前用户信息
 - GET  /api/auth/users — 用户列表（admin）
 """
+
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, Field, validator
 from typing import Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field, validator
+
 from db.database import get_db
-from db.models import User, AuditLog
-from .service import register_user, authenticate_user, get_current_user, decode_token, revoke_token, refresh_access_token
+from db.models import AuditLog, User
+
+from .service import (
+    authenticate_user,
+    decode_token,
+    get_current_user,
+    refresh_access_token,
+    register_user,
+    revoke_token,
+)
 
 
 def _dt_to_iso(dt):
@@ -22,6 +32,8 @@ def _dt_to_iso(dt):
     if isinstance(dt, datetime):
         return dt.isoformat()
     return dt
+
+
 from logger import get_logger
 
 logger = get_logger("auth.router")
@@ -30,6 +42,7 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 
 # ── 请求模型 ──
+
 
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=32, pattern=r"^[a-zA-Z0-9_]+$")
@@ -55,10 +68,12 @@ class LoginRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     """P2-3: Refresh Token 请求"""
+
     refresh_token: str
 
 
 # ── 辅助函数 ──
+
 
 def _get_token_from_request(request: Request) -> str:
     """从请求中提取 JWT token"""
@@ -68,7 +83,7 @@ def _get_token_from_request(request: Request) -> str:
     return ""
 
 
-def get_current_user_from_request(request: Request) -> Optional[User]:
+def get_current_user_from_request(request: Request) -> User | None:
     """从请求获取当前用户"""
     token = _get_token_from_request(request)
     if not token:
@@ -93,6 +108,7 @@ def require_admin(request: Request) -> User:
 
 
 # ── 路由 ──
+
 
 @router.post("/register")
 async def api_register(data: RegisterRequest, request: Request, db=Depends(get_db)):
@@ -212,13 +228,21 @@ async def api_audit_log(request: Request, limit: int = 50, db=Depends(get_db)):
 class UpdateRoleRequest(BaseModel):
     role: str
 
+
 @router.put("/users/{user_id}/role")
-async def update_user_role(user_id: int, req: UpdateRoleRequest, request: Request, admin_user=Depends(require_admin), db=Depends(get_db)):
+async def update_user_role(
+    user_id: int,
+    req: UpdateRoleRequest,
+    request: Request,
+    admin_user=Depends(require_admin),
+    db=Depends(get_db),
+):
     """管理员修改用户角色"""
     VALID_ROLES = {"customer", "agent", "supervisor", "admin"}
     if req.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"无效角色，可选: {', '.join(VALID_ROLES)}")
     from db.models import User
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")

@@ -5,21 +5,24 @@
 v3.4: 所有 FilterString 参数经过 sanitize_erp_input 净化，防 SQL 注入
 v4.1: 指数退避重试 + Token 自动刷新 + 分页查询 + 字段标准化映射
 """
+
 import asyncio
 import functools
 import re
 import time
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, Dict, List, Optional, TypeVar
 
 import httpx
-from erp import KingdeeAdapterBase, sanitize_erp_input
+
 from config import (
     HTTP_TIMEOUT,
-    HTTPX_MAX_CONNECTIONS,
     HTTPX_KEEPALIVE_CONNECTIONS,
-    RETRY_MAX_ATTEMPTS,
+    HTTPX_MAX_CONNECTIONS,
     RETRY_BASE_DELAY,
+    RETRY_MAX_ATTEMPTS,
 )
+from erp import KingdeeAdapterBase, sanitize_erp_input
 from logger import get_logger
 
 logger = get_logger("erp.kingdee_real")
@@ -41,17 +44,16 @@ def _exponential_backoff(
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            last_exc: Optional[Exception] = None
+            last_exc: Exception | None = None
             for attempt in range(max_attempts):
                 try:
                     return await func(*args, **kwargs)
                 except exceptions as exc:
                     last_exc = exc
                     if attempt < max_attempts - 1:
-                        delay = base_delay * (2 ** attempt)
+                        delay = base_delay * (2**attempt)
                         logger.warning(
-                            f"{func.__name__} 第 {attempt + 1} 次失败: {exc}, "
-                            f"{delay:.1f}s 后重试"
+                            f"{func.__name__} 第 {attempt + 1} 次失败: {exc}, {delay:.1f}s 后重试"
                         )
                         await asyncio.sleep(delay)
             raise last_exc  # type: ignore[misc]
@@ -98,11 +100,11 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         self.app_id = app_id
         self.app_secret = app_secret
         self.db_id = db_id
-        self._token: Optional[str] = None
+        self._token: str | None = None
         self._token_obtained_at: float = 0
         self._token_expires: float = 0
-        self._token_refresh_lock: Optional[asyncio.Lock] = None
-        self._client: Optional[httpx.AsyncClient] = None
+        self._token_refresh_lock: asyncio.Lock | None = None
+        self._client: httpx.AsyncClient | None = None
 
     def _get_refresh_lock(self) -> asyncio.Lock:
         """延迟创建锁（避免在非异步上下文中创建）"""
@@ -177,7 +179,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         base_delay=1.0,
         exceptions=(httpx.HTTPStatusError, httpx.RequestError),
     )
-    async def _api_call(self, form_id: str, method: str, data: Dict[str, Any]) -> Any:
+    async def _api_call(self, form_id: str, method: str, data: dict[str, Any]) -> Any:
         """
         通用金蝶 API 调用
         - 401/403 时自动刷新 token 并重试
@@ -224,19 +226,19 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         self,
         form_id: str,
         filter_string: str,
-        field_names: Optional[List[str]] = None,
+        field_names: list[str] | None = None,
         top_row_count: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         带分页的金蝶 BillQuery 封装。
         - top_row_count=0 表示查询全部（自动分页）
         - 返回合并后的所有行
         """
-        all_rows: List[Dict[str, Any]] = []
+        all_rows: list[dict[str, Any]] = []
         start_row = 0
 
         while True:
-            body: Dict[str, Any] = {
+            body: dict[str, Any] = {
                 "FormId": form_id,
                 "FilterString": filter_string,
                 "StartRow": start_row,
@@ -278,7 +280,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     # -------------------------------------------------------------------
 
     @staticmethod
-    def _map_product(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _map_product(row: dict[str, Any]) -> dict[str, Any]:
         """金蝶物料行 -> 标准产品字段"""
         return {
             "id": row.get("FNumber", ""),
@@ -291,7 +293,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         }
 
     @staticmethod
-    def _map_inventory(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _map_inventory(row: dict[str, Any]) -> dict[str, Any]:
         """金蝶库存行 -> 标准库存字段"""
         material = row.get("FMaterialId", {})
         if isinstance(material, str):
@@ -308,7 +310,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         }
 
     @staticmethod
-    def _map_order(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _map_order(row: dict[str, Any]) -> dict[str, Any]:
         """金蝶销售订单行 -> 标准订单字段"""
         customer = row.get("FCUSTID", {})
         if isinstance(customer, str):
@@ -316,7 +318,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         bill_entries = row.get("BillEntry", [])
         if isinstance(bill_entries, str):
             bill_entries = []
-        items: List[str] = []
+        items: list[str] = []
         for entry in bill_entries:
             if isinstance(entry, dict):
                 mat = entry.get("FMaterialId", {})
@@ -336,7 +338,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         }
 
     @staticmethod
-    def _map_customer(row: Dict[str, Any]) -> Dict[str, Any]:
+    def _map_customer(row: dict[str, Any]) -> dict[str, Any]:
         """金蝶客户行 -> 标准客户字段"""
         return {
             "id": row.get("FNumber", ""),
@@ -350,7 +352,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
     # 业务查询方法
     # -------------------------------------------------------------------
 
-    async def query_product(self, keyword: str) -> List[Dict[str, Any]]:
+    async def query_product(self, keyword: str) -> list[dict[str, Any]]:
         """查询商品信息（映射到金蝶物料表 BD_MATERIAL）"""
         try:
             safe_keyword = sanitize_erp_input(keyword)
@@ -363,7 +365,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
 
     async def query_inventory(
         self, product_id: str = "", keyword: str = ""
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """查询库存（映射到金蝶库存查询 STK_INVENTORY）"""
         try:
             safe_pid = sanitize_erp_input(product_id)
@@ -380,14 +382,11 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             logger.warning(f"库存查询失败: {e}")
             return []
 
-    async def query_order(
-        self, order_id: str = "", customer_id: str = ""
-    ) -> List[Dict[str, Any]]:
+    async def query_order(self, order_id: str = "", customer_id: str = "") -> list[dict[str, Any]]:
         """查询订单（映射到金蝶销售订单 SAL_ORDER）"""
         if not order_id and not customer_id:
             logger.warning(
-                "query_order 被调用时未提供 order_id 或 customer_id，"
-                "拒绝查询以防止全量数据泄漏"
+                "query_order 被调用时未提供 order_id 或 customer_id，拒绝查询以防止全量数据泄漏"
             )
             return []
         try:
@@ -403,16 +402,14 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             logger.warning(f"订单查询失败: {e}")
             return []
 
-    async def query_customer(self, customer_id: str) -> Optional[Dict[str, Any]]:
+    async def query_customer(self, customer_id: str) -> dict[str, Any] | None:
         """查询客户资料（映射到金蝶客户表 BD_CUSTOMER）"""
         if not customer_id:
             logger.warning("query_customer 被调用时未提供 customer_id，拒绝查询")
             return None
         try:
             safe_cid = sanitize_erp_input(customer_id)
-            rows = await self._paged_query(
-                "BD_CUSTOMER", f"FNumber='{safe_cid}'"
-            )
+            rows = await self._paged_query("BD_CUSTOMER", f"FNumber='{safe_cid}'")
             if not rows:
                 return None
             return self._map_customer(rows[0])

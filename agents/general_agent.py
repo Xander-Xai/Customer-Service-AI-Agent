@@ -2,8 +2,10 @@
 通用咨询专家智能体（v3.4 精简版）
 兼任协作协调者角色
 """
+
 import re
-from typing import Dict, Any
+from typing import Any, Dict
+
 from .base_agent import BaseAgent
 
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
@@ -23,10 +25,10 @@ class GeneralAgent(BaseAgent):
         super().__init__(
             name="通用咨询专家",
             role="一般咨询和客户服务协调",
-            expertise=["产品概览", "服务介绍", "常见问题", "协调转接", "售前咨询"]
+            expertise=["产品概览", "服务介绍", "常见问题", "协调转接", "售前咨询"],
         )
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         customer_query = state["customer_query"]
 
         extra_context = ""
@@ -39,9 +41,9 @@ class GeneralAgent(BaseAgent):
             )
             if customer and isinstance(customer, dict) and customer.get("name"):
                 erp_data = (
-                    f"客户: {customer.get('name','')} | 电话: {customer.get('phone','')} "
-                    f"| 等级: {customer.get('level','')} | 累计消费: {customer.get('total_spent',0)}元 "
-                    f"| 地址: {customer.get('address','')}"
+                    f"客户: {customer.get('name', '')} | 电话: {customer.get('phone', '')} "
+                    f"| 等级: {customer.get('level', '')} | 累计消费: {customer.get('total_spent', 0)}元 "
+                    f"| 地址: {customer.get('address', '')}"
                 )
                 await self._write_blackboard("erp.customer_data", erp_data, ttl=300)
                 extra_context = f"[客户资料]\n{erp_data}"
@@ -52,12 +54,13 @@ class GeneralAgent(BaseAgent):
                 bb_data = await self.bb.read_prefix("erp.")
                 if bb_data:
                     context_parts = [f"[{k}] {v}" for k, v in bb_data.items()]
-                    extra_context += f"\n\n[其他Agent发现]\n" + "\n".join(context_parts[:3])
+                    extra_context += "\n\n[其他Agent发现]\n" + "\n".join(context_parts[:3])
             except Exception as e:
                 self.logger.debug(f"Blackboard 读取失败: {e}")
 
         return await self._process_with_llm(
-            state, self._format_system_prompt(_SYSTEM_PROMPT),
+            state,
+            self._format_system_prompt(_SYSTEM_PROMPT),
             extra_context=extra_context,
             fallback_response="感谢您的咨询，请问有什么可以帮助您的？",
         )

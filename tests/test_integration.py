@@ -11,11 +11,14 @@ Mock LLM 集成测试（v3.9）
 
 所有测试无需真实 LLM API Key，100% Mock。
 """
+
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ===== Mock LLM 响应构造 =====
+
 
 def _make_mock_llm(content: str = "这是一条测试回复", tool_calls=None):
     """构造一个行为可控的 Mock LLM 客户端"""
@@ -49,6 +52,7 @@ def _make_state(query: str, session_id: str = "test-session") -> dict:
 
 # ===== 测试类 =====
 
+
 class TestGraphEndToEnd:
     """端到端图调用测试（Mock LLM）"""
 
@@ -70,6 +74,7 @@ class TestGraphEndToEnd:
 
         # Patch ERP（create_erp_adapter 在 _init_agents 中通过 from erp.factory 导入）
         from erp.kingdee_adapter import KingdeeMockAdapter
+
         self.mock_erp = KingdeeMockAdapter()
 
         self.erp_patcher = patch(
@@ -85,15 +90,16 @@ class TestGraphEndToEnd:
         self.container.llm = self.mock_llm
 
     def teardown_method(self):
-        if hasattr(self, 'patcher'):
+        if hasattr(self, "patcher"):
             self.patcher.stop()
-        if hasattr(self, 'erp_patcher'):
+        if hasattr(self, "erp_patcher"):
             self.erp_patcher.stop()
 
     @pytest.mark.asyncio
     async def test_simple_query_end_to_end(self):
         """简单查询：缓存未命中 → 路由 → Sequential → 响应"""
         from multi_agent_customer_service import build_graph
+
         app = build_graph(self.container)
         state = _make_state("这款精华液多少钱？")
 
@@ -109,6 +115,7 @@ class TestGraphEndToEnd:
     async def test_cache_hit_skips_routing(self):
         """缓存命中 → 直接跳到 final_response，跳过路由"""
         from multi_agent_customer_service import build_graph
+
         app = build_graph(self.container)
 
         # 先跑一次，让响应被缓存
@@ -130,6 +137,7 @@ class TestGraphEndToEnd:
         """投诉查询 → 端到端走通（mock LLM 路由器可能返回非 complaint 分类，
         但图应仍能完整执行并返回响应。投诉→hierarchical 路由逻辑由 TestRoutingLogic 单独验证）"""
         from multi_agent_customer_service import build_graph
+
         app = build_graph(self.container)
         state = _make_state("我要投诉！你们的产品导致我皮肤过敏，要求退款赔偿！")
 
@@ -144,6 +152,7 @@ class TestGraphEndToEnd:
         """多领域查询 → 端到端走通（mock LLM 路由器分类有限，但图应完整执行。
         多领域→parallel/react 路由逻辑由 TestRoutingLogic 单独验证）"""
         from multi_agent_customer_service import build_graph
+
         app = build_graph(self.container)
         state = _make_state("我买了你们的精华液，想查一下订单物流，另外产品成分安全吗？")
 
@@ -157,9 +166,11 @@ class TestGraphEndToEnd:
     async def test_general_inquiry_sequential(self):
         """通用咨询 → Sequential 模式（使用唯一查询避免缓存干扰）"""
         from multi_agent_customer_service import build_graph
+
         app = build_graph(self.container)
         # 使用带时间戳的唯一查询，避免被之前的测试缓存命中
         import time
+
         unique_query = f"你好，请问有什么可以帮您的？{int(time.time() * 1000)}"
         state = _make_state(unique_query)
 
@@ -174,9 +185,9 @@ class TestAgentProcess:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        from session_manager import EnhancedSessionManager
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
+        from session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -294,11 +305,11 @@ class TestAgentSessionContext:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        from session_manager import EnhancedSessionManager
+        from agents import ProductAgent
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
-        from agents import ProductAgent
         from erp.kingdee_adapter import KingdeeMockAdapter
+        from session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -325,8 +336,9 @@ class TestAgentSessionContext:
             # 验证第二轮调用时 messages 中包含第一轮的对话
             if call_count == 1:
                 msg_contents = [str(m.content) for m in messages]
-                assert any("第一轮" in c or "精华液" in c for c in msg_contents), \
+                assert any("第一轮" in c or "精华液" in c for c in msg_contents), (
                     "第二轮 LLM 调用应包含第一轮的对话上下文"
+                )
             resp.content = responses[call_count]
             call_count += 1
             return resp
@@ -352,6 +364,7 @@ class TestDriftDetection:
     @pytest.fixture(autouse=True)
     async def setup(self):
         from session_manager import EnhancedSessionManager
+
         self.sm = EnhancedSessionManager()
         self.session_id = "drift-test"
         await self.sm.create_session(self.session_id)
@@ -381,7 +394,10 @@ class TestDriftDetection:
         drift = await self.sm.detect_drift(self.session_id, "今天天气怎么样？")
         # 话题漂移应该被检测到（Jaccard 相似度很低）
         assert drift.get("drifts"), f"Expected drifts, got: {drift}"
-        assert any(d.get("type") in ("topic_drift", "intent_drift", "topic", "intent") for d in drift["drifts"])
+        assert any(
+            d.get("type") in ("topic_drift", "intent_drift", "topic", "intent")
+            for d in drift["drifts"]
+        )
 
 
 class TestCollaborationModes:
@@ -389,15 +405,18 @@ class TestCollaborationModes:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        from session_manager import EnhancedSessionManager
+        from agents import (
+            BillingAgent,
+            ComplaintAgent,
+            GeneralAgent,
+            ProductAgent,
+            TechAgent,
+        )
+        from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
-        from collaboration.orchestrator import CollaborationOrchestrator
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from agents import (
-            ProductAgent, TechAgent, BillingAgent,
-            ComplaintAgent, GeneralAgent,
-        )
+        from session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -433,10 +452,7 @@ class TestCollaborationModes:
         state = _make_state("精华液多少钱？")
         self.sm.create_session(state["session_id"])
 
-        result = await mode.execute(
-            self.agents_dict, state,
-            {"primary_agent": "product_agent"}
-        )
+        result = await mode.execute(self.agents_dict, state, {"primary_agent": "product_agent"})
 
         assert result["response"], "Sequential 模式应返回响应"
         assert result["mode"] == "sequential"
@@ -452,8 +468,7 @@ class TestCollaborationModes:
         self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
-            self.agents_dict, state,
-            {"agent_list": ["product_agent", "billing_agent"]}
+            self.agents_dict, state, {"agent_list": ["product_agent", "billing_agent"]}
         )
 
         assert result["response"]
@@ -470,8 +485,9 @@ class TestCollaborationModes:
         self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
-            self.agents_dict, state,
-            {"primary_agent": "product_agent", "consult_agents": ["tech_agent"]}
+            self.agents_dict,
+            state,
+            {"primary_agent": "product_agent", "consult_agents": ["tech_agent"]},
         )
 
         assert result["response"]
@@ -487,8 +503,9 @@ class TestCollaborationModes:
         self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
-            self.agents_dict, state,
-            {"coordinator": "general_agent", "sub_tasks": {"complaint_agent": "投诉处理"}}
+            self.agents_dict,
+            state,
+            {"coordinator": "general_agent", "sub_tasks": {"complaint_agent": "投诉处理"}},
         )
 
         assert result["response"]
@@ -503,10 +520,7 @@ class TestCollaborationModes:
         state = _make_state("帮我查一下订单 1001 的物流状态，并推荐相关产品")
         self.sm.create_session(state["session_id"])
 
-        result = await mode.execute(
-            self.agents_dict, state,
-            {"primary_agent": "react_agent"}
-        )
+        result = await mode.execute(self.agents_dict, state, {"primary_agent": "react_agent"})
 
         assert result["response"]
         assert result["mode"] == "react"
@@ -518,6 +532,7 @@ class TestErrorHandling:
     @pytest.fixture(autouse=True)
     def setup(self):
         import multi_agent_customer_service as graph_mod
+
         self.graph_mod = graph_mod
         graph_mod.llm = None
         graph_mod.agents_dict = {}
@@ -534,8 +549,8 @@ class TestErrorHandling:
     async def test_llm_timeout_graceful_degradation(self):
         """LLM 超时 → 降级到 fallback 响应"""
         from agents import ProductAgent
-        from session_manager import EnhancedSessionManager
         from erp.kingdee_adapter import KingdeeMockAdapter
+        from session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         agent = ProductAgent()
@@ -554,7 +569,11 @@ class TestErrorHandling:
 
         # 超时应降级到 fallback 响应
         assert result["response"]
-        assert "错误" in result["response"] or "重试" in result["response"] or "抱歉" in result["response"]
+        assert (
+            "错误" in result["response"]
+            or "重试" in result["response"]
+            or "抱歉" in result["response"]
+        )
 
     @pytest.mark.asyncio
     async def test_llm_connection_error_graceful_degradation(self):
@@ -576,7 +595,11 @@ class TestErrorHandling:
         result = await agent.process(state)
 
         assert result["response"]
-        assert "错误" in result["response"] or "重试" in result["response"] or "抱歉" in result["response"]
+        assert (
+            "错误" in result["response"]
+            or "重试" in result["response"]
+            or "抱歉" in result["response"]
+        )
 
     @pytest.mark.asyncio
     async def test_erp_unavailable_graceful_degradation(self):
@@ -612,10 +635,10 @@ class TestRoutingLogic:
     @pytest.mark.asyncio
     async def test_fast_path_routes_to_sequential(self):
         """低复杂度查询 → fast_path=True → Sequential"""
-        from router.query_router import QueryRouter, RoutingResult
         from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
+        from router.query_router import QueryRouter, RoutingResult
 
         bus = MessageBus()
         bb = SharedBlackboard()
@@ -635,10 +658,10 @@ class TestRoutingLogic:
     @pytest.mark.asyncio
     async def test_complaint_routes_to_hierarchical(self):
         """投诉查询 → Hierarchical"""
-        from router.query_router import RoutingResult
         from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
+        from router.query_router import RoutingResult
 
         bus = MessageBus()
         bb = SharedBlackboard()
@@ -651,18 +674,16 @@ class TestRoutingLogic:
             fast_path=False,
         )
 
-        mode_name = orch.select_mode_name(
-            routing, _make_state("我要投诉！皮肤过敏了")
-        )
+        mode_name = orch.select_mode_name(routing, _make_state("我要投诉！皮肤过敏了"))
         assert mode_name == "hierarchical"
 
     @pytest.mark.asyncio
     async def test_high_complexity_multi_domain_routes_to_react(self):
         """高复杂度 + 多领域 → ReAct"""
-        from router.query_router import RoutingResult
         from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
+        from router.query_router import RoutingResult
 
         bus = MessageBus()
         bb = SharedBlackboard()

@@ -8,24 +8,30 @@ RAG 检索质量评估脚本（面试用）
 
 输出：评估报告 + 可截图的汇总表
 """
+
 import asyncio
-import sys
-import os
 import json
+import os
+import sys
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict, List, Tuple
 
 # 添加项目根目录到 path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rag.knowledge_base import CosmeticsKnowledgeBase
-from rag.seed_data import seed_product_knowledge, seed_faq, seed_tech_support, seed_complaint_knowledge, seed_supplementary_data
-
+from rag.seed_data import (
+    seed_complaint_knowledge,
+    seed_faq,
+    seed_product_knowledge,
+    seed_supplementary_data,
+    seed_tech_support,
+)
 
 # ===== 评估数据集 =====
 # 格式：(查询, 期望匹配的关键词列表, 期望命中的 collection)
 # 关键词用于判断检索结果是否"相关"——如果结果中包含任一关键词，视为命中
-EVAL_DATASET: List[Dict[str, Any]] = [
+EVAL_DATASET: list[dict[str, Any]] = [
     # --- 产品知识类 (product_knowledge) ---
     {
         "query": "烟酰胺有什么功效？",
@@ -299,15 +305,19 @@ async def evaluate_rag():
         status = "✅" if hit else "❌"
         print(f"  {status} [{category:6s}] {query}")
         if hit:
-            print(f"       → 命中排名: #{first_relevant_rank}, "
-                  f"P@{K}: {precision_at_k:.2f}, "
-                  f"平均距离: {avg_distance:.4f}")
+            print(
+                f"       → 命中排名: #{first_relevant_rank}, "
+                f"P@{K}: {precision_at_k:.2f}, "
+                f"平均距离: {avg_distance:.4f}"
+            )
         else:
             if retrieved:
-                print(f"       → 最近结果: {retrieved[0]['content'][:60]}... "
-                      f"(距离: {retrieved[0].get('distance', 'N/A'):.4f})")
+                print(
+                    f"       → 最近结果: {retrieved[0]['content'][:60]}... "
+                    f"(距离: {retrieved[0].get('distance', 'N/A'):.4f})"
+                )
             else:
-                print(f"       → 无检索结果")
+                print("       → 无检索结果")
 
     # 3. 汇总统计
     print()
@@ -342,20 +352,20 @@ async def evaluate_rag():
     print(f"  测试查询总数:     {total}")
     print(f"  命中数:           {hits}/{total}")
     print()
-    print(f"  ┌─────────────────────────────────┐")
-    print(f"  │     RAG 检索质量核心指标         │")
-    print(f"  ├─────────────────────────────────┤")
+    print("  ┌─────────────────────────────────┐")
+    print("  │     RAG 检索质量核心指标         │")
+    print("  ├─────────────────────────────────┤")
     print(f"  │  Hit Rate (Top-{K}):     {hit_rate:>6.1%}     │")
     print(f"  │  Precision@{K}:          {avg_precision:>6.1%}     │")
     print(f"  │  Recall@{K}:             {avg_recall:>6.1%}     │")
     print(f"  │  MRR:                  {avg_mrr:>6.3f}     │")
     print(f"  │  平均检索距离:         {avg_distance_all:>6.4f}  │")
-    print(f"  └─────────────────────────────────┘")
+    print("  └─────────────────────────────────┘")
     print()
 
     print("  按类别统计:")
     print(f"  {'类别':<12s}  {'命中/总数':>8s}  {'命中率':>6s}")
-    print(f"  {'-'*12}  {'-'*8}  {'-'*6}")
+    print(f"  {'-' * 12}  {'-' * 8}  {'-' * 6}")
     for cat, stats in sorted(categories.items()):
         cat_rate = stats["hits"] / stats["total"] if stats["total"] > 0 else 0
         bar = "█" * int(cat_rate * 10) + "░" * (10 - int(cat_rate * 10))
@@ -367,8 +377,8 @@ async def evaluate_rag():
     print("-" * 70)
     print()
     print(f'  "我的 RAG 系统使用 ChromaDB 向量检索，{pk_count + faq_count + ts_count} 篇文档')
-    print(f'   分 3 个 collection（产品知识/FAQ/技术支持）。')
-    print(f'   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}。')
+    print("   分 3 个 collection（产品知识/FAQ/技术支持）。")
+    print(f"   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}。")
     print(f'   这意味着 {hit_rate:.0%} 的用户问题能在前 {K} 条检索结果中找到相关答案。"')
     print()
     print("=" * 70)

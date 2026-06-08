@@ -5,10 +5,13 @@ Revises:
 Create Date: 2026-06-05
 
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
+from typing import Union
+
+import sqlalchemy as sa
 
 from alembic import op
-import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = "001_initial_schema"

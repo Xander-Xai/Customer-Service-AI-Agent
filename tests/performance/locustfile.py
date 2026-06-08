@@ -12,10 +12,12 @@
   pip install locust
   make dev  # 启动应用
 """
-from locust import HttpUser, task, between, events
+
 import json
 import random
 import time
+
+from locust import HttpUser, between, events, task
 
 # 测试用例：模拟真实用户查询
 TEST_QUERIES = [
@@ -39,6 +41,7 @@ TEST_QUERIES = [
 
 class HealthCheckUser(HttpUser):
     """健康检查用户（只检查系统状态）"""
+
     weight = 1
     wait_time = between(5, 15)
 
@@ -49,6 +52,7 @@ class HealthCheckUser(HttpUser):
 
 class ChatUser(HttpUser):
     """聊天用户（模拟真实对话场景）"""
+
     weight = 5
     wait_time = between(2, 8)
 
@@ -58,10 +62,13 @@ class ChatUser(HttpUser):
         self.session_id = ""
         self.session_token = ""
         try:
-            resp = self.client.post("/api/auth/login", json={
-                "username": "admin",
-                "password": "admin123",
-            })
+            resp = self.client.post(
+                "/api/auth/login",
+                json={
+                    "username": "admin",
+                    "password": "admin123",
+                },
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 self.token = data.get("token", "")
@@ -129,16 +136,20 @@ class ChatUser(HttpUser):
 
 class AdminUser(HttpUser):
     """管理用户（管理后台操作）"""
+
     weight = 1
     wait_time = between(5, 20)
 
     def on_start(self):
         self.token = ""
         try:
-            resp = self.client.post("/api/auth/login", json={
-                "username": "admin",
-                "password": "admin123",
-            })
+            resp = self.client.post(
+                "/api/auth/login",
+                json={
+                    "username": "admin",
+                    "password": "admin123",
+                },
+            )
             if resp.status_code == 200:
                 self.token = resp.json().get("token", "")
         except Exception:
@@ -159,6 +170,7 @@ class AdminUser(HttpUser):
 
 
 # ===== 自定义统计 =====
+
 
 @events.test_start.add_listener
 def on_test_start(environment, **kwargs):

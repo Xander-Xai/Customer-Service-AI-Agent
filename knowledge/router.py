@@ -6,9 +6,11 @@
 - POST   /api/knowledge/{collection}/add — 添加文档
 - POST   /api/knowledge/sync — 从 ERP 同步产品数据
 """
-from fastapi import APIRouter, Depends, Request, HTTPException
-from pydantic import BaseModel, Field
+
 from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from auth.router import require_admin
 from logger import get_logger
@@ -19,8 +21,8 @@ router = APIRouter(prefix="/api/knowledge", tags=["知识库"])
 
 
 class AddDocRequest(BaseModel):
-    documents: List[str] = Field(..., min_length=1, max_length=50)
-    metadatas: Optional[List[dict]] = None
+    documents: list[str] = Field(..., min_length=1, max_length=50)
+    metadatas: list[dict] | None = None
 
 
 @router.get("/stats")
@@ -29,6 +31,7 @@ async def knowledge_stats(request: Request):
     _ = require_admin(request)
     try:
         from multi_agent_customer_service import knowledge_base
+
         if not knowledge_base or not knowledge_base.available:
             return {"available": False, "message": "RAG 知识库未初始化"}
         collections = ["product_knowledge", "faq", "tech_support", "complaint_knowledge"]
@@ -47,9 +50,17 @@ async def reseed_knowledge(request: Request):
     _ = require_admin(request)
     try:
         from multi_agent_customer_service import knowledge_base
+
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")
-        from rag.seed_data import seed_product_knowledge, seed_faq, seed_tech_support, seed_complaint_knowledge, seed_supplementary_data
+        from rag.seed_data import (
+            seed_complaint_knowledge,
+            seed_faq,
+            seed_product_knowledge,
+            seed_supplementary_data,
+            seed_tech_support,
+        )
+
         seed_product_knowledge(knowledge_base)
         seed_faq(knowledge_base)
         seed_tech_support(knowledge_base)
@@ -74,18 +85,25 @@ async def add_documents(collection: str, data: AddDocRequest, request: Request):
     _ = require_admin(request)
     try:
         from multi_agent_customer_service import knowledge_base
+
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")
         valid_collections = ["product_knowledge", "faq", "tech_support"]
         if collection not in valid_collections:
-            raise HTTPException(status_code=400, detail=f"无效的 collection，可选: {valid_collections}")
+            raise HTTPException(
+                status_code=400, detail=f"无效的 collection，可选: {valid_collections}"
+            )
         knowledge_base.add_documents(
             collection,
             data.documents,
             data.metadatas,
         )
         count = knowledge_base.get_collection_count(collection)
-        return {"message": f"已添加 {len(data.documents)} 条文档", "collection": collection, "total": count}
+        return {
+            "message": f"已添加 {len(data.documents)} 条文档",
+            "collection": collection,
+            "total": count,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -99,7 +117,8 @@ async def sync_from_erp(request: Request):
     """
     _ = require_admin(request)
     try:
-        from multi_agent_customer_service import knowledge_base, erp
+        from multi_agent_customer_service import erp, knowledge_base
+
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")
         if not erp:
@@ -152,12 +171,14 @@ async def sync_from_erp(request: Request):
                 f"| 规格: {specs} | 成分: {ingredients} | 适用: {suitable}"
             )
             documents.append(doc)
-            metadatas.append({
-                "category": "product_type",
-                "topic": category,
-                "name": name,
-                "source": "erp_sync",
-            })
+            metadatas.append(
+                {
+                    "category": "product_type",
+                    "topic": category,
+                    "name": name,
+                    "source": "erp_sync",
+                }
+            )
 
         if not documents:
             return {"message": "ERP 产品数据为空，无需同步", "synced": 0}

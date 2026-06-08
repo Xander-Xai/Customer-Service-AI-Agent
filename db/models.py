@@ -5,8 +5,10 @@ User / ChatHistory / AuditLog / Feedback / PromptVersion
 v4.3 变更：
 - 时间戳从 Float 迁移为 DateTime(timezone=True)，支持时区感知
 """
+
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, Float, Boolean, ForeignKey, JSON, DateTime
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -19,12 +21,15 @@ def _utcnow():
 
 class User(Base):
     """用户表"""
+
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     username = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(256), nullable=False)
-    role = Column(String(20), nullable=False, default="customer")  # customer | agent | supervisor | admin
+    role = Column(
+        String(20), nullable=False, default="customer"
+    )  # customer | agent | supervisor | admin
     display_name = Column(String(128), default="")
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
@@ -37,6 +42,7 @@ class User(Base):
 
 class ChatHistory(Base):
     """会话历史持久化"""
+
     __tablename__ = "chat_histories"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -52,11 +58,14 @@ class ChatHistory(Base):
 
 class AuditLog(Base):
     """操作审计日志"""
+
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
-    action = Column(String(64), nullable=False, index=True)  # login / register / query / admin_action
+    action = Column(
+        String(64), nullable=False, index=True
+    )  # login / register / query / admin_action
     detail = Column(Text, default="")
     ip_address = Column(String(64), default="")
     timestamp = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -66,6 +75,7 @@ class AuditLog(Base):
 
 class Feedback(Base):
     """用户反馈（点赞/点踩）"""
+
     __tablename__ = "feedbacks"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -80,6 +90,7 @@ class PromptVersion(Base):
     """Prompt 版本管理（v4.1）
     用于 A/B 测试框架中追踪不同 Prompt 策略的效果。
     """
+
     __tablename__ = "prompt_versions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

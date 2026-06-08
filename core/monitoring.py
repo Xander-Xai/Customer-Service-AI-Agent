@@ -10,31 +10,36 @@ v3.4 优化：
 - MetricsCollector: asyncio.Lock 保护并发写入
 - CircuitBreaker: 状态转换原子化，防止多协程同时探测
 """
-import time
-import json
-import asyncio
-from collections import deque
-from typing import Dict, List, Any, Optional
 
-from logger import get_logger
+import asyncio
+import json
+import time
+from collections import deque
+from typing import Any, Dict, List, Optional
+
 from config import (
-    RESPONSE_TIME_TARGET_MAX, RESPONSE_TIME_TARGET_MIN,
-    SLA_ALERT_WINDOW, SLA_ALERT_THRESHOLD, SLA_ALERT_COOLDOWN,
-    CIRCUIT_BREAKER_FAIL_THRESHOLD, CIRCUIT_BREAKER_RECOVERY_TIME,
+    CIRCUIT_BREAKER_FAIL_THRESHOLD,
+    CIRCUIT_BREAKER_RECOVERY_TIME,
+    RESPONSE_TIME_TARGET_MAX,
+    RESPONSE_TIME_TARGET_MIN,
+    SLA_ALERT_COOLDOWN,
+    SLA_ALERT_THRESHOLD,
+    SLA_ALERT_WINDOW,
 )
+from logger import get_logger
 
 logger = get_logger("monitoring")
 
 # ===== 性能指标常量 =====
-RESPONSE_TIMES_MAXLEN = 200        # 响应时间 deque 最大长度
-STATS_RECENT_COUNT = 100           # 统计时取最近 N 次响应时间
-P95_MIN_SAMPLES = 20               # 计算 P95 最少样本数
-SESSION_TTL = 3600.0               # 会话统计过期时间（秒，1 小时）
-CLEANUP_INTERVAL = 100             # 每 N 次请求清理一次过期会话
-METRICS_SNAPSHOT_TTL = 86400       # Redis 快照 TTL（秒，24 小时）
-METRICS_HISTORY_MAX = 24           # Redis 历史快照保留数
-PERCENTAGE_MULTIPLIER = 100        # 百分比乘数
-P95_PERCENTILE = 0.95              # P95 百分位
+RESPONSE_TIMES_MAXLEN = 200  # 响应时间 deque 最大长度
+STATS_RECENT_COUNT = 100  # 统计时取最近 N 次响应时间
+P95_MIN_SAMPLES = 20  # 计算 P95 最少样本数
+SESSION_TTL = 3600.0  # 会话统计过期时间（秒，1 小时）
+CLEANUP_INTERVAL = 100  # 每 N 次请求清理一次过期会话
+METRICS_SNAPSHOT_TTL = 86400  # Redis 快照 TTL（秒，24 小时）
+METRICS_HISTORY_MAX = 24  # Redis 历史快照保留数
+PERCENTAGE_MULTIPLIER = 100  # 百分比乘数
+P95_PERCENTILE = 0.95  # P95 百分位
 
 
 # ===== 性能指标采集器 =====
@@ -49,8 +54,8 @@ class MetricsCollector:
         self.total_requests = 0
         self.total_errors = 0
         self.response_times = deque(maxlen=RESPONSE_TIMES_MAXLEN)  # 自动截断，保留最近 N 条
-        self.agent_call_counts: Dict[str, int] = {}
-        self.mode_counts: Dict[str, int] = {}
+        self.agent_call_counts: dict[str, int] = {}
+        self.mode_counts: dict[str, int] = {}
         self.cache_hits = 0
         self.cache_misses = 0
         # SLA 追踪
@@ -60,12 +65,15 @@ class MetricsCollector:
         self.total_single_turn_resolved = 0
         self.total_ai_handled = 0
         self.total_escalated = 0
-        self.session_turn_counts: Dict[str, int] = {}
-        self.session_last_activity: Dict[str, float] = {}
+        self.session_turn_counts: dict[str, int] = {}
+        self.session_last_activity: dict[str, float] = {}
         self._session_ttl: float = SESSION_TTL  # 会话统计过期时间
         # v3.2: 细粒度解决率追踪
-        self.resolution_counts: Dict[str, int] = {
-            "resolved": 0, "uncertain": 0, "failed": 0, "escalated": 0,
+        self.resolution_counts: dict[str, int] = {
+            "resolved": 0,
+            "uncertain": 0,
+            "failed": 0,
+            "escalated": 0,
         }
         # v3.2: SLA 告警滑动窗口
         self._sla_window = deque(maxlen=SLA_ALERT_WINDOW)  # 自动截断
@@ -75,9 +83,17 @@ class MetricsCollector:
         return self._lock
 
     # --- Section: Metric Recording (write path) ---
-    async def record_request(self, elapsed: float, agent: str = "", mode: str = "", cached: bool = False,
-                       error: bool = False, session_id: str = None, escalated: bool = False,
-                       resolution_status: str = ""):
+    async def record_request(
+        self,
+        elapsed: float,
+        agent: str = "",
+        mode: str = "",
+        cached: bool = False,
+        error: bool = False,
+        session_id: str = None,
+        escalated: bool = False,
+        resolution_status: str = "",
+    ):
         """v3.4: 改为 async，使用 asyncio.Lock 保护并发写入"""
         async with self._ensure_lock():
             self.total_requests += 1
@@ -103,9 +119,16 @@ class MetricsCollector:
             now = time.time()
             if session_id is not None:
                 is_first_turn = session_id not in self.session_turn_counts
-                self.session_turn_counts[session_id] = self.session_turn_counts.get(session_id, 0) + 1
+                self.session_turn_counts[session_id] = (
+                    self.session_turn_counts.get(session_id, 0) + 1
+                )
                 self.session_last_activity[session_id] = now
-                if is_first_turn and not escalated and not cached and resolution_status == "resolved":
+                if (
+                    is_first_turn
+                    and not escalated
+                    and not cached
+                    and resolution_status == "resolved"
+                ):
                     self.total_single_turn_resolved += 1
                 # 定期清理过期会话统计（每 100 次请求清理一次）
                 if self.total_requests % CLEANUP_INTERVAL == 0:
@@ -128,8 +151,9 @@ class MetricsCollector:
 
     def _cleanup_expired_sessions(self, now: float):
         """清理过期的会话统计，防止内存无限增长"""
-        expired = [sid for sid, ts in self.session_last_activity.items()
-                   if now - ts > self._session_ttl]
+        expired = [
+            sid for sid, ts in self.session_last_activity.items() if now - ts > self._session_ttl
+        ]
         for sid in expired:
             self.session_turn_counts.pop(sid, None)
             self.session_last_activity.pop(sid, None)
@@ -137,16 +161,28 @@ class MetricsCollector:
             logger.debug(f"[Metrics] 清理 {len(expired)} 个过期会话统计")
 
     # --- Section: Metric Queries (read path) ---
-    async def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         async with self._ensure_lock():
             times = list(self.response_times)[-STATS_RECENT_COUNT:]  # 最近 N 次
             return {
                 "total_requests": self.total_requests,
                 "total_errors": self.total_errors,
-                "error_rate": round(self.total_errors / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1),
+                "error_rate": round(
+                    self.total_errors / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1
+                ),
                 "avg_response_time": round(sum(times) / max(len(times), 1), 2),
-                "p95_response_time": round(sorted(times)[int(len(times) * P95_PERCENTILE)] if len(times) >= P95_MIN_SAMPLES else (max(times) if times else 0), 2),
-                "cache_hit_rate": round(self.cache_hits / max(self.cache_hits + self.cache_misses, 1) * PERCENTAGE_MULTIPLIER, 1),
+                "p95_response_time": round(
+                    sorted(times)[int(len(times) * P95_PERCENTILE)]
+                    if len(times) >= P95_MIN_SAMPLES
+                    else (max(times) if times else 0),
+                    2,
+                ),
+                "cache_hit_rate": round(
+                    self.cache_hits
+                    / max(self.cache_hits + self.cache_misses, 1)
+                    * PERCENTAGE_MULTIPLIER,
+                    1,
+                ),
                 "agent_call_counts": dict(self.agent_call_counts),
                 "mode_counts": dict(self.mode_counts),
                 "sla": {
@@ -154,8 +190,12 @@ class MetricsCollector:
                     "target_max": RESPONSE_TIME_TARGET_MAX,
                     "violations_slow": self.sla_violations,
                     "violations_fast": self.sla_too_fast,
-                    "violation_rate": round(self.sla_violations / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1),
-                    "window_violation_rate": await self.get_sla_window_violation_rate(_internal=True),
+                    "violation_rate": round(
+                        self.sla_violations / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1
+                    ),
+                    "window_violation_rate": await self.get_sla_window_violation_rate(
+                        _internal=True
+                    ),
                 },
             }
 
@@ -172,12 +212,16 @@ class MetricsCollector:
             violations = sum(1 for t in self._sla_window if t > RESPONSE_TIME_TARGET_MAX)
             return round(violations / len(self._sla_window) * PERCENTAGE_MULTIPLIER, 1)
 
-    async def get_kpi_stats(self) -> Dict[str, Any]:
+    async def get_kpi_stats(self) -> dict[str, Any]:
         async with self._ensure_lock():
             total_sessions = len(self.session_turn_counts)
             single_turn_sessions = sum(1 for v in self.session_turn_counts.values() if v == 1)
-            first_resolution_rate = single_turn_sessions / max(total_sessions, 1) * PERCENTAGE_MULTIPLIER
-            ai_handled_rate = self.total_ai_handled / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER
+            first_resolution_rate = (
+                single_turn_sessions / max(total_sessions, 1) * PERCENTAGE_MULTIPLIER
+            )
+            ai_handled_rate = (
+                self.total_ai_handled / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER
+            )
 
             # v3.2 口径：基于 Agent 信号的解决率（更准确）
             total_resolution = sum(self.resolution_counts.values())
@@ -215,7 +259,9 @@ class MetricsCollector:
                 "stats": await self.get_stats(),
                 "kpi": await self.get_kpi_stats(),
             }
-            redis_client.setex("metrics:snapshot", METRICS_SNAPSHOT_TTL, json.dumps(snapshot, ensure_ascii=False))
+            redis_client.setex(
+                "metrics:snapshot", METRICS_SNAPSHOT_TTL, json.dumps(snapshot, ensure_ascii=False)
+            )
             redis_client.lpush("metrics:history", json.dumps(snapshot, ensure_ascii=False))
             redis_client.ltrim("metrics:history", 0, METRICS_HISTORY_MAX - 1)
             return True
@@ -224,7 +270,7 @@ class MetricsCollector:
             return False
 
     @staticmethod
-    def load_snapshot(redis_client=None) -> Optional[Dict[str, Any]]:
+    def load_snapshot(redis_client=None) -> dict[str, Any] | None:
         """从 Redis 加载最近的指标快照"""
         if redis_client is None:
             return None
@@ -250,8 +296,12 @@ class CircuitBreaker:
     HALF_OPEN = "half_open"
 
     def __init__(self, fail_threshold: int = None, recovery_time: int = None):
-        self.fail_threshold = fail_threshold if fail_threshold is not None else CIRCUIT_BREAKER_FAIL_THRESHOLD
-        self.recovery_time = recovery_time if recovery_time is not None else CIRCUIT_BREAKER_RECOVERY_TIME
+        self.fail_threshold = (
+            fail_threshold if fail_threshold is not None else CIRCUIT_BREAKER_FAIL_THRESHOLD
+        )
+        self.recovery_time = (
+            recovery_time if recovery_time is not None else CIRCUIT_BREAKER_RECOVERY_TIME
+        )
         self.state = self.CLOSED
         self.consecutive_failures = 0
         self.last_failure_time = 0.0
@@ -281,7 +331,9 @@ class CircuitBreaker:
             if self.state == self.HALF_OPEN:
                 self.state = self.OPEN
                 self._half_open_permits = 0
-                logger.warning(f"[CircuitBreaker] HALF_OPEN → OPEN，探测失败，重新熔断 {self.recovery_time}s")
+                logger.warning(
+                    f"[CircuitBreaker] HALF_OPEN → OPEN，探测失败，重新熔断 {self.recovery_time}s"
+                )
             elif self.consecutive_failures >= self.fail_threshold and self.state == self.CLOSED:
                 self.state = self.OPEN
                 logger.warning(
@@ -311,7 +363,7 @@ class CircuitBreaker:
                 return True
             return False
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         return {
             "state": self.state,
             "consecutive_failures": self.consecutive_failures,
@@ -333,10 +385,10 @@ class SLAAlertManager:
 
     def __init__(self, bus=None):
         self.bus = bus
-        self.alerts: List[Dict[str, Any]] = []
-        self.last_alert_time: Dict[str, float] = {}
+        self.alerts: list[dict[str, Any]] = []
+        self.last_alert_time: dict[str, float] = {}
 
-    async def check_and_alert(self, metrics: MetricsCollector) -> Optional[Dict[str, Any]]:
+    async def check_and_alert(self, metrics: MetricsCollector) -> dict[str, Any] | None:
         window_rate = await metrics.get_sla_window_violation_rate()
         alert_key = "sla_violation_high"
 
@@ -358,7 +410,7 @@ class SLAAlertManager:
 
             self.alerts.append(alert)
             if len(self.alerts) > self.ALERT_HISTORY_MAX:
-                self.alerts = self.alerts[-self.ALERT_HISTORY_MAX:]
+                self.alerts = self.alerts[-self.ALERT_HISTORY_MAX :]
             self.last_alert_time[alert_key] = time.time()
 
             logger.warning(f"[SLA-Alert] {alert['message']} (severity={severity})")
@@ -366,18 +418,22 @@ class SLAAlertManager:
             if self.bus:
                 try:
                     from core.message_bus import Message, MessageType
-                    await self.bus.publish(Message(
-                        msg_type=MessageType.BROADCAST,
-                        topic="alert.sla",
-                        sender="sla_alert_manager",
-                        payload=alert,
-                    ))
+
+                    await self.bus.publish(
+                        Message(
+                            msg_type=MessageType.BROADCAST,
+                            topic="alert.sla",
+                            sender="sla_alert_manager",
+                            payload=alert,
+                        )
+                    )
                 except Exception as e:
                     logger.debug(f"[SLA-Alert] Bus 事件发布失败: {e}")
 
             # 分级通知路由
             try:
                 from alerts.notifier import alert_notifier
+
                 await alert_notifier.send_alert(
                     title=f"SLA 告警 [{severity.upper()}]",
                     content=alert["message"],
@@ -389,7 +445,5 @@ class SLAAlertManager:
             return alert
         return None
 
-    def get_alerts(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_alerts(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.alerts[-limit:]
-
-

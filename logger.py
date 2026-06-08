@@ -6,6 +6,7 @@
 - 同时输出到 stderr + 文件
 - 分布式追踪：contextvars 自动注入 trace_id
 """
+
 import contextvars
 import gzip
 import json
@@ -17,9 +18,8 @@ from pathlib import Path
 
 from config import LOG_CONFIG
 
-
 # ===== 分布式追踪上下文变量 =====
-_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar('trace_id', default='')
+_trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")
 
 
 def set_trace_id(trace_id: str):
@@ -112,8 +112,12 @@ def _setup_file_handler(logger_instance: logging.Logger, level: int):
         # 生产环境使用 JSON 格式，开发环境使用文本格式
         use_json = os.getenv("LOG_FORMAT", "text").lower() == "json"
         file_handler.setFormatter(
-            _JSONFormatter() if use_json else logging.Formatter(
-                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s")
+            _JSONFormatter()
+            if use_json
+            else logging.Formatter(
+                LOG_CONFIG.get(
+                    "format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s"
+                )
             )
         )
 
@@ -146,7 +150,9 @@ def get_logger(name: str) -> logging.Logger:
         stderr_handler.addFilter(trace_filter)
         stderr_handler.setFormatter(
             logging.Formatter(
-                LOG_CONFIG.get("format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s")
+                LOG_CONFIG.get(
+                    "format", "%(asctime)s - %(name)s - %(levelname)s - [%(trace_id)s] %(message)s"
+                )
             )
         )
         logger.addHandler(stderr_handler)

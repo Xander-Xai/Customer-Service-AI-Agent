@@ -4,21 +4,26 @@ FastAPI 应用工厂 + 核心路由（v5.0 — 路由拆分后）
 中间件 → api/middleware.py | 聊天路由 → api/routes/chat.py
 WebSocket → api/routes/ws.py | 监控 → api/routes/monitoring.py
 """
+
 import asyncio
 import os
 import time
-from typing import Dict, Any
 from contextlib import asynccontextmanager
+from typing import Any, Dict
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 
 from config import (
-    VERSION, RESPONSE_TIME_TARGET_MAX, RESPONSE_TIME_TARGET_MIN,
-    HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS, DEV_MODE,
+    DEV_MODE,
+    HTTPX_KEEPALIVE_CONNECTIONS,
+    HTTPX_MAX_CONNECTIONS,
+    RESPONSE_TIME_TARGET_MAX,
+    RESPONSE_TIME_TARGET_MIN,
+    VERSION,
 )
 from logger import get_logger, get_trace_id
 
@@ -40,8 +45,10 @@ _circuit_breaker_ref = None
 
 # ── 图执行引擎（所有路由共用）──
 
-async def _run_graph(session_id: str, query: str, stream_callback=None,
-                     multimodal_content=None) -> Dict[str, Any]:
+
+async def _run_graph(
+    session_id: str, query: str, stream_callback=None, multimodal_content=None
+) -> dict[str, Any]:
     """执行 LangGraph 图（原生异步 + SLA 告警 + 解决状态追踪）"""
     start = time.time()
 
@@ -116,6 +123,7 @@ async def _persist_metrics_snapshot():
     if not _metrics:
         return
     from api.middleware import get_redis_client
+
     r = get_redis_client()
     if r:
         try:
@@ -126,8 +134,15 @@ async def _persist_metrics_snapshot():
 
 # ── 应用工厂 ──
 
-def create_app(graph_app, session_manager=None, response_cache=None,
-               metrics=None, message_bus=None, sla_alert_mgr=None):
+
+def create_app(
+    graph_app,
+    session_manager=None,
+    response_cache=None,
+    metrics=None,
+    message_bus=None,
+    sla_alert_mgr=None,
+):
     """创建 FastAPI 应用"""
     global _graph_app, _session_manager, _response_cache, _metrics, _bus, _sla_alert_mgr
     _graph_app = graph_app
@@ -146,10 +161,13 @@ def create_app(graph_app, session_manager=None, response_cache=None,
                 max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
             ),
         )
-        logger.info(f"httpx 连接池就绪 (max={HTTPX_MAX_CONNECTIONS} / keepalive={HTTPX_KEEPALIVE_CONNECTIONS})")
+        logger.info(
+            f"httpx 连接池就绪 (max={HTTPX_MAX_CONNECTIONS} / keepalive={HTTPX_KEEPALIVE_CONNECTIONS})"
+        )
 
         # 周期性 WebSocket 连接清理
         from api.routes.ws import periodic_ws_cleanup
+
         cleanup_task = asyncio.create_task(periodic_ws_cleanup())
 
         # v5.0: circuit_breaker 到 app.state
@@ -169,6 +187,7 @@ def create_app(graph_app, session_manager=None, response_cache=None,
 
         await app.state.http_client.aclose()
         from llm.client import OpenAICompatibleClient
+
         await OpenAICompatibleClient.close_all_clients()
         logger.info("httpx 连接池已关闭")
 
@@ -187,8 +206,8 @@ def create_app(graph_app, session_manager=None, response_cache=None,
     app.state.persist_metrics_snapshot = _persist_metrics_snapshot
 
     # ── 中间件栈 ──
-    from api.utils import resolve_cors_origins
     from api.middleware import setup_middleware
+    from api.utils import resolve_cors_origins
 
     resolved_origins = resolve_cors_origins()
     logger.info(f"CORS 允许来源: {resolved_origins}")
@@ -196,16 +215,24 @@ def create_app(graph_app, session_manager=None, response_cache=None,
         CORSMiddleware,
         allow_origins=resolved_origins,
         allow_methods=["GET", "POST", "DELETE", "PUT"],
-        allow_headers=["X-API-Key", "X-Admin-Token", "X-Session-Token", "X-CSRF-Token", "Content-Type", "Authorization"],
+        allow_headers=[
+            "X-API-Key",
+            "X-Admin-Token",
+            "X-Session-Token",
+            "X-CSRF-Token",
+            "Content-Type",
+            "Authorization",
+        ],
     )
     setup_middleware(app)
 
     # ── 挂载路由模块 ──
+    from api.routes.chat import router as chat_router
+    from api.routes.feedback import router as feedback_router
     from api.routes.monitoring import router as monitoring_router
     from api.routes.sessions import router as sessions_router
-    from api.routes.feedback import router as feedback_router
-    from api.routes.chat import router as chat_router
     from api.routes.ws import router as ws_router
+
     app.include_router(monitoring_router)
     app.include_router(sessions_router)
     app.include_router(feedback_router)
@@ -224,7 +251,7 @@ def create_app(graph_app, session_manager=None, response_cache=None,
     def _serve_html(request: Request, file_path: str, fallback_msg: str):
         if os.path.exists(file_path):
             nonce = getattr(request.state, "csp_nonce", "")
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 content = f.read()
             if nonce:
                 content = content.replace("<script", f'<script nonce="{nonce}"')

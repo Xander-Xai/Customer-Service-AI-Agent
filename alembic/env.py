@@ -3,18 +3,20 @@
 从 db.database 导入 engine，从 db.models 导入 Base，
 支持从 DATABASE_URL 环境变量读取数据库连接。
 """
+
 import os
 import sys
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
+
 from alembic import context
 
 # 将项目根目录加入 sys.path，确保能导入 db 模块
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from db.models import Base
 from db.database import engine as _default_engine
+from db.models import Base
 
 # Alembic Config object
 config = context.config

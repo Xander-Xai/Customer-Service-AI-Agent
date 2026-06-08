@@ -7,19 +7,24 @@
 - v3.5: 高复杂度多领域查询路由到 ReAct 模式
 - v4.3: 运行时模式升级（低质量响应自动升级到更复杂模式）
 """
-from typing import Any, Dict, Tuple, List
-from .modes import SequentialMode, ParallelMode, ConsultationMode, HierarchicalMode, ReActMode
+
+from typing import Any, Dict, List, Tuple
+
+from config import MODE_UPGRADE_ENABLED, REACT_COMPLEXITY_THRESHOLD
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
-from session_manager import INTENT_KEYWORDS
-from config import REACT_COMPLEXITY_THRESHOLD, MODE_UPGRADE_ENABLED
 from logger import get_logger
+from session_manager import INTENT_KEYWORDS
+
+from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, SequentialMode
 
 logger = get_logger("collaboration.orchestrator")
 
 # v3.4: 从 INTENT_KEYWORDS 提取所有关键词（单一数据源）
 _PRODUCT_KEYWORDS = set(INTENT_KEYWORDS.get("product_info", []))
-_BILLING_KEYWORDS = set(INTENT_KEYWORDS.get("billing", [])) | set(INTENT_KEYWORDS.get("order_query", []))
+_BILLING_KEYWORDS = set(INTENT_KEYWORDS.get("billing", [])) | set(
+    INTENT_KEYWORDS.get("order_query", [])
+)
 _TECH_KEYWORDS = set(INTENT_KEYWORDS.get("technical_support", []))
 _COMPLAINT_KEYWORDS = set(INTENT_KEYWORDS.get("complaint", []))
 
@@ -46,16 +51,20 @@ class CollaborationOrchestrator:
             "react": ReActMode(bus=message_bus, bb=blackboard),  # v3.5
         }
 
-    def select_mode_name(self, routing_result: Any, state: Dict[str, Any]) -> str:
+    def select_mode_name(self, routing_result: Any, state: dict[str, Any]) -> str:
         """仅选择模式名称（供 LangGraph Conditional Edge 使用）"""
         mode_name, _ = self._select_mode(routing_result, state)
         return mode_name
 
-    def build_context(self, routing_result: Any, state: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    def build_context(
+        self, routing_result: Any, state: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
         """选择模式并返回 (mode_name, context)（供 graph 节点使用）"""
         return self._select_mode(routing_result, state)
 
-    def _select_mode(self, routing_result: Any, state: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    def _select_mode(
+        self, routing_result: Any, state: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]]:
         """统一的模式选择逻辑（唯一的模式选择来源）"""
         complexity = routing_result.complexity
         query_type = routing_result.query_type
@@ -77,7 +86,7 @@ class CollaborationOrchestrator:
             return "hierarchical", {"coordinator": "general_agent", "sub_tasks": sub_tasks}
 
         # 涉及多领域 → 并行模式 或 ReAct 推理模式
-        multi_agent_hints: List[str] = []
+        multi_agent_hints: list[str] = []
         if _has_keywords(query, _PRODUCT_KEYWORDS):
             multi_agent_hints.append("product_agent")
         if _has_keywords(query, _BILLING_KEYWORDS):
@@ -108,7 +117,7 @@ class CollaborationOrchestrator:
         # 默认：顺序模式
         return "sequential", {"primary_agent": primary_agent}
 
-    def upgrade_mode(self, current_mode: str, state: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    def upgrade_mode(self, current_mode: str, state: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         """
         v4.3: 运行时模式升级。
         当低质量响应触发时，自动升级到更复杂的协作模式重新处理。

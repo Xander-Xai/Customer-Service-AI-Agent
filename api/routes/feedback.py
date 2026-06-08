@@ -2,14 +2,15 @@
 反馈相关路由：提交反馈、反馈统计
 从 api/app.py create_app() 提取。
 """
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from logger import get_logger
 from api.utils import sanitize_input
+from logger import get_logger
 
 
 class FeedbackRequest(BaseModel):
@@ -18,6 +19,7 @@ class FeedbackRequest(BaseModel):
     rating: int = Field(default=1, ge=-1, le=1)  # 1=点赞, -1=点踩
     message_index: int = Field(default=0, ge=0)  # 第几条回复
     comment: str = Field(default="", max_length=500)
+
 
 router = APIRouter()
 logger = get_logger("api.feedback")
@@ -48,6 +50,7 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
     try:
         from db.database import get_db_session
         from db.models import Feedback
+
         db = get_db_session()
         try:
             feedback = Feedback(
@@ -73,16 +76,26 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
     if bus:
         try:
             from core.message_bus import Message, MessageType
-            await bus.publish(Message(
-                msg_type=MessageType.BROADCAST,
-                topic="feedback.received",
-                sender="api_feedback",
-                payload={"session_id": session_id, "resolved": resolved, "rating": rating, "comment": comment},
-            ))
+
+            await bus.publish(
+                Message(
+                    msg_type=MessageType.BROADCAST,
+                    topic="feedback.received",
+                    sender="api_feedback",
+                    payload={
+                        "session_id": session_id,
+                        "resolved": resolved,
+                        "rating": rating,
+                        "comment": comment,
+                    },
+                )
+            )
         except Exception as e:
             logger.debug(f"Feedback Bus 事件发布失败: {e}")
 
-    logger.info(f"[Feedback] session={session_id} resolved={resolved} rating={rating} comment={comment[:50]}")
+    logger.info(
+        f"[Feedback] session={session_id} resolved={resolved} rating={rating} comment={comment[:50]}"
+    )
     return {"status": "ok", "session_id": session_id, "resolved": resolved, "rating": rating}
 
 
@@ -91,6 +104,7 @@ async def feedback_stats():
     try:
         from db.database import get_db_session
         from db.models import Feedback
+
         db = get_db_session()
         try:
             total = db.query(Feedback).count()

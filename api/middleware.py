@@ -2,6 +2,7 @@
 API 中间件栈：限流、安全头、认证、分布式追踪
 从 api/app.py create_app() 提取。
 """
+
 import hmac
 import os
 import re
@@ -14,11 +15,12 @@ from typing import Dict
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.utils import check_admin_token, check_api_key, check_jwt_auth, is_authenticated
 from config import (
-    API_KEY_ENABLED, DEV_MODE,
+    API_KEY_ENABLED,
+    DEV_MODE,
 )
 from logger import get_logger, set_trace_id
-from api.utils import check_api_key, check_jwt_auth, check_admin_token, is_authenticated
 
 logger = get_logger("api.middleware")
 
@@ -31,9 +33,13 @@ def get_redis_client():
     global _redis_client
     if _redis_client is None:
         try:
-            from config import REDIS_URL
             import redis
-            _redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
+
+            from config import REDIS_URL
+
+            _redis_client = redis.Redis.from_url(
+                REDIS_URL, decode_responses=True, socket_connect_timeout=3
+            )
             _redis_client.ping()
         except Exception as e:
             logger.debug(f"[Redis] 初始化失败: {e}")
@@ -64,7 +70,7 @@ def setup_middleware(app: FastAPI):
     """注册所有 HTTP 中间件到 FastAPI 应用"""
 
     # ── 限流中间件 ──
-    _rate_limit_store: Dict[str, list] = defaultdict(list)
+    _rate_limit_store: dict[str, list] = defaultdict(list)
     _RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "60"))
     _RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
     _rate_limit_cleanup_counter = 0
@@ -72,7 +78,8 @@ def setup_middleware(app: FastAPI):
     def _cleanup_rate_limit_store():
         now = time.time()
         expired_keys = [
-            key for key, timestamps in _rate_limit_store.items()
+            key
+            for key, timestamps in _rate_limit_store.items()
             if not timestamps or now - timestamps[-1] > 3600
         ]
         for key in expired_keys:
@@ -80,7 +87,11 @@ def setup_middleware(app: FastAPI):
 
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next):
-        if request.url.path in ("/", "/api/health", "/login.html", "/admin.html", "/widget.html") or request.url.path.startswith("/static/") or request.url.path.startswith("/ws/"):
+        if (
+            request.url.path in ("/", "/api/health", "/login.html", "/admin.html", "/widget.html")
+            or request.url.path.startswith("/static/")
+            or request.url.path.startswith("/ws/")
+        ):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
@@ -94,14 +105,18 @@ def setup_middleware(app: FastAPI):
         auth_path = request.url.path
         if auth_path == "/api/auth/login":
             auth_key = f"auth_login:{client_ip}"
-            _rate_limit_store[auth_key] = [t for t in _rate_limit_store.get(auth_key, []) if now - t < 300]
+            _rate_limit_store[auth_key] = [
+                t for t in _rate_limit_store.get(auth_key, []) if now - t < 300
+            ]
             if len(_rate_limit_store[auth_key]) >= 5:
                 return JSONResponse({"error": "登录尝试过于频繁，请 5 分钟后重试"}, status_code=429)
             _rate_limit_store[auth_key].append(now)
             return await call_next(request)
         if auth_path == "/api/auth/register":
             auth_key = f"auth_register:{client_ip}"
-            _rate_limit_store[auth_key] = [t for t in _rate_limit_store.get(auth_key, []) if now - t < 3600]
+            _rate_limit_store[auth_key] = [
+                t for t in _rate_limit_store.get(auth_key, []) if now - t < 3600
+            ]
             if len(_rate_limit_store[auth_key]) >= 3:
                 return JSONResponse({"error": "注册过于频繁，请稍后再试"}, status_code=429)
             _rate_limit_store[auth_key].append(now)
@@ -114,7 +129,9 @@ def setup_middleware(app: FastAPI):
         elif get_redis_client() and not redis_ok:
             return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
 
-        _rate_limit_store[client_ip] = [t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW]
+        _rate_limit_store[client_ip] = [
+            t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW
+        ]
         if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX:
             return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
         _rate_limit_store[client_ip].append(now)
@@ -153,17 +170,37 @@ def setup_middleware(app: FastAPI):
             if cl and int(cl) > 1000000:
                 return JSONResponse({"error": "Payload too large"}, status_code=413)
 
-        if path in ("/", "/api/health", "/login.html", "/admin.html", "/widget.html") or path.startswith("/static/"):
+        if path in (
+            "/",
+            "/api/health",
+            "/login.html",
+            "/admin.html",
+            "/widget.html",
+        ) or path.startswith("/static/"):
             return await call_next(request)
         if path.startswith("/api/auth/login") or path.startswith("/api/auth/register"):
             return await call_next(request)
 
         required_auth = "api_key_or_jwt"
-        if path in ("/api/metrics", "/api/kpi", "/api/circuit-breaker", "/api/cache/stats", "/metrics/prometheus", "/api/feedback/stats"):
+        if (
+            path
+            in (
+                "/api/metrics",
+                "/api/kpi",
+                "/api/circuit-breaker",
+                "/api/cache/stats",
+                "/metrics/prometheus",
+                "/api/feedback/stats",
+            )
+            or path.startswith("/api/alerts")
+            or path.startswith("/api/monitoring")
+        ):
             required_auth = "supervisor_or_admin"
-        elif path.startswith("/api/alerts") or path.startswith("/api/monitoring"):
-            required_auth = "supervisor_or_admin"
-        elif path.startswith("/api/auth/users") or path.startswith("/api/auth/audit") or path.startswith("/api/knowledge"):
+        elif (
+            path.startswith("/api/auth/users")
+            or path.startswith("/api/auth/audit")
+            or path.startswith("/api/knowledge")
+        ):
             required_auth = "admin"
 
         if required_auth == "admin":
@@ -186,7 +223,9 @@ def setup_middleware(app: FastAPI):
 
         if DEV_MODE:
             client_ip = request.client.host if request.client else "unknown"
-            logger.warning(f"[SECURITY] DEV_MODE auth bypass: {request.method} {request.url.path} from {client_ip}")
+            logger.warning(
+                f"[SECURITY] DEV_MODE auth bypass: {request.method} {request.url.path} from {client_ip}"
+            )
             return await call_next(request)
 
         if is_authenticated(request):
@@ -224,7 +263,7 @@ def setup_middleware(app: FastAPI):
                 response.set_cookie(
                     key=_CSRF_COOKIE_NAME,
                     value=token,
-                    httponly=False,       # JS 需要读取
+                    httponly=False,  # JS 需要读取
                     samesite="lax",
                     secure=not DEV_MODE,  # 生产环境强制 HTTPS
                     max_age=3600,
@@ -250,10 +289,14 @@ def setup_middleware(app: FastAPI):
 
         if not cookie_token or not header_token:
             client_ip = request.client.host if request.client else "unknown"
-            logger.warning(f"[CSRF] Missing token: cookie={'yes' if cookie_token else 'no'}, header={'yes' if header_token else 'no'}, path={path}, ip={client_ip}")
+            logger.warning(
+                f"[CSRF] Missing token: cookie={'yes' if cookie_token else 'no'}, header={'yes' if header_token else 'no'}, path={path}, ip={client_ip}"
+            )
             return JSONResponse(
-                {"error": "CSRF validation failed: missing CSRF token. "
-                          "Ensure the csrf_token cookie is set and the X-CSRF-Token header is included."},
+                {
+                    "error": "CSRF validation failed: missing CSRF token. "
+                    "Ensure the csrf_token cookie is set and the X-CSRF-Token header is included."
+                },
                 status_code=403,
             )
 
@@ -294,8 +337,16 @@ ROLE_PERMISSIONS = {
     "customer": {"chat", "own_sessions", "feedback"},
     "agent": {"chat", "all_sessions", "feedback"},
     "supervisor": {"chat", "all_sessions", "feedback", "monitoring", "alerts"},
-    "admin": {"chat", "all_sessions", "feedback", "monitoring", "alerts",
-              "user_management", "knowledge_management", "system_config"},
+    "admin": {
+        "chat",
+        "all_sessions",
+        "feedback",
+        "monitoring",
+        "alerts",
+        "user_management",
+        "knowledge_management",
+        "system_config",
+    },
 }
 
 

@@ -1,7 +1,9 @@
 """
 技术支持专家智能体（v3.5: 增加 RAG 知识检索）
 """
-from typing import Dict, Any
+
+from typing import Any, Dict
+
 from .base_agent import BaseAgent
 
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
@@ -21,17 +23,18 @@ class TechAgent(BaseAgent):
         super().__init__(
             name="技术支持专家",
             role="化妆品使用指导和技术问题处理",
-            expertise=["使用方法", "过敏处理", "产品搭配", "保质期", "保存方法"]
+            expertise=["使用方法", "过敏处理", "产品搭配", "保质期", "保存方法"],
         )
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         customer_query = state["customer_query"]
         # v3.6: RAG 知识库已覆盖硬编码知识，移除冗余 _knowledge
         rag_context = await self._retrieve_knowledge(
             customer_query, collections=["tech_support", "product_knowledge"]
         )
         return await self._process_with_llm(
-            state, self._format_system_prompt(_SYSTEM_PROMPT),
+            state,
+            self._format_system_prompt(_SYSTEM_PROMPT),
             extra_context=rag_context,
             fallback_response="抱歉，处理技术问题时遇到错误，请稍后重试。",
         )

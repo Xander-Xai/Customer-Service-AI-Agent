@@ -8,6 +8,7 @@ ImageProcessor — 图片预处理（v5.1）
 - base64 编码 + data URL 生成
 - 大小校验（原始 + 编码后）
 """
+
 import base64
 import io
 import logging
@@ -21,8 +22,8 @@ logger = logging.getLogger(__name__)
 
 # 默认压缩参数
 MAX_LONG_EDGE = 2048  # 长边最大像素
-JPEG_QUALITY = 85     # JPEG 压缩质量
-WEBP_QUALITY = 85     # WebP 压缩质量
+JPEG_QUALITY = 85  # JPEG 压缩质量
+WEBP_QUALITY = 85  # WebP 压缩质量
 
 
 class ImageProcessor:
@@ -31,7 +32,7 @@ class ImageProcessor:
     def __init__(
         self,
         max_size_mb: int = 0,
-        allowed_types: Optional[list] = None,
+        allowed_types: list | None = None,
         max_long_edge: int = MAX_LONG_EDGE,
         jpeg_quality: int = JPEG_QUALITY,
     ):
@@ -63,10 +64,14 @@ class ImageProcessor:
             ValueError: 格式或大小不合法
         """
         if not self.validate_mime(content_type):
-            raise ValueError(f"不支持的图片格式: {content_type}，仅支持: {', '.join(self.allowed_types)}")
+            raise ValueError(
+                f"不支持的图片格式: {content_type}，仅支持: {', '.join(self.allowed_types)}"
+            )
 
         if not self.validate_size(data):
-            raise ValueError(f"图片大小超出限制: {len(data) / 1024 / 1024:.1f}MB > {self.max_size_mb}MB")
+            raise ValueError(
+                f"图片大小超出限制: {len(data) / 1024 / 1024:.1f}MB > {self.max_size_mb}MB"
+            )
 
         # 打开并压缩
         compressed_bytes, output_type = self._compress(data, content_type)
@@ -80,10 +85,12 @@ class ImageProcessor:
         if encoded_mb > 15:
             raise ValueError(f"编码后图片过大: {encoded_mb:.1f}MB > 15MB")
 
-        logger.debug("图片处理完成: %s → %s, %.1fKB", content_type, output_type, len(compressed_bytes) / 1024)
+        logger.debug(
+            "图片处理完成: %s → %s, %.1fKB", content_type, output_type, len(compressed_bytes) / 1024
+        )
         return data_url
 
-    def _compress(self, data: bytes, content_type: str) -> Tuple[bytes, str]:
+    def _compress(self, data: bytes, content_type: str) -> tuple[bytes, str]:
         """
         压缩图片：缩放长边 + 质量压缩
 
@@ -96,10 +103,7 @@ class ImageProcessor:
             raise ValueError(f"无法解析图片: {e}") from e
 
         # 转为 RGB（去掉 alpha 通道，JPEG 不支持 RGBA）
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGB")
-            output_type = "image/jpeg"
-        elif img.mode != "RGB":
+        if img.mode in ("RGBA", "LA", "P") or img.mode != "RGB":
             img = img.convert("RGB")
             output_type = "image/jpeg"
         else:
@@ -115,7 +119,13 @@ class ImageProcessor:
 
         # 写入字节流
         buf = io.BytesIO()
-        fmt = "JPEG" if output_type == "image/jpeg" else "WEBP" if output_type == "image/webp" else "PNG"
+        fmt = (
+            "JPEG"
+            if output_type == "image/jpeg"
+            else "WEBP"
+            if output_type == "image/webp"
+            else "PNG"
+        )
         save_kwargs = {}
         if fmt == "JPEG":
             save_kwargs = {"quality": self.jpeg_quality, "optimize": True}

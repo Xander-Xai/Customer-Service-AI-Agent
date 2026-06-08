@@ -2,6 +2,7 @@
 会话相关路由：会话 CRUD、历史、消息查询
 从 api/app.py create_app() 提取。
 """
+
 import hmac
 from datetime import datetime, timezone
 
@@ -17,7 +18,9 @@ logger = get_logger("api.sessions")
 def _extract_user_id(request: Request) -> str | None:
     """从 JWT payload 或 API Key 认证结果中提取 user_id"""
     state = request.app.state
-    payload = getattr(state, "_current_jwt_payload", None) or getattr(request.state, "jwt_payload", None)
+    payload = getattr(state, "_current_jwt_payload", None) or getattr(
+        request.state, "jwt_payload", None
+    )
     if payload:
         return str(payload.get("sub", ""))
     return None
@@ -69,14 +72,16 @@ async def get_session(session_id: str, request: Request):
         user_id = _extract_user_id(request)
         if not _check_session_ownership(session, user_id, dev_mode):
             return JSONResponse({"error": "无权访问该会话"}, status_code=403)
-        return {"session": {
-            "session_id": session_id,
-            "messages": session.get("messages", []),
-            "created_at": session.get("created_at"),
-            "last_activity": session.get("last_activity"),
-            "message_count": session.get("message_count", 0),
-            "summary": session.get("summary", ""),
-        }}
+        return {
+            "session": {
+                "session_id": session_id,
+                "messages": session.get("messages", []),
+                "created_at": session.get("created_at"),
+                "last_activity": session.get("last_activity"),
+                "message_count": session.get("message_count", 0),
+                "summary": session.get("summary", ""),
+            }
+        }
     return JSONResponse({"error": "session not found"}, status_code=404)
 
 
@@ -134,7 +139,13 @@ async def get_history_messages(session_id: str, request: Request):
     if not session:
         return JSONResponse({"error": "会话不存在"}, status_code=404)
     messages = session.get("messages", [])
-    return {"messages": [
-        {"role": m.get("role", ""), "content": m.get("content", ""), "timestamp": m.get("timestamp", 0)}
-        for m in messages
-    ]}
+    return {
+        "messages": [
+            {
+                "role": m.get("role", ""),
+                "content": m.get("content", ""),
+                "timestamp": m.get("timestamp", 0),
+            }
+            for m in messages
+        ]
+    }

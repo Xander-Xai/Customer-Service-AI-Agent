@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-cov lint prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag
+.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -35,13 +35,13 @@ test-fast: env-test ## 快速测试（跳过慢测试）
 	python -m pytest tests/ -x -v --tb=short -m "not slow"
 
 # ===== 代码质量 =====
-lint: ## 代码检查
-	@echo "🔍 代码检查..."
-	python -m py_compile config.py
-	python -m py_compile api/app.py
-	python -m py_compile api/app_factory.py
-	python -m py_compile multi_agent_customer_service.py
-	@echo "✅ 语法检查通过"
+lint: ## 代码检查（ruff）
+	ruff check .
+	ruff format --check .
+
+format: ## 代码格式化
+	ruff format .
+	ruff check --fix .
 
 # ===== RAG 评估 =====
 eval-rag: ## RAG 检索质量评估

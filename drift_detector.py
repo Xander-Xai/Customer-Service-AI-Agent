@@ -6,14 +6,19 @@
 - 漂移频率升级机制
 - 漂移自动修复策略
 """
-from typing import Dict, List, Any, Optional
 
-from logger import get_logger
+from typing import Any, Dict, List, Optional
+
 from config import (
-    DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
-    DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
 )
+from config import (
+    DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
+)
+from config import (
+    DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
+)
+from logger import get_logger
 from token_counter import _tokenize_chinese
 
 logger = get_logger("drift_detector")
@@ -37,26 +42,52 @@ DRIFT_REPAIR_STRATEGIES = {
 # 扩充反义词/矛盾对（v3.1: 40+ 组）
 NEGATION_PAIRS = [
     # 情感/评价
-    ("好", "差"), ("满意", "不满"), ("喜欢", "讨厌"), ("推荐", "不推荐"),
-    ("不错", "很差"), ("优秀", "糟糕"), ("完美", "缺陷"),
+    ("好", "差"),
+    ("满意", "不满"),
+    ("喜欢", "讨厌"),
+    ("推荐", "不推荐"),
+    ("不错", "很差"),
+    ("优秀", "糟糕"),
+    ("完美", "缺陷"),
     # 效果
-    ("有效", "无效"), ("有用", "没用"), ("改善", "恶化"), ("好转", "变差"),
-    ("白了", "没白"), ("保湿", "干燥"), ("修复", "损伤"),
+    ("有效", "无效"),
+    ("有用", "没用"),
+    ("改善", "恶化"),
+    ("好转", "变差"),
+    ("白了", "没白"),
+    ("保湿", "干燥"),
+    ("修复", "损伤"),
     # 态度/意愿
-    ("愿意", "不愿意"), ("想买", "不想买"), ("要", "不要"),
-    ("接受", "拒绝"), ("同意", "反对"), ("支持", "反对"),
+    ("愿意", "不愿意"),
+    ("想买", "不想买"),
+    ("要", "不要"),
+    ("接受", "拒绝"),
+    ("同意", "反对"),
+    ("支持", "反对"),
     # 数量/程度
-    ("很多", "很少"), ("太贵", "便宜"), ("太慢", "快"),
-    ("太多", "太少"), ("严重", "轻微"),
+    ("很多", "很少"),
+    ("太贵", "便宜"),
+    ("太慢", "快"),
+    ("太多", "太少"),
+    ("严重", "轻微"),
     # 时间/顺序
-    ("之前", "现在"), ("以前", "最近"), ("一直", "从不"),
-    ("经常", "从不"), ("总是", "偶尔"),
+    ("之前", "现在"),
+    ("以前", "最近"),
+    ("一直", "从不"),
+    ("经常", "从不"),
+    ("总是", "偶尔"),
     # 安全/品质
-    ("安全", "危险"), ("正品", "假货"), ("天然", "化学"),
-    ("温和", "刺激"), ("不过敏", "过敏"),
+    ("安全", "危险"),
+    ("正品", "假货"),
+    ("天然", "化学"),
+    ("温和", "刺激"),
+    ("不过敏", "过敏"),
     # 服务
-    ("及时", "拖延"), ("专业", "不专业"), ("负责", "不负责"),
-    ("解决了", "没解决"), ("可以退", "不能退"),
+    ("及时", "拖延"),
+    ("专业", "不专业"),
+    ("负责", "不负责"),
+    ("解决了", "没解决"),
+    ("可以退", "不能退"),
 ]
 
 # 多分类意图关键词映射（v3.1: 7 类意图，接入 Router 体系）
@@ -71,7 +102,7 @@ INTENT_KEYWORDS = {
 }
 
 
-def _classify_intent(text: str) -> Optional[str]:
+def _classify_intent(text: str) -> str | None:
     """多分类意图识别（v3.1: 7 类意图）"""
     scores = {}
     for intent, keywords in INTENT_KEYWORDS.items():
@@ -83,7 +114,7 @@ def _classify_intent(text: str) -> Optional[str]:
     return max(scores, key=scores.get)
 
 
-def _check_escalation(session: Dict[str, Any], session_id: str = "") -> Optional[Dict[str, Any]]:
+def _check_escalation(session: dict[str, Any], session_id: str = "") -> dict[str, Any] | None:
     """v3.1: 检查漂移频率是否触发升级"""
     escalation_threshold = _CFG_ESCALATION_THRESHOLD
     drift_count = len(session.get("drift_log", []))
@@ -113,7 +144,9 @@ class DriftDetector:
     - 漂移频率升级机制
     """
 
-    def detect(self, session: Dict[str, Any], session_id: str, current_query: str) -> Dict[str, Any]:
+    def detect(
+        self, session: dict[str, Any], session_id: str, current_query: str
+    ) -> dict[str, Any]:
         """
         检测 4 类对话漂移（v3.1 增强）
         - jieba 中文分词提升话题/相似度检测精度
@@ -137,11 +170,13 @@ class DriftDetector:
         for i, q in enumerate(user_queries[:-1]):
             similarity = _text_similarity(q, current_query)
             if similarity > threshold_rep:
-                drifts.append({
-                    "type": DriftType.REPETITION,
-                    "detail": f"与第{i+1}轮问题相似度 {similarity:.0%}",
-                    "action": DRIFT_REPAIR_STRATEGIES[DriftType.REPETITION],
-                })
+                drifts.append(
+                    {
+                        "type": DriftType.REPETITION,
+                        "detail": f"与第{i + 1}轮问题相似度 {similarity:.0%}",
+                        "action": DRIFT_REPAIR_STRATEGIES[DriftType.REPETITION],
+                    }
+                )
                 break
 
         # 2. 话题漂移检测（v3.1: jieba 分词替代正则）
@@ -155,31 +190,39 @@ class DriftDetector:
                 overlap = len(prev_tokens & curr_tokens) / max(len(prev_tokens | curr_tokens), 1)
                 threshold_topic = _CFG_TOPIC_THRESHOLD
                 if overlap < threshold_topic:
-                    drifts.append({
-                        "type": DriftType.TOPIC,
-                        "detail": f"用户切换了话题（话题重叠 {overlap:.0%}）",
-                        "action": DRIFT_REPAIR_STRATEGIES[DriftType.TOPIC],
-                    })
+                    drifts.append(
+                        {
+                            "type": DriftType.TOPIC,
+                            "detail": f"用户切换了话题（话题重叠 {overlap:.0%}）",
+                            "action": DRIFT_REPAIR_STRATEGIES[DriftType.TOPIC],
+                        }
+                    )
 
         # 3. 意图漂移检测（v3.1: 多分类 7 类意图）
         prev_text = "".join(user_queries[:-1]) if user_queries[:-1] else ""
         prev_intent = _classify_intent(prev_text)
         curr_intent = _classify_intent(current_query)
         if prev_intent and curr_intent and prev_intent != curr_intent:
-            drifts.append({
-                "type": DriftType.INTENT,
-                "detail": f"意图从 '{prev_intent}' 变为 '{curr_intent}'",
-                "action": DRIFT_REPAIR_STRATEGIES[DriftType.INTENT],
-            })
+            drifts.append(
+                {
+                    "type": DriftType.INTENT,
+                    "detail": f"意图从 '{prev_intent}' 变为 '{curr_intent}'",
+                    "action": DRIFT_REPAIR_STRATEGIES[DriftType.INTENT],
+                }
+            )
 
         # 4. 矛盾检测（v3.1: 40+ 组反义词）— 复用已计算的 prev_text
         for pos, neg in NEGATION_PAIRS:
-            if (pos in prev_text and neg in current_query) or (neg in prev_text and pos in current_query):
-                drifts.append({
-                    "type": DriftType.CONTRADICTION,
-                    "detail": f"检测到矛盾表达：'{pos}' vs '{neg}'",
-                    "action": DRIFT_REPAIR_STRATEGIES[DriftType.CONTRADICTION],
-                })
+            if (pos in prev_text and neg in current_query) or (
+                neg in prev_text and pos in current_query
+            ):
+                drifts.append(
+                    {
+                        "type": DriftType.CONTRADICTION,
+                        "detail": f"检测到矛盾表达：'{pos}' vs '{neg}'",
+                        "action": DRIFT_REPAIR_STRATEGIES[DriftType.CONTRADICTION],
+                    }
+                )
                 break  # 一次只报一个矛盾
 
         if drifts:

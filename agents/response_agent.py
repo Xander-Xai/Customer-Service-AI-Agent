@@ -2,8 +2,10 @@
 响应处理智能体（v4.1 — 集成自我评估闭环）
 职责：缓存写入、会话记录、SLA 监控、事件广播、解决状态评估 + 响应清洗 + 质量评估
 """
+
 import re
-from typing import Dict, Any
+from typing import Any, Dict
+
 from agents.base_agent import BaseAgent
 from agents.evaluator import ResponseEvaluator
 from core.message_bus import MessageBus
@@ -11,9 +13,14 @@ from core.shared_blackboard import SharedBlackboard
 from logger import get_logger
 
 logger = get_logger("agent.response_agent")
-from session_manager import EnhancedSessionManager
 from cache.response_cache import ResponseCache
-from config import EVAL_LOW_SCORE_THRESHOLD, EVAL_ALERT_ENABLED, EVAL_RETRY_THRESHOLD, EVAL_RETRY_ENABLED
+from config import (
+    EVAL_ALERT_ENABLED,
+    EVAL_LOW_SCORE_THRESHOLD,
+    EVAL_RETRY_ENABLED,
+    EVAL_RETRY_THRESHOLD,
+)
+from session_manager import EnhancedSessionManager
 
 # 解决状态常量
 RESOLUTION_RESOLVED = "resolved"
@@ -23,15 +30,27 @@ RESOLUTION_ESCALATED = "escalated"
 
 # "不确定"响应的特征关键词
 UNCERTAIN_PHRASES = [
-    "无法确定", "无法回答", "不确定",
-    "请联系人工", "请咨询客服",  # 仅完整的升级短语触发（非单独"建议您"）
-    "转接人工", "转人工", "稍等", "请稍候",
-    "我帮不了", "抱歉无法", "无法提供",
+    "无法确定",
+    "无法回答",
+    "不确定",
+    "请联系人工",
+    "请咨询客服",  # 仅完整的升级短语触发（非单独"建议您"）
+    "转接人工",
+    "转人工",
+    "稍等",
+    "请稍候",
+    "我帮不了",
+    "抱歉无法",
+    "无法提供",
 ]
 
 # "升级人工"响应的特征关键词
 ESCALATION_PHRASES = [
-    "转接人工", "转人工客服", "人工客服介入", "升级处理", "高级客服",
+    "转接人工",
+    "转人工客服",
+    "人工客服介入",
+    "升级处理",
+    "高级客服",
 ]
 
 # ===== v3.8: 响应清洗正则 =====
@@ -131,7 +150,7 @@ class ResponseAgent(BaseAgent):
         self.cache = cache
         self.evaluator = evaluator or ResponseEvaluator()
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         """
         ResponseAgent 核心处理流程（v4.1: 增加质量评估闭环）：
         1. 响应清洗（移除垃圾内容）
@@ -215,18 +234,21 @@ class ResponseAgent(BaseAgent):
         )
 
         # 6. 广播响应完成事件（v4.1: 含评估分数）
-        await self._publish_event("response.complete", {
-            "agent": agent,
-            "mode": mode,
-            "cached": cached,
-            "agents_used": agents_used,
-            "resolution_status": resolution_status,
-            "eval_score": state.get("eval_score"),
-        })
+        await self._publish_event(
+            "response.complete",
+            {
+                "agent": agent,
+                "mode": mode,
+                "cached": cached,
+                "agents_used": agents_used,
+                "resolution_status": resolution_status,
+                "eval_score": state.get("eval_score"),
+            },
+        )
 
         return state
 
-    def _evaluate_resolution(self, state: Dict[str, Any]) -> str:
+    def _evaluate_resolution(self, state: dict[str, Any]) -> str:
         """
         v3.4: 基于多维信号评估解决状态（修复投诉误判为 escalated 的问题）
         - escalated: 仅当响应明确要求转人工时才标记
@@ -259,7 +281,7 @@ class ResponseAgent(BaseAgent):
         # 正常解决（包括 hierarchical 模式成功处理的投诉）
         return RESOLUTION_RESOLVED
 
-    def _evaluate_quality(self, state: Dict[str, Any]) -> dict:
+    def _evaluate_quality(self, state: dict[str, Any]) -> dict:
         """
         v4.1: 调用 ResponseEvaluator 评估回答质量
         将评估结果写入 state，供后续流程使用。
@@ -281,7 +303,7 @@ class ResponseAgent(BaseAgent):
             self.logger.warning(f"质量评估异常: {e}")
             return None
 
-    async def _alert_low_score(self, state: Dict[str, Any], eval_result: dict):
+    async def _alert_low_score(self, state: dict[str, Any], eval_result: dict):
         """v4.1: 低分回答告警"""
         if not EVAL_ALERT_ENABLED:
             return
@@ -301,10 +323,13 @@ class ResponseAgent(BaseAgent):
         self.logger.warning(f"[EVAL] 低分告警: score={score} - {alert_content}")
 
         # 通过 MessageBus 广播低分告警事件
-        await self._publish_event("eval.low_score", {
-            "score": score,
-            "factors": eval_result.get("factors", {}),
-            "suggestions": suggestions,
-            "session_id": state.get("session_id", ""),
-            "agent": state.get("current_agent", ""),
-        })
+        await self._publish_event(
+            "eval.low_score",
+            {
+                "score": score,
+                "factors": eval_result.get("factors", {}),
+                "suggestions": suggestions,
+                "session_id": state.get("session_id", ""),
+                "agent": state.get("current_agent", ""),
+            },
+        )

@@ -3,7 +3,8 @@ ERP 适配器工厂（v3.0）
 根据 ERP_MODE 环境变量自动选择 Mock 或真实适配器
 包含配置校验与诊断日志
 """
-from config import ERP_MODE, ERP_BASE_URL, ERP_APP_ID, ERP_APP_SECRET, ERP_DB_ID
+
+from config import ERP_APP_ID, ERP_APP_SECRET, ERP_BASE_URL, ERP_DB_ID, ERP_MODE
 from logger import get_logger
 
 logger = get_logger("erp.factory")
@@ -45,18 +46,14 @@ def create_erp_adapter():
         else:
             try:
                 from erp.kingdee_real_adapter import KingdeeRealAdapter
+
                 adapter = KingdeeRealAdapter(
                     base_url=ERP_BASE_URL,
                     app_id=ERP_APP_ID,
                     app_secret=ERP_APP_SECRET,
                     db_id=ERP_DB_ID,
                 )
-                logger.info(
-                    f"ERP 适配器: real mode | "
-                    f"base_url=*** | "
-                    f"app_id=*** | "
-                    f"db_id=***"
-                )
+                logger.info("ERP 适配器: real mode | base_url=*** | app_id=*** | db_id=***")
                 return adapter
             except Exception as e:
                 logger.warning(f"真实 ERP 适配器加载失败，降级到 mock: {e}")
@@ -65,5 +62,6 @@ def create_erp_adapter():
         logger.warning(f"未知 ERP_MODE='{ERP_MODE}'，仅支持 'mock' 或 'real'，使用 mock 模式")
 
     from erp.kingdee_adapter import KingdeeMockAdapter
+
     logger.info("ERP 适配器: mock mode（模拟数据，不连接真实 ERP）")
     return KingdeeMockAdapter()
