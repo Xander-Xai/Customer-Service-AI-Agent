@@ -5,10 +5,15 @@
 import { renderMarkdown } from '../utils/markdown.js';
 import { escapeHtml, scrollToBottom, copyToClipboard } from '../utils/dom.js';
 import { getAgentIcon, getModeLabel } from '../utils/agents.js';
-import { API } from '../api/index.js';
 
 let progressStatusEl = null;
 let currentSessionId = null;
+let _feedbackSubmitter = null;  // v5.0: 解耦反馈提交（由外部注入）
+
+/** 注入反馈提交函数（由 chat/index.js 调用，避免直接依赖 API 层） */
+export function setFeedbackHandler(submitter) {
+  _feedbackSubmitter = submitter;
+}
 
 /** 设置当前会话 ID（由 session 模块调用） */
 export function setSessionId(id) { currentSessionId = id; }
@@ -249,9 +254,9 @@ export function createStreamingMessage() {
 // ===== 反馈 =====
 
 function sendFeedback(btn, resolved) {
-  if (!currentSessionId) return;
+  if (!currentSessionId || !_feedbackSubmitter) return;
   const rating = resolved ? 1 : -1;
-  API.submitRating(currentSessionId, rating).then(() => {
+  _feedbackSubmitter(currentSessionId, rating).then(() => {
     const bar = btn.parentElement;
     bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
   }).catch(() => {});
