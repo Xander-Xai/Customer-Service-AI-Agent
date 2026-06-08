@@ -106,7 +106,7 @@ def init_db():
 
     if not _alembic_ok:
         Base.metadata.create_all(bind=engine)
-        logger.info(f"数据库初始化完成（create_all）: {_DB_TYPE} ({DATABASE_URL})")
+        logger.info(f"数据库初始化完成（create_all）: {_DB_TYPE}")
 
 
 def get_db():

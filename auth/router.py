@@ -38,8 +38,8 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., max_length=32)
+    password: str = Field(..., max_length=64)
 
 
 class RefreshRequest(BaseModel):

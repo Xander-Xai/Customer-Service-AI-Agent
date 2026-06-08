@@ -6,6 +6,7 @@ import '../styles/layout.css';
 import '../styles/components.css';
 import '../styles/admin.css';
 import '../styles/animations.css';
+import { showToast } from './utils/toast.js';
 
 const TOKEN = localStorage.getItem('token');
 if (!TOKEN) window.location.href = '/login.html';
@@ -14,15 +15,6 @@ const headers = {
   'Authorization': 'Bearer ' + TOKEN,
   'Content-Type': 'application/json',
 };
-
-function showToast(msg, type = 'success') {
-  const t = document.getElementById('toast');
-  if (!t) return;
-  t.textContent = msg;
-  t.className = 'toast ' + type;
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3000);
-}
 
 function logout() {
   localStorage.removeItem('token');
@@ -104,7 +96,7 @@ async function loadAlertConfig() {
   document.getElementById('alertConfig').innerHTML = `
     <div class="admin-stat"><span class="label">Webhook 数量</span><span class="value">${data.webhooks.length} 个</span></div>
     <div class="admin-stat"><span class="label">邮件通知</span><span class="value">${data.email_enabled ? '✅ 已配置' : '❌ 未配置'}</span></div>
-    ${data.email_to.length ? `<div class="admin-stat"><span class="label">通知邮箱</span><span class="value">${data.email_to.join(', ')}</span></div>` : ''}
+    ${data.email_to.length ? `<div class="admin-stat"><span class="label">通知邮箱</span><span class="value">${esc(data.email_to.join(', '))}</span></div>` : ''}
   `;
 }
 
@@ -140,11 +132,11 @@ async function loadSystemHealth() {
     const s = data.status || 'unknown';
     const color = s === 'healthy' ? '#4ade80' : s === 'degraded' ? '#fbbf24' : '#f87171';
     el.innerHTML = `
-      <div class="admin-stat"><span class="label">状态</span><span class="value" style="color:${color}">${s}</span></div>
-      <div class="admin-stat"><span class="label">版本</span><span class="value">${data.version || '-'}</span></div>
-      <div class="admin-stat"><span class="label">模式</span><span class="value">${data.mode || '-'}</span></div>
+      <div class="admin-stat"><span class="label">状态</span><span class="value" style="color:${color}">${esc(s)}</span></div>
+      <div class="admin-stat"><span class="label">版本</span><span class="value">${esc(data.version || '-')}</span></div>
+      <div class="admin-stat"><span class="label">模式</span><span class="value">${esc(data.mode || '-')}</span></div>
       <div class="admin-stat"><span class="label">Redis</span><span class="value">${data.components?.redis?.connected ? '✅' : '❌'}</span></div>
-      <div class="admin-stat"><span class="label">熔断器</span><span class="value">${data.components?.circuit_breaker?.state || '-'}</span></div>
+      <div class="admin-stat"><span class="label">熔断器</span><span class="value">${esc(data.components?.circuit_breaker?.state || '-')}</span></div>
       <div class="admin-stat"><span class="label">LLM</span><span class="value">${data.components?.llm?.configured ? '✅ 已配置' : '❌ 未配置'}</span></div>
     `;
   } catch (e) { console.error('Health check failed:', e); }
