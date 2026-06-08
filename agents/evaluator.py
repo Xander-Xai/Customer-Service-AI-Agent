@@ -4,6 +4,7 @@
 实现自我评估闭环：评估 -> 反馈聚合 -> 低分告警 -> Prompt 优化依据
 """
 import re
+import json
 import time
 from typing import Dict, Any, List, Optional
 from logger import get_logger
@@ -399,7 +400,6 @@ class ResponseEvaluator:
             raw = result.content.strip()
 
             # 解析 JSON 响应
-            import json
             # 尝试提取 JSON（LLM 可能输出 markdown 包裹的 JSON）
             json_match = re.search(r'\{[^}]+\}', raw)
             if json_match:

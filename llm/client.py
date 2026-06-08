@@ -158,6 +158,45 @@ class OpenAICompatibleClient:
             await self.circuit_breaker.record_failure()
         raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
 
+    async def async_invoke_raw(self, messages: list, timeout: Optional[float] = None):
+        """使用预格式化的消息列表直接调用（适用于多模态等需要原始 content 格式的场景）
+        messages: 已格式化的 OpenAI 格式消息列表 [{"role": "user", "content": [...]}]
+        跳过 _format_messages，直接传递。
+        """
+        if self.circuit_breaker and not await self.circuit_breaker.should_allow():
+            raise Exception("CircuitBreaker OPEN: LLM 调用已熔断")
+
+        payload = {"model": self.model, "messages": messages}
+        if "max_tokens" not in payload:
+            payload["max_tokens"] = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+        client = await self._get_async_client()
+        call_timeout = httpx.Timeout(timeout or self.timeout)
+
+        for attempt in range(self.max_retries):
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload, headers=self.headers, timeout=call_timeout,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                if self.circuit_breaker:
+                    await self.circuit_breaker.record_success()
+                if "choices" in result and result["choices"]:
+                    message = result["choices"][0].get("message", {})
+                    return CustomResponse(message.get("content", "") or "")
+                return CustomResponse("API response format error")
+            except (httpx.HTTPStatusError, httpx.RequestError) as e:
+                if attempt == self.max_retries - 1:
+                    break
+                delay = min(self.base_delay * (2 ** attempt) + random.uniform(0, 0.3), 10.0)
+                logger.warning(f"[LLM-raw] retry {attempt+1}/{self.max_retries}: {e}, wait {delay:.1f}s")
+                await asyncio.sleep(delay)
+
+        if self.circuit_breaker:
+            await self.circuit_breaker.record_failure()
+        raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
+
     async def async_invoke_stream(self, messages, timeout: Optional[float] = None):
         """流式调用（SSE 逐 chunk 接收）"""
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():

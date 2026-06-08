@@ -328,7 +328,10 @@ class EnhancedSessionManager:
     # ---- H-3: 用户级隔离 ----
 
     def set_user_id(self, session_id: str, user_id: str):
-        """设置会话的 user_id（用于用户级隔离）"""
+        """设置会话的 user_id（用于用户级隔离）
+        注意: 简单 dict 赋值受 CPython GIL 保护，无需额外加锁。
+        如需严格一致性，可在调用方使用 _session_lock。
+        """
         if session_id in self.sessions and user_id:
             self.sessions[session_id]["user_id"] = user_id
 
