@@ -63,6 +63,8 @@ export function connect(sessionId) {
     const authPayload = { type: 'auth' };
     if (jwtToken) authPayload.token = jwtToken;
     if (apiKey) authPayload.api_key = apiKey;
+    const sessionToken = localStorage.getItem('currentSessionToken');
+    if (sessionToken) authPayload.session_token = sessionToken;
     try { _ws.send(JSON.stringify(authPayload)); }
     catch (e) { console.error('[WS] 发送认证消息失败:', e); }
 

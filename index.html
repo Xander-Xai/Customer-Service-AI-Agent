@@ -21,9 +21,6 @@
       <button class="nav-link active" data-page="chat">
         💬 对话
       </button>
-      <button class="nav-link" data-page="monitor">
-        📊 监控
-      </button>
     </nav>
     <div class="nav-status">
       <div class="status-indicator">
@@ -76,8 +73,11 @@
           </div>
         </div>
         <div class="chat-input-wrapper" id="chatInputWrapper">
-          <button class="btn-attach" id="btnAttach" title="上传图片" aria-label="上传图片">
+          <button class="btn-attach" id="btnAttach" title="上传文件" aria-label="上传文件">
             📎
+          </button>
+          <button class="btn-voice" id="btnVoice" title="语音输入" aria-label="语音输入">
+            🎤
           </button>
           <textarea
             class="chat-input"
@@ -91,112 +91,10 @@
             ➤
           </button>
         </div>
-        <div class="input-hint" id="inputHint">按 Enter 发送，Shift + Enter 换行 · 可拖拽图片到输入区 · <span class="input-help-hint" id="btnShortcuts">快捷键 <kbd>?</kbd></span></div>
-        <input type="file" id="imageFileInput" accept="image/jpeg,image/png,image/webp" style="display:none">
+        <div class="input-hint" id="inputHint">按 Enter 发送，Shift + Enter 换行 · 支持图片/文档/视频上传 · <span class="input-help-hint" id="btnShortcuts">快捷键 <kbd>?</kbd></span></div>
+        <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,video/*,.pdf,.docx,.doc,.txt,.md" style="display:none">
       </div>
     </main>
-  </div>
-
-  <!-- 监控页面（初始隐藏） -->
-  <div id="monitorPage" style="display:none;">
-    <div class="monitor-layout page-transition">
-      <div class="monitor-grid" id="metricCards"></div>
-      <div class="monitor-grid">
-        <div class="metric-card card-wide" id="agentChartCard">
-          <div class="card-header"><div class="card-title">📊 Agent 负载分布</div></div>
-          <div class="bar-chart" id="agentChart"></div>
-        </div>
-        <div class="metric-card card-wide" id="modeChartCard">
-          <div class="card-header"><div class="card-title">🔄 协作模式分布</div></div>
-          <div class="bar-chart" id="modeChart"></div>
-        </div>
-      </div>
-      <div class="monitor-grid">
-        <div class="metric-card" id="slaCard">
-          <div class="card-header"><div class="card-title">⏱️ SLA 达标率</div></div>
-          <div style="display:flex;align-items:center;gap:24px;justify-content:center">
-            <div class="donut-chart" id="slaDonut">
-              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="SLA 达标率">
-                <circle class="donut-bg" cx="50" cy="50" r="42"/>
-                <circle class="donut-fill" id="slaFill" cx="50" cy="50" r="42" stroke="var(--success)" stroke-dasharray="0 264"/>
-              </svg>
-              <div class="donut-label">
-                <div class="donut-value" id="slaValue">--</div>
-                <div class="donut-desc">达标率</div>
-              </div>
-            </div>
-            <div>
-              <div style="margin-bottom:8px"><span class="status-tag healthy" id="slaStatus">--</span></div>
-              <div class="metric-detail" id="slaDetail">目标: 5s - 20s</div>
-            </div>
-          </div>
-        </div>
-        <div class="metric-card" id="cacheCard">
-          <div class="card-header"><div class="card-title">💾 缓存命中率</div></div>
-          <div style="text-align:center">
-            <div class="donut-chart" id="cacheDonut">
-              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="缓存命中率">
-                <circle class="donut-bg" cx="50" cy="50" r="42"/>
-                <circle class="donut-fill" id="cacheFill" cx="50" cy="50" r="42" stroke="var(--primary)" stroke-dasharray="0 264"/>
-              </svg>
-              <div class="donut-label">
-                <div class="donut-value" id="cacheValue">--</div>
-                <div class="donut-desc">命中率</div>
-              </div>
-            </div>
-            <div class="metric-detail" id="cacheDetail">L1: -- / L2: --</div>
-          </div>
-        </div>
-        <div class="metric-card" id="resolutionCard">
-          <div class="card-header"><div class="card-title">✅ 首次解决率</div></div>
-          <div style="text-align:center">
-            <div class="donut-chart" id="resolutionDonut">
-              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="首次解决率">
-                <circle class="donut-bg" cx="50" cy="50" r="42"/>
-                <circle class="donut-fill" id="resolutionFill" cx="50" cy="50" r="42" stroke="var(--success)" stroke-dasharray="0 264"/>
-              </svg>
-              <div class="donut-label">
-                <div class="donut-value" id="resolutionValue">--</div>
-                <div class="donut-desc">解决率</div>
-              </div>
-            </div>
-            <div class="metric-detail" id="resolutionDetail">--</div>
-          </div>
-        </div>
-        <div class="metric-card" id="aiCard">
-          <div class="card-header"><div class="card-title">🤖 AI 处理率</div></div>
-          <div style="text-align:center">
-            <div class="donut-chart" id="aiDonut">
-              <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="AI 处理率">
-                <circle class="donut-bg" cx="50" cy="50" r="42"/>
-                <circle class="donut-fill" id="aiFill" cx="50" cy="50" r="42" stroke="var(--info)" stroke-dasharray="0 264"/>
-              </svg>
-              <div class="donut-label">
-                <div class="donut-value" id="aiValue">--</div>
-                <div class="donut-desc">AI 处理</div>
-              </div>
-            </div>
-            <div class="metric-detail" id="aiDetail">--</div>
-          </div>
-        </div>
-      </div>
-      <div class="monitor-grid">
-        <div class="metric-card card-wide" id="sessionsCard">
-          <div class="card-header">
-            <div class="card-title">📋 最近会话</div>
-            <button class="nav-link" id="btnRefreshMonitor" style="padding:4px 10px;font-size:11px">🔄 刷新</button>
-          </div>
-          <table class="data-table" id="sessionsTable">
-            <thead><tr><th>会话 ID</th><th>消息数</th><th>漂移次数</th><th>最后活动</th><th>状态</th></tr></thead>
-            <tbody id="sessionsTableBody"></tbody>
-          </table>
-        </div>
-        <div class="metric-card card-wide" id="alertsCard">
-          <div class="card-header"><div class="card-title">🔔 SLA 告警</div></div>
-          <div id="alertsList"><div style="text-align:center;padding:20px;color:var(--text-muted)">暂无告警</div></div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <!-- 会话详情侧面板 -->

@@ -119,8 +119,8 @@ function renderModeChart(data) {
   const counts = data.metrics.mode_counts || {};
   const container = document.getElementById('modeChart');
   if (!container) return;
-  const modeColors = { sequential: 'info', parallel: 'success', consultation: 'warning', hierarchical: 'error' };
-  const modeLabels = { sequential: '快速通道', parallel: '并行处理', consultation: '专家会诊', hierarchical: '层级协作' };
+  const modeColors = { sequential: 'info', parallel: 'success', consultation: 'warning', hierarchical: 'error', react: 'primary' };
+  const modeLabels = { sequential: '快速通道', parallel: '并行处理', consultation: '专家会诊', hierarchical: '层级协作', react: 'ReAct 推理' };
   const entries = Object.entries(counts);
   if (entries.length === 0) {
     container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);width:100%">暂无数据</div>';

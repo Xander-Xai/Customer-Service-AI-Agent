@@ -315,7 +315,7 @@ def register_user(username: str, password: str, display_name: str = "") -> Dict[
         user = User(
             username=username,
             password_hash=hash_password(password),
-            role="user",
+            role="customer",
             display_name=display_name or username,
             created_at=datetime.now(timezone.utc),
         )

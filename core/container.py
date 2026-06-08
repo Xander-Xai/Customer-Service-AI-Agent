@@ -15,7 +15,7 @@ Usage:
     # container.graph_app 在 initialize() 中自动构建
 """
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 from logger import get_logger
 
@@ -71,6 +71,7 @@ class ServiceContainer:
 
         # ===== 延迟初始化组件（initialize() 中设置）=====
         self.llm: Any = None
+        self.vision_llm: Any = None  # v5.1: Vision LLM（多模态模型）
 
         # ERP
         self.erp: Any = None
@@ -112,6 +113,9 @@ class ServiceContainer:
 
             # 1. LLM
             await self._init_llm()
+
+            # 1.5. v5.1: Vision LLM（多模态模型，仅在启用时初始化）
+            await self._init_vision_llm()
 
             # 2. ERP
             if self.erp is None:
@@ -176,6 +180,36 @@ class ServiceContainer:
                 circuit_breaker=self.circuit_breaker,
             )
 
+    async def _init_vision_llm(self):
+        """v5.1: 初始化 Vision LLM 客户端（仅在 MULTIMODAL_ENABLED 时）"""
+        from config import MULTIMODAL_ENABLED, VISION_MODEL, VISION_BASE_URL, VISION_API_KEY
+        from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+
+        if not MULTIMODAL_ENABLED:
+            return
+
+        # 从环境变量获取，留空则复用默认 LLM 配置
+        vision_model = VISION_MODEL or OPENAI_MODEL
+        vision_base_url = VISION_BASE_URL or OPENAI_BASE_URL
+        vision_api_key = VISION_API_KEY or OPENAI_API_KEY
+
+        # 如果 Vision 模型与默认模型相同，复用同一个客户端
+        if (vision_model == OPENAI_MODEL
+                and vision_base_url == OPENAI_BASE_URL
+                and vision_api_key == OPENAI_API_KEY):
+            self.vision_llm = self.llm
+            logger.info("Vision LLM 复用默认 LLM 客户端")
+            return
+
+        from llm.client import OpenAICompatibleClient
+        self.vision_llm = OpenAICompatibleClient(
+            api_key=vision_api_key,
+            base_url=vision_base_url,
+            model=vision_model,
+            circuit_breaker=self.circuit_breaker,
+        )
+        logger.info(f"Vision LLM 初始化完成: {vision_model} @ {vision_base_url}")
+
     async def _init_rag_and_tools(self):
         """初始化 RAG 知识库 + 工具注册"""
         if self.knowledge_base is None:
@@ -184,7 +218,8 @@ class ServiceContainer:
                 seed_product_knowledge, seed_faq, seed_tech_support, seed_complaint_knowledge,
                 seed_supplementary_data,
             )
-            self.knowledge_base = CosmeticsKnowledgeBase()
+            from config import CLIP_ENABLED
+            self.knowledge_base = CosmeticsKnowledgeBase(clip_enabled=CLIP_ENABLED)
             seed_product_knowledge(self.knowledge_base)
             seed_faq(self.knowledge_base)
             seed_tech_support(self.knowledge_base)
@@ -232,6 +267,8 @@ class ServiceContainer:
             agent.set_bus(self.bus)
             agent.set_blackboard(self.bb)
             agent.set_erp(self.erp)
+            if self.vision_llm:  # v5.1: 注入 Vision LLM
+                agent.set_vision_llm(self.vision_llm)
             self.agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
@@ -248,6 +285,8 @@ class ServiceContainer:
         react_agent.set_erp(self.erp)
         react_agent.set_knowledge_base(self.knowledge_base)
         react_agent.set_tool_registry(self.tool_registry)
+        if self.vision_llm:  # v5.1: 注入 Vision LLM
+            react_agent.set_vision_llm(self.vision_llm)
         self.agents_dict["react_agent"] = react_agent
 
         # ResponseAgent

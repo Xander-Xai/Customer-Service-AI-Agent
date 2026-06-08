@@ -1,5 +1,5 @@
 /**
- * 输入区模块：消息发送、图片上传、拖拽、输入自适应
+ * 输入区模块：消息发送、文件上传（图片/文档/视频）、拖拽、输入自适应
  */
 import { API } from '../api/index.js';
 import { appendUserMessage, appendAssistantMessage, appendSystemMessage, showTypingIndicator, removeTypingIndicator, createStreamingMessage, removeProgressStatus } from './messages.js';
@@ -9,7 +9,22 @@ import { formatFileSize } from '../utils/format.js';
 import { showToast } from '../utils/toast.js';
 
 let isWaitingResponse = false;
-let selectedImageFile = null;
+let selectedFile = null;
+
+/** 判断文件是否为图片类型 */
+function isImageFile(file) {
+  return file.type.startsWith('image/');
+
+}
+
+/** 获取文件类型图标 */
+function getFileIcon(file) {
+  if (file.type.startsWith('image/')) return '🖼️';
+  if (file.type.startsWith('video/')) return '🎬';
+  if (file.type === 'application/pdf') return '📄';
+  if (file.name?.endsWith('.docx') || file.name?.endsWith('.doc')) return '📝';
+  return '📎';
+}
 
 // ===== 快捷提问 =====
 
@@ -34,54 +49,39 @@ export function sendMessage() {
   const input = document.getElementById('chatInput');
   if (!input) return;
   const query = input.value.trim();
-  if ((!query && !selectedImageFile) || isWaitingResponse) return;
+  if ((!query && !selectedFile) || isWaitingResponse) return;
 
   hideWelcome();
 
-  const imageFile = selectedImageFile;
-  appendUserMessage(query, imageFile);
-  addToHistory({ role: 'user', content: query, hasImage: !!imageFile });
+  const file = selectedFile;
+  const isImage = file && isImageFile(file);
+  const displayQuery = file && !isImage ? `${getFileIcon(file)} ${file.name}\n${query}` : query;
+  appendUserMessage(displayQuery, isImage ? file : null);
+  addToHistory({ role: 'user', content: query, hasFile: !!file, fileName: file?.name });
 
   input.value = '';
   autoResizeInput(input);
-  clearImageSelection();
+  clearFileSelection();
 
-  // 有图片：REST API
-  if (imageFile) {
+  // 有文件：图片走 SSE 流式，其他文件走 REST
+  if (file) {
     isWaitingResponse = true;
     updateSendButton();
-    showTypingIndicator();
 
-    API.sendChatWithImage(query, imageFile, getCurrentSessionId()).then(result => {
-      removeTypingIndicator();
-      isWaitingResponse = false;
-      updateSendButton();
-
-      updateSessionInfo(result.session_id, result.session_token);
-
-      appendAssistantMessage(result.response || '图片分析完成', {
-        agent: '', elapsed: result.elapsed || 0, mode: '', cached: false, agentsUsed: [], resolutionStatus: '',
-      });
-      addToHistory({ role: 'assistant', content: result.response });
-      loadSessionList();
-    }).catch(err => {
-      removeTypingIndicator();
-      isWaitingResponse = false;
-      updateSendButton();
-      appendSystemMessage('图片发送失败: ' + (err.message || '未知错误'));
-    });
-
+    if (isImage) {
+      _sendViaSSEWithImage(query, file);
+    } else {
+      _sendFileViaREST(query, file);
+    }
     input.focus();
     return;
   }
 
-  // 无图片：优先 SSE 流式，降级到 WebSocket
+  // 无文件：优先 SSE 流式，降级到 WebSocket
   isWaitingResponse = true;
   updateSendButton();
 
   _sendViaSSE(query);
-  input.value = '';
-  autoResizeInput(input);
   input.focus();
 }
 
@@ -107,6 +107,9 @@ function _sendViaSSE(query) {
         agent: data.agent || '',
         mode: data.mode || 'sequential',
         elapsed: data.elapsed || data.processing_time || 0,
+        cached: data.cached || false,
+        agentsUsed: data.agents_used || [],
+        resolutionStatus: data.resolution_status || '',
       }) : data.content || '';
 
       updateSessionInfo(data.session_id, data.session_token);
@@ -132,55 +135,167 @@ function _sendViaSSE(query) {
   });
 }
 
-// ===== 图片上传 =====
+/** v5.1: 多模态 SSE 流式发送（图片 + 文字，降级到 REST） */
+function _sendViaSSEWithImage(query, imageFile) {
+  let streaming = null;
+  let hasStarted = false;
 
-export function triggerImageUpload() {
-  const input = document.getElementById('imageFileInput');
+  const controller = API.sendChatStreamWithImage(
+    query, imageFile, getCurrentSessionId(), getCurrentSessionToken(), {
+      onChunk(content) {
+        if (!hasStarted) {
+          hasStarted = true;
+          removeTypingIndicator();
+          streaming = createStreamingMessage();
+        }
+        if (streaming && content) streaming.appendChunk(content);
+      },
+      onDone(data) {
+        isWaitingResponse = false;
+        updateSendButton();
+
+        const rawText = streaming ? streaming.finalize({
+          agent: data.agent || '',
+          mode: data.mode || 'sequential',
+          elapsed: data.elapsed || data.processing_time || 0,
+          cached: data.cached || false,
+          agentsUsed: data.agents_used || [],
+          resolutionStatus: data.resolution_status || '',
+        }) : data.content || '';
+
+        updateSessionInfo(data.session_id, data.session_token);
+        addToHistory({ role: 'assistant', content: rawText, agent: data.agent });
+        loadSessionList();
+      },
+      onError(errMsg) {
+        if (!hasStarted) {
+          // SSE 流式失败 → 降级到 REST 同步
+          console.log('[SSE-MM] 流式失败，降级到 REST:', errMsg);
+          showTypingIndicator();
+          API.sendChatWithImage(query, imageFile, getCurrentSessionId()).then(result => {
+            removeTypingIndicator();
+            isWaitingResponse = false;
+            updateSendButton();
+            updateSessionInfo(result.session_id, result.session_token);
+            appendAssistantMessage(result.response || '图片分析完成', {
+              agent: result.agent || '', elapsed: result.elapsed || 0,
+              mode: result.mode || '', cached: false, agentsUsed: result.agents_used || [],
+            });
+            addToHistory({ role: 'assistant', content: result.response });
+            loadSessionList();
+          }).catch(err => {
+            removeTypingIndicator();
+            isWaitingResponse = false;
+            updateSendButton();
+            appendSystemMessage('图片发送失败: ' + (err.message || '未知错误'));
+          });
+        } else {
+          isWaitingResponse = false;
+          updateSendButton();
+          if (streaming) streaming.finalize({});
+          showToast('图片分析中断', 'warning');
+        }
+      },
+      onStatus(data) {
+        if (!hasStarted) showTypingIndicator();
+      },
+    }
+  );
+}
+
+/** 非图片文件上传（视频/PDF/DOCX/文本）走 REST /api/chat/file */
+async function _sendFileViaREST(query, file) {
+  showTypingIndicator();
+  try {
+    const result = await API.sendChatWithFile(query, file, getCurrentSessionId());
+    removeTypingIndicator();
+    isWaitingResponse = false;
+    updateSendButton();
+    updateSessionInfo(result.session_id, result.session_token);
+    appendAssistantMessage(result.response || '文件分析完成', {
+      agent: result.agent || '', elapsed: result.elapsed || 0,
+      mode: result.mode || '', cached: false, agentsUsed: result.agents_used || [],
+    });
+    addToHistory({ role: 'assistant', content: result.response });
+    loadSessionList();
+  } catch (err) {
+    removeTypingIndicator();
+    isWaitingResponse = false;
+    updateSendButton();
+    appendSystemMessage('文件处理失败: ' + (err.message || '未知错误'));
+  }
+}
+
+// ===== 文件上传 =====
+
+export function triggerFileUpload() {
+  const input = document.getElementById('fileInput');
   if (input) input.click();
 }
 
-function handleImageSelect(event) {
+function handleFileSelect(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
-  validateAndSetImage(file);
+  validateAndSetFile(file);
   event.target.value = '';
 }
 
-function validateAndSetImage(file) {
-  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-  if (!allowedTypes.includes(file.type)) {
-    appendSystemMessage('不支持的图片格式，请上传 JPEG、PNG 或 WebP 格式的图片');
+function validateAndSetFile(file) {
+  // 按类型分组校验
+  const isImage = file.type.startsWith('image/');
+  const isVideo = file.type.startsWith('video/');
+  const isPdf = file.type === 'application/pdf';
+  const isDoc = file.name?.endsWith('.docx') || file.name?.endsWith('.doc');
+  const isText = file.type === 'text/plain' || file.name?.endsWith('.md');
+
+  if (!isImage && !isVideo && !isPdf && !isDoc && !isText) {
+    appendSystemMessage('不支持的文件格式。支持: 图片(JPEG/PNG/WebP)、视频、PDF、DOCX、TXT/MD');
     return;
   }
-  if (file.size > 5 * 1024 * 1024) {
-    appendSystemMessage(`图片大小超过限制（最大 5MB），当前大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`);
+
+  // 分类型大小限制
+  const maxMB = isVideo ? 50 : 20;
+  if (file.size > maxMB * 1024 * 1024) {
+    appendSystemMessage(`文件大小超过限制（最大 ${maxMB}MB），当前大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`);
     return;
   }
-  selectedImageFile = file;
-  showImagePreview(file);
+
+  selectedFile = file;
+  showFilePreview(file);
   updateSendButton();
 }
 
-function showImagePreview(file) {
+function showFilePreview(file) {
   const area = document.getElementById('imagePreviewArea');
   const thumb = document.getElementById('imagePreviewThumb');
   const nameEl = document.getElementById('imagePreviewName');
   const sizeEl = document.getElementById('imagePreviewSize');
-  if (!area || !thumb) return;
-  thumb.src = URL.createObjectURL(file);
-  if (nameEl) nameEl.textContent = file.name || '图片';
+  if (!area) return;
+
+  if (isImageFile(file) && thumb) {
+    thumb.src = URL.createObjectURL(file);
+    thumb.style.display = 'block';
+  } else if (thumb) {
+    thumb.style.display = 'none';
+  }
+
+  if (nameEl) nameEl.textContent = `${getFileIcon(file)} ${file.name || '文件'}`;
   if (sizeEl) sizeEl.textContent = formatFileSize(file.size);
   area.style.display = 'block';
 }
 
-export function clearImageSelection() {
-  selectedImageFile = null;
+export function clearFileSelection() {
+  selectedFile = null;
   const area = document.getElementById('imagePreviewArea');
   const thumb = document.getElementById('imagePreviewThumb');
   if (area) area.style.display = 'none';
   if (thumb && thumb.src) { URL.revokeObjectURL(thumb.src); thumb.src = ''; }
   updateSendButton();
 }
+
+// 向后兼容别名
+export const clearImageSelection = clearFileSelection;
+export const triggerImageUpload = triggerFileUpload;
 
 // ===== 拖拽上传 =====
 
@@ -201,7 +316,7 @@ export function initDragAndDrop() {
   });
   chatArea.addEventListener('drop', (e) => {
     const files = e.dataTransfer && e.dataTransfer.files;
-    if (files && files.length > 0) validateAndSetImage(files[0]);
+    if (files && files.length > 0) validateAndSetFile(files[0]);
   }, false);
 }
 
@@ -223,7 +338,7 @@ export function autoResizeInput(el) {
 export function updateSendButton() {
   const input = document.getElementById('chatInput');
   const btn = document.getElementById('btnSend');
-  if (btn) btn.disabled = (!input || (!input.value.trim() && !selectedImageFile)) || isWaitingResponse;
+  if (btn) btn.disabled = (!input || (!input.value.trim() && !selectedFile)) || isWaitingResponse;
 }
 
 // ===== 初始化 =====
@@ -233,17 +348,23 @@ export function initInputEvents() {
   const imagePreviewRemove = document.getElementById('imagePreviewRemove');
   const btnSend = document.getElementById('btnSend');
   const chatInput = document.getElementById('chatInput');
-  const imageFileInput = document.getElementById('imageFileInput');
+  const fileInput = document.getElementById('fileInput');
 
-  if (btnAttach) btnAttach.addEventListener('click', triggerImageUpload);
-  if (imagePreviewRemove) imagePreviewRemove.addEventListener('click', clearImageSelection);
+  if (btnAttach) btnAttach.addEventListener('click', triggerFileUpload);
+  if (imagePreviewRemove) imagePreviewRemove.addEventListener('click', clearFileSelection);
   if (btnSend) btnSend.addEventListener('click', sendMessage);
   if (chatInput) {
     chatInput.addEventListener('keydown', handleInputKeydown);
     chatInput.addEventListener('input', () => autoResizeInput(chatInput));
   }
-  if (imageFileInput) imageFileInput.addEventListener('change', handleImageSelect);
+  if (fileInput) fileInput.addEventListener('change', handleFileSelect);
 }
 
 /** 获取 isWaitingResponse 状态（供外部检查） */
 export function getIsWaiting() { return isWaitingResponse; }
+
+/** 重置等待状态（新建对话时调用） */
+export function resetWaitingState() {
+  isWaitingResponse = false;
+  updateSendButton();
+}

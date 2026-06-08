@@ -27,21 +27,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 @pytest.fixture(scope="function")
 def graph_app():
-    from multi_agent_customer_service import make_graph
-    return make_graph()
+    from multi_agent_customer_service import build_graph
+    from core.container import ServiceContainer
+    container = ServiceContainer()
+    return build_graph(container)
 
 
 @pytest.fixture
 def fastapi_app():
-    from multi_agent_customer_service import make_graph, session_mgr, cache, metrics, bus
+    from multi_agent_customer_service import build_graph
+    from core.container import ServiceContainer
     from api.app import create_app
-    graph = make_graph()
+    container = ServiceContainer()
+    graph = build_graph(container)
     return create_app(
         graph,
-        session_manager=session_mgr,
-        response_cache=cache,
-        metrics=metrics,
-        message_bus=bus,
+        session_manager=container.session_mgr,
+        response_cache=container.cache,
+        metrics=container.metrics,
+        message_bus=container.bus,
     )
 
 
@@ -71,8 +75,8 @@ def client_no_auth(fastapi_app):
 
 class TestImports:
     def test_import_graph(self):
-        from multi_agent_customer_service import make_graph
-        assert callable(make_graph)
+        from multi_agent_customer_service import build_graph
+        assert callable(build_graph)
 
     def test_import_agents(self):
         from agents import ProductAgent, TechAgent, BillingAgent, ComplaintAgent, GeneralAgent
@@ -116,9 +120,11 @@ class TestImports:
 
 class TestGraphBuild:
     def test_graph_build(self):
-        from multi_agent_customer_service import make_graph
-        app = make_graph()
-        assert app is not None
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
+        container = ServiceContainer()
+        app = build_graph(container)
+        assert hasattr(app, 'ainvoke')
 
     @pytest.mark.asyncio
     async def test_graph_invoke_returns_state(self, graph_app):
@@ -221,7 +227,7 @@ class TestCache:
         c = ResponseCache(l1_max=50, l2_max=200)
         c.put("玫瑰精华液成分", "含有玻尿酸")
         result = c.get("玫瑰精华液有什么成分")
-        assert result is not None
+        assert result == "含有玻尿酸"
 
     def test_l2_semantic_config(self):
         from cache.response_cache import ResponseCache
@@ -235,6 +241,7 @@ class TestCache:
         c = ResponseCache(l1_max=50, l2_max=200, default_ttl=1)
         c.put("expire_test", "value")
         time.sleep(1.1)
+        assert c.get("expire_test") is None
 
     def test_cache_stats(self):
         from cache.response_cache import ResponseCache
@@ -249,6 +256,8 @@ class TestCache:
         for i in range(25):
             c.put(f"key_{i}", f"value_{i}")
         # 应触发淘汰
+        stats = c.get_stats()
+        assert stats["l1_size"] <= 10
 
     def test_l2_cache_functionality(self):
         from cache.response_cache import ResponseCache
@@ -287,6 +296,7 @@ class TestSessionManager:
             await sm.add_message("test", f"消息{i}", is_user=True)
         context = await sm.get_conversation_context("test")
         # 应保留最近的3条
+        assert len(context) <= 6
 
     @pytest.mark.asyncio
     async def test_delete_session(self):
@@ -471,7 +481,7 @@ class TestERP:
         from erp.kingdee_adapter import KingdeeMockAdapter
         erp = KingdeeMockAdapter()
         result = await erp.query_customer("C001")
-        assert result is not None
+        assert isinstance(result, dict)
         assert result["name"] == "王女士"
 
     @pytest.mark.asyncio
@@ -485,7 +495,10 @@ class TestERP:
     async def test_erp_factory_mock(self):
         from erp.kingdee_adapter import KingdeeMockAdapter
         adapter = KingdeeMockAdapter()
-        assert adapter is not None
+        assert hasattr(adapter, 'query_product')
+        assert hasattr(adapter, 'query_inventory')
+        assert hasattr(adapter, 'query_order')
+        assert hasattr(adapter, 'query_customer')
 
     @pytest.mark.asyncio
     async def test_erp_abstract_interface(self):
@@ -504,7 +517,8 @@ class TestCollaboration:
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
         orch = CollaborationOrchestrator(MessageBus(), SharedBlackboard())
-        assert orch is not None
+        assert hasattr(orch, 'select_mode_name')
+        assert hasattr(orch, 'build_context')
 
     def test_orchestrator_select_mode(self):
         from collaboration.orchestrator import CollaborationOrchestrator
@@ -528,17 +542,29 @@ class TestAPI:
         assert resp.status_code == 200
 
     def test_metrics_endpoint(self, client_with_api_key):
+        from config import API_KEY_ENABLED
         resp = client_with_api_key.get("/api/metrics")
-        # v4.0: API_KEY_ENABLED=false 时需要 JWT 认证，API Key 不生效
-        assert resp.status_code in (200, 401)
+        # metrics 需要 admin 认证；API_KEY_ENABLED=false 时 API Key 不生效
+        if API_KEY_ENABLED:
+            assert resp.status_code == 200
+        else:
+            assert resp.status_code == 401
 
     def test_kpi_endpoint(self, client_with_api_key):
+        from config import API_KEY_ENABLED
         resp = client_with_api_key.get("/api/kpi")
-        assert resp.status_code in (200, 401)
+        if API_KEY_ENABLED:
+            assert resp.status_code == 200
+        else:
+            assert resp.status_code == 401
 
     def test_cache_stats_endpoint(self, client_with_api_key):
+        from config import API_KEY_ENABLED
         resp = client_with_api_key.get("/api/cache/stats")
-        assert resp.status_code in (200, 401)
+        if API_KEY_ENABLED:
+            assert resp.status_code == 200
+        else:
+            assert resp.status_code == 401
 
     def test_sessions_endpoint(self, client_with_api_key):
         resp = client_with_api_key.get("/api/sessions")
@@ -575,13 +601,9 @@ class TestSecurityAuth:
         assert resp.status_code == 401
 
     def test_alerts_no_auth_returns_401(self, client_no_auth):
-        from config import DEV_MODE
         resp = client_no_auth.get("/api/alerts")
-        # v4.0: 告警端点需要认证，DEV_MODE 下允许无认证访问
-        if DEV_MODE:
-            assert resp.status_code in (200, 401, 403)
-        else:
-            assert resp.status_code in (401, 403)
+        # alerts 需要认证，无认证时返回 401
+        assert resp.status_code == 401
 
     def test_cache_stats_no_auth_returns_401(self, client_no_auth):
         resp = client_no_auth.get("/api/cache/stats")
@@ -592,9 +614,13 @@ class TestSecurityAuth:
         assert resp.status_code == 200
 
     def test_metrics_with_api_key(self, client_with_api_key):
+        from config import API_KEY_ENABLED
         resp = client_with_api_key.get("/api/metrics")
-        # v4.0: API_KEY_ENABLED=false 时需要 JWT 认证
-        assert resp.status_code in (200, 401)
+        # metrics 需要 admin 认证；API_KEY_ENABLED=false 时 API Key 不生效
+        if API_KEY_ENABLED:
+            assert resp.status_code == 200
+        else:
+            assert resp.status_code == 401
 
     def test_health_is_public(self, client_no_auth):
         resp = client_no_auth.get("/api/health")
@@ -602,13 +628,12 @@ class TestSecurityAuth:
 
     def test_sessions_no_auth_returns_401(self, client_no_auth):
         # v4.0: 会话端点需要认证（移除了 localhost 绕过）
-        # 注意：DEV_MODE=true 时会绕过认证（测试环境），此测试验证认证逻辑存在
         from config import DEV_MODE
         resp = client_no_auth.get("/api/sessions")
         if DEV_MODE:
-            assert resp.status_code == 200  # DEV_MODE 下允许无认证访问
+            assert resp.status_code == 200
         else:
-            assert resp.status_code in (401, 403)
+            assert resp.status_code == 401
 
     def test_sessions_with_api_key(self, client_with_api_key):
         resp = client_with_api_key.get("/api/sessions")
@@ -632,23 +657,23 @@ class TestSecurityAuth:
 
 class TestInputSanitization:
     def test_control_chars_removed(self):
-        from api.app import _sanitize_input
-        assert _sanitize_input("hello\x00world") == "helloworld"
-        assert _sanitize_input("test\x01\x02\x03value") == "testvalue"
+        from api.utils import sanitize_input
+        assert sanitize_input("hello\x00world") == "helloworld"
+        assert sanitize_input("test\x01\x02\x03value") == "testvalue"
 
     def test_html_tags_removed(self):
-        from api.app import _sanitize_input
-        assert _sanitize_input("<script>alert(1)</script>") == "alert(1)"
-        assert _sanitize_input("<b>bold</b> text") == "bold text"
+        from api.utils import sanitize_input
+        assert sanitize_input("<script>alert(1)</script>") == "alert(1)"
+        assert sanitize_input("<b>bold</b> text") == "bold text"
 
     def test_normal_text_preserved(self):
-        from api.app import _sanitize_input
-        assert _sanitize_input("你好，我想咨询产品信息") == "你好，我想咨询产品信息"
+        from api.utils import sanitize_input
+        assert sanitize_input("你好，我想咨询产品信息") == "你好，我想咨询产品信息"
 
     def test_whitespace_stripped(self):
-        from api.app import _sanitize_input
-        assert _sanitize_input("  hello  ") == "hello"
-        assert _sanitize_input("\n\ttest\n") == "test"
+        from api.utils import sanitize_input
+        assert sanitize_input("  hello  ") == "hello"
+        assert sanitize_input("\n\ttest\n") == "test"
 
 
 # ============================================================================
@@ -919,7 +944,7 @@ class TestSLAAlertManager:
             assert alert["type"] == "sla_violation_high"
         else:
             # 如果窗口未填充（并发锁问题），跳过断言
-            assert True
+            pytest.xfail("SLA window not populated - likely concurrency issue")
 
     @pytest.mark.asyncio
     @pytest.mark.asyncio
@@ -1091,7 +1116,7 @@ class TestChineseCacheOptimization:
         cache = ResponseCache(l1_max=50, l2_max=200, default_ttl=3600)
         cache.put("这款玫瑰精华液有什么成分", "含有玫瑰精油和透明质酸")
         result = cache.get("玫瑰精华液的成分是什么")
-        assert result is not None
+        assert result == "含有玫瑰精油和透明质酸"
 
     def test_cache_eviction_reduced_batch(self):
         from cache.response_cache import ResponseCache
@@ -1279,14 +1304,18 @@ class TestReActAgent:
 
 class TestGraphIntegration:
     def test_graph_has_react_node(self):
-        from multi_agent_customer_service import make_graph
-        app = make_graph()
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
+        container = ServiceContainer()
+        app = build_graph(container)
         nodes = list(app.get_graph().nodes)
         assert "react" in nodes
 
     def test_graph_has_all_modes(self):
-        from multi_agent_customer_service import make_graph
-        app = make_graph()
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
+        container = ServiceContainer()
+        app = build_graph(container)
         nodes = list(app.get_graph().nodes)
         for mode in ["sequential", "parallel", "consultation", "hierarchical", "react"]:
             assert mode in nodes
@@ -1374,11 +1403,12 @@ class TestPerformance:
         assert hits >= 30
 
     def test_sequential_chat_requests(self, graph_app):
-        from multi_agent_customer_service import session_mgr, cache, metrics, bus
+        from core.container import ServiceContainer
         from api.app import create_app
         from fastapi.testclient import TestClient
         from config import API_KEY
-        app = create_app(graph_app, session_manager=session_mgr, response_cache=cache, metrics=metrics, message_bus=bus)
+        container = ServiceContainer()
+        app = create_app(graph_app, session_manager=container.session_mgr, response_cache=container.cache, metrics=container.metrics, message_bus=container.bus)
         client = TestClient(app, raise_server_exceptions=True)
         headers = {"X-API-Key": API_KEY}
         first_resp = client.post("/api/chat", json={"query": "你好"}, headers=headers)
@@ -1390,10 +1420,11 @@ class TestPerformance:
         assert resp.status_code == 200
 
     def test_health_endpoint_stress(self, graph_app):
-        from multi_agent_customer_service import session_mgr, cache, metrics, bus
+        from core.container import ServiceContainer
         from api.app import create_app
         from fastapi.testclient import TestClient
-        app = create_app(graph_app, session_manager=session_mgr, response_cache=cache, metrics=metrics, message_bus=bus)
+        container = ServiceContainer()
+        app = create_app(graph_app, session_manager=container.session_mgr, response_cache=container.cache, metrics=container.metrics, message_bus=container.bus)
         client = TestClient(app)
         start = time.time()
         for _ in range(100):

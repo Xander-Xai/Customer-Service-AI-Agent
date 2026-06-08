@@ -7,7 +7,8 @@ const WELCOME_HTML = `
     <div class="welcome-icon">💬</div>
     <h2 class="welcome-title">智能客服助手</h2>
     <p class="welcome-subtitle">
-      基于多智能体协作，为您提供产品咨询、技术支持、订单查询、投诉处理等一站式服务
+      基于多智能体协作，为您提供产品咨询、技术支持、订单查询、投诉处理等一站式服务。<br>
+      支持文字对话、语音输入、图片/文档/视频分析
     </p>
     <div class="quick-prompts">
       <div class="quick-prompt-card" data-title="产品成分查询">

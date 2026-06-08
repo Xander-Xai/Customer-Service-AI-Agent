@@ -5,7 +5,6 @@
 import '../styles/variables.css';
 import '../styles/layout.css';
 import '../styles/components.css';
-import '../styles/monitor.css';
 import '../styles/animations.css';
 import '../styles/responsive.css';
 

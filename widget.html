@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能客服</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --primary-light: rgba(99,102,241,0.1);
+      --bg: #ffffff;
+      --bg-secondary: #f9fafb;
+      --bg-bubble: #f3f4f6;
+      --text-primary: #111827;
+      --text-secondary: #6b7280;
+      --text-muted: #9ca3af;
+      --border: #e5e7eb;
+      --border-light: #f3f4f6;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.06);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+    }
+
+    .widget-dark {
+      --bg: #1f2937;
+      --bg-secondary: #111827;
+      --bg-bubble: #374151;
+      --text-primary: #f9fafb;
+      --text-secondary: #d1d5db;
+      --text-muted: #6b7280;
+      --border: #374151;
+      --border-light: #1f2937;
+      --primary-light: rgba(99,102,241,0.15);
+      --shadow: 0 1px 3px rgba(0,0,0,0.2);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    html, body {
+      height: 100%;
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-primary);
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    /* ── Error screen ── */
+    .error-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      text-align: center;
+      padding: 24px;
+      color: var(--text-secondary);
+    }
+    .error-screen .icon { font-size: 32px; margin-bottom: 12px; }
+    .error-screen h2 { font-size: 16px; color: var(--text-primary); margin-bottom: 6px; }
+
+    /* ── Main container ── */
+    .widget-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      background: var(--bg);
+    }
+
+    /* ── Header ── */
+    .widget-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      background: var(--primary);
+      color: #fff;
+      flex-shrink: 0;
+    }
+    .header-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .header-info { flex: 1; min-width: 0; }
+    .header-name {
+      font-size: 15px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      opacity: 0.85;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #34d399;
+      flex-shrink: 0;
+    }
+
+    /* ── Messages area ── */
+    .widget-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      scroll-behavior: smooth;
+    }
+    .widget-messages::-webkit-scrollbar { width: 4px; }
+    .widget-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ── Message bubbles ── */
+    .msg-row {
+      display: flex;
+      flex-direction: column;
+      max-width: 85%;
+      animation: fadeInUp 0.25s ease;
+    }
+    .msg-row.user { align-self: flex-end; align-items: flex-end; }
+    .msg-row.ai   { align-self: flex-start; align-items: flex-start; }
+
+    .msg-bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.6;
+      word-break: break-word;
+      box-shadow: var(--shadow);
+    }
+    .msg-row.user .msg-bubble {
+      background: var(--primary);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-row.ai .msg-bubble {
+      background: var(--bg-bubble);
+      color: var(--text-primary);
+      border-bottom-left-radius: 4px;
+    }
+    .msg-time {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      padding: 0 4px;
+    }
+
+    /* ── Typing indicator ── */
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 10px 14px;
+    }
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+    .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Quick questions ── */
+    .quick-questions {
+      display: flex;
+      gap: 8px;
+      padding: 0 16px 12px;
+      overflow-x: auto;
+      flex-shrink: 0;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .quick-questions::-webkit-scrollbar { display: none; }
+    .quick-questions.hidden { display: none; }
+    .quick-btn {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--bg);
+      color: var(--primary);
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+      font-family: var(--font);
+    }
+    .quick-btn:hover {
+      background: var(--primary-light);
+      border-color: var(--primary);
+    }
+
+    /* ── Input area ── */
+    .widget-input-area {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--border-light);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .widget-textarea {
+      flex: 1;
+      resize: none;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: var(--font);
+      line-height: 1.4;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      outline: none;
+      min-height: 40px;
+      max-height: 80px;
+      transition: border-color 0.15s ease;
+    }
+    .widget-textarea::placeholder { color: var(--text-muted); }
+    .widget-textarea:focus { border-color: var(--primary); }
+
+    .btn-send {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      background: var(--primary);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-send:hover { background: var(--primary-hover); }
+    .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* ── Welcome message ── */
+    .welcome-msg {
+      text-align: center;
+      padding: 24px 16px;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+    .welcome-msg .emoji { font-size: 28px; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="widget-container" id="widgetRoot">
+    <!-- Header -->
+    <div class="widget-header">
+      <div class="header-avatar" id="headerAvatar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      </div>
+      <div class="header-info">
+        <div class="header-name" id="headerName">在线客服</div>
+        <div class="header-status">
+          <span class="status-dot"></span>
+          <span id="statusText">在线</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="widget-messages" id="messages">
+      <!-- Welcome -->
+      <div class="welcome-msg">
+        <div class="emoji">&#x1F44B;</div>
+        <div id="welcomeText">您好！我是智能客服助手，有什么可以帮您的吗？</div>
+      </div>
+    </div>
+
+    <!-- Quick questions -->
+    <div class="quick-questions" id="quickQuestions">
+      <button class="quick-btn" data-q="产品有哪些功效？">产品有哪些功效？</button>
+      <button class="quick-btn" data-q="如何查询订单物流？">如何查询订单物流？</button>
+      <button class="quick-btn" data-q="退换货政策是什么？">退换货政策是什么？</button>
+      <button class="quick-btn" data-q="敏感肌可以用吗？">敏感肌可以用吗？</button>
+    </div>
+
+    <!-- Input -->
+    <div class="widget-input-area">
+      <textarea
+        class="widget-textarea"
+        id="chatInput"
+        placeholder="输入您的问题..."
+        rows="1"
+        aria-label="输入消息"
+      ></textarea>
+      <button class="btn-send" id="btnSend" disabled aria-label="发送消息">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <script>
+  (function() {
+    "use strict";
+
+    // ── URL Params ──
+    const params = new URLSearchParams(window.location.search);
+    const apiKey = params.get("api_key");
+    const brandName = params.get("name") || "";
+    const theme = params.get("theme") || "light";
+    const lang = params.get("lang") || "zh";
+
+    // ── i18n ──
+    const i18n = {
+      zh: {
+        noApiKey: "缺少必要参数",
+        noApiKeyDesc: "请在 URL 中提供 api_key 参数，例如：widget.html?api_key=your_key",
+        online: "在线",
+        placeholder: "输入您的问题...",
+        welcome: "您好！我是智能客服助手，有什么可以帮您的吗？",
+        quicks: ["产品有哪些功效？", "如何查询订单物流？", "退换货政策是什么？", "敏感肌可以用吗？"],
+        defaultBrand: "在线客服",
+        errorPrefix: "抱歉，服务出现异常，请稍后重试。",
+      },
+      en: {
+        noApiKey: "Missing required parameter",
+        noApiKeyDesc: "Please provide an api_key in the URL, e.g.: widget.html?api_key=your_key",
+        online: "Online",
+        placeholder: "Type your message...",
+        welcome: "Hello! I'm your smart assistant. How can I help you?",
+        quicks: ["What are the product features?", "How to track my order?", "What's the return policy?", "Is it suitable for sensitive skin?"],
+        defaultBrand: "Online Support",
+        errorPrefix: "Sorry, something went wrong. Please try again later.",
+      },
+    };
+    const t = i18n[lang] || i18n.zh;
+    const displayName = brandName || t.defaultBrand;
+
+    // ── Apply theme ──
+    if (theme === "dark") {
+      document.getElementById("widgetRoot").classList.add("widget-dark");
+    }
+
+    // ── API Key guard ──
+    if (!apiKey) {
+      document.getElementById("widgetRoot").innerHTML =
+        '<div class="error-screen"><div><div class="icon">&#x26A0;&#xFE0F;</div><h2>' +
+        t.noApiKey + "</h2><p>" + t.noApiKeyDesc + "</p></div></div>";
+      return;
+    }
+
+    // ── Setup DOM refs ──
+    const headerName = document.getElementById("headerName");
+    const messagesEl = document.getElementById("messages");
+    const quickQuestions = document.getElementById("quickQuestions");
+    const chatInput = document.getElementById("chatInput");
+    const btnSend = document.getElementById("btnSend");
+    const statusText = document.getElementById("statusText");
+
+    headerName.textContent = displayName;
+    statusText.textContent = t.online;
+    chatInput.placeholder = t.placeholder;
+
+    // ── Rebuild quick questions for current lang ──
+    quickQuestions.innerHTML = "";
+    t.quicks.forEach(function(q) {
+      var btn = document.createElement("button");
+      btn.className = "quick-btn";
+      btn.dataset.q = q;
+      btn.textContent = q;
+      quickQuestions.appendChild(btn);
+    });
+
+    // ── State ──
+    var sessionId = crypto.randomUUID();
+    var isSending = false;
+
+    // ── Helpers ──
+    function formatTime(d) {
+      var h = d.getHours().toString().padStart(2, "0");
+      var m = d.getMinutes().toString().padStart(2, "0");
+      return h + ":" + m;
+    }
+
+    function renderMarkdown(text) {
+      // Escape HTML
+      var s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      // Bold
+      s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+      // Italic
+      s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
+      // Inline code
+      s = s.replace(/`(.+?)`/g, "<code>$1</code>");
+      // Unordered list items
+      s = s.replace(/^[*-]\s+(.+)$/gm, "<li>$1</li>");
+      s = s.replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>");
+      // Newlines
+      s = s.replace(/\n/g, "<br>");
+      return s;
+    }
+
+    function scrollToBottom() {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function addMessage(role, html, timestamp) {
+      var row = document.createElement("div");
+      row.className = "msg-row " + role;
+      var bubble = document.createElement("div");
+      bubble.className = "msg-bubble";
+      bubble.innerHTML = html;
+      row.appendChild(bubble);
+      if (timestamp) {
+        var timeEl = document.createElement("div");
+        timeEl.className = "msg-time";
+        timeEl.textContent = timestamp;
+        row.appendChild(timeEl);
+      }
+      messagesEl.appendChild(row);
+      scrollToBottom();
+      return bubble;
+    }
+
+    function addTypingIndicator() {
+      var row = document.createElement("div");
+      row.className = "msg-row ai";
+      var bubble = document.createElement("div");
+      bubble.className = "msg-bubble";
+      var indicator = document.createElement("div");
+      indicator.className = "typing-indicator";
+      for (var i = 0; i < 3; i++) {
+        var dot = document.createElement("div");
+        dot.className = "typing-dot";
+        indicator.appendChild(dot);
+      }
+      bubble.appendChild(indicator);
+      row.appendChild(bubble);
+      messagesEl.appendChild(row);
+      scrollToBottom();
+      return row;
+    }
+
+    function setSending(sending) {
+      isSending = sending;
+      btnSend.disabled = sending || !chatInput.value.trim();
+      chatInput.disabled = sending;
+      if (sending) {
+        quickQuestions.classList.add("hidden");
+      }
+    }
+
+    // ── REST fallback ──
+    function sendRest(query, callback) {
+      fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "X-API-Key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          session_id: sessionId,
+          query: query,
+        }),
+      })
+        .then(function(r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          var text = data.response || data.message || data.reply || data.content || JSON.stringify(data);
+          callback(text, false);
+          callback(null, true);
+        })
+        .catch(function() {
+          callback(null, false, "rest_error");
+        });
+    }
+
+    // ── Send message ──
+    function sendMessage(query) {
+      query = query.trim();
+      if (!query || isSending) return;
+
+      setSending(true);
+
+      // Add user message
+      addMessage("user", renderMarkdown(query), formatTime(new Date()));
+
+      // Show typing
+      var typingRow = addTypingIndicator();
+
+      var fullText = "";
+      var bubbleEl = null;
+      var done = false;
+      var startTime = Date.now();
+
+      function onToken(token, isDone, error) {
+        if (done) return;
+
+        if (error) {
+          // Remove typing indicator
+          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+          // Show error
+          if (!bubbleEl) {
+            bubbleEl = addMessage("ai", renderMarkdown(t.errorPrefix), formatTime(new Date()));
+          }
+          done = true;
+          setSending(false);
+          return;
+        }
+
+        if (isDone) {
+          done = true;
+          // Remove typing indicator if still present
+          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+
+          if (!bubbleEl) {
+            // No streaming tokens received, fullText was built
+            bubbleEl = addMessage("ai", fullText || renderMarkdown(t.errorPrefix), formatTime(new Date()));
+          }
+          setSending(false);
+          return;
+        }
+
+        if (token) {
+          // Remove typing indicator on first token
+          if (typingRow && typingRow.parentNode) {
+            typingRow.parentNode.removeChild(typingRow);
+            typingRow = null;
+          }
+
+          fullText += token;
+          if (!bubbleEl) {
+            bubbleEl = addMessage("ai", "", null);
+          }
+          bubbleEl.innerHTML = renderMarkdown(fullText);
+          scrollToBottom();
+        }
+      }
+
+      // Try SSE first, fallback to REST
+      var streamUrl = "/api/chat/stream";
+      fetch(streamUrl, {
+        method: "POST",
+        headers: {
+          "X-API-Key": apiKey,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify({ session_id: sessionId, query: query }),
+      })
+        .then(function(response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          var ct = response.headers.get("content-type") || "";
+          if (ct.indexOf("text/event-stream") === -1 && ct.indexOf("application/json") !== -1) {
+            // Server returned JSON instead of SSE, treat as REST
+            return response.json().then(function(data) {
+              var text = data.response || data.message || data.reply || data.content || "";
+              if (text) {
+                if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+                bubbleEl = addMessage("ai", renderMarkdown(text), formatTime(new Date()));
+              }
+              done = true;
+              setSending(false);
+            });
+          }
+          // Stream SSE
+          var reader = response.body.getReader();
+          var decoder = new TextDecoder();
+          var buffer = "";
+
+          function pump() {
+            return reader.read().then(function(result) {
+              if (result.done) {
+                onToken(null, true);
+                return;
+              }
+              buffer += decoder.decode(result.value, { stream: true });
+              var lines = buffer.split("\n");
+              buffer = lines.pop();
+              for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line || !line.startsWith("data:")) continue;
+                var data = line.slice(5).trim();
+                if (data === "[DONE]") { onToken(null, true); return; }
+                try {
+                  var parsed = JSON.parse(data);
+                  onToken(parsed.token || parsed.content || "", false);
+                } catch (e) {
+                  if (data) onToken(data, false);
+                }
+              }
+              return pump();
+            });
+          }
+          return pump();
+        })
+        .catch(function() {
+          // Fallback to REST
+          if (!done) {
+            sendRest(query, onToken);
+          }
+        });
+    }
+
+    // ── Event listeners ──
+    chatInput.addEventListener("input", function() {
+      btnSend.disabled = isSending || !chatInput.value.trim();
+      // Auto-resize
+      chatInput.style.height = "auto";
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 80) + "px";
+    });
+
+    chatInput.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (!isSending && chatInput.value.trim()) {
+          sendMessage(chatInput.value);
+          chatInput.value = "";
+          chatInput.style.height = "auto";
+          btnSend.disabled = true;
+        }
+      }
+    });
+
+    btnSend.addEventListener("click", function() {
+      if (!isSending && chatInput.value.trim()) {
+        sendMessage(chatInput.value);
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+        btnSend.disabled = true;
+      }
+    });
+
+    quickQuestions.addEventListener("click", function(e) {
+      var btn = e.target.closest(".quick-btn");
+      if (btn && btn.dataset.q) {
+        sendMessage(btn.dataset.q);
+      }
+    });
+
+    // ── Resize observer for auto-scroll ──
+    var observer = new MutationObserver(scrollToBottom);
+    observer.observe(messagesEl, { childList: true, subtree: true });
+
+    // ── Welcome message (replace placeholder) ──
+    var welcomeEl = messagesEl.querySelector(".welcome-msg");
+    if (welcomeEl) {
+      welcomeEl.querySelector("#welcomeText").textContent = t.welcome;
+    }
+
+    // Focus input
+    chatInput.focus();
+  })();
+  </script>
+</body>
+</html>

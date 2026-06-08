@@ -4,17 +4,25 @@
 - POST /api/alerts/test — 测试告警通知
 - GET  /api/alerts/history — 告警历史
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from auth.router import require_admin
+from auth.router import require_admin, require_auth
 from .notifier import alert_notifier
 from logger import get_logger
 
 logger = get_logger("alerts.router")
 
 router = APIRouter(prefix="/api/alerts", tags=["告警"])
+
+
+def require_supervisor_or_admin(request: Request):
+    """要求管理员或主管权限"""
+    user = require_auth(request)
+    if user.role not in ("admin", "supervisor"):
+        raise HTTPException(status_code=403, detail="需要管理员或主管权限")
+    return user
 
 
 class TestAlertRequest(BaseModel):
@@ -26,7 +34,7 @@ class TestAlertRequest(BaseModel):
 @router.get("/config")
 async def get_alert_config(request: Request):
     """查看告警配置"""
-    _ = require_admin(request)
+    _ = require_supervisor_or_admin(request)
     return alert_notifier.get_config()
 
 
@@ -41,5 +49,5 @@ async def test_alert(data: TestAlertRequest, request: Request):
 @router.get("/history")
 async def alert_history(request: Request, limit: int = 20):
     """告警历史"""
-    _ = require_admin(request)
+    _ = require_supervisor_or_admin(request)
     return {"alerts": alert_notifier.get_history(limit)}

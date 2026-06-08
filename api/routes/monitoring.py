@@ -216,3 +216,56 @@ async def prometheus_metrics(request: Request):
         lines.append(f'csai_circuit_breaker_state {state_map.get(cb_status.get("state", ""), -1)}')
 
     return PlainTextResponse('\n'.join(lines) + '\n', media_type="text/plain")
+
+
+@router.get("/api/monitoring/quality-trends")
+async def quality_trends():
+    """最近7天质量评分趋势（初始模拟数据，后续由 metrics collector 累积）"""
+    from datetime import date, timedelta
+    today = date.today()
+    trends = []
+    for i in range(6, -1, -1):
+        d = today - timedelta(days=i)
+        trends.append({
+            "date": d.isoformat(),
+            "avg_score": round(70 + (7 - i) * 1.8, 1),
+            "total_queries": 40 + i * 5,
+        })
+    return {"trends": trends}
+
+
+@router.get("/api/monitoring/hot-questions")
+async def hot_questions():
+    """热门问题 TOP10（初始模拟数据，后续由 metrics collector 累积）"""
+    return {
+        "questions": [
+            {"query": "精华液成分有哪些", "count": 23, "category": "product_info"},
+            {"query": "如何退货退款", "count": 18, "category": "billing"},
+            {"query": "面膜适合什么肤质", "count": 15, "category": "product_info"},
+            {"query": "订单物流查询", "count": 14, "category": "order"},
+            {"query": "会员积分怎么用", "count": 12, "category": "membership"},
+            {"query": "防晒霜SPF怎么选", "count": 11, "category": "product_info"},
+            {"query": "过敏了怎么办", "count": 10, "category": "complaint"},
+            {"query": "活动优惠有哪些", "count": 9, "category": "promotion"},
+            {"query": "产品保质期多久", "count": 8, "category": "product_info"},
+            {"query": "怎么修改收货地址", "count": 7, "category": "order"},
+        ]
+    }
+
+
+@router.get("/api/monitoring/satisfaction")
+async def satisfaction():
+    """客户满意度统计（初始模拟数据，后续由 metrics collector 累积）"""
+    return {
+        "overall_rate": 0.85,
+        "total": 120,
+        "positive": 102,
+        "negative": 18,
+        "by_category": {
+            "product_info": {"rate": 0.92, "count": 45},
+            "billing": {"rate": 0.78, "count": 28},
+            "order": {"rate": 0.88, "count": 25},
+            "complaint": {"rate": 0.65, "count": 12},
+            "membership": {"rate": 0.90, "count": 10},
+        },
+    }

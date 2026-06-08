@@ -81,3 +81,21 @@ def seed_supplementary_data(kb):
     seed_faq(kb)
     seed_tech_support(kb)
     seed_complaint_knowledge(kb)
+    seed_image_knowledge(kb)  # v5.1: 图片知识库
+
+
+def seed_image_knowledge(kb, collection_name="image_knowledge"):
+    """
+    v5.1: 图片知识库种子数据（CLIP 多模态检索）
+    从 data/seed/image_knowledge.json 加载图片元数据。
+    注意：实际图片文件需放在 data/images/ 目录下。
+    """
+    items = _load_seed_file("image_knowledge.json")
+    if not items:
+        return
+
+    image_paths = [item["image_path"] for item in items]
+    metadatas = [item.get("metadata", {}) for item in items]
+
+    kb.add_image_documents(collection_name, image_paths, metadatas)
+    logger.info(f"图片种子数据加载完成: {collection_name} ({len(items)} 条)")

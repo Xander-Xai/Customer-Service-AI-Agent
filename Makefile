@@ -13,6 +13,10 @@ dev: env-dev ## 本地开发启动（uvicorn 热重载）
 	@echo "🚀 启动开发服务器..."
 	uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload --reload-dir . --log-level debug
 
+dev-https: env-dev ## 本地 HTTPS 开发启动（支持麦克风等需要安全上下文的功能）
+	@echo "🔒 启动 HTTPS 开发服务器..."
+	uvicorn api.app_factory:app --host 0.0.0.0 --port 8444 --reload --reload-dir . --log-level info --ssl-keyfile .certs/key.pem --ssl-certfile .certs/cert.pem
+
 dev-docker: env-dev ## Docker 开发环境（自动加载 override）
 	@echo "🐳 启动 Docker 开发环境..."
 	docker compose up app --build

@@ -4,7 +4,7 @@
 import { on, off, emit } from './events.js';
 import * as ws from './websocket.js';
 import * as rest from './rest.js';
-import { sendChatStream } from './sse.js';
+import { sendChatStream, sendChatStreamWithImage } from './sse.js';
 
 export const API = {
   // WebSocket
@@ -34,8 +34,25 @@ export const API = {
   getHistory: rest.getHistory,
   getHistoryMessages: rest.getHistoryMessages,
   sendChatWithImage: rest.sendChatWithImage,
+  sendChatWithFile: rest.sendChatWithFile,
   sendChat: rest.sendChat,
+
+  // 管理后台 API
+  getUsers: rest.getUsers,
+  getAuditLog: rest.getAuditLog,
+  getKnowledgeStats: rest.getKnowledgeStats,
+  seedKnowledge: rest.seedKnowledge,
+  syncKnowledge: rest.syncKnowledge,
+  getAlertConfig: rest.getAlertConfig,
+  testAlert: rest.testAlert,
+  refreshToken: rest.refreshToken,
+
+  // 监控 API
+  getQualityTrends: rest.getQualityTrends,
+  getHotQuestions: rest.getHotQuestions,
+  getSatisfaction: rest.getSatisfaction,
 
   // SSE
   sendChatStream,
+  sendChatStreamWithImage,
 };

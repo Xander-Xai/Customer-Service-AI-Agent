@@ -24,10 +24,9 @@ class TestDatabaseModels:
 
     def test_import_models(self):
         from db.models import Base, User, ChatHistory, AuditLog
-        assert Base is not None
-        assert User is not None
-        assert ChatHistory is not None
-        assert AuditLog is not None
+        assert hasattr(User, '__tablename__')
+        assert hasattr(ChatHistory, '__tablename__')
+        assert hasattr(AuditLog, '__tablename__')
 
     def test_database_init(self):
         from db.database import init_db, engine
@@ -62,12 +61,12 @@ class TestAuthService:
 
     def test_create_and_decode_token(self):
         from auth.service import create_token, decode_token
-        token = create_token(1, "testuser", "user")
+        token = create_token(1, "testuser", "customer")
         payload = decode_token(token)
-        assert payload is not None
+        assert isinstance(payload, dict)
         assert payload["sub"] == 1
         assert payload["username"] == "testuser"
-        assert payload["role"] == "user"
+        assert payload["role"] == "customer"
         assert "exp" in payload
         assert "iat" in payload
 
@@ -93,10 +92,10 @@ class TestAuthService:
 
         # 认证
         auth = authenticate_user(unique, "password123")
-        assert auth is not None
+        assert isinstance(auth, dict)
         assert "token" in auth
         assert auth["username"] == unique
-        assert auth["role"] == "user"
+        assert auth["role"] == "customer"
 
         # 错误密码
         auth2 = authenticate_user(unique, "wrong_password")
@@ -110,7 +109,7 @@ class TestAuthService:
         from auth.service import init_default_admin, authenticate_user
         init_default_admin()
         auth = authenticate_user("admin", "admin123")
-        assert auth is not None
+        assert isinstance(auth, dict)
         assert auth["role"] == "admin"
         assert auth["username"] == "admin"
 
@@ -163,11 +162,11 @@ class TestKnowledgeRouter:
 
     def test_import_router(self):
         from knowledge.router import router
-        assert router is not None
+        assert hasattr(router, 'routes')
 
     def test_import_init(self):
         from knowledge import knowledge_router
-        assert knowledge_router is not None
+        assert hasattr(knowledge_router, 'routes')
 
 
 # ===== 认证路由测试 =====
@@ -177,11 +176,11 @@ class TestAuthRouter:
 
     def test_import_router(self):
         from auth.router import router
-        assert router is not None
+        assert hasattr(router, 'routes')
 
     def test_import_init(self):
         from auth import auth_router
-        assert auth_router is not None
+        assert hasattr(auth_router, 'routes')
 
 
 # ===== API 集成测试（FastAPI TestClient） =====
@@ -197,20 +196,22 @@ class TestAPIIntegration:
         init_db()
         init_default_admin()
 
-        from multi_agent_customer_service import make_graph, session_mgr, cache, metrics, bus, sla_alert_mgr
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
         from api.app import create_app
         from auth.router import router as auth_router
         from knowledge.router import router as knowledge_router
         from alerts.router import router as alerts_router
 
-        graph_app = make_graph()
+        container = ServiceContainer()
+        graph_app = build_graph(container)
         app = create_app(
             graph_app,
-            session_manager=session_mgr,
-            response_cache=cache,
-            metrics=metrics,
-            message_bus=bus,
-            sla_alert_mgr=sla_alert_mgr,
+            session_manager=container.session_mgr,
+            response_cache=container.cache,
+            metrics=container.metrics,
+            message_bus=container.bus,
+            sla_alert_mgr=container.sla_alert_mgr,
         )
         app.include_router(auth_router)
         app.include_router(knowledge_router)

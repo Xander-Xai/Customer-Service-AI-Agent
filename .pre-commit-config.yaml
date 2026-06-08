@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: no-env-files
+        name: Prevent committing .env files
+        entry: bash -c 'for f in "$@"; do case "$f" in .env|.env.*|.env.prod.generated) echo "ERROR: $f must not be committed. Add to .gitignore."; exit 1;; esac; done' --
+        language: system
+        files: '^\.env'
+        pass_filenames: true

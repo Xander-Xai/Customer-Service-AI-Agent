@@ -25,8 +25,10 @@ def _extract_user_id(request: Request) -> str | None:
 
 def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool) -> bool:
     """检查会话是否属于当前用户"""
-    if dev_mode or not user_id:
+    if dev_mode:
         return True
+    if not user_id:
+        return False
     session_user = session.get("user_id")
     if not session_user:
         return True

@@ -31,7 +31,7 @@ async def knowledge_stats(request: Request):
         from multi_agent_customer_service import knowledge_base
         if not knowledge_base or not knowledge_base.available:
             return {"available": False, "message": "RAG 知识库未初始化"}
-        collections = ["product_knowledge", "faq", "tech_support"]
+        collections = ["product_knowledge", "faq", "tech_support", "complaint_knowledge"]
         stats = {}
         for name in collections:
             stats[name] = knowledge_base.get_collection_count(name)

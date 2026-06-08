@@ -43,6 +43,7 @@ class BaseAgent(ABC):
         self.role = role
         self.expertise = expertise
         self.llm = None
+        self.vision_llm = None  # v5.1: Vision LLM（多模态模型）
         self.session_manager = session_manager or EnhancedSessionManager()
         self.bus = message_bus
         self.bb = blackboard
@@ -58,6 +59,16 @@ class BaseAgent(ABC):
 
     def set_llm(self, llm):
         self.llm = llm
+
+    def set_vision_llm(self, vision_llm):
+        """v5.1: 注入 Vision LLM 客户端（多模态模型）"""
+        self.vision_llm = vision_llm
+
+    def _get_effective_llm(self, state: Dict[str, Any]):
+        """v5.1: 根据是否含多模态内容选择 LLM 客户端"""
+        if state.get("has_multimodal") and self.vision_llm:
+            return self.vision_llm
+        return self.llm
 
     def set_session_manager(self, session_manager: EnhancedSessionManager):
         self.session_manager = session_manager
@@ -258,15 +269,22 @@ class BaseAgent(ABC):
 
     async def _retrieve_knowledge(self, query: str,
                                    collections: List[str] = None,
-                                   n_results: int = 3) -> str:
+                                   n_results: int = 3,
+                                   image_uri: str = None) -> str:
         """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
+        v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
         返回格式化字符串，可直接拼入 extra_context。
         知识库不可用时静默返回空字符串。
         """
         if not self.knowledge_base or not self.knowledge_base.available:
             return ""
         try:
-            if collections:
+            # v5.1: 多模态融合检索
+            if image_uri and hasattr(self.knowledge_base, 'query_multimodal'):
+                results = await self.knowledge_base.query_multimodal(
+                    query, image_uri=image_uri, collections=collections, n_results=n_results
+                )
+            elif collections:
                 results = await self.knowledge_base.query_multiple(collections, query, n_results)
             else:
                 results = await self.knowledge_base.query("product_knowledge", query, n_results)
@@ -326,7 +344,17 @@ class BaseAgent(ABC):
         elif drift.get("has_drift"):
             drift_info = "; ".join([d.get("detail", "") for d in drift["drifts"]])
             user_content += f"\n\n[对话漂移提示] {drift_info}"
-        messages.append(HumanMessage(content=user_content))
+
+        # v5.1: 多模态消息构造 — 当 state 含 multimodal_content 时，
+        # 构造 OpenAI 多模态 content 格式（text + image_url 等混合内容）
+        multimodal_parts = state.get("multimodal_content")
+        if multimodal_parts:
+            # 构造 list 类型 content：文本部分 + 多模态部分
+            content_list = [{"type": "text", "text": user_content}]
+            content_list.extend(multimodal_parts)
+            messages.append(HumanMessage(content=content_list))
+        else:
+            messages.append(HumanMessage(content=user_content))
 
         return session_id, messages, drift
 
@@ -355,10 +383,11 @@ class BaseAgent(ABC):
 
         tools = self.tool_registry.get_openai_tools() if self.tool_registry else None
         response_content = ""
+        effective_llm = self._get_effective_llm(state)  # v5.1: 多模态时用 Vision LLM
 
         for round_num in range(max_tool_rounds):
             try:
-                response = await self.llm.async_invoke(messages, tools=tools)
+                response = await effective_llm.async_invoke(messages, tools=tools)
             except Exception as e:
                 self.logger.error(f"LLM 调用出错 (round {round_num}) [{get_trace_id()}]: {e}")
                 response_content = fallback_response
@@ -435,10 +464,11 @@ class BaseAgent(ABC):
 
         # v4.2: 真流式模式 — 有 stream_callback 时逐 token 推送
         stream_callback = state.get("stream_callback")
+        effective_llm = self._get_effective_llm(state)  # v5.1: 多模态时用 Vision LLM
         if stream_callback:
             response_content = ""
             try:
-                async for chunk in self.llm.async_invoke_stream(messages):
+                async for chunk in effective_llm.async_invoke_stream(messages):
                     response_content += chunk
                     try:
                         await stream_callback({"type": "chunk", "content": chunk})
@@ -454,7 +484,7 @@ class BaseAgent(ABC):
         else:
             # 非流式模式（原有逻辑）
             try:
-                response = await self.llm.async_invoke(messages)
+                response = await effective_llm.async_invoke(messages)
                 response_content = response.content
             except Exception as e:
                 self.logger.error(f"LLM 调用出错 [{get_trace_id()}]: {e}")

@@ -8,9 +8,9 @@ import { appendSystemMessage, showProgressStatus, removeProgressStatus, setSessi
 import { getCurrentSessionId, getCurrentSessionToken, updateSessionInfo, addToHistory, startNewChat, loadSessionList, selectSession } from './sessions.js';
 import { sendMessage, initInputEvents, initDragAndDrop, updateSendButton, useQuickPrompt } from './input.js';
 import { initShortcuts } from './shortcuts.js';
-import { bindQuickPrompts } from './welcome.js';
+import { renderWelcome, bindQuickPrompts } from './welcome.js';
 import { initSearch } from './search.js';
-import { switchPage, initMonitor } from '../monitor/index.js';
+import { toggleRecording } from './voice.js';
 
 export function init() {
   console.log('[Init] DOM loaded, setting up...');
@@ -37,6 +37,10 @@ export function init() {
   // 初始化拖拽上传
   initDragAndDrop();
 
+  // 初始化语音按钮
+  const btnVoice = document.getElementById('btnVoice');
+  if (btnVoice) btnVoice.addEventListener('click', toggleRecording);
+
   // 注册 WebSocket 事件
   API.on('connected', handleWSConnected);
   API.on('disconnected', handleWSDisconnected);
@@ -53,10 +57,11 @@ export function init() {
   // 加载会话列表
   loadSessionList();
 
-  // 初始化导航事件
-  document.querySelectorAll('.nav-link[data-page]').forEach(btn => {
-    btn.addEventListener('click', () => switchPage(btn.dataset.page));
-  });
+  // 如果没有活跃会话，显示欢迎页
+  if (!getCurrentSessionId()) {
+    const container = document.getElementById('chatMessages');
+    renderWelcome(container);
+  }
 
   // 初始化快捷提问卡片事件
   bindQuickPrompts(useQuickPrompt);
