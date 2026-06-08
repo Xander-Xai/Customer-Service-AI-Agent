@@ -3,33 +3,25 @@
 - MetricsCollector: 性能指标实时采集（KPI + SLA + 解决率）
 - CircuitBreaker: LLM 调用熔断器（三态：CLOSED / OPEN / HALF_OPEN）
 - SLAAlertManager: SLA 违约率滑动窗口告警
-- OpenAICompatibleClient: OpenAI 兼容异步 HTTP 客户端（指数退避 + 熔断器）
-- CustomResponse: LLM 响应包装
+
+LLM 客户端已迁移到 llm/client.py
 
 v3.4 优化：
 - MetricsCollector: asyncio.Lock 保护并发写入
 - CircuitBreaker: 状态转换原子化，防止多协程同时探测
-- OpenAICompatibleClient: 支持实例级连接池（多 base_url 隔离）
 """
 import time
 import json
-import os
-import random
 import asyncio
-import httpx
 from collections import deque
 from typing import Dict, List, Any, Optional
 
-from logger import get_logger, get_trace_id
+from logger import get_logger
 from config import (
     RESPONSE_TIME_TARGET_MAX, RESPONSE_TIME_TARGET_MIN,
     SLA_ALERT_WINDOW, SLA_ALERT_THRESHOLD, SLA_ALERT_COOLDOWN,
     CIRCUIT_BREAKER_FAIL_THRESHOLD, CIRCUIT_BREAKER_RECOVERY_TIME,
-    RETRY_MAX_ATTEMPTS, RETRY_BASE_DELAY, HTTP_TIMEOUT, HTTP_HEADERS,
-    HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS,
 )
-
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 logger = get_logger("monitoring")
 
@@ -383,210 +375,3 @@ class SLAAlertManager:
         return self.alerts[-limit:]
 
 
-# ===== OpenAI 兼容客户端 =====
-class CustomResponse:
-    """LLM 响应包装（v3.5: 支持 Function Calling tool_calls）"""
-    def __init__(self, content: str, tool_calls: list = None):
-        self.content = content
-        self.tool_calls = tool_calls  # [{"id", "name", "arguments"}] or None
-
-
-class OpenAICompatibleClient:
-    """OpenAI 兼容异步客户端（v3.4: 熔断器 async 调用 + 实例级连接池隔离）"""
-    _client_pools: Dict[str, httpx.AsyncClient] = {}  # v3.4: 按 base_url 隔离连接池
-    _pool_lock: asyncio.Lock = asyncio.Lock()  # P1-2: 直接初始化，消除竞态
-
-    def __init__(self, api_key: str, base_url: str, model: str,
-                 circuit_breaker: Optional[CircuitBreaker] = None):
-        self.api_key = api_key
-        self.base_url = base_url.rstrip('/')
-        self.model = model
-        self.timeout = HTTP_TIMEOUT
-        self.max_retries = RETRY_MAX_ATTEMPTS
-        self.base_delay = RETRY_BASE_DELAY
-        self.headers = HTTP_HEADERS.copy()
-        self.headers["Authorization"] = f"Bearer {api_key}"
-        self.circuit_breaker = circuit_breaker
-
-    @staticmethod
-    def _format_messages(messages) -> list:
-        """统一消息格式化（v3.7: 支持 ToolMessage 和 AIMessage.tool_calls）
-        v4.1: 支持多模态消息格式（content 为 list 时保持原样传递）"""
-        formatted = []
-        for msg in messages:
-            if hasattr(msg, 'type') and msg.type == 'tool':
-                formatted.append({"role": "tool", "content": msg.content, "tool_call_id": getattr(msg, 'tool_call_id', '')})
-            elif hasattr(msg, 'tool_calls') and msg.tool_calls:
-                formatted.append({"role": "assistant", "content": msg.content or "", "tool_calls": msg.tool_calls})
-            elif isinstance(msg, SystemMessage):
-                formatted.append({"role": "system", "content": msg.content})
-            elif isinstance(msg, HumanMessage):
-                # v4.1: 多模态支持 — 如果 content 是 list（包含 text + image_url），保持原样
-                if isinstance(msg.content, list):
-                    formatted.append({"role": "user", "content": msg.content})
-                else:
-                    formatted.append({"role": "user", "content": msg.content})
-            elif isinstance(msg, AIMessage):
-                formatted.append({"role": "assistant", "content": msg.content})
-            else:
-                formatted.append({"role": "user", "content": str(msg.content)})
-        return formatted
-
-    async def _get_async_client(self) -> httpx.AsyncClient:
-        """v3.5: 连接池并发安全（pool lock 保护）"""
-        async with OpenAICompatibleClient._pool_lock:
-            pool_key = self.base_url
-            client = OpenAICompatibleClient._client_pools.get(pool_key)
-            if client is None or client.is_closed:
-                client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.timeout),
-                    limits=httpx.Limits(
-                        max_connections=HTTPX_MAX_CONNECTIONS,
-                        max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
-                    ),
-                )
-                OpenAICompatibleClient._client_pools[pool_key] = client
-            return client
-
-    @classmethod
-    async def close_all_clients(cls):
-        """关闭所有连接池中的客户端（生命周期结束时调用）"""
-        for client in cls._client_pools.values():
-            if not client.is_closed:
-                await client.aclose()
-        cls._client_pools.clear()
-
-    async def async_invoke(self, messages, timeout: Optional[float] = None,
-                           tools: Optional[list] = None):
-        """原生异步调用（v3.5: 支持 Function Calling）
-        tools: OpenAI tools 格式工具列表，传入后 LLM 可返回 tool_calls。
-        当模型不支持 tools 时自动降级为普通调用。
-        """
-        if self.circuit_breaker and not await self.circuit_breaker.should_allow():
-            raise Exception("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
-
-        payload = {"model": self.model, "messages": self._format_messages(messages)}
-        # v4.1: 设置 max_tokens 防止响应被截断（可通过 LLM_MAX_TOKENS 环境变量覆盖）
-        if "max_tokens" not in payload:
-            payload["max_tokens"] = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
-        if tools:
-            payload["tools"] = tools
-        client = await self._get_async_client()
-        call_timeout = httpx.Timeout(timeout or self.timeout)
-
-        last_error = None
-        for attempt in range(self.max_retries):
-            try:
-                resp = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    json=payload, headers=self.headers, timeout=call_timeout,
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                if "choices" in result and result["choices"]:
-                    message = result["choices"][0].get("message", {})
-                    content = message.get("content", "") or ""
-                    # 解析 tool_calls（v3.5 Function Calling）
-                    tool_calls_raw = message.get("tool_calls")
-                    parsed_tool_calls = None
-                    if tool_calls_raw:
-                        parsed_tool_calls = []
-                        for tc in tool_calls_raw:
-                            fn = tc.get("function", {})
-                            parsed_tool_calls.append({
-                                "id": tc.get("id", ""),
-                                "name": fn.get("name", ""),
-                                "arguments": fn.get("arguments", "{}"),
-                            })
-                    if self.circuit_breaker:
-                        await self.circuit_breaker.record_success()
-                    return CustomResponse(content, parsed_tool_calls)
-                return CustomResponse("API response format error")
-            except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                last_error = e
-                # v3.5: 模型不支持 tools 时自动降级（仅对 HTTPStatusError 400/422）
-                if isinstance(e, httpx.HTTPStatusError) and tools and e.response.status_code in (400, 422):
-                    logger.warning(f"[LLM] [{get_trace_id()}] 模型不支持 tools 参数，降级为普通调用: {e}")
-                    del payload["tools"]
-                    tools = None
-                    continue
-                if attempt == self.max_retries - 1:
-                    break
-                max_delay = 10.0  # 最大单次重试延迟 10 秒
-                delay = min(self.base_delay * (2 ** attempt) + random.uniform(0, 0.3), max_delay)
-                logger.warning(f"[LLM-async] [{get_trace_id()}] retry {attempt+1}/{self.max_retries}: {e}, wait {delay:.1f}s")
-                await asyncio.sleep(delay)
-
-        if self.circuit_breaker:
-            await self.circuit_breaker.record_failure()
-        # v3.7: 不向调用方泄露内部错误细节（URL、状态码、响应体）
-        raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
-
-    async def async_invoke_stream(self, messages, timeout: Optional[float] = None):
-        """v4.2: 真流式调用，使用 SSE 逐 chunk 接收 LLM 响应。
-
-        Yields:
-            str: 每个 SSE chunk 中 delta.content 的文本片段。
-
-        使用方式:
-            async for chunk in client.async_invoke_stream(messages):
-                print(chunk, end="", flush=True)
-        """
-        if self.circuit_breaker and not await self.circuit_breaker.should_allow():
-            raise Exception("CircuitBreaker OPEN: LLM 流式调用已熔断")
-
-        payload = {
-            "model": self.model,
-            "messages": self._format_messages(messages),
-            "stream": True,
-            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "4096")),
-        }
-        client = await self._get_async_client()
-        call_timeout = httpx.Timeout(timeout or self.timeout)
-
-        last_error = None
-        for attempt in range(self.max_retries):
-            try:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/chat/completions",
-                    json=payload, headers=self.headers, timeout=call_timeout,
-                ) as resp:
-                    resp.raise_for_status()
-                    if self.circuit_breaker:
-                        await self.circuit_breaker.record_success()
-
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        # SSE 格式: "data: {json}" 或 "data: [DONE]"
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data.strip() == "[DONE]":
-                                return
-                            try:
-                                chunk = json.loads(data)
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    content = delta.get("content", "")
-                                    if content:
-                                        yield content
-                            except json.JSONDecodeError:
-                                continue
-                return  # 正常结束
-            except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                last_error = e
-                if attempt == self.max_retries - 1:
-                    break
-                max_delay = 10.0
-                delay = min(self.base_delay * (2 ** attempt) + random.uniform(0, 0.3), max_delay)
-                logger.warning(
-                    f"[LLM-stream] [{get_trace_id()}] retry {attempt+1}/{self.max_retries}: {e}, "
-                    f"wait {delay:.1f}s"
-                )
-                await asyncio.sleep(delay)
-
-        if self.circuit_breaker:
-            await self.circuit_breaker.record_failure()
-        raise Exception(f"LLM 流式调用失败（已重试 {self.max_retries} 次），请稍后重试")

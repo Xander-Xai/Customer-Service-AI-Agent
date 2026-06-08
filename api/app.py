@@ -269,7 +269,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
             pass
 
         await app.state.http_client.aclose()
-        from core.monitoring import OpenAICompatibleClient
+        from llm.client import OpenAICompatibleClient
         await OpenAICompatibleClient.close_all_clients()
         logger.info("httpx 连接池已关闭")
 
@@ -370,7 +370,6 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
     # ── 静态资源 ──
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     static_dir = os.path.join(project_root, "static")
-    templates_dir = os.path.join(project_root, "templates")
     dist_dir = os.path.join(project_root, "static", "dist")
 
     if os.path.isdir(static_dir):
@@ -389,11 +388,8 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         return HTMLResponse(f"<h1>{fallback_msg}</h1>", status_code=404)
 
     def _html_path(filename: str) -> str:
-        """优先从 Vite 构建产物目录获取 HTML，回退到 templates/"""
-        dist_path = os.path.join(dist_dir, filename)
-        if os.path.exists(dist_path):
-            return dist_path
-        return os.path.join(templates_dir, filename)
+        """从 Vite 构建产物目录获取 HTML 路径"""
+        return os.path.join(dist_dir, filename)
 
     @app.get("/", response_class=HTMLResponse)
     async def serve_index(request: Request):
@@ -869,7 +865,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         # 8. 调用 LLM（通过 OpenAI 兼容客户端）
         try:
-            from core.monitoring import OpenAICompatibleClient
+            from llm.client import OpenAICompatibleClient
             import config as _cfg
 
             # P0-1: 从容器获取 circuit_breaker，消除 multi_agent_customer_service 依赖

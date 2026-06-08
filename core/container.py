@@ -1,18 +1,18 @@
 """
-依赖注入容器（v4.1）
+依赖注入容器（v4.5）
 管理所有系统组件的生命周期和依赖关系。
 
 替代 multi_agent_customer_service.py 中的模块级全局变量，
 提供显式的依赖管理，便于测试、替换和生命周期控制。
 
+v4.5: 图构建统一委托给 build_graph(container)，
+消除容器内 _build_graph() 的重复图拓扑定义。
+
 Usage:
     # 推荐方式：通过容器初始化
     container = ServiceContainer()
     await container.initialize()
-    app = build_graph(container)
-
-    # 向后兼容：原有方式仍然有效
-    app = make_graph()
+    # container.graph_app 在 initialize() 中自动构建
 """
 import asyncio
 from typing import Optional, Dict, Any
@@ -82,8 +82,9 @@ class ServiceContainer:
         # Session & Router
         self.router: Any = None
 
-        # Orchestrator
-        self.orchestrator: Any = None
+        # Orchestrator（依赖 bus + bb，已在上面创建）
+        from collaboration.orchestrator import CollaborationOrchestrator
+        self.orchestrator = CollaborationOrchestrator(self.bus, self.bb)
 
         # RAG & Tools
         self.knowledge_base: Any = None
@@ -126,11 +127,7 @@ class ServiceContainer:
             # 5. Router
             await self._init_router()
 
-            # 6. Orchestrator
-            from collaboration.orchestrator import CollaborationOrchestrator
-            self.orchestrator = CollaborationOrchestrator(self.bus, self.bb)
-
-            # 7. 构建 LangGraph 应用
+            # 6. 构建 LangGraph 应用
             self._build_graph()
 
             self._initialized = True
@@ -138,173 +135,10 @@ class ServiceContainer:
                         f"({len(self.agents_dict)} agents)")
 
     def _build_graph(self):
-        """构建 LangGraph 工作流图（使用容器中的服务实例）"""
-        from langgraph.graph import StateGraph, END
-
-        from core.state import AgentState
-
-        # 使用容器中的实例
-        _session_mgr = self.session_mgr
-        _cache = self.cache
-        _circuit_breaker = self.circuit_breaker
-        _bus = self.bus
-        _bb = self.bb
-        _agents_dict = self.agents_dict
-        _response_agent = self.response_agent
-        _router = self.router
-        _orchestrator = self.orchestrator
-        _metrics = self.metrics
-        _sla_alert_mgr = self.sla_alert_mgr
-
-        from router.query_router import RoutingResult
-        from logger import get_logger
-        _logger = get_logger("container.graph")
-
-        # 图节点函数（使用容器实例的闭包）
-        async def check_cache_node(state: AgentState) -> AgentState:
-            query = state["customer_query"]
-            cached = _cache.get(query)
-            if cached:
-                state["response"] = cached
-                state["cached"] = True
-                state["current_agent"] = "cache"
-                state["collaboration_mode"] = "cache_hit"
-            else:
-                state["cached"] = False
-            return state
-
-        async def classify_query_node(state: AgentState) -> AgentState:
-            query = state["customer_query"]
-            session_id = state.get("session_id", "default")
-            await _session_mgr.create_session(session_id)
-            context = await _session_mgr.get_conversation_context(session_id)
-            context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
-            if not await _circuit_breaker.should_allow():
-                from router.query_router import INTENT_AGENT_MAP
-                rule_type, _, complexity = _router._rule_classify_and_score(query, context_text)
-                final_type = rule_type or "general_inquiry"
-                result = RoutingResult(
-                    query_type=final_type,
-                    agent_name=INTENT_AGENT_MAP.get(final_type, "general_agent"),
-                    complexity=complexity,
-                    fast_path=complexity < _router.complexity_threshold,
-                    confidence=0.3,
-                    raw_llm_result="[circuit_breaker_open]",
-                    rule_override=True,
-                )
-            else:
-                try:
-                    result = await _router.route(query, context_text)
-                except Exception as e:
-                    _logger.warning(f"[Router] 路由异常，降级到通用查询: {e}")
-                    result = RoutingResult(
-                        query_type="general_inquiry",
-                        agent_name="general_agent",
-                        complexity=30,
-                        fast_path=True,
-                        confidence=0.0,
-                        raw_llm_result="[error_fallback]",
-                        rule_override=True,
-                    )
-            state["query_type"] = result.query_type
-            state["current_agent"] = result.agent_name
-            state["complexity"] = result.complexity
-            state["fast_path"] = result.fast_path
-            state["collaboration_mode"] = ""
-            await _bb.write("last_routing", {
-                "query_type": result.query_type,
-                "agent": result.agent_name,
-                "complexity": result.complexity,
-            })
-            return state
-
-        async def execute_collaboration(state: AgentState, mode_name: str) -> AgentState:
-            import time
-            start = time.time()
-            try:
-                routing_result = RoutingResult(
-                    query_type=state.get("query_type", "general_inquiry"),
-                    agent_name=state.get("current_agent", "general_agent"),
-                    complexity=state.get("complexity", 0),
-                    fast_path=state.get("fast_path", True),
-                )
-                _, context = _orchestrator.build_context(routing_result, state)
-                mode = _orchestrator._modes.get(mode_name)
-                if not mode:
-                    mode = _orchestrator._modes["sequential"]
-                    mode_name = "sequential"
-                result = await mode.execute(_agents_dict, dict(state), context)
-            except Exception as e:
-                _logger.error(f"[{mode_name}] error: {e}")
-                result = {"response": "处理出错，请重试", "mode": mode_name, "agents_used": []}
-            elapsed = time.time() - start
-            state["response"] = result.get("response", "")
-            state["collaboration_mode"] = result.get("mode", mode_name)
-            state["agents_used"] = result.get("agents_used", [])
-            return state
-
-        def _make_collaboration_node(mode_name: str):
-            async def _node(state: AgentState) -> AgentState:
-                return await execute_collaboration(state, mode_name)
-            _node.__name__ = f"{mode_name}_node"
-            return _node
-
-        async def final_response_node(state: AgentState) -> AgentState:
-            if _response_agent:
-                try:
-                    state = await _response_agent.process(dict(state))
-                except Exception as e:
-                    _logger.error(f"[ResponseAgent] error: {e}")
-                    if state.get("response") and not state.get("cached", False):
-                        _cache.put(state["customer_query"], state["response"])
-            else:
-                if state.get("response") and not state.get("cached", False):
-                    _cache.put(state["customer_query"], state["response"])
-            return state
-
-        def select_collaboration_mode(state: AgentState) -> str:
-            routing_result = RoutingResult(
-                query_type=state.get("query_type", "general_inquiry"),
-                agent_name=state.get("current_agent", "general_agent"),
-                complexity=state.get("complexity", 0),
-                fast_path=state.get("fast_path", True),
-            )
-            return _orchestrator.select_mode_name(routing_result, state)
-
-        # 构建图
-        workflow = StateGraph(AgentState)
-        workflow.add_node("check_cache", check_cache_node)
-        workflow.add_node("classify_query", classify_query_node)
-        workflow.add_node("sequential", _make_collaboration_node("sequential"))
-        workflow.add_node("parallel", _make_collaboration_node("parallel"))
-        workflow.add_node("consultation", _make_collaboration_node("consultation"))
-        workflow.add_node("hierarchical", _make_collaboration_node("hierarchical"))
-        workflow.add_node("react", _make_collaboration_node("react"))
-        workflow.add_node("final_response", final_response_node)
-
-        workflow.set_entry_point("check_cache")
-        workflow.add_conditional_edges(
-            "check_cache",
-            lambda s: "final_response" if s.get("cached", False) else "classify_query",
-            {"final_response": "final_response", "classify_query": "classify_query"},
-        )
-        workflow.add_conditional_edges(
-            "classify_query",
-            select_collaboration_mode,
-            {
-                "sequential": "sequential",
-                "parallel": "parallel",
-                "consultation": "consultation",
-                "hierarchical": "hierarchical",
-                "react": "react",
-            },
-        )
-        for mode in ["sequential", "parallel", "consultation", "hierarchical", "react"]:
-            workflow.add_edge(mode, "final_response")
-        workflow.set_finish_point("final_response")
-
-        self.graph_app = workflow.compile()
-        _logger.info("[Container] LangGraph 构建完成")
+        """构建 LangGraph 工作流图（委托给 multi_agent_customer_service.build_graph）"""
+        from multi_agent_customer_service import build_graph
+        self.graph_app = build_graph(self)
+        logger.info("[Container] LangGraph 构建完成")
 
     # ===== 内部初始化方法 =====
 
@@ -312,7 +146,7 @@ class ServiceContainer:
         """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）"""
         if self.llm is not None:
             return
-        from core.monitoring import OpenAICompatibleClient
+        from llm.client import OpenAICompatibleClient
         from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, DEV_MODE
 
         # v4.1: 检查 API Key 是否有效
@@ -451,7 +285,7 @@ class ServiceContainer:
 
         # 1. 关闭 LLM 连接池
         try:
-            from core.monitoring import OpenAICompatibleClient
+            from llm.client import OpenAICompatibleClient
             await OpenAICompatibleClient.close_all_clients()
             logger.info("  ✅ LLM 连接池已关闭")
         except Exception as e:
