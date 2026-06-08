@@ -442,10 +442,10 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
                 return await call_next(request)
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-        # 默认: api_key_or_jwt（DEV_MODE 可跳过）
+        # 默认: api_key_or_jwt（DEV_MODE 可跳过，仅限开发环境）
         if DEV_MODE:
-            # v4.3 安全加固：DEV_MODE 绕过认证时记录警告
-            logger.warning(f"[SECURITY] DEV_MODE bypasses authentication for {request.url.path}")
+            client_ip = request.client.host if request.client else "unknown"
+            logger.warning(f"[SECURITY] DEV_MODE auth bypass: {request.method} {request.url.path} from {client_ip}")
             return await call_next(request)
 
         if _is_authenticated(request):
@@ -717,7 +717,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         # 在后台运行图执行（含流式回调）
         graph_task = asyncio.create_task(
-            _run_graph_stream(sid, query, stream_callback)
+            _run_graph(sid, query, stream_callback)
         )
 
         def _sse_event(event_data: dict) -> str:
@@ -1392,9 +1392,10 @@ async def _persist_metrics_snapshot():
             pass
 
 
-async def _run_graph(session_id: str, query: str) -> Dict[str, Any]:
+async def _run_graph(session_id: str, query: str, stream_callback=None) -> Dict[str, Any]:
     """
-    执行 LangGraph 图（v3.2: 原生异步 + SLA 告警 + 解决状态追踪）
+    执行 LangGraph 图（原生异步 + SLA 告警 + 解决状态追踪）
+    stream_callback: 可选流式回调，注入后 Agent 层自动使用真流式 LLM 调用
     """
     start = time.time()
 
@@ -1412,6 +1413,8 @@ async def _run_graph(session_id: str, query: str) -> Dict[str, Any]:
         "resolution_status": "",
         "trace_id": get_trace_id(),
     }
+    if stream_callback:
+        state["stream_callback"] = stream_callback
 
     try:
         result = await _graph_app.ainvoke(state)
@@ -1422,75 +1425,17 @@ async def _run_graph(session_id: str, query: str) -> Dict[str, Any]:
     result["elapsed"] = elapsed
 
     # SLA 告警
+    prefix = "[SLA-Stream]" if stream_callback else "[SLA]"
     if elapsed > RESPONSE_TIME_TARGET_MAX:
         logger.warning(
-            f"[SLA] 响应超时: {elapsed:.2f}s > {RESPONSE_TIME_TARGET_MAX}s "
+            f"{prefix} 响应超时: {elapsed:.2f}s > {RESPONSE_TIME_TARGET_MAX}s "
             f"(session={session_id}, mode={result.get('collaboration_mode', '')}, "
             f"agent={result.get('current_agent', '')})"
         )
     elif elapsed < RESPONSE_TIME_TARGET_MIN:
         logger.info(
-            f"[SLA] 响应偏快: {elapsed:.2f}s < {RESPONSE_TIME_TARGET_MIN}s "
+            f"{prefix} 响应偏快: {elapsed:.2f}s < {RESPONSE_TIME_TARGET_MIN}s "
             f"(session={session_id}, cached={result.get('cached', False)})"
-        )
-
-    # 采集指标
-    if _metrics:
-        await _metrics.record_request(
-            elapsed=elapsed,
-            agent=result.get("current_agent", ""),
-            mode=result.get("collaboration_mode", ""),
-            cached=result.get("cached", False),
-            session_id=session_id,
-            escalated=result.get("collaboration_mode", "") == "hierarchical",
-            resolution_status=result.get("resolution_status", ""),
-        )
-        if _sla_alert_mgr:
-            try:
-                await _sla_alert_mgr.check_and_alert(_metrics)
-            except Exception:
-                pass
-
-    return result
-
-
-async def _run_graph_stream(session_id: str, query: str, stream_callback) -> Dict[str, Any]:
-    """
-    v4.2: 带流式回调的 LangGraph 图执行。
-    将 stream_callback 注入到图状态中，Agent 层自动使用真流式 LLM 调用。
-    执行完成后向队列发送结束信号。
-    """
-    start = time.time()
-
-    state = {
-        "session_id": session_id,
-        "current_agent": "",
-        "customer_query": query,
-        "query_type": "",
-        "response": "",
-        "complexity": 0,
-        "fast_path": True,
-        "collaboration_mode": "",
-        "cached": False,
-        "agents_used": [],
-        "resolution_status": "",
-        "trace_id": get_trace_id(),
-        "stream_callback": stream_callback,  # v4.2: 流式回调注入
-    }
-
-    try:
-        result = await _graph_app.ainvoke(state)
-    except AttributeError:
-        result = await asyncio.to_thread(_graph_app.invoke, state)
-
-    elapsed = time.time() - start
-    result["elapsed"] = elapsed
-
-    # SLA 告警
-    if elapsed > RESPONSE_TIME_TARGET_MAX:
-        logger.warning(
-            f"[SLA-Stream] 响应超时: {elapsed:.2f}s > {RESPONSE_TIME_TARGET_MAX}s "
-            f"(session={session_id}, mode={result.get('collaboration_mode', '')})"
         )
 
     # 采集指标
@@ -1513,8 +1458,10 @@ async def _run_graph_stream(session_id: str, query: str, stream_callback) -> Dic
     # 通知 SSE generator 流已结束
     if stream_callback:
         try:
-            await stream_callback(None)  # 哨兵：流结束
+            await stream_callback(None)
         except Exception:
             pass
+
+    return result
 
     return result

@@ -203,13 +203,21 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
 
 
 def revoke_user_tokens(user_id: int) -> int:
-    """P2-3: 吊销指定用户的所有 refresh_token（密码修改时调用）"""
+    """吊销指定用户的所有 refresh_token（密码修改时调用）
+    v5.0: 添加 scan_iter count 限制和最大迭代次数，防止 Redis 阻塞
+    """
     if not _denylist._use_redis:
         return 0
     try:
         refresh_prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:").replace("blacklist", "refresh")
         revoked = 0
-        for key in _denylist._redis.scan_iter(f"{refresh_prefix}*"):
+        max_keys = 5000  # 最多扫描 5000 个 key，防止 Redis 阻塞
+        scanned = 0
+        for key in _denylist._redis.scan_iter(f"{refresh_prefix}*", count=100):
+            scanned += 1
+            if scanned > max_keys:
+                logger.warning(f"revoke_user_tokens: 扫描超过 {max_keys} 个 key，提前终止")
+                break
             data = _denylist._redis.get(key)
             if data:
                 try:
