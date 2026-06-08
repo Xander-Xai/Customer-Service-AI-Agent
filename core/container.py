@@ -65,7 +65,8 @@ class ServiceContainer:
                     window_size=SESSION_WINDOW_SIZE,
                     url=REDIS_URL,
                 )
-                self.cache._init_redis()
+                # Redis 缓存预热移至 initialize()（异步执行）
+                self._redis_url = REDIS_URL
             except Exception:
                 logger.warning("Redis 初始化失败，回退到内存模式")
 
@@ -113,6 +114,10 @@ class ServiceContainer:
 
             # 1. LLM
             await self._init_llm()
+
+            # 1.2. Redis 缓存预热（异步，避免阻塞事件循环）
+            if hasattr(self, '_redis_url'):
+                await self.cache._init_redis(self._redis_url)
 
             # 1.5. v5.1: Vision LLM（多模态模型，仅在启用时初始化）
             await self._init_vision_llm()

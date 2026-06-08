@@ -196,7 +196,7 @@ def create_app(graph_app, session_manager=None, response_cache=None,
         CORSMiddleware,
         allow_origins=resolved_origins,
         allow_methods=["GET", "POST", "DELETE", "PUT"],
-        allow_headers=["X-API-Key", "X-Admin-Token", "X-Session-Token", "Content-Type", "Authorization"],
+        allow_headers=["X-API-Key", "X-Admin-Token", "X-Session-Token", "X-CSRF-Token", "Content-Type", "Authorization"],
     )
     setup_middleware(app)
 

@@ -8,6 +8,7 @@ v3.4 优化：
 - L2 tokenize 改用 jieba 中文分词（与 session_manager 共享），提升中文语义匹配精度
 - 缓存淘汰策略优化：每次淘汰 5% 而非 20%，避免缓存雪崩
 """
+import asyncio
 import hashlib
 import time
 from collections import defaultdict, OrderedDict, deque
@@ -43,27 +44,28 @@ class ResponseCache:
                     f"threshold_short={threshold_short} threshold_long={threshold_long} "
                     f"short_text_max_len={short_text_max_len}")
 
-    def _init_redis(self, redis_url: str = None):
+    async def _init_redis(self, redis_url: str = None):
         """可选：初始化 Redis 持久化层（懒加载，不影响主功能）"""
         try:
             import redis
             url = redis_url or config.REDIS_URL
             self._redis = redis.Redis.from_url(url, decode_responses=True)
-            self._redis.ping()
-            self._warm_up_from_redis()
+            await asyncio.to_thread(self._redis.ping)
+            await self._warm_up_from_redis()
             logger.info("Redis 持久化层已连接")
         except Exception as e:
             self._redis = None
             logger.debug(f"Redis 不可用，仅使用内存缓存: {e}")
 
-    def _warm_up_from_redis(self):
+    async def _warm_up_from_redis(self):
         """从 Redis 预热 L1 缓存"""
         if not self._redis:
             return
         try:
             import json
-            for key in self._redis.scan_iter("cache:resp:*", count=100):
-                data = self._redis.get(key)
+            keys = await asyncio.to_thread(lambda: list(self._redis.scan_iter("cache:resp:*", count=100)))
+            for key in keys[:100]:  # 限制预热数量
+                data = await asyncio.to_thread(self._redis.get, key)
                 if data:
                     entry = json.loads(data)
                     md5_key = key.replace("cache:resp:", "")
@@ -102,12 +104,18 @@ class ResponseCache:
         self._l1[key_md5] = (response, now)
         self._l1.move_to_end(key_md5)
 
-        # 可选：同步写入 Redis 持久化层
+        # 可选：同步写入 Redis 持久化层（非阻塞，通过线程执行）
         if hasattr(self, '_redis') and self._redis:
             try:
                 import json
-                self._redis.setex(f"cache:resp:{key_md5}", int(self._default_ttl),
-                                  json.dumps({"response": response, "ts": now}, ensure_ascii=False))
+                import threading
+                data = json.dumps({"response": response, "ts": now}, ensure_ascii=False)
+                key = f"cache:resp:{key_md5}"
+                ttl = int(self._default_ttl)
+                t = threading.Thread(
+                    target=self._redis.setex, args=(key, ttl, data), daemon=True
+                )
+                t.start()
             except Exception:
                 pass
 

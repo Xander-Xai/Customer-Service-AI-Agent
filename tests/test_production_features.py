@@ -213,16 +213,16 @@ class TestRefreshToken:
         assert payload["sub"] == 1
         assert payload["type"] == "access"
 
-    def test_create_refresh_token(self):
+    async def test_create_refresh_token(self):
         """创建 refresh_token"""
         from auth.service import create_refresh_token, decode_token
-        token = create_refresh_token(1, "testuser", "user")
+        token = await create_refresh_token(1, "testuser", "user")
         payload = decode_token(token)
         assert payload is not None
         assert payload["sub"] == 1
         assert payload["type"] == "refresh"
 
-    def test_refresh_access_token_flow(self):
+    async def test_refresh_access_token_flow(self):
         """refresh_token 换取 access_token 完整流程"""
         from auth.service import (
             register_user, authenticate_user, create_refresh_token,
@@ -235,7 +235,7 @@ class TestRefreshToken:
         assert auth is not None
 
         # 创建 refresh_token
-        refresh = create_refresh_token(auth["user_id"], auth["username"], auth["role"])
+        refresh = await create_refresh_token(auth["user_id"], auth["username"], auth["role"])
         # 用 refresh_token 换取新 access_token
         result = refresh_access_token(refresh)
         assert result is not None
