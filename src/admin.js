@@ -8,22 +8,25 @@ import '../styles/admin.css';
 import '../styles/animations.css';
 import { showToast } from './utils/toast.js';
 
-const TOKEN = localStorage.getItem('token');
-if (!TOKEN) window.location.href = '/login.html';
-
-const headers = {
-  'Authorization': 'Bearer ' + TOKEN,
-  'Content-Type': 'application/json',
-};
-
 function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   window.location.href = '/login.html';
 }
 
+function getHeaders() {
+  const token = localStorage.getItem('token');
+  if (!token) { logout(); return null; }
+  return {
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json',
+  };
+}
+
 async function api(path, options = {}) {
-  const resp = await fetch(path, { headers, ...options });
+  const hdrs = getHeaders();
+  if (!hdrs) return null;
+  const resp = await fetch(path, { headers: hdrs, ...options });
   if (resp.status === 401) { logout(); return null; }
   return resp.json();
 }
