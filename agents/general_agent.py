@@ -53,8 +53,8 @@ class GeneralAgent(BaseAgent):
                 if bb_data:
                     context_parts = [f"[{k}] {v}" for k, v in bb_data.items()]
                     extra_context += f"\n\n[其他Agent发现]\n" + "\n".join(context_parts[:3])
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.debug(f"Blackboard 读取失败: {e}")
 
         return await self._process_with_llm(
             state, self._format_system_prompt(_SYSTEM_PROMPT),

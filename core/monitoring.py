@@ -38,9 +38,12 @@ P95_PERCENTILE = 0.95              # P95 百分位
 
 
 # ===== 性能指标采集器 =====
+# Responsibilities are cohesive: collection, computation, and optional persistence
+# all operate on the same in-memory counters. Not splitting.
 class MetricsCollector:
     """系统性能指标实时采集（v3.4: asyncio.Lock 保护并发安全）"""
 
+    # --- Section: State & Initialization ---
     def __init__(self):
         self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
         self.total_requests = 0
@@ -71,6 +74,7 @@ class MetricsCollector:
         """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
         return self._lock
 
+    # --- Section: Metric Recording (write path) ---
     async def record_request(self, elapsed: float, agent: str = "", mode: str = "", cached: bool = False,
                        error: bool = False, session_id: str = None, escalated: bool = False,
                        resolution_status: str = ""):
@@ -132,6 +136,7 @@ class MetricsCollector:
         if expired:
             logger.debug(f"[Metrics] 清理 {len(expired)} 个过期会话统计")
 
+    # --- Section: Metric Queries (read path) ---
     async def get_stats(self) -> Dict[str, Any]:
         async with self._ensure_lock():
             times = list(self.response_times)[-STATS_RECENT_COUNT:]  # 最近 N 次
@@ -199,6 +204,7 @@ class MetricsCollector:
                 "total_multi_turn": total_sessions - single_turn_sessions,
             }
 
+    # --- Section: Snapshot Persistence (optional, requires Redis) ---
     async def save_snapshot(self, redis_client=None) -> bool:
         """持久化指标快照到 Redis（可选，需 Redis 可用）"""
         if redis_client is None:
@@ -225,7 +231,8 @@ class MetricsCollector:
         try:
             data = redis_client.get("metrics:snapshot")
             return json.loads(data) if data else None
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[Metrics] 加载快照失败: {e}")
             return None
 
 
@@ -365,8 +372,8 @@ class SLAAlertManager:
                         sender="sla_alert_manager",
                         payload=alert,
                     ))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[SLA-Alert] Bus 事件发布失败: {e}")
 
             # 分级通知路由
             try:

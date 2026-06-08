@@ -100,5 +100,6 @@ def get_tracer(name: str = "csai"):
     try:
         from opentelemetry import trace
         return trace.get_tracer(name)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"获取 Tracer 失败: {e}")
         return None

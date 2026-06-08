@@ -36,8 +36,8 @@ async def health(request: Request):
             r.ping()
             redis_latency_ms = round((time.time() - t0) * 1000, 2)
             redis_ok = True
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Health] Redis 连接检查失败: {e}")
 
     # LLM
     llm_api_key = os.environ.get("OPENAI_API_KEY", "")
@@ -53,8 +53,8 @@ async def health(request: Request):
         client = chromadb.Client()
         client.heartbeat()
         chromadb_ok = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Health] ChromaDB 连接检查失败: {e}")
 
     # Database
     db_ok = False
@@ -67,8 +67,8 @@ async def health(request: Request):
             conn.execute(_sql_text("SELECT 1"))
         db_latency_ms = round((time.time() - t0) * 1000, 2)
         db_ok = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"[Health] 数据库连接检查失败: {e}")
 
     from config import VERSION, DEV_MODE, REDIS_URL
     uptime_seconds = round(time.time() - getattr(state, "module_load_time", time.time()), 2)
@@ -133,8 +133,8 @@ async def kpi_endpoint(request: Request):
             snapshot = metrics.load_snapshot(r)
             if snapshot:
                 result["last_snapshot"] = snapshot
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[KPI] 快照加载失败: {e}")
     return result
 
 

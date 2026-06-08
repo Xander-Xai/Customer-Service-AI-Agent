@@ -99,14 +99,14 @@ async def _run_graph(session_id: str, query: str, stream_callback=None,
         if _sla_alert_mgr:
             try:
                 await _sla_alert_mgr.check_and_alert(_metrics)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"SLA 告警检查失败: {e}")
 
     if stream_callback:
         try:
             await stream_callback(None)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"stream_callback 终止信号失败: {e}")
 
     return result
 
@@ -120,8 +120,8 @@ async def _persist_metrics_snapshot():
     if r:
         try:
             await _metrics.save_snapshot(r)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"指标快照持久化失败: {e}")
 
 
 # ── 应用工厂 ──

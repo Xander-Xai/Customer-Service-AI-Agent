@@ -35,7 +35,8 @@ def get_redis_client():
             import redis
             _redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
             _redis_client.ping()
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[Redis] 初始化失败: {e}")
             _redis_client = None
     return _redis_client
 
@@ -54,7 +55,8 @@ def _redis_rate_limit(client_ip: str, max_requests: int, window_seconds: int) ->
         pipe.expire(key, window_seconds)
         result = pipe.execute()
         return result[1] <= max_requests
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[Redis] 限流操作失败: {e}")
         return False
 
 

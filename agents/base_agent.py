@@ -18,6 +18,7 @@ from core.message_bus import MessageBus, Message, MessageType
 from core.shared_blackboard import SharedBlackboard
 from config import TOOL_MAX_ROUNDS, AB_TEST_ENABLED
 from logger import get_logger, get_trace_id
+from exceptions import LLMError, SessionError, KnowledgeError, ERPError
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3             # 最大重试次数
@@ -219,7 +220,8 @@ class BaseAgent(ABC):
     async def _detect_drift(self, session_id: str, query: str) -> Dict[str, Any]:
         try:
             return await self.session_manager.detect_drift(session_id, query)
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"漂移检测失败: {e}")
             return {"has_drift": False, "drifts": []}
 
     def _handle_drift(self, query: str, drift_result: Dict[str, Any]) -> str:
@@ -371,6 +373,14 @@ class BaseAgent(ABC):
 
         return session_id, messages, drift
 
+    # NOTE: _process_with_llm and _process_with_tools share identical pre-processing
+    # (A/B variant resolution + _prepare_llm_messages + _get_effective_llm) and
+    # post-processing (session save + state mutation + A/B recording + event publish).
+    # The pre-processing is already consolidated in _prepare_llm_messages().
+    # The post-processing is ~15 lines of straightforward state writes; extracting a
+    # _execute_pipeline() with strategy callbacks was evaluated but adds indirection
+    # without proportional benefit given the methods are already <100 lines each.
+
     async def _process_with_tools(self, state: Dict[str, Any],
                                    system_prompt: str,
                                    extra_context: str = "",
@@ -485,15 +495,15 @@ class BaseAgent(ABC):
                     response_content += chunk
                     try:
                         await stream_callback({"type": "chunk", "content": chunk})
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        self.logger.debug(f"stream_callback 推送 chunk 失败: {e}")
             except Exception as e:
                 self.logger.error(f"LLM 流式调用出错 [{get_trace_id()}]: {e}")
                 response_content = fallback_response
                 try:
                     await stream_callback({"type": "chunk", "content": fallback_response})
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.logger.debug(f"stream_callback 推送 fallback 失败: {e}")
         else:
             # 非流式模式（原有逻辑）
             try:

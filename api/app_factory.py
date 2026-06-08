@@ -91,6 +91,10 @@ app = create_app(
 # 注入容器到 app.state
 app.state.container = _container
 
+# 注入 Redis 客户端工厂到 app.state（供健康检查等使用）
+from api.middleware import get_redis_client as _get_redis
+app.state.get_redis_client = _get_redis
+
 # 注册路由
 from auth.router import router as auth_router
 from knowledge.router import router as knowledge_router
@@ -106,8 +110,8 @@ app.router.lifespan_context = lifespan
 try:
     from core.tracing import setup_tracing
     setup_tracing(app)
-except Exception:
-    pass
+except Exception as e:
+    logger.debug(f"分布式追踪初始化跳过: {e}")
 
 # ===== 启动安全检查 =====
 _security_warnings = []
