@@ -27,8 +27,10 @@ v4.1 依赖注入：
 """
 import asyncio
 import time
-from typing import List, TypedDict
+from typing import List
 from langgraph.graph import StateGraph, END  # END: LangGraph 终止节点
+
+from core.state import AgentState
 
 from config import (
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL,
@@ -62,21 +64,6 @@ def _format_duration(seconds: float) -> str:
     if seconds < 1:
         return f"{seconds*1000:.0f}ms"
     return f"{seconds:.1f}s"
-
-
-# ===== 状态定义 =====
-class AgentState(TypedDict):
-    session_id: str
-    current_agent: str
-    customer_query: str
-    query_type: str
-    response: str
-    complexity: int
-    fast_path: bool
-    collaboration_mode: str
-    cached: bool
-    agents_used: List[str]
-    resolution_status: str  # resolved | uncertain | failed | escalated
 
 
 # ===== 全局实例 =====
@@ -510,8 +497,9 @@ def make_graph():
 def build_graph(container: ServiceContainer):
     """通过 ServiceContainer 构建 LangGraph 工作流图（v4.1 推荐方式）
 
-    与 make_graph() 功能完全相同，但通过容器注入依赖而非使用全局变量。
-    所有图节点函数通过闭包绑定到容器实例，避免隐式全局状态。
+    NOTE: 本函数与 make_graph() 功能完全对等，区别在于所有图节点通过闭包
+    绑定到容器实例（而非使用模块级全局变量）。节点逻辑、图拓扑与 make_graph()
+    保持一致——若修改 make_graph() 的拓扑或节点行为，请同步更新此处。
 
     Usage:
         container = ServiceContainer()

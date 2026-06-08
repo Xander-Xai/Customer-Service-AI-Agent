@@ -70,16 +70,14 @@ const API = (() => {
     const wsUrl = `${protocol}//${location.host}/ws/chat`;
 
     try {
-      // v4.0: 认证支持：优先 JWT token，回退到 API Key
+      // v4.4: 认证支持：API Key 仍在 URL 中传递（低敏感度），JWT 通过首条消息传递（避免 token 泄露到日志/URL）
       let authUrl = wsUrl;
-      const jwtToken = localStorage.getItem('token');
-      if (jwtToken) {
-        authUrl = `${wsUrl}?token=${encodeURIComponent(jwtToken)}`;
-      } else if (API_KEY) {
+      if (API_KEY) {
         authUrl = `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}`;
       }
       _ws = new WebSocket(authUrl);
-      console.log('[WS] 连接中...' + (jwtToken ? ' (JWT)' : API_KEY ? ' (API Key)' : ' (无认证)'));
+      const jwtToken = localStorage.getItem('token');
+      console.log('[WS] 连接中...' + (jwtToken ? ' (JWT via first message)' : API_KEY ? ' (API Key)' : ' (无认证)'));
     } catch (e) {
       console.error('[WS] 创建连接失败:', e);
       _emit('ws_error', { error: e });
@@ -90,6 +88,17 @@ const API = (() => {
     _ws.onopen = () => {
       _reconnectCount = 0;  // v3.6: 连接成功重置计数
       _connectionReady = true;
+
+      // v4.4: 通过首条消息发送 JWT token（而非 URL 参数，避免泄露到日志/浏览器历史）
+      const jwtToken = localStorage.getItem('token');
+      if (jwtToken) {
+        try {
+          _ws.send(JSON.stringify({ type: 'auth', token: jwtToken }));
+        } catch (e) {
+          console.error('[WS] 发送认证消息失败:', e);
+        }
+      }
+
       _emit('connected', { sessionId: _sessionId });
       console.log('[WS] 已连接');
       // v3.6: 发送队列中的暂存消息

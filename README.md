@@ -1,8 +1,10 @@
-# 多智能体客服系统 (Customer Service AI Agent v4.3)
+# 多智能体客服系统 (Customer Service AI Agent v4.4)
 
 面向化妆品生产企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent → 响应处理。
 
-> **v4.3** 生产上线验收通过：**383 tests passed** | 安全审计 7.5/10 | 代码质量 8.0/10 | 生产就绪性 7.0/10
+> **v4.4** 全面优化：安全加固 + 代码质量重构 + 测试覆盖率 + 文档完善
+> 
+> **v4.3** 生产验收通过：**383 tests passed** | 安全审计 7.5/10 | 代码质量 8.0/10 | 生产就绪性 7.0/10
 > 
 > 核心能力：DeepSeek/SiliconFlow LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · 生产安全加固 · 密钥自动生成
 
@@ -143,6 +145,55 @@ graph TB
 | **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行 + 复杂度评分（阈值 50） |
 | **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 |
 | **Layer 3** | `final_response` | 解决状态评估 + 缓存写入 + SLA 监控 + 事件广播 |
+
+### 请求处理时序图
+
+```mermaid
+sequenceDiagram
+    participant C as 客户端
+    participant MW as 中间件层
+    participant G as LangGraph
+    participant L0 as Layer 0 缓存
+    participant L1 as Layer 1 路由
+    participant L2 as Layer 2 协作
+    participant RA as ResponseAgent
+    participant LLM as LLM API
+
+    C->>MW: WebSocket / REST 请求
+    MW->>MW: 限流 + 认证 + 输入净化
+    MW->>G: invoke(state)
+
+    G->>L0: check_cache(query)
+    alt 缓存命中 (<10ms)
+        L0-->>G: cached=true, response
+        G->>RA: final_response
+    else 缓存未命中
+        L0-->>G: cached=false
+        G->>L1: classify_query(query, context)
+        par 双层路由并行
+            L1->>LLM: LLM Router 分类
+            L1->>L1: Rule Classifier 规则匹配
+        end
+        L1-->>G: RoutingResult(agent, complexity, mode)
+
+        G->>L2: select_collaboration_mode
+        alt 简单查询 (complexity < 50)
+            L2->>L2: Sequential 单 Agent
+        else 复杂查询
+            L2->>L2: Parallel/Consultation/Hierarchical
+        else 需要推理
+            L2->>L2: ReAct 推理链 (RAG + FC)
+        end
+        L2-->>G: response, agents_used
+
+        G->>RA: final_response(state)
+        RA->>RA: 质量评估 + 模式升级重试
+        RA->>RA: 缓存写入 + 会话记录
+    end
+
+    G-->>MW: result
+    MW-->>C: response + session_token
+```
 
 ---
 
@@ -649,6 +700,33 @@ make lint
   - 注入泄露：小模型泄露系统提示 → 输出层正则检测 + 安全回复替换
 - **RAG 检索质量评估**：30 条测试查询，Hit Rate@3 = 63.3%，发现英文 embedding 中文局限
 - **全量 388 tests passed**（383 离线 + 5 真实 LLM E2E）
+
+### v4.4 (2026-06-08) — 全面优化：安全加固 + 代码重构 + 测试 + 文档
+
+**安全加固 (6项)**
+- **PyJWT 替换自研 JWT**：使用 PyJWT 成熟库 + 算法白名单 HS256，防止 alg:none 攻击
+- **JWT denylist 大小限制**：内存回退上限 10000 条，生产无 Redis 时警告
+- **WebSocket JWT 认证修复**：JWT 不再通过 URL 参数传递，改用首条消息认证
+- **WebSocket 连接计数清理**：定期清理零连接 IP 记录，防止内存泄漏
+- **CSP 安全加固**：script-src 移除 `unsafe-inline`，仅保留 nonce + `unsafe-hashes`
+- **清理 .env.dev 真实 API Key**：替换为占位符，防止意外泄露
+
+**代码质量重构 (4项)**
+- **session_manager.py 拆分**：→ `token_counter.py` + `drift_detector.py` + 核心会话管理
+- **AgentState 统一定义**：新建 `core/state.py` 单一定义点，消除 3 处重复
+- **图构建优化**：`build_graph()` 与 `make_graph()` 共享节点逻辑
+- **API Key 验证增强**：占位符值更全面的检测
+
+**测试与 CI (3项)**
+- **pytest 覆盖率门槛**：`--cov-fail-under=80`，强制覆盖率达标
+- **CI 覆盖率报告**：GitHub Actions 生成 HTML 报告并上传 artifact
+- **测试 fixture 修复**：`graph_app` 从 session 作用域改为 function，消除状态泄漏
+
+**文档 (2项)**
+- **SECURITY.md**：完整的安全模型文档（认证/净化/限流/LLM安全/基础设施）
+- **架构时序图**：Mermaid 时序图展示请求流经四层的完整流程
+
+---
 
 ### v4.1 (2026-06-05) — DeepSeek LLM + 依赖注入 + 流式输出 + 全栈增强
 - **DeepSeek LLM 接入**：默认模型切换为 deepseek-chat，支持 LLM_PROVIDER 环境变量切换

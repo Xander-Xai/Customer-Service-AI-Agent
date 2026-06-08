@@ -140,21 +140,8 @@ class ServiceContainer:
     def _build_graph(self):
         """构建 LangGraph 工作流图（使用容器中的服务实例）"""
         from langgraph.graph import StateGraph, END
-        from typing import List, TypedDict
 
-        # 状态定义
-        class AgentState(TypedDict):
-            session_id: str
-            current_agent: str
-            customer_query: str
-            query_type: str
-            response: str
-            complexity: int
-            fast_path: bool
-            collaboration_mode: str
-            cached: bool
-            agents_used: List[str]
-            resolution_status: str
+        from core.state import AgentState
 
         # 使用容器中的实例
         _session_mgr = self.session_mgr

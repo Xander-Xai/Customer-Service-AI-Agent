@@ -147,6 +147,17 @@ def _resolve_cors_origins() -> list:
 _ws_connections: Dict[str, int] = defaultdict(int)
 _ws_lock = asyncio.Lock()
 _WS_HEARTBEAT_INTERVAL = 30
+_ws_conn_counter = 0  # 用于触发周期性清理
+
+
+def _cleanup_stale_ws_connections():
+    """清理 _ws_connections 中连接数为 0 的条目，防止内存泄漏"""
+    stale_keys = [ip for ip, count in _ws_connections.items() if count <= 0]
+    for key in stale_keys:
+        del _ws_connections[key]
+    if stale_keys:
+        logger.info(f"[WS] 清理 {len(stale_keys)} 个过期连接记录")
+    return len(stale_keys)
 
 
 # ── Pydantic 模型 ──
@@ -235,7 +246,27 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         )
         logger.info(f"httpx 连接池就绪 (max={HTTPX_MAX_CONNECTIONS} / keepalive={HTTPX_KEEPALIVE_CONNECTIONS})")
 
+        # v4.4: 周期性清理过期的 WebSocket 连接记录（每 5 分钟）
+        async def _periodic_ws_cleanup():
+            while True:
+                await asyncio.sleep(300)  # 5 分钟
+                try:
+                    async with _ws_lock:
+                        cleaned = _cleanup_stale_ws_connections()
+                    if cleaned:
+                        logger.debug(f"[WS] 周期性清理: 移除 {cleaned} 个过期条目")
+                except Exception as e:
+                    logger.warning(f"[WS] 周期性清理异常: {e}")
+
+        cleanup_task = asyncio.create_task(_periodic_ws_cleanup())
+
         yield
+
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
         await app.state.http_client.aclose()
         from core.monitoring import OpenAICompatibleClient
@@ -325,7 +356,7 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
-            f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes' 'unsafe-inline'; "
+            f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes'; "
             "style-src 'self' 'unsafe-inline'; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
@@ -622,6 +653,12 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         finally:
             async with _ws_lock:
                 _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
+                # v4.4: 每 50 次连接事件触发一次清理（补充周期性清理）
+                global _ws_conn_counter
+                _ws_conn_counter += 1
+                if _ws_conn_counter >= 50:
+                    _ws_conn_counter = 0
+                    _cleanup_stale_ws_connections()
             if _bus:
                 try:
                     await _bus.unsubscribe("agent.processing", on_agent_event)

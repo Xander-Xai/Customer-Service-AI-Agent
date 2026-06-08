@@ -25,7 +25,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # 移除自定义 event_loop fixture 以避免与 pytest-asyncio 0.21+ 冲突
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def graph_app():
     from multi_agent_customer_service import make_graph
     return make_graph()

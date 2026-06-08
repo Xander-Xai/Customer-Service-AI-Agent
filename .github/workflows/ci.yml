@@ -55,6 +55,18 @@ jobs:
         run: |
           python -m pytest tests/test_stress.py -v --tb=short
 
+      - name: Run coverage report
+        run: |
+          python -m pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml --ignore=tests/test_e2e_real_llm.py -m "not real_llm and not stress" 2>&1 | tail -30
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-${{ matrix.python-version }}
+          path: htmlcov/
+          retention-days: 14
+
       - name: Summary
         if: always()
         run: |
