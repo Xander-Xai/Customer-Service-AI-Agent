@@ -54,29 +54,21 @@ class TestGraphEndToEnd:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        """每个测试前重置全局状态"""
-        import multi_agent_customer_service as graph_mod
-        self.graph_mod = graph_mod
-
-        # 重置全局变量
-        graph_mod.llm = None
-        graph_mod.agents_dict = {}
-        graph_mod.router = None
-        graph_mod.response_agent = None
-        graph_mod.knowledge_base = None
-        graph_mod.tool_registry = None
+        """每个测试前创建 Mock ServiceContainer"""
+        from core.container import ServiceContainer
+        from multi_agent_customer_service import build_graph
 
         # 创建 mock LLM
         self.mock_llm = _make_mock_llm("产品成分包含玻尿酸和烟酰胺，适合各种肤质。")
 
         # Patch OpenAICompatibleClient 避免真实 HTTP 调用
         self.patcher = patch(
-            "multi_agent_customer_service.OpenAICompatibleClient",
+            "llm.client.OpenAICompatibleClient",
             return_value=self.mock_llm,
         )
         self.patcher.start()
 
-        # Patch ERP（create_erp_adapter 在 initialize_agents 中通过 from erp.factory 导入）
+        # Patch ERP（create_erp_adapter 在 _init_agents 中通过 from erp.factory 导入）
         from erp.kingdee_adapter import KingdeeMockAdapter
         self.mock_erp = KingdeeMockAdapter()
 
@@ -86,17 +78,23 @@ class TestGraphEndToEnd:
         )
         self.erp_patcher.start()
 
+        # 创建容器（同步部分），不调用 initialize()（避免真实 LLM 调用）
+        self.container = ServiceContainer()
+
+        # 手动注入 mock LLM
+        self.container.llm = self.mock_llm
+
     def teardown_method(self):
-        self.patcher.stop()
-        self.erp_patcher.stop()
-        # 重置全局状态
-        self.graph_mod.llm = None
-        self.graph_mod.agents_dict = {}
+        if hasattr(self, 'patcher'):
+            self.patcher.stop()
+        if hasattr(self, 'erp_patcher'):
+            self.erp_patcher.stop()
 
     @pytest.mark.asyncio
     async def test_simple_query_end_to_end(self):
         """简单查询：缓存未命中 → 路由 → Sequential → 响应"""
-        app = self.graph_mod.make_graph()
+        from multi_agent_customer_service import build_graph
+        app = build_graph(self.container)
         state = _make_state("这款精华液多少钱？")
 
         result = await app.ainvoke(state)
@@ -110,7 +108,8 @@ class TestGraphEndToEnd:
     @pytest.mark.asyncio
     async def test_cache_hit_skips_routing(self):
         """缓存命中 → 直接跳到 final_response，跳过路由"""
-        app = self.graph_mod.make_graph()
+        from multi_agent_customer_service import build_graph
+        app = build_graph(self.container)
 
         # 先跑一次，让响应被缓存
         query = "产品保质期是多久？"
@@ -130,7 +129,8 @@ class TestGraphEndToEnd:
     async def test_complaint_query_end_to_end(self):
         """投诉查询 → 端到端走通（mock LLM 路由器可能返回非 complaint 分类，
         但图应仍能完整执行并返回响应。投诉→hierarchical 路由逻辑由 TestRoutingLogic 单独验证）"""
-        app = self.graph_mod.make_graph()
+        from multi_agent_customer_service import build_graph
+        app = build_graph(self.container)
         state = _make_state("我要投诉！你们的产品导致我皮肤过敏，要求退款赔偿！")
 
         result = await app.ainvoke(state)
@@ -143,7 +143,8 @@ class TestGraphEndToEnd:
     async def test_multi_domain_query_end_to_end(self):
         """多领域查询 → 端到端走通（mock LLM 路由器分类有限，但图应完整执行。
         多领域→parallel/react 路由逻辑由 TestRoutingLogic 单独验证）"""
-        app = self.graph_mod.make_graph()
+        from multi_agent_customer_service import build_graph
+        app = build_graph(self.container)
         state = _make_state("我买了你们的精华液，想查一下订单物流，另外产品成分安全吗？")
 
         result = await app.ainvoke(state)
@@ -155,7 +156,8 @@ class TestGraphEndToEnd:
     @pytest.mark.asyncio
     async def test_general_inquiry_sequential(self):
         """通用咨询 → Sequential 模式（使用唯一查询避免缓存干扰）"""
-        app = self.graph_mod.make_graph()
+        from multi_agent_customer_service import build_graph
+        app = build_graph(self.container)
         # 使用带时间戳的唯一查询，避免被之前的测试缓存命中
         import time
         unique_query = f"你好，请问有什么可以帮您的？{int(time.time() * 1000)}"
@@ -222,6 +224,7 @@ class TestAgentProcess:
 
         assert result["response"]
         assert result["current_agent"] == "技术支持专家"
+        self.mock_llm.async_invoke.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_billing_agent_process(self):
@@ -243,6 +246,7 @@ class TestAgentProcess:
 
         assert result["response"]
         assert result["current_agent"] == "账单专家"
+        self.mock_llm.async_invoke.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_complaint_agent_process(self):
@@ -262,6 +266,7 @@ class TestAgentProcess:
 
         assert result["response"]
         assert result["current_agent"] == "投诉处理专家"
+        self.mock_llm.async_invoke.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_general_agent_process(self):
@@ -281,6 +286,7 @@ class TestAgentProcess:
 
         assert result["response"]
         assert result["current_agent"] == "通用咨询专家"
+        self.mock_llm.async_invoke.assert_called_once()
 
 
 class TestAgentSessionContext:
@@ -344,11 +350,11 @@ class TestDriftDetection:
     """漂移检测集成测试"""
 
     @pytest.fixture(autouse=True)
-    def setup(self):
+    async def setup(self):
         from session_manager import EnhancedSessionManager
         self.sm = EnhancedSessionManager()
         self.session_id = "drift-test"
-        self.sm.create_session(self.session_id)
+        await self.sm.create_session(self.session_id)
 
     @pytest.mark.asyncio
     async def test_repetition_detection(self):
@@ -365,15 +371,17 @@ class TestDriftDetection:
     @pytest.mark.asyncio
     async def test_topic_drift_detection(self):
         """话题漂移检测：从产品问题突然切换到完全不相关的主题"""
-        # 先建立话题上下文
+        # 先建立话题上下文（需要至少 2 条用户消息才能比较话题变化）
         await self.sm.add_message(self.session_id, "精华液的成分有哪些？", is_user=True)
         await self.sm.add_message(self.session_id, "包含玻尿酸和烟酰胺。", is_user=False)
+        await self.sm.add_message(self.session_id, "这款面霜多少钱？", is_user=True)
+        await self.sm.add_message(self.session_id, "128 元。", is_user=False)
 
         # 切换到完全不同的话题
         drift = await self.sm.detect_drift(self.session_id, "今天天气怎么样？")
         # 话题漂移应该被检测到（Jaccard 相似度很低）
-        if drift.get("drifts"):
-            assert any(d.get("type") in ("topic", "intent") for d in drift["drifts"])
+        assert drift.get("drifts"), f"Expected drifts, got: {drift}"
+        assert any(d.get("type") in ("topic_drift", "intent_drift", "topic", "intent") for d in drift["drifts"])
 
 
 class TestCollaborationModes:

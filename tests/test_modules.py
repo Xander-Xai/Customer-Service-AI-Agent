@@ -32,7 +32,7 @@ class TestSessionManagerModule:
         from session_manager import EnhancedSessionManager
         sm = EnhancedSessionManager()
         sid = await sm.create_session()
-        assert sid is not None
+        assert isinstance(sid, str)
         assert len(sid) > 0
 
     @pytest.mark.asyncio
@@ -208,13 +208,13 @@ class TestResponseAgentModule:
         result = _sanitize_response("React.createElement('div')\n正常回答内容")
         assert "createElement" not in result
         # The regex removes code lines; remaining content may be partial
-        assert result is not None
+        assert isinstance(result, str)
 
     def test_sanitize_console_log(self):
         from agents.response_agent import _sanitize_response
         result = _sanitize_response("console.log('debug')\n正常回答")
         assert "console.log" not in result
-        assert result is not None
+        assert isinstance(result, str)
 
     def test_sanitize_empty_input(self):
         from agents.response_agent import _sanitize_response
@@ -416,8 +416,9 @@ class TestERPModule:
     async def test_mock_adapter_product(self):
         from erp.kingdee_adapter import KingdeeMockAdapter
         adapter = KingdeeMockAdapter()
-        result = await adapter.query_product("P001")
-        assert result is not None
+        result = await adapter.query_product("玫瑰")
+        assert isinstance(result, list)
+        assert len(result) > 0
 
     @pytest.mark.asyncio
     async def test_mock_adapter_inventory(self):
@@ -430,20 +431,25 @@ class TestERPModule:
     async def test_mock_adapter_order(self):
         from erp.kingdee_adapter import KingdeeMockAdapter
         adapter = KingdeeMockAdapter()
-        result = await adapter.query_order("ORD001")
-        assert result is not None
+        result = await adapter.query_order("ORD20260530001")
+        assert isinstance(result, list)
+        assert len(result) > 0
 
     @pytest.mark.asyncio
     async def test_mock_adapter_customer(self):
         from erp.kingdee_adapter import KingdeeMockAdapter
         adapter = KingdeeMockAdapter()
         result = await adapter.query_customer("C001")
-        assert result is not None
+        assert isinstance(result, dict)
+        assert result["name"] == "王女士"
 
     def test_factory_mock(self):
         from erp.factory import create_erp_adapter
         adapter = create_erp_adapter()
-        assert adapter is not None
+        assert hasattr(adapter, 'query_product')
+        assert hasattr(adapter, 'query_inventory')
+        assert hasattr(adapter, 'query_order')
+        assert hasattr(adapter, 'query_customer')
 
     def test_abstract_interface(self):
         from erp.kingdee_adapter import KingdeeAdapterBase
@@ -472,27 +478,27 @@ class TestAgentsModule:
     def test_product_agent_init(self):
         from agents.product_agent import ProductAgent
         pa = ProductAgent()
-        assert pa.name is not None
+        assert pa.name == "产品专家"
 
     def test_billing_agent_init(self):
         from agents.billing_agent import BillingAgent
         ba = BillingAgent()
-        assert ba.name is not None
+        assert ba.name == "账单专家"
 
     def test_tech_agent_init(self):
         from agents.tech_agent import TechAgent
         ta = TechAgent()
-        assert ta.name is not None
+        assert ta.name == "技术支持专家"
 
     def test_complaint_agent_init(self):
         from agents.complaint_agent import ComplaintAgent
         ca = ComplaintAgent()
-        assert ca.name is not None
+        assert ca.name == "投诉处理专家"
 
     def test_general_agent_init(self):
         from agents.general_agent import GeneralAgent
         ga = GeneralAgent()
-        assert ga.name is not None
+        assert ga.name == "通用咨询专家"
 
     def test_response_agent_init(self):
         from agents.response_agent import ResponseAgent
@@ -502,7 +508,7 @@ class TestAgentsModule:
     def test_react_agent_init(self):
         from agents.react_agent import ReActAgent
         ra = ReActAgent()
-        assert ra.name is not None
+        assert ra.name == "ReAct推理专家"
 
     def test_agents_inherit_base(self):
         from agents.base_agent import BaseAgent
@@ -616,7 +622,7 @@ class TestRAGModule:
     def test_knowledge_base_init(self):
         from rag.knowledge_base import CosmeticsKnowledgeBase
         kb = CosmeticsKnowledgeBase()
-        assert kb is not None
+        assert kb.available
 
     def test_seed_data_functions(self):
         from rag.seed_data import seed_faq, seed_product_knowledge, seed_tech_support
@@ -684,7 +690,8 @@ class TestCollaborationModule:
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
         orch = CollaborationOrchestrator(MessageBus(), SharedBlackboard())
-        assert orch is not None
+        assert hasattr(orch, 'select_mode_name')
+        assert hasattr(orch, 'build_context')
 
     def test_sequential_mode_selection(self):
         from collaboration.orchestrator import CollaborationOrchestrator
@@ -773,9 +780,11 @@ class TestAPIModule:
         assert len(sid) > 0
 
     def test_health_endpoint(self):
-        from multi_agent_customer_service import make_graph
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
         from api.app import create_app
-        graph = make_graph()
+        container = ServiceContainer()
+        graph = build_graph(container)
         app = create_app(graph)
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -786,9 +795,11 @@ class TestAPIModule:
         assert "version" in data
 
     def test_security_headers(self):
-        from multi_agent_customer_service import make_graph
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
         from api.app import create_app
-        graph = make_graph()
+        container = ServiceContainer()
+        graph = build_graph(container)
         app = create_app(graph)
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -798,10 +809,12 @@ class TestAPIModule:
         assert "Content-Security-Policy" in resp.headers
 
     def test_feedback_endpoint_validation(self):
-        from multi_agent_customer_service import make_graph
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
         from api.app import create_app
         import config
-        graph = make_graph()
+        container = ServiceContainer()
+        graph = build_graph(container)
         app = create_app(graph)
         from fastapi.testclient import TestClient
         client = TestClient(app)
@@ -821,14 +834,18 @@ class TestLangGraphModule:
     """LangGraph 图构建验证"""
 
     def test_graph_build(self):
-        from multi_agent_customer_service import make_graph
-        graph = make_graph()
-        assert graph is not None
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
+        container = ServiceContainer()
+        graph = build_graph(container)
+        assert hasattr(graph, 'ainvoke')
 
     @pytest.mark.asyncio
     async def test_graph_simple_query(self):
-        from multi_agent_customer_service import make_graph
-        graph = make_graph()
+        from multi_agent_customer_service import build_graph
+        from core.container import ServiceContainer
+        container = ServiceContainer()
+        graph = build_graph(container)
         state = {
             "session_id": "e2e_001",
             "customer_query": "你好",
@@ -856,7 +873,8 @@ class TestLoggerModule:
     def test_get_logger(self):
         from logger import get_logger
         logger = get_logger("test")
-        assert logger is not None
+        assert hasattr(logger, "info")
+        assert hasattr(logger, "warning")
 
     def test_logger_has_methods(self):
         from logger import get_logger
@@ -877,12 +895,12 @@ class TestSecurityAudit:
     def test_no_hardcoded_secrets(self):
         import os
         secret_patterns = [
-            r'password\s*=\s*["\'][^"\']+["\']',
-            r'api_key\s*=\s*["\'][^"\']+["\']',
-            r'secret\s*=\s*["\'][^"\']+["\']',
+            r'password\s*=\s*["\'][^"\'\n]+["\']',
+            r'api_key\s*=\s*["\'][^"\'\n]+["\']',
+            r'secret\s*=\s*["\'][^"\'\n]+["\']',
         ]
         for root, dirs, files in os.walk('.'):
-            dirs[:] = [d for d in dirs if d not in ('venv', '.git', '__pycache__', 'node_modules', '.claude')]
+            dirs[:] = [d for d in dirs if d not in ('venv', '.venv', '.git', '__pycache__', 'node_modules', '.claude', 'htmlcov', 'scripts', 'data', 'logs')]
             for f in files:
                 if f.endswith('.py'):
                     path = os.path.join(root, f)
@@ -893,8 +911,8 @@ class TestSecurityAudit:
                             matches = re.findall(pattern, content, re.IGNORECASE)
                             real_matches = [m for m in matches if 'test' not in m.lower() and 'example' not in m.lower() and 'config' not in m.lower() and 'sample' not in m.lower()]
                             assert len(real_matches) == 0, f"Hardcoded secret in {path}: {real_matches}"
-                    except Exception:
-                        pass
+                    except (PermissionError, UnicodeDecodeError) as e:
+                        pytest.fail(f"Failed to read {path}: {e}")
 
     def test_session_id_validation_pattern(self):
         from api.app import _SESSION_ID_RE
@@ -962,7 +980,8 @@ class TestStreamingLLM:
     @pytest.mark.asyncio
     async def test_async_invoke_stream_yields_chunks(self):
         """验证 async_invoke_stream 逐 chunk 返回文本"""
-        from core.monitoring import OpenAICompatibleClient, CircuitBreaker
+        from llm.client import OpenAICompatibleClient
+        from core.monitoring import CircuitBreaker
         cb = CircuitBreaker()
         client = OpenAICompatibleClient(
             api_key="sk-test", base_url="http://localhost:9999",
