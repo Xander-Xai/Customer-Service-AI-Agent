@@ -6,7 +6,7 @@
 import re
 import json
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from logger import get_logger
 
 logger = get_logger("agents.evaluator")

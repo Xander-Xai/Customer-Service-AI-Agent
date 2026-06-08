@@ -759,24 +759,24 @@ class TestAPIModule:
     """API 端点 + 安全验证"""
 
     def test_sanitize_input(self):
-        from api.app import _sanitize_input
-        assert _sanitize_input("hello\x00world") == "helloworld"
-        assert _sanitize_input("<script>alert('xss')</script>") != "<script>alert('xss')</script>"
+        from api.utils import sanitize_input
+        assert sanitize_input("hello\x00world") == "helloworld"
+        assert sanitize_input("<script>alert('xss')</script>") != "<script>alert('xss')</script>"
 
     def test_validate_session_id_valid(self):
-        from api.app import _validate_session_id
-        sid = _validate_session_id("abc-123_test")
+        from api.utils import validate_session_id
+        sid = validate_session_id("abc-123_test")
         assert sid == "abc-123_test"
 
     def test_validate_session_id_invalid(self):
-        from api.app import _validate_session_id
-        sid = _validate_session_id("../../etc/passwd")
+        from api.utils import validate_session_id
+        sid = validate_session_id("../../etc/passwd")
         assert sid != "../../etc/passwd"
         assert len(sid) > 10
 
     def test_validate_session_id_empty(self):
-        from api.app import _validate_session_id
-        sid = _validate_session_id("")
+        from api.utils import validate_session_id
+        sid = validate_session_id("")
         assert len(sid) > 0
 
     def test_health_endpoint(self):
@@ -915,7 +915,7 @@ class TestSecurityAudit:
                         pytest.fail(f"Failed to read {path}: {e}")
 
     def test_session_id_validation_pattern(self):
-        from api.app import _SESSION_ID_RE
+        from api.utils import _SESSION_ID_RE
         assert _SESSION_ID_RE.match("abc123")
         assert _SESSION_ID_RE.match("test-session_id")
         assert not _SESSION_ID_RE.match("../../etc/passwd")

@@ -1,7 +1,8 @@
 """
-ChromaDB 知识库管理器（v4.3）
+ChromaDB 知识库管理器（v5.1）
 基于向量检索的 RAG 检索增强生成。
 v4.3: 更换为中文 embedding 模型（BAAI/bge-small-zh-v1.5），提升中文语义检索精度。
+v5.1: 集成 CLIP 多模态 embedding，支持图片语义检索。
 """
 import asyncio
 from typing import Any, Dict, List, Optional
@@ -13,11 +14,15 @@ logger = get_logger("rag.knowledge_base")
 class CosmeticsKnowledgeBase:
     """化妆品领域知识库（基于 ChromaDB 向量检索）"""
 
-    def __init__(self, persist_directory: Optional[str] = None):
+    def __init__(self, persist_directory: Optional[str] = None, clip_enabled: bool = False):
         """
         Args:
             persist_directory: 持久化目录。None 则使用内存模式（适合演示和测试）。
+            clip_enabled: 是否启用 CLIP 多模态检索
         """
+        self._clip_enabled = clip_enabled
+        self._clip_embed_fn = None
+
         try:
             import chromadb
             from chromadb.utils import embedding_functions
@@ -25,13 +30,18 @@ class CosmeticsKnowledgeBase:
             # v4.3: 使用中文 embedding 模型提升语义检索精度
             self._embed_fn = self._create_embedding_function()
 
+            # v5.1: CLIP embedding（延迟加载）
+            if clip_enabled:
+                self._clip_embed_fn = self._create_clip_embedding_function()
+
             if persist_directory:
                 self._client = chromadb.PersistentClient(path=persist_directory)
             else:
                 self._client = chromadb.Client()
             self._collections: Dict[str, Any] = {}
             self._available = True
-            logger.info(f"ChromaDB 初始化成功 (persist={persist_directory}, embedding={self._embed_fn_name})")
+            clip_info = f", clip={'enabled' if self._clip_embed_fn else 'failed'}" if clip_enabled else ""
+            logger.info(f"ChromaDB 初始化成功 (persist={persist_directory}, embedding={self._embed_fn_name}{clip_info})")
         except ImportError:
             self._available = False
             logger.warning("chromadb 未安装，RAG 功能不可用")
@@ -68,6 +78,18 @@ class CosmeticsKnowledgeBase:
         return embedding_functions.DefaultEmbeddingFunction()
 
     _embed_fn_name: str = "unknown"  # 类变量，记录实际使用的模型名
+
+    @staticmethod
+    def _create_clip_embedding_function():
+        """v5.1: 创建 CLIP 多模态 embedding 函数"""
+        try:
+            from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
+            ef = OpenCLIPEmbeddingFunction()
+            logger.info("CLIP embedding 模型加载成功")
+            return ef
+        except Exception as e:
+            logger.warning(f"CLIP embedding 加载失败: {e}，多模态检索不可用")
+            return None
 
     @property
     def available(self) -> bool:
@@ -195,3 +217,177 @@ class CosmeticsKnowledgeBase:
         if collection is None:
             return 0
         return collection.count()
+
+    # ===== v5.1: CLIP 多模态检索 =====
+
+    def get_or_create_image_collection(self, name: str = "image_knowledge"):
+        """获取或创建 CLIP 图片 collection（使用 CLIP embedding）"""
+        if not self._available or not self._clip_embed_fn:
+            return None
+        if name not in self._collections:
+            self._collections[name] = self._client.get_or_create_collection(
+                name=name,
+                embedding_function=self._clip_embed_fn,
+            )
+        return self._collections[name]
+
+    def add_image_documents(self, collection_name: str,
+                            image_paths: List[str],
+                            metadatas: Optional[List[Dict[str, Any]]] = None):
+        """
+        向图片 collection 添加图片文档
+
+        Args:
+            collection_name: collection 名称
+            image_paths: 图片路径列表（本地路径或 URL）
+            metadatas: 元数据列表
+        """
+        collection = self.get_or_create_image_collection(collection_name)
+        if collection is None:
+            return
+        if not image_paths:
+            return
+
+        ids = [f"{collection_name}_{i}" for i in range(len(image_paths))]
+        if metadatas is None:
+            metadatas = [{"_default": "true"}] * len(image_paths)
+        else:
+            metadatas = [m if m else {"_default": "true"} for m in metadatas]
+
+        # CLIP embedding 接受 URIs（图片路径）
+        collection.add(uris=image_paths, metadatas=metadatas, ids=ids)
+        logger.debug(f"图片 collection '{collection_name}' 添加 {len(image_paths)} 张图片")
+
+    async def query_image(self, collection_name: str, query_text: str,
+                          n_results: int = 3) -> List[Dict[str, Any]]:
+        """
+        用文本查询图片 collection（CLIP 跨模态检索）
+
+        Args:
+            collection_name: collection 名称
+            query_text: 查询文本
+            n_results: 返回结果数
+
+        Returns:
+            匹配的图片文档列表
+        """
+        collection = self.get_or_create_image_collection(collection_name)
+        if collection is None or collection.count() == 0:
+            return []
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: collection.query(query_texts=[query_text], n_results=n_results)
+            )
+            return self._parse_query_result(result)
+        except Exception as e:
+            logger.error(f"CLIP 图片查询失败 [{collection_name}]: {e}")
+            return []
+
+    async def query_image_by_uri(self, collection_name: str, query_image_uri: str,
+                                 n_results: int = 3) -> List[Dict[str, Any]]:
+        """
+        用图片查询图片 collection（CLIP 图片-图片检索）
+
+        Args:
+            collection_name: collection 名称
+            query_image_uri: 查询图片路径
+            n_results: 返回结果数
+
+        Returns:
+            匹配的图片文档列表
+        """
+        collection = self.get_or_create_image_collection(collection_name)
+        if collection is None or collection.count() == 0:
+            return []
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: collection.query(query_uris=[query_image_uri], n_results=n_results)
+            )
+            return self._parse_query_result(result)
+        except Exception as e:
+            logger.error(f"CLIP 图片-图片查询失败 [{collection_name}]: {e}")
+            return []
+
+    async def query_multimodal(self, text_query: str, image_uri: Optional[str] = None,
+                               collections: Optional[List[str]] = None,
+                               n_results: int = 3) -> List[Dict[str, Any]]:
+        """
+        v5.1: 多模态融合检索（文本 + 图片）
+        同时查询文本 collection 和图片 collection，用 RRF 融合排序。
+
+        Args:
+            text_query: 文本查询
+            image_uri: 可选图片 URI（用于图片-图片检索）
+            collections: 文本 collection 列表（默认 product_knowledge, faq, tech_support）
+            n_results: 返回结果数
+        """
+        if collections is None:
+            collections = ["product_knowledge", "faq", "tech_support"]
+
+        all_results = []
+
+        # 文本检索（现有路径）
+        text_results = await self.query_multiple(collections, text_query, n_results)
+        for i, r in enumerate(text_results):
+            r["_rank"] = i
+            r["_source"] = "text"
+        all_results.extend(text_results)
+
+        # CLIP 图片检索
+        if self._clip_enabled and self._clip_embed_fn:
+            image_results = await self.query_image("image_knowledge", text_query, n_results)
+            for i, r in enumerate(image_results):
+                r["_rank"] = i
+                r["_source"] = "clip_text"
+            all_results.extend(image_results)
+
+            # 图片-图片检索（如果提供了查询图片）
+            if image_uri:
+                img_results = await self.query_image_by_uri("image_knowledge", image_uri, n_results)
+                for i, r in enumerate(img_results):
+                    r["_rank"] = i
+                    r["_source"] = "clip_image"
+                all_results.extend(img_results)
+
+        # RRF 融合排序
+        return self._rrf_merge(all_results, n_results)
+
+    @staticmethod
+    def _rrf_merge(results: List[Dict[str, Any]], n_results: int,
+                   k: int = 60) -> List[Dict[str, Any]]:
+        """Reciprocal Rank Fusion 融合排序"""
+        # 按 source 分组
+        groups = {}
+        for r in results:
+            source = r.get("_source", "text")
+            groups.setdefault(source, []).append(r)
+
+        # 计算 RRF 分数
+        scored = {}
+        for source, items in groups.items():
+            for rank, item in enumerate(items):
+                content = item.get("content", "")
+                key = content[:100]  # 用前 100 字符作为去重 key
+                rrf_score = 1.0 / (k + rank + 1)
+                if key in scored:
+                    scored[key]["_rrf_score"] += rrf_score
+                else:
+                    scored[key] = {**item, "_rrf_score": rrf_score}
+
+        # 按 RRF 分数排序
+        merged = sorted(scored.values(), key=lambda x: x.get("_rrf_score", 0), reverse=True)
+        # 清理内部字段
+        for r in merged:
+            r.pop("_rank", None)
+            r.pop("_source", None)
+            r.pop("_rrf_score", None)
+        return merged[:n_results]
+
+    @property
+    def clip_available(self) -> bool:
+        """CLIP 是否可用"""
+        return self._clip_enabled and self._clip_embed_fn is not None

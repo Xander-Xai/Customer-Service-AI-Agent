@@ -9,6 +9,7 @@ import { getAgentIcon, getModeLabel } from '../utils/agents.js';
 let progressStatusEl = null;
 let currentSessionId = null;
 let _feedbackSubmitter = null;  // v5.0: 解耦反馈提交（由外部注入）
+let messageIndex = 0;           // 追踪 AI 回复序号（用于 feedback message_index）
 
 /** 注入反馈提交函数（由 chat/index.js 调用，避免直接依赖 API 层） */
 export function setFeedbackHandler(submitter) {
@@ -16,7 +17,10 @@ export function setFeedbackHandler(submitter) {
 }
 
 /** 设置当前会话 ID（由 session 模块调用） */
-export function setSessionId(id) { currentSessionId = id; }
+export function setSessionId(id) {
+  currentSessionId = id;
+  messageIndex = 0; // 切换会话时重置回复计数
+}
 
 // ===== 消息渲染 =====
 
@@ -74,6 +78,7 @@ export function appendAssistantMessage(content, meta = {}) {
             ${escapeHtml(getModeLabel(meta.mode))}
           </span>
           ${meta.cached ? '<span class="cached-badge">⚡ 缓存命中</span>' : ''}
+          ${meta.resolutionStatus ? `<span class="meta-item resolution-${escapeHtml(meta.resolutionStatus)}">${escapeHtml(meta.resolutionStatus)}</span>` : ''}
           <span class="message-meta">
             ${meta.elapsed ? `<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>` : ''}
           </span>
@@ -91,6 +96,7 @@ export function appendAssistantMessage(content, meta = {}) {
   // 绑定反馈和复制按钮事件
   const lastMsg = container.lastElementChild;
   if (lastMsg) {
+    lastMsg.dataset.messageIndex = messageIndex++;
     const positiveBtn = lastMsg.querySelector('.btn-feedback.positive');
     const negativeBtn = lastMsg.querySelector('.btn-feedback.negative');
     const copyBtn = lastMsg.querySelector('.btn-copy');
@@ -229,10 +235,28 @@ export function createStreamingMessage() {
         modeBadge.textContent = getModeLabel(meta.mode);
       }
 
-      const metaSpan = wrapper.querySelector('.message-meta');
-      if (meta.elapsed) {
-        metaSpan.innerHTML = `<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>`;
+      // Agent 流转轨迹（多 Agent 协作时显示）
+      if (meta.agentsUsed && meta.agentsUsed.length > 1) {
+        const steps = meta.agentsUsed.map((a, i) => {
+          const icon = getAgentIcon(a);
+          const cls = i === meta.agentsUsed.length - 1 ? 'active' : 'completed';
+          return `<div class="agent-flow-step ${cls}">${icon} ${escapeHtml(a)}</div>`;
+        }).join('<span class="agent-flow-arrow">→</span>');
+        const flowHtml = `<div class="agent-flow">${steps}</div>`;
+        agentTag.insertAdjacentHTML('beforebegin', flowHtml);
       }
+
+      // 更新 meta 行：耗时 + 缓存 + 解决状态
+      const metaContainer = modeBadge.parentElement;
+      const metaSpan = metaContainer.querySelector('.message-meta');
+      const metaParts = [];
+      if (meta.elapsed) metaParts.push(`<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>`);
+      if (meta.cached) metaParts.push(`<span class="cached-badge">⚡ 缓存命中</span>`);
+      if (meta.resolutionStatus) metaParts.push(`<span class="meta-item resolution-${escapeHtml(meta.resolutionStatus)}">${escapeHtml(meta.resolutionStatus)}</span>`);
+      if (metaSpan) metaSpan.innerHTML = metaParts.join('');
+
+      // 追踪 messageIndex
+      wrapper.dataset.messageIndex = messageIndex++;
 
       // 绑定事件
       if (positiveBtn) positiveBtn.addEventListener('click', () => sendFeedback(positiveBtn, true));
@@ -256,7 +280,8 @@ export function createStreamingMessage() {
 function sendFeedback(btn, resolved) {
   if (!currentSessionId || !_feedbackSubmitter) return;
   const rating = resolved ? 1 : -1;
-  _feedbackSubmitter(currentSessionId, rating).then(() => {
+  const idx = parseInt(btn.closest('.message')?.dataset.messageIndex || '0', 10);
+  _feedbackSubmitter(currentSessionId, rating, idx).then(() => {
     const bar = btn.parentElement;
     bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
   }).catch(() => {});

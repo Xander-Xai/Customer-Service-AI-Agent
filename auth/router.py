@@ -207,3 +207,34 @@ async def api_audit_log(request: Request, limit: int = 50, db=Depends(get_db)):
             for l in logs
         ]
     }
+
+
+class UpdateRoleRequest(BaseModel):
+    role: str
+
+@router.put("/users/{user_id}/role")
+async def update_user_role(user_id: int, req: UpdateRoleRequest, request: Request, admin_user=Depends(require_admin), db=Depends(get_db)):
+    """管理员修改用户角色"""
+    VALID_ROLES = {"customer", "agent", "supervisor", "admin"}
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"无效角色，可选: {', '.join(VALID_ROLES)}")
+    from db.models import User
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    user.role = req.role
+    db.commit()
+
+    # 审计日志
+    ip = request.client.host if request.client else "unknown"
+    log = AuditLog(
+        user_id=admin_user.id,
+        action="update_user_role",
+        detail=f"target_user={user_id} new_role={req.role}",
+        ip_address=ip,
+        timestamp=datetime.now(timezone.utc),
+    )
+    db.add(log)
+    db.commit()
+
+    return {"message": "角色已更新", "user_id": user_id, "role": req.role}

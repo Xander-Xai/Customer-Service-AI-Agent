@@ -87,7 +87,7 @@ RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "4.3.0"
+VERSION = "5.0.0"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
@@ -177,6 +177,15 @@ SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
 MULTIMODAL_ENABLED = os.getenv("MULTIMODAL_ENABLED", "false").lower() == "true"
 MAX_IMAGE_SIZE_MB = _int_env("MAX_IMAGE_SIZE_MB", 5)
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
+
+# ===== v5.1: Vision LLM 配置（多模态模型）=====
+VISION_MODEL = os.getenv("VISION_MODEL", "")  # 留空则复用 OPENAI_MODEL
+VISION_BASE_URL = os.getenv("VISION_BASE_URL", "")  # 留空则复用 OPENAI_BASE_URL
+VISION_API_KEY = os.getenv("VISION_API_KEY", "")  # 留空则复用 OPENAI_API_KEY
+
+# ===== v5.1: CLIP 多模态检索配置 =====
+CLIP_ENABLED = os.getenv("CLIP_ENABLED", "false").lower() == "true"
+IMAGE_COLLECTION_NAME = os.getenv("IMAGE_COLLECTION_NAME", "image_knowledge")
 
 # ===== v4.1: Redis 用途扩展 =====
 REDIS_JWT_PREFIX = os.getenv("REDIS_JWT_PREFIX", "csai:jwt:blacklist:")

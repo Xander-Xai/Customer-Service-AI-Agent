@@ -6,7 +6,7 @@ import { escapeHtml } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 import { appendUserMessage, appendAssistantMessage, appendSystemMessage, setSessionId } from './messages.js';
 import { renderWelcome, bindQuickPrompts } from './welcome.js';
-import { useQuickPrompt } from './input.js';
+import { useQuickPrompt, resetWaitingState } from './input.js';
 
 let currentSessionId = localStorage.getItem('currentSessionId') || null;
 let currentSessionToken = localStorage.getItem('currentSessionToken') || null;
@@ -45,6 +45,11 @@ export function startNewChat() {
   localStorage.removeItem('currentSessionId');
   localStorage.removeItem('currentSessionToken');
   setSessionId(null);
+
+  // 重置发送状态和输入框
+  resetWaitingState();
+  const chatInput = document.getElementById('chatInput');
+  if (chatInput) { chatInput.value = ''; chatInput.style.height = 'auto'; }
 
   const container = document.getElementById('chatMessages');
   renderWelcome(container);

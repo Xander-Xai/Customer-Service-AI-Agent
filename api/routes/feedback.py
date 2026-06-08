@@ -6,9 +6,18 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from logger import get_logger
-from api.app import _sanitize_input, FeedbackRequest
+from api.utils import sanitize_input
+
+
+class FeedbackRequest(BaseModel):
+    session_id: str = Field(..., max_length=36)
+    resolved: bool = Field(default=True)
+    rating: int = Field(default=1, ge=-1, le=1)  # 1=点赞, -1=点踩
+    message_index: int = Field(default=0, ge=0)  # 第几条回复
+    comment: str = Field(default="", max_length=500)
 
 router = APIRouter()
 logger = get_logger("api.feedback")
@@ -25,7 +34,7 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
     resolved = data.resolved
     rating = data.rating
     message_index = data.message_index
-    comment = _sanitize_input(data.comment)
+    comment = sanitize_input(data.comment)
 
     if not session_id:
         return JSONResponse({"error": "session_id 不能为空"}, status_code=400)

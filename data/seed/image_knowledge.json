@@ -1,0 +1,52 @@
+[
+  {
+    "id": "img_001",
+    "image_path": "data/images/product_serum.jpg",
+    "metadata": {
+      "product_name": "玻尿酸精华液",
+      "category": "精华",
+      "description": "透明质酸保湿精华液，30ml 瓶装",
+      "keywords": "精华液,保湿,玻尿酸,透明质酸"
+    }
+  },
+  {
+    "id": "img_002",
+    "image_path": "data/images/product_cream.jpg",
+    "metadata": {
+      "product_name": "烟酰胺面霜",
+      "category": "面霜",
+      "description": "烟酰胺亮肤面霜，50g 罐装",
+      "keywords": "面霜,烟酰胺,亮肤,美白"
+    }
+  },
+  {
+    "id": "img_003",
+    "image_path": "data/images/product_cleanser.jpg",
+    "metadata": {
+      "product_name": "氨基酸洁面乳",
+      "category": "洁面",
+      "description": "温和氨基酸洁面乳，120ml 管装",
+      "keywords": "洁面,氨基酸,温和,洗面奶"
+    }
+  },
+  {
+    "id": "img_004",
+    "image_path": "data/images/product_sunscreen.jpg",
+    "metadata": {
+      "product_name": "防晒霜 SPF50+",
+      "category": "防晒",
+      "description": "高倍防晒霜 SPF50+ PA++++，60ml",
+      "keywords": "防晒,SPF50,防晒霜,紫外线"
+    }
+  },
+  {
+    "id": "img_005",
+    "image_path": "data/images/product_mask.jpg",
+    "metadata": {
+      "product_name": "胶原蛋白面膜",
+      "category": "面膜",
+      "description": "胶原蛋白修复面膜，5 片装",
+      "keywords": "面膜,胶原蛋白,修复,补水"
+    }
+  }
+]

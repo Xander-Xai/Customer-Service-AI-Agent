@@ -245,6 +245,7 @@
 .mode-badge.parallel { background: var(--success-bg); color: var(--success); }
 .mode-badge.consultation { background: var(--warning-bg); color: var(--warning); }
 .mode-badge.hierarchical { background: var(--error-bg); color: var(--error); }
+.mode-badge.react { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
 
 /* 元数据行 */
 .message-meta {
@@ -268,6 +269,20 @@
   padding: 1px 6px;
   border-radius: var(--radius-full);
   font-size: 10px;
+}
+
+/* 解决状态标签 */
+.meta-item.resolution-resolved,
+.meta-item.resolution-single_turn_resolved {
+  color: var(--success);
+}
+
+.meta-item.resolution-escalated {
+  color: var(--warning);
+}
+
+.meta-item.resolution-unresolved {
+  color: var(--error);
 }
 
 /* 打字指示器 */
@@ -454,6 +469,34 @@
 .btn-attach:hover {
   color: var(--primary);
   background: var(--primary-subtle);
+}
+
+/* 语音按钮 */
+.btn-voice {
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  transition: all var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.btn-voice:hover {
+  color: var(--error);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.btn-voice.recording {
+  color: var(--error);
+  animation: pulse 1s infinite;
+  background: rgba(239, 68, 68, 0.15);
 }
 
 /* 拖拽悬停状态 */

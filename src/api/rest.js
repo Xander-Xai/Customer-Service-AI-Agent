@@ -2,25 +2,22 @@
  * REST API 封装
  */
 
-/** 通用请求方法（JWT + API Key 双认证） */
+import { fetchWithAuth } from '../auth/index.js';
+
+/** 通用请求方法（JWT + API Key 双认证，支持 401 自动刷新） */
 async function _request(method, path, body = null, extraHeaders = {}) {
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json', ...extraHeaders },
   };
-  const token = localStorage.getItem('token');
-  if (token) {
-    opts.headers['Authorization'] = 'Bearer ' + token;
-  } else {
-    const apiKey = localStorage.getItem('api_key') || '';
-    if (apiKey) opts.headers['X-API-Key'] = apiKey;
-  }
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) opts.headers['X-API-Key'] = apiKey;
   if (body) opts.body = JSON.stringify(body);
 
-  const resp = await fetch(path, opts);
+  const resp = await fetchWithAuth(path, opts);
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(err.error || `HTTP ${resp.status}`);
+    throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
   }
   return resp.json();
 }
@@ -50,8 +47,11 @@ export function submitFeedback(sessionId, resolved, comment = '') {
   return _request('POST', '/api/feedback', { session_id: sessionId, resolved, comment });
 }
 
-export function submitRating(sessionId, rating, comment = '') {
-  return _request('POST', '/api/feedback', { session_id: sessionId, rating, resolved: rating > 0, comment });
+export function submitRating(sessionId, rating, messageIndex = 0, comment = '') {
+  return _request('POST', '/api/feedback', {
+    session_id: sessionId, rating,
+    resolved: rating > 0, message_index: messageIndex, comment,
+  });
 }
 
 export function getFeedbackStats() { return _request('GET', '/api/feedback/stats'); }
@@ -71,19 +71,14 @@ export function sendChatWithImage(query, imageFile, sessionId) {
   formData.append('session_id', sessionId || '');
 
   const headers = {};
-  const token = localStorage.getItem('token');
-  if (token) {
-    headers['Authorization'] = 'Bearer ' + token;
-  } else {
-    const apiKey = localStorage.getItem('api_key') || '';
-    if (apiKey) headers['X-API-Key'] = apiKey;
-  }
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) headers['X-API-Key'] = apiKey;
 
-  return fetch('/api/chat/image', { method: 'POST', headers, body: formData })
+  return fetchWithAuth('/api/chat/image', { method: 'POST', headers, body: formData })
     .then(async resp => {
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
-        throw new Error(err.error || `HTTP ${resp.status}`);
+        throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
       }
       return resp.json();
     });
@@ -92,4 +87,66 @@ export function sendChatWithImage(query, imageFile, sessionId) {
 /** REST 对话（备用） */
 export function sendChat(query, sessionId) {
   return _request('POST', '/api/chat', { query, session_id: sessionId });
+}
+
+/** 统一文件上传对话（图片/视频/PDF/DOCX/文本） */
+export function sendChatWithFile(query, file, sessionId) {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('query', query || '');
+  formData.append('session_id', sessionId || '');
+
+  const headers = {};
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) headers['X-API-Key'] = apiKey;
+
+  return fetchWithAuth('/api/chat/file', { method: 'POST', headers, body: formData })
+    .then(async resp => {
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ error: resp.statusText }));
+        throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
+      }
+      return resp.json();
+    });
+}
+
+// ===== 监控 API =====
+
+/** 最近7天质量评分趋势 */
+export function getQualityTrends() { return _request('GET', '/api/monitoring/quality-trends'); }
+
+/** 热门问题 TOP10 */
+export function getHotQuestions() { return _request('GET', '/api/monitoring/hot-questions'); }
+
+/** 客户满意度统计 */
+export function getSatisfaction() { return _request('GET', '/api/monitoring/satisfaction'); }
+
+// ===== 管理后台 API =====
+
+/** 获取用户列表（管理员） */
+export function getUsers() { return _request('GET', '/api/auth/users'); }
+
+/** 获取审计日志（管理员） */
+export function getAuditLog(limit = 30) { return _request('GET', `/api/auth/audit?limit=${limit}`); }
+
+/** 获取知识库统计 */
+export function getKnowledgeStats() { return _request('GET', '/api/knowledge/stats'); }
+
+/** 重新种子知识库 */
+export function seedKnowledge() { return _request('POST', '/api/knowledge/seed'); }
+
+/** 从 ERP 同步知识库 */
+export function syncKnowledge() { return _request('POST', '/api/knowledge/sync'); }
+
+/** 获取告警配置 */
+export function getAlertConfig() { return _request('GET', '/api/alerts/config'); }
+
+/** 发送测试告警 */
+export function testAlert(title, content, severity) {
+  return _request('POST', '/api/alerts/test', { title, content, severity });
+}
+
+/** Token 刷新 */
+export function refreshToken(refreshTokenValue) {
+  return _request('POST', '/api/auth/refresh', { refresh_token: refreshTokenValue });
 }

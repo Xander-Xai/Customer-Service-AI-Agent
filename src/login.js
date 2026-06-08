@@ -45,13 +45,15 @@ async function handleSubmit(e) {
 
     if (isLogin) {
       localStorage.setItem('token', data.token);
+      if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
       localStorage.setItem('user', JSON.stringify({
         user_id: data.user_id,
         username: data.username,
         role: data.role,
         display_name: data.display_name,
       }));
-      window.location.href = '/';
+      const redirectMap = { customer: '/', agent: '/', supervisor: '/admin.html', admin: '/admin.html' };
+      window.location.href = redirectMap[data.role] || '/';
     } else {
       toggleMode();
       document.getElementById('username').value = username;
@@ -73,8 +75,16 @@ async function handleSubmit(e) {
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
   // 已登录则跳转
-  if (localStorage.getItem('token')) {
-    window.location.href = '/';
+  const token = localStorage.getItem('token');
+  const userRaw = localStorage.getItem('user');
+  if (token) {
+    try {
+      const u = userRaw ? JSON.parse(userRaw) : {};
+      const redirectMap = { customer: '/', agent: '/', supervisor: '/admin.html', admin: '/admin.html' };
+      window.location.href = redirectMap[u.role] || '/';
+    } catch {
+      window.location.href = '/';
+    }
     return;
   }
 

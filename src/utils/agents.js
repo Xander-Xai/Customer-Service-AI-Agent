@@ -10,6 +10,7 @@ export const AGENT_ICONS = {
   '投诉处理专家': '⚠️',
   '通用咨询专家': '📋',
   'response_agent': '📨',
+  'ReAct推理专家': '🧠',
 };
 
 /** 协作模式标签 */
@@ -18,6 +19,7 @@ export const MODE_LABELS = {
   parallel: '并行处理',
   consultation: '专家会诊',
   hierarchical: '层级协作',
+  react: 'ReAct 推理',
 };
 
 /** 获取 Agent 图标（带默认值） */
