@@ -2,8 +2,11 @@
 工具注册与执行框架（v3.5）
 支持 OpenAI Function Calling 格式的工具定义、注册和执行。
 """
-from typing import Any, Callable, Dict, List
+
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Dict, List
+
 from logger import get_logger
 
 logger = get_logger("tools.registry")
@@ -12,9 +15,10 @@ logger = get_logger("tools.registry")
 @dataclass
 class ToolDefinition:
     """工具定义（JSON Schema 格式，兼容 OpenAI Function Calling）"""
+
     name: str
     description: str
-    parameters: Dict[str, Any]  # JSON Schema
+    parameters: dict[str, Any]  # JSON Schema
     handler: Callable[..., Any]  # async callable(arguments: dict) -> str
 
 
@@ -25,10 +29,11 @@ class ToolRegistry:
     """
 
     def __init__(self):
-        self._tools: Dict[str, ToolDefinition] = {}
+        self._tools: dict[str, ToolDefinition] = {}
 
-    def register(self, name: str, description: str,
-                 parameters: Dict[str, Any], handler: Callable[..., Any]):
+    def register(
+        self, name: str, description: str, parameters: dict[str, Any], handler: Callable[..., Any]
+    ):
         """注册一个工具"""
         self._tools[name] = ToolDefinition(
             name=name,
@@ -38,7 +43,7 @@ class ToolRegistry:
         )
         logger.debug(f"工具已注册: {name}")
 
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
+    def get_openai_tools(self) -> list[dict[str, Any]]:
         """返回 OpenAI Function Calling 格式的工具列表"""
         return [
             {
@@ -52,7 +57,7 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
-    async def execute(self, name: str, arguments: Dict[str, Any]) -> str:
+    async def execute(self, name: str, arguments: dict[str, Any]) -> str:
         """执行指定工具，返回字符串结果"""
         tool = self._tools.get(name)
         if not tool:
@@ -64,7 +69,6 @@ class ToolRegistry:
             logger.error(f"工具执行失败 [{name}]: {e}", exc_info=True)
             return f"工具 '{name}' 执行失败，请稍后重试"
 
-    def list_tools(self) -> List[str]:
+    def list_tools(self) -> list[str]:
         """返回所有已注册工具名称"""
         return list(self._tools.keys())
-

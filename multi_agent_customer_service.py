@@ -15,13 +15,15 @@ v4.3 运行时模式升级：
 v4.1 依赖注入：
 - ServiceContainer（core/container.py）集中管理组件生命周期
 """
-import time
-from langgraph.graph import StateGraph, END
 
-from core.state import AgentState
+import time
+
+from langgraph.graph import END, StateGraph
+
 from core.container import ServiceContainer
-from router.query_router import RoutingResult
+from core.state import AgentState
 from logger import get_logger, set_trace_id
+from router.query_router import RoutingResult
 
 logger = get_logger("graph")
 
@@ -29,7 +31,7 @@ logger = get_logger("graph")
 def _format_duration(seconds: float) -> str:
     """格式化耗时显示"""
     if seconds < 1:
-        return f"{seconds*1000:.0f}ms"
+        return f"{seconds * 1000:.0f}ms"
     return f"{seconds:.1f}s"
 
 
@@ -74,16 +76,16 @@ def build_graph(container: ServiceContainer):
             await c._init_router()
 
         context = await c.session_mgr.get_conversation_context(session_id)
-        context_text = "\n".join(
-            [m.get("content", "") for m in context[-6:]]
-        ) if context else ""
+        context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
 
         # v3.2: 熔断器检查 — OPEN 状态时跳过 LLM，仅用规则分类
         if not await c.circuit_breaker.should_allow():
             logger.warning("[Router] LLM 熔断中，降级为纯规则分类")
             from router.query_router import INTENT_AGENT_MAP
+
             rule_type, _, complexity = c.router._rule_classify_and_score(
-                query, context_text,
+                query,
+                context_text,
             )
             final_type = rule_type or "general_inquiry"
             result = RoutingResult(
@@ -122,11 +124,14 @@ def build_graph(container: ServiceContainer):
         )
 
         # 写入黑板供下游使用
-        await c.bb.write("last_routing", {
-            "query_type": result.query_type,
-            "agent": result.agent_name,
-            "complexity": result.complexity,
-        })
+        await c.bb.write(
+            "last_routing",
+            {
+                "query_type": result.query_type,
+                "agent": result.agent_name,
+                "complexity": result.complexity,
+            },
+        )
 
         return state
 
@@ -146,7 +151,8 @@ def build_graph(container: ServiceContainer):
         return state
 
     async def _execute_collaboration(
-        state: AgentState, mode_name: str,
+        state: AgentState,
+        mode_name: str,
     ) -> AgentState:
         """统一执行协作模式"""
         # 确保 agents 已初始化
@@ -179,16 +185,15 @@ def build_graph(container: ServiceContainer):
         state["response"] = result.get("response", "")
         state["collaboration_mode"] = result.get("mode", mode_name)
         state["agents_used"] = result.get("agents_used", [])
-        logger.info(
-            f"[{mode_name}] agents={state['agents_used']} "
-            f"{_format_duration(elapsed)}"
-        )
+        logger.info(f"[{mode_name}] agents={state['agents_used']} {_format_duration(elapsed)}")
         return state
 
     def _make_collaboration_node(mode_name: str):
         """协作模式节点工厂"""
+
         async def _node(state: AgentState) -> AgentState:
             return await _execute_collaboration(state, mode_name)
+
         _node.__doc__ = f"{mode_name} 协作模式节点"
         _node.__name__ = f"{mode_name}_node"
         return _node

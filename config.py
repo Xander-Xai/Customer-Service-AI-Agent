@@ -2,9 +2,11 @@
 配置文件（v4.1 — 接入 DeepSeek + 依赖注入 + 流式输出版）
 支持 DEV / PROD / TEST 三套配置，通过 .env 文件切换
 """
+
+import logging
 import os
 import sys
-import logging
+
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -40,10 +42,7 @@ LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
 # ===== HTTP 请求配置 =====
 HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 30)
-HTTP_HEADERS = {
-    "Content-Type": "application/json",
-    "User-Agent": "MultiAgentCustomerService/3.0.0"
-}
+HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": "MultiAgentCustomerService/3.0.0"}
 
 # ===== 路由配置 =====
 ROUTING_COMPLEXITY_THRESHOLD = _int_env("ROUTING_COMPLEXITY_THRESHOLD", 50)
@@ -82,7 +81,9 @@ SLA_ALERT_COOLDOWN = _int_env("SLA_ALERT_COOLDOWN", 300)
 # ===== 模型熔断器配置（v3.2 新增）=====
 CIRCUIT_BREAKER_FAIL_THRESHOLD = _int_env("CIRCUIT_BREAKER_FAIL_THRESHOLD", 5)
 CIRCUIT_BREAKER_RECOVERY_TIME = _int_env("CIRCUIT_BREAKER_RECOVERY_TIME", 60)
-LLM_ROUTER_TIMEOUT = _float_env("LLM_ROUTER_TIMEOUT", 4.0)  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
+LLM_ROUTER_TIMEOUT = _float_env(
+    "LLM_ROUTER_TIMEOUT", 4.0
+)  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
 
 # ===== 重试配置 =====
 RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
@@ -106,14 +107,14 @@ WS_IDLE_TIMEOUT = _int_env("WS_IDLE_TIMEOUT", 300)
 # 会话令牌签名密钥（用于防会话劫持）
 SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # TLS 配置
-TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")    # TLS 证书文件路径
-TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")      # TLS 私钥文件路径
+TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")  # TLS 证书文件路径
+TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")  # TLS 私钥文件路径
 
 
 # ===== 日志配置 =====
 LOG_CONFIG = {
     "level": os.getenv("LOG_LEVEL", "INFO"),
-    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 }
 
 # ===== CORS 配置（v3.0 新增） =====
@@ -123,7 +124,9 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o
 API_KEY_ENABLED = os.getenv("API_KEY_ENABLED", "true").lower() == "true"
 API_KEY = os.getenv("API_KEY", "")
 if API_KEY_ENABLED and not API_KEY:
-    raise ValueError("API_KEY_ENABLED=true requires a non-empty API_KEY. Set API_KEY in .env or disable authentication with API_KEY_ENABLED=false")
+    raise ValueError(
+        "API_KEY_ENABLED=true requires a non-empty API_KEY. Set API_KEY in .env or disable authentication with API_KEY_ENABLED=false"
+    )
 
 # ===== ERP 模式配置（v3.0 新增） =====
 ERP_MODE = os.getenv("ERP_MODE", "mock")  # mock | real
@@ -139,7 +142,11 @@ if _redis_url_env:
 else:
     _redis_password = os.getenv("REDIS_PASSWORD", "")
     _redis_host = os.getenv("REDIS_HOST", "localhost")
-    REDIS_URL = f"redis://:{_redis_password}@{_redis_host}:6379" if _redis_password else f"redis://{_redis_host}:6379"
+    REDIS_URL = (
+        f"redis://:{_redis_password}@{_redis_host}:6379"
+        if _redis_password
+        else f"redis://{_redis_host}:6379"
+    )
 
 # ===== v3.5: RAG 配置 =====
 RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
@@ -155,7 +162,7 @@ TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
 # ===== v4.0: 用户认证配置 =====
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_EXPIRE_HOURS = _int_env("JWT_EXPIRE_HOURS", 72)
-JWT_ACCESS_EXPIRE_HOURS = _int_env("JWT_ACCESS_EXPIRE_HOURS", 2)     # P2-3: access_token 短生命周期
+JWT_ACCESS_EXPIRE_HOURS = _int_env("JWT_ACCESS_EXPIRE_HOURS", 2)  # P2-3: access_token 短生命周期
 JWT_REFRESH_EXPIRE_HOURS = _int_env("JWT_REFRESH_EXPIRE_HOURS", 168)  # P2-3: refresh_token 7天
 # v4.0: 本地开发模式（仅开发环境设置此变量为 true，生产环境禁止）
 DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
@@ -165,7 +172,9 @@ DB_DIR = os.getenv("DB_DIR", "data")
 DB_PATH = os.getenv("DB_PATH", os.path.join(DB_DIR, "csai.db"))
 
 # ===== v4.0: 告警通知配置 =====
-ALERT_WEBHOOKS = os.getenv("ALERT_WEBHOOKS", "")  # JSON 数组: [{"name":"钉钉","url":"...","type":"dingtalk"}]
+ALERT_WEBHOOKS = os.getenv(
+    "ALERT_WEBHOOKS", ""
+)  # JSON 数组: [{"name":"钉钉","url":"...","type":"dingtalk"}]
 SMTP_HOST = os.getenv("SMTP_HOST", "")
 SMTP_PORT = _int_env("SMTP_PORT", 587)
 SMTP_USER = os.getenv("SMTP_USER", "")
@@ -241,23 +250,43 @@ def validate_required_config():
         return  # 非生产环境的开发模式跳过后续校验
 
     _PLACEHOLDER_PREFIXES = (
-        "your-", "change-me", "change_me", "sk-placeholder", "sk-xxx", "sk-your",
-        "sk-test-placeholder", "sk-tnwwg",  # 匹配已知旧占位符
+        "your-",
+        "change-me",
+        "change_me",
+        "sk-placeholder",
+        "sk-xxx",
+        "sk-your",
+        "sk-test-placeholder",
+        "sk-tnwwg",  # 匹配已知旧占位符
     )
     errors = []
 
     # LLM API Key
-    if not OPENAI_API_KEY or any(OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES):
+    if not OPENAI_API_KEY or any(
+        OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES
+    ):
         errors.append("OPENAI_API_KEY 未配置或使用占位符")
 
     # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
-    if not JWT_SECRET or JWT_SECRET in ("", "change-me-in-production", "dev-jwt-secret-do-not-use-in-prod", "your-jwt-secret-change-in-production"):
+    if not JWT_SECRET or JWT_SECRET in (
+        "",
+        "change-me-in-production",
+        "dev-jwt-secret-do-not-use-in-prod",
+        "your-jwt-secret-change-in-production",
+    ):
         errors.append("JWT_SECRET 未配置或使用默认值")
     elif len(JWT_SECRET) < 32:
-        errors.append(f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥")
+        errors.append(
+            f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥"
+        )
 
     # Session Token Secret
-    if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production", "dev-session-secret-do-not-use-in-prod", "your-session-secret-change-in-production"):
+    if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in (
+        "",
+        "change-me-session-secret-in-production",
+        "dev-session-secret-do-not-use-in-prod",
+        "your-session-secret-change-in-production",
+    ):
         errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值")
 
     if not _DEV_MODE and "*" in CORS_ORIGINS:

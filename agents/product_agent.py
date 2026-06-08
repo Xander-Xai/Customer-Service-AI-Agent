@@ -1,7 +1,9 @@
 """
 产品专家智能体（v3.5: 增加 RAG 知识检索）
 """
-from typing import Dict, Any
+
+from typing import Any, Dict
+
 from .base_agent import BaseAgent
 
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
@@ -21,10 +23,10 @@ class ProductAgent(BaseAgent):
         super().__init__(
             name="产品专家",
             role="化妆品产品信息咨询和推荐",
-            expertise=["产品成分", "功效分析", "价格比较", "肤质匹配", "库存查询"]
+            expertise=["产品成分", "功效分析", "价格比较", "肤质匹配", "库存查询"],
         )
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         customer_query = state["customer_query"]
 
         # ERP 产品数据查询
@@ -46,7 +48,8 @@ class ProductAgent(BaseAgent):
         extra_context = "\n\n".join(context_parts) if context_parts else ""
 
         return await self._process_with_llm(
-            state, self._format_system_prompt(_SYSTEM_PROMPT),
+            state,
+            self._format_system_prompt(_SYSTEM_PROMPT),
             extra_context=extra_context,
             fallback_response="抱歉，处理产品查询时遇到问题，请稍后重试。",
         )

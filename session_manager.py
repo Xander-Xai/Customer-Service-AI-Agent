@@ -14,46 +14,63 @@
 - v4.1: 关键方法改为全异步，消除 asyncio.to_thread 线程池开销
 - v4.3: 拆分为 token_counter / drift_detector / session_manager 三模块
 """
+
 import asyncio
 import functools
+import hashlib
+import hmac
 import inspect
+import json
 import os
 import re
 import time
 import uuid
-import json
-import hmac
-import hashlib
-from typing import Dict, List, Any, Optional
 from collections import deque
+from typing import Any, Dict, List, Optional
 
-from logger import get_logger
 from config import (
-    SESSION_MAX_TOKENS as _CFG_SESSION_MAX_TOKENS,
-    SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
-    DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
-    DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
-    REDIS_URL as _CFG_REDIS_URL,
+)
+from config import (
+    DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
+)
+from config import (
+    DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
+)
+from config import (
     MAX_SESSIONS as _CFG_MAX_SESSIONS,
-    SESSION_IDLE_TTL as _CFG_SESSION_IDLE_TTL,
+)
+from config import (
     REDIS_SESSION_PREFIX as _CFG_REDIS_PREFIX,
 )
-
-# v4.3: 从拆分模块导入，保持所有原有公开符号可从 session_manager 导入
-from token_counter import _count_tokens, _tokenize_chinese, _get_tokenizer, _get_jieba
+from config import (
+    REDIS_URL as _CFG_REDIS_URL,
+)
+from config import (
+    SESSION_IDLE_TTL as _CFG_SESSION_IDLE_TTL,
+)
+from config import (
+    SESSION_MAX_TOKENS as _CFG_SESSION_MAX_TOKENS,
+)
+from config import (
+    SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
+)
 from drift_detector import (
+    DRIFT_REPAIR_STRATEGIES,
+    INTENT_KEYWORDS,
+    NEGATION_PAIRS,
     DriftDetector,
     DriftType,
-    DRIFT_REPAIR_STRATEGIES,
-    NEGATION_PAIRS,
-    INTENT_KEYWORDS,
 )
+from logger import get_logger
+
+# v4.3: 从拆分模块导入，保持所有原有公开符号可从 session_manager 导入
+from token_counter import _count_tokens, _get_jieba, _get_tokenizer, _tokenize_chinese
 
 logger = get_logger("session_manager")
 
 # v3.6: 会话 ID 格式校验（防路径遍历 / 注入）
-_SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9\-_]{1,64}$')
+_SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_]{1,64}$")
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +111,7 @@ def _dual_mode(async_func):
     同步调用时用 asyncio.run() 执行；异步调用时正常返回协程（可被 await）。
     v5.0: 添加结构化日志，跟踪同步调用频率以指导后续纯异步迁移。
     """
+
     @functools.wraps(async_func)
     def wrapper(*args, **kwargs):
         global _loop_creation_count
@@ -153,19 +171,29 @@ class EnhancedSessionManager:
     # [S1] 初始化与存储后端配置
     # ------------------------------------------------------------------
 
-    def __init__(self, storage_backend: str = "memory", window_size: int = 10,
-                 llm=None, max_tokens: int = None, **storage_config):
+    def __init__(
+        self,
+        storage_backend: str = "memory",
+        window_size: int = 10,
+        llm=None,
+        max_tokens: int = None,
+        **storage_config,
+    ):
         self.storage_backend = storage_backend
         self.storage_config = storage_config
         self.window_size = window_size
         self.max_tokens = max_tokens or _CFG_SESSION_MAX_TOKENS
         self.llm = llm
-        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.sessions: dict[str, dict[str, Any]] = {}
         self._create_count = 0  # v3.8 fix: explicit init (was hasattr dynamic)
-        self._session_lock = asyncio.Lock()  # v3.8 fix: protect sessions dict from concurrent mutation
+        self._session_lock = (
+            asyncio.Lock()
+        )  # v3.8 fix: protect sessions dict from concurrent mutation
         self._drift_detector = DriftDetector()  # v4.3: 委托漂移检测
         self._validate_storage_config()
-        logger.info(f"初始化完成 backend={storage_backend} window={window_size} max_tokens={self.max_tokens}")
+        logger.info(
+            f"初始化完成 backend={storage_backend} window={window_size} max_tokens={self.max_tokens}"
+        )
 
     def _validate_storage_config(self):
         defaults = {
@@ -184,9 +212,10 @@ class EnhancedSessionManager:
 
     def _get_redis(self):
         """获取 Redis 客户端（懒初始化，失败时回退到内存模式）"""
-        if not hasattr(self, '_redis_client') or self._redis_client is None:
+        if not hasattr(self, "_redis_client") or self._redis_client is None:
             try:
                 import redis
+
                 url = self.storage_config.get("url", _CFG_REDIS_URL)
                 self._redis_client = redis.Redis.from_url(url, decode_responses=True)
                 self._redis_client.ping()
@@ -199,24 +228,28 @@ class EnhancedSessionManager:
                 self.storage_backend = "memory"
         return self._redis_client
 
-    def _create_memory_backend(self, session_id: str) -> List:
+    def _create_memory_backend(self, session_id: str) -> list:
         """创建简单消息存储（兼容新版 langchain，不依赖已废弃的 ConversationBufferMemory）"""
         # 所有后端统一使用内存列表存储
         # 文件后端可从 JSON 加载历史
         if self.storage_backend == "file":
-            fp = os.path.join(self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json")
+            fp = os.path.join(
+                self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json"
+            )
             if os.path.exists(fp):
                 try:
-                    with open(fp, "r", encoding="utf-8") as f:
+                    with open(fp, encoding="utf-8") as f:
                         return json.load(f)
                 except Exception as e:
                     logger.warning(f"加载会话文件失败 session={session_id}: {e}")
         return []
 
-    def _save_to_file(self, session_id: str, messages: List):
+    def _save_to_file(self, session_id: str, messages: list):
         """文件后端持久化"""
         if self.storage_backend == "file":
-            fp = os.path.join(self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json")
+            fp = os.path.join(
+                self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json"
+            )
             try:
                 with open(fp, "w", encoding="utf-8") as f:
                     json.dump(messages, f, ensure_ascii=False)
@@ -232,21 +265,22 @@ class EnhancedSessionManager:
     def _evict_idle_sessions(self):
         """v3.4: 淘汰超过上限的空闲会话，防止内存无限增长"""
         import config  # 动态读取，支持运行时修改
+
         now = time.time()
         max_sessions = config.MAX_SESSIONS
         idle_ttl = config.SESSION_IDLE_TTL
 
         # 先淘汰超过空闲 TTL 的会话
-        expired = [sid for sid, s in self.sessions.items()
-                   if now - s.get("last_activity", 0) > idle_ttl]
+        expired = [
+            sid for sid, s in self.sessions.items() if now - s.get("last_activity", 0) > idle_ttl
+        ]
         for sid in expired:
             self._delete_session_unlocked(sid)
 
         # 如果仍然超过上限，淘汰最旧的会话
         if len(self.sessions) >= max_sessions:
             sorted_sessions = sorted(
-                self.sessions.items(),
-                key=lambda x: x[1].get("last_activity", 0)
+                self.sessions.items(), key=lambda x: x[1].get("last_activity", 0)
             )
             to_remove = len(self.sessions) - max_sessions + 1
             for sid, _ in sorted_sessions[:to_remove]:
@@ -275,6 +309,7 @@ class EnhancedSessionManager:
             r = self._get_redis()
             if r:
                 try:
+
                     def _redis_load():
                         stored = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:messages")
                         if stored:
@@ -283,6 +318,7 @@ class EnhancedSessionManager:
                             meta = json.loads(meta_raw) if meta_raw else {}
                             return msgs, meta
                         return None, None
+
                     stored, meta = await asyncio.to_thread(_redis_load)
                     if stored is not None:
                         messages = stored
@@ -326,11 +362,13 @@ class EnhancedSessionManager:
     def _get_token_secret() -> str:
         """获取令牌签名密钥（运行时从 config 读取，支持动态配置）"""
         import config
+
         secret = config.SESSION_TOKEN_SECRET
         # v4.0: 占位符值视为未配置（安全启发式），生产环境应配置真实密钥
         if secret in ("", "change-me-session-secret-in-production"):
-            if not getattr(config, 'DEV_MODE', False):
+            if not getattr(config, "DEV_MODE", False):
                 import logging
+
                 logging.getLogger("session_manager").warning(
                     "⚠️ SESSION_TOKEN_SECRET 未配置！会话所有权校验已禁用，生产环境必须配置此密钥。"
                 )
@@ -350,7 +388,9 @@ class EnhancedSessionManager:
             hashlib.sha256,
         ).hexdigest()[:32]
 
-    def validate_session_token(self, session_id: str, token: str, client_fingerprint: str = "") -> bool:
+    def validate_session_token(
+        self, session_id: str, token: str, client_fingerprint: str = ""
+    ) -> bool:
         """校验会话令牌是否匹配（防止非创建者访问会话）
         v4.0 安全修复: SESSION_TOKEN_SECRET 启用时必须携带有效 token
         v4.0: 绑定客户端指纹（IP+UA），防止跨客户端复用
@@ -362,7 +402,8 @@ class EnhancedSessionManager:
                 return False
             # v5.0: 非 DEV 模式下空 secret 应拒绝（防止 IDOR）
             import config
-            if not getattr(config, 'DEV_MODE', False):
+
+            if not getattr(config, "DEV_MODE", False):
                 logger.warning("SESSION_TOKEN_SECRET 未配置，非 DEV 模式拒绝放行")
                 return False
             return True  # 仅 DEV 模式放行
@@ -376,7 +417,7 @@ class EnhancedSessionManager:
         return hmac.compare_digest(token, expected_no_fp)
 
     @_dual_mode
-    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    async def get_session(self, session_id: str) -> dict[str, Any] | None:
         """获取会话（异步版，内部 create_session 可能涉及 I/O）"""
         if not _SESSION_ID_PATTERN.match(session_id):
             return None
@@ -415,7 +456,9 @@ class EnhancedSessionManager:
         session["messages"].append(msg)
         session["message_count"] = len(session["messages"])
         session["last_activity"] = time.time()
-        session["topic_history"].append({"is_user": is_user, "content": message[:100], "ts": time.time()})
+        session["topic_history"].append(
+            {"is_user": is_user, "content": message[:100], "ts": time.time()}
+        )
 
         # v3.8: 如果是第一条用户消息且没有摘要，用它生成摘要（截取前50字符）
         if is_user and not session.get("summary") and session["message_count"] <= 1:
@@ -431,8 +474,13 @@ class EnhancedSessionManager:
             if r:
                 try:
                     ttl = self.storage_config.get("ttl", 86400)
+
                     def _redis_save():
-                        r.setex(f"{_CFG_REDIS_PREFIX}{session_id}:messages", ttl, json.dumps(session["messages"], ensure_ascii=False))
+                        r.setex(
+                            f"{_CFG_REDIS_PREFIX}{session_id}:messages",
+                            ttl,
+                            json.dumps(session["messages"], ensure_ascii=False),
+                        )
                         meta = {
                             "created_at": session["created_at"],
                             "last_activity": session["last_activity"],
@@ -441,12 +489,19 @@ class EnhancedSessionManager:
                             "drift_log": session.get("drift_log", []),
                             "topic_history": list(session.get("topic_history", [])),
                         }
-                        r.setex(f"{_CFG_REDIS_PREFIX}{session_id}:meta", ttl, json.dumps(meta, ensure_ascii=False))
+                        r.setex(
+                            f"{_CFG_REDIS_PREFIX}{session_id}:meta",
+                            ttl,
+                            json.dumps(meta, ensure_ascii=False),
+                        )
+
                     await asyncio.to_thread(_redis_save)
                 except Exception as e:
                     logger.warning(f"Redis 保存失败: {e}")
 
-    async def get_conversation_context(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
+    async def get_conversation_context(
+        self, session_id: str, max_messages: int = None
+    ) -> list[dict[str, Any]]:
         """获取带滑动窗口 + 摘要的对话上下文（v3.4: 异步摘要生成，不阻塞事件循环）"""
         session = await self.get_session(session_id)
         messages = session["messages"]
@@ -482,11 +537,13 @@ class EnhancedSessionManager:
 
         context = []
         if session.get("summary"):
-            context.append({"role": "system", "content": f"[历史摘要] {session['summary']}", "is_user": False})
+            context.append(
+                {"role": "system", "content": f"[历史摘要] {session['summary']}", "is_user": False}
+            )
         context.extend(self._messages_to_context(recent_messages))
         return context
 
-    def _messages_to_context(self, messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    def _messages_to_context(self, messages: list[dict[str, str]]) -> list[dict[str, Any]]:
         """将消息列表转换为上下文格式"""
         result = []
         for msg in messages:
@@ -496,19 +553,29 @@ class EnhancedSessionManager:
             result.append({"role": role, "content": content, "is_user": is_user})
         return result
 
-    async def _generate_summary_async(self, messages: List[Dict[str, str]], existing_summary: str = "") -> str:
+    async def _generate_summary_async(
+        self, messages: list[dict[str, str]], existing_summary: str = ""
+    ) -> str:
         """v3.4: 异步摘要生成（不阻塞事件循环）"""
         if not self.llm:
             return existing_summary
         try:
             max_chars = _CFG_SUMMARY_MAX_CHARS
-            text = "\n".join([f"{'用户' if m.get('role') == 'user' else 'AI'}: {m.get('content', '')[:200]}" for m in messages[-20:]])
-            prompt = f"请用 2-3 句话总结以下对话要点（保留关键信息如产品名、订单号、问题类型）：\n{text}"
+            text = "\n".join(
+                [
+                    f"{'用户' if m.get('role') == 'user' else 'AI'}: {m.get('content', '')[:200]}"
+                    for m in messages[-20:]
+                ]
+            )
+            prompt = (
+                f"请用 2-3 句话总结以下对话要点（保留关键信息如产品名、订单号、问题类型）：\n{text}"
+            )
             if existing_summary:
                 prompt = f"已有摘要：{existing_summary}\n\n请结合新对话更新摘要：\n{text}"
             from langchain_core.messages import HumanMessage as HM
+
             # v3.4: 优先使用异步接口，回退到 asyncio.to_thread
-            if hasattr(self.llm, 'async_invoke'):
+            if hasattr(self.llm, "async_invoke"):
                 resp = await self.llm.async_invoke([HM(content=prompt)])
             else:
                 resp = await asyncio.to_thread(self.llm.invoke, [HM(content=prompt)])
@@ -523,13 +590,14 @@ class EnhancedSessionManager:
 
     # ---- 漂移检测 ----
 
-    def _classify_intent(self, text: str) -> Optional[str]:
+    def _classify_intent(self, text: str) -> str | None:
         """多分类意图识别（v3.1: 7 类意图）"""
         from drift_detector import _classify_intent as _classify
+
         return _classify(text)
 
     @_dual_mode
-    async def detect_drift(self, session_id: str, current_query: str) -> Dict[str, Any]:
+    async def detect_drift(self, session_id: str, current_query: str) -> dict[str, Any]:
         """
         检测 4 类对话漂移（v3.1 增强）
         - jieba 中文分词提升话题/相似度检测精度
@@ -541,15 +609,17 @@ class EnhancedSessionManager:
         return self._drift_detector.detect(session, session_id, current_query)
 
     @staticmethod
-    def _check_escalation(session: Dict[str, Any], session_id: str = "") -> Optional[Dict[str, Any]]:
+    def _check_escalation(session: dict[str, Any], session_id: str = "") -> dict[str, Any] | None:
         """v3.1: 检查漂移频率是否触发升级"""
         from drift_detector import _check_escalation
+
         return _check_escalation(session, session_id)
 
     @staticmethod
     def _text_similarity(a: str, b: str) -> float:
         """文本相似度（v3.1: jieba 分词提升精度）"""
         from drift_detector import _text_similarity
+
         return _text_similarity(a, b)
 
     # ------------------------------------------------------------------
@@ -558,7 +628,7 @@ class EnhancedSessionManager:
 
     # ---- 管理接口 ----
 
-    def get_session_info(self, session_id: str) -> Dict[str, Any]:
+    def get_session_info(self, session_id: str) -> dict[str, Any]:
         session = self.sessions.get(session_id)
         if not session:
             return {}
@@ -574,7 +644,7 @@ class EnhancedSessionManager:
         }
 
     @_dual_mode
-    async def list_sessions(self) -> List[Dict[str, Any]]:
+    async def list_sessions(self) -> list[dict[str, Any]]:
         """列出所有会话（异步版，保持锁保护一致性）"""
         async with self._session_lock:
             return [self.get_session_info(sid) for sid in self.sessions]
@@ -587,19 +657,21 @@ class EnhancedSessionManager:
             for sid, s in self.sessions.items():
                 msgs = s.get("messages", [])
                 last_msg = msgs[-1].get("content", "") if msgs else ""
-                all_sessions.append({
-                    "session_id": sid,
-                    "title": msgs[0].get("content", "")[:50] if msgs else "",
-                    "last_message": last_msg[:100],
-                    "message_count": s.get("message_count", len(msgs)),
-                    "updated_at": s.get("last_activity", 0),
-                    "user_id": s.get("user_id", ""),
-                })
+                all_sessions.append(
+                    {
+                        "session_id": sid,
+                        "title": msgs[0].get("content", "")[:50] if msgs else "",
+                        "last_message": last_msg[:100],
+                        "message_count": s.get("message_count", len(msgs)),
+                        "updated_at": s.get("last_activity", 0),
+                        "user_id": s.get("user_id", ""),
+                    }
+                )
             # 按更新时间倒序
             all_sessions.sort(key=lambda x: x.get("updated_at", 0), reverse=True)
             total = len(all_sessions)
             return {
-                "sessions": all_sessions[offset:offset + limit],
+                "sessions": all_sessions[offset : offset + limit],
                 "total": total,
                 "offset": offset,
                 "limit": limit,
@@ -637,7 +709,7 @@ class EnhancedSessionManager:
         """create_session 的同步包装"""
         return _run_async_compat(self.create_session(session_id))
 
-    def get_session_sync(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_session_sync(self, session_id: str) -> dict[str, Any] | None:
         """get_session 的同步包装"""
         return _run_async_compat(self.get_session(session_id))
 
@@ -645,7 +717,9 @@ class EnhancedSessionManager:
         """add_message 的同步包装"""
         return _run_async_compat(self.add_message(session_id, message, is_user))
 
-    async def get_conversation_context_sync(self, session_id: str, max_messages: int = None) -> List[Dict[str, Any]]:
+    async def get_conversation_context_sync(
+        self, session_id: str, max_messages: int = None
+    ) -> list[dict[str, Any]]:
         """get_conversation_context 的同步包装（注意：原方法已是 async，此方法仅为命名兼容）"""
         return await self.get_conversation_context(session_id, max_messages)
 
@@ -653,7 +727,7 @@ class EnhancedSessionManager:
         """delete_session 的同步包装"""
         return _run_async_compat(self.delete_session(session_id))
 
-    def list_sessions_sync(self) -> List[Dict[str, Any]]:
+    def list_sessions_sync(self) -> list[dict[str, Any]]:
         """list_sessions 的同步包装"""
         return _run_async_compat(self.list_sessions())
 
@@ -661,7 +735,9 @@ class EnhancedSessionManager:
         """generate_session_token 的同步包装"""
         return _run_async_compat(self.generate_session_token(session_id, client_fingerprint))
 
-    def validate_session_token_sync(self, session_id: str, token: str, client_fingerprint: str = "") -> bool:
+    def validate_session_token_sync(
+        self, session_id: str, token: str, client_fingerprint: str = ""
+    ) -> bool:
         """validate_session_token 的同步包装"""
         return _run_async_compat(self.validate_session_token(session_id, token, client_fingerprint))
 

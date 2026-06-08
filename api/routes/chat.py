@@ -2,6 +2,7 @@
 聊天相关路由：REST / SSE 流式 / 多模态图片 / 语音 / TTS / 文件上传
 从 api/app.py create_app() 提取，通过 request.app.state 访问依赖。
 """
+
 import asyncio
 import io
 import json
@@ -10,26 +11,27 @@ import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Request, Form, File, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
+from api.utils import extract_user_id, sanitize_input, validate_session_id
 from config import MAX_QUERY_LENGTH, MULTIMODAL_ENABLED
 from logger import get_logger
-from api.utils import sanitize_input, validate_session_id, extract_user_id
 
 router = APIRouter()
 logger = get_logger("api.chat")
 
 # ===== SSE 流式常量 =====
-SSE_CHUNK_TIMEOUT = 60.0   # SSE 事件队列等待超时（秒）
+SSE_CHUNK_TIMEOUT = 60.0  # SSE 事件队列等待超时（秒）
 CHAT_QUERY_MAX_LENGTH = 2000  # 聊天查询最大字符数
 
 # ===== SSE 超时常量 =====
-SSE_CHUNK_TIMEOUT = 60.0   # SSE 事件队列等待超时（秒）
+SSE_CHUNK_TIMEOUT = 60.0  # SSE 事件队列等待超时（秒）
 
 
 # ── Pydantic 模型 ──
+
 
 class ChatRequest(BaseModel):
     query: str = Field(..., max_length=CHAT_QUERY_MAX_LENGTH)
@@ -39,12 +41,14 @@ class ChatRequest(BaseModel):
 
 class ChatStreamRequest(BaseModel):
     """SSE 流式输出请求模型"""
+
     query: str = Field(..., max_length=CHAT_QUERY_MAX_LENGTH)
     session_id: str = Field(default="", max_length=36)
     session_token: str = Field(default="", max_length=64)
 
 
 # ── SSE 工具 ──
+
 
 def _sse_event(event_data: dict) -> str:
     return f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
@@ -64,6 +68,7 @@ class _SessionValidationError(Exception):
 @dataclass
 class AuthenticatedSession:
     """经过认证和验证的会话信息"""
+
     sid: str
     session_manager: object
     client_provided_sid: bool
@@ -107,6 +112,7 @@ async def get_authenticated_session(
 @dataclass
 class SSEStreamContext:
     """SSE 流式会话的共享上下文"""
+
     graph_task: asyncio.Task
     chunk_queue: asyncio.Queue
     sid: str
@@ -122,8 +128,8 @@ def _build_sse_stream_context(
     query: str,
     session_manager: object,
     client_provided_sid: bool,
-    multimodal_content: Optional[list] = None,
-) -> Tuple[asyncio.Task, asyncio.Queue]:
+    multimodal_content: list | None = None,
+) -> tuple[asyncio.Task, asyncio.Queue]:
     """构建 SSE 流式任务和队列，返回 (graph_task, chunk_queue)。"""
     run_graph = request.app.state.run_graph
     chunk_queue: asyncio.Queue = asyncio.Queue()
@@ -170,18 +176,20 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
             session_token = ctx.session_manager.generate_session_token(ctx.sid)
 
         elapsed = round(time.time() - start_time, 3)
-        yield _sse_event({
-            "type": "done",
-            "content": result.get("response", ""),
-            "agent": result.get("current_agent", ""),
-            "mode": result.get("collaboration_mode", "sequential"),
-            "elapsed": elapsed,
-            "cached": result.get("cached", False),
-            "agents_used": result.get("agents_used", []),
-            "resolution_status": result.get("resolution_status", ""),
-            "session_id": ctx.sid,
-            "session_token": session_token,
-        })
+        yield _sse_event(
+            {
+                "type": "done",
+                "content": result.get("response", ""),
+                "agent": result.get("current_agent", ""),
+                "mode": result.get("collaboration_mode", "sequential"),
+                "elapsed": elapsed,
+                "cached": result.get("cached", False),
+                "agents_used": result.get("agents_used", []),
+                "resolution_status": result.get("resolution_status", ""),
+                "session_id": ctx.sid,
+                "session_token": session_token,
+            }
+        )
     except Exception as e:
         logger.error(f"SSE 流式处理失败: {e}", exc_info=True)
         yield _sse_event({"type": "error", "content": "服务内部错误，请稍后重试"})
@@ -189,11 +197,14 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
 
 # ── REST 聊天 ──
 
+
 @router.post("/api/chat")
 async def rest_chat(data: ChatRequest, request: Request):
     try:
         session = await get_authenticated_session(
-            request, data.session_id, data.session_token,
+            request,
+            data.session_id,
+            data.session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -226,12 +237,15 @@ async def rest_chat(data: ChatRequest, request: Request):
 
 # ── SSE 流式输出 ──
 
+
 @router.post("/api/chat/stream")
 async def stream_chat(data: ChatStreamRequest, request: Request):
     """SSE 真流式输出端点（v4.2）"""
     try:
         session = await get_authenticated_session(
-            request, data.session_id, data.session_token,
+            request,
+            data.session_id,
+            data.session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -241,8 +255,11 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
         return JSONResponse({"error": "query 不能为空"}, status_code=400)
 
     graph_task, chunk_queue = _build_sse_stream_context(
-        request, session.sid, query,
-        session.session_manager, session.client_provided_sid,
+        request,
+        session.sid,
+        query,
+        session.session_manager,
+        session.client_provided_sid,
     )
     ctx = SSEStreamContext(
         graph_task=graph_task,
@@ -257,11 +274,16 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
     return StreamingResponse(
         _sse_stream_generator(ctx),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
 # ── 多模态图片对话 ──
+
 
 @router.post("/api/chat/image")
 async def chat_with_image(
@@ -277,7 +299,9 @@ async def chat_with_image(
 
     try:
         session = await get_authenticated_session(
-            request, session_id, session_token,
+            request,
+            session_id,
+            session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -292,6 +316,7 @@ async def chat_with_image(
 
     try:
         from media.image_processor import ImageProcessor
+
         processor = ImageProcessor()
         data_url = processor.process(image_bytes, image.content_type or "")
     except ValueError as e:
@@ -328,6 +353,7 @@ async def chat_with_image(
 
 # ── 多模态 SSE 流式 ──
 
+
 @router.post("/api/chat/multimodal/stream")
 async def stream_multimodal_chat(
     request: Request,
@@ -342,7 +368,9 @@ async def stream_multimodal_chat(
 
     try:
         session = await get_authenticated_session(
-            request, session_id, session_token,
+            request,
+            session_id,
+            session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -357,6 +385,7 @@ async def stream_multimodal_chat(
 
     try:
         from media.image_processor import ImageProcessor
+
         processor = ImageProcessor()
         data_url = processor.process(image_bytes, image.content_type or "")
     except ValueError as e:
@@ -369,8 +398,11 @@ async def stream_multimodal_chat(
     user_text = sanitize_input(query)[:MAX_QUERY_LENGTH] if query else "请分析这张图片"
 
     graph_task, chunk_queue = _build_sse_stream_context(
-        request, session.sid, user_text,
-        session.session_manager, session.client_provided_sid,
+        request,
+        session.sid,
+        user_text,
+        session.session_manager,
+        session.client_provided_sid,
         multimodal_content=multimodal_content,
     )
     ctx = SSEStreamContext(
@@ -386,11 +418,16 @@ async def stream_multimodal_chat(
     return StreamingResponse(
         _sse_stream_generator(ctx),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
 # ── 语音对话 ──
+
 
 @router.post("/api/chat/voice")
 async def chat_with_voice(
@@ -407,7 +444,9 @@ async def chat_with_voice(
 
     try:
         session = await get_authenticated_session(
-            request, session_id, session_token,
+            request,
+            session_id,
+            session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -420,6 +459,7 @@ async def chat_with_voice(
 
     try:
         from media.audio_processor import AudioProcessor
+
         stt = AudioProcessor()
         query_text = await stt.transcribe(audio_bytes, audio.content_type or "", language)
     except ValueError as e:
@@ -456,6 +496,7 @@ async def chat_with_voice(
 
 # ── TTS 文字转语音 ──
 
+
 @router.post("/api/tts")
 async def text_to_speech(
     request: Request,
@@ -473,6 +514,7 @@ async def text_to_speech(
 
     try:
         from media.tts_processor import TTSProcessor
+
         tts = TTSProcessor()
         audio_bytes = await tts.synthesize(text, voice)
     except ImportError:
@@ -492,6 +534,7 @@ async def text_to_speech(
 async def list_tts_voices():
     """v5.1: 返回可用 TTS 语音列表"""
     from media.tts_processor import TTSProcessor
+
     return {"voices": TTSProcessor.list_voices()}
 
 
@@ -511,6 +554,7 @@ async def _handle_image_upload(
         raise _SessionValidationError(400, "多模态功能未启用")
     try:
         from media.image_processor import ImageProcessor
+
         processor = ImageProcessor()
         data_url = processor.process(file_bytes, content_type)
     except ValueError as e:
@@ -534,6 +578,7 @@ async def _handle_audio_upload(
     """
     try:
         from media.audio_processor import AudioProcessor
+
         stt = AudioProcessor()
         query_text = await stt.transcribe(file_bytes, content_type, language)
     except ValueError as e:
@@ -560,6 +605,7 @@ async def _handle_document_upload(
     """
     try:
         from media.document_processor import DocumentProcessor
+
         dp = DocumentProcessor()
         doc_text = dp.extract(file_bytes, content_type, filename)
     except ImportError:
@@ -589,6 +635,7 @@ async def _handle_video_upload(
         raise _SessionValidationError(400, "多模态功能未启用")
     try:
         from media.video_processor import VideoProcessor
+
         vp = VideoProcessor()
         frames = vp.extract_frames(file_bytes, content_type)
     except ImportError:
@@ -616,7 +663,9 @@ async def chat_with_file(
     """v5.1: 统一文件上传端点 — 自动识别文件类型分发到对应处理器"""
     try:
         session = await get_authenticated_session(
-            request, session_id, session_token,
+            request,
+            session_id,
+            session_token,
         )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
@@ -636,25 +685,38 @@ async def chat_with_file(
     try:
         if content_type.startswith("video/"):
             multimodal_content, user_text = await _handle_video_upload(
-                file_bytes, content_type, user_text,
+                file_bytes,
+                content_type,
+                user_text,
             )
-        elif content_type in ("application/pdf",
-                              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                              "text/plain", "text/markdown"):
+        elif content_type in (
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "text/markdown",
+        ):
             multimodal_content, user_text = await _handle_document_upload(
-                file_bytes, content_type, file.filename or "", user_text,
+                file_bytes,
+                content_type,
+                file.filename or "",
+                user_text,
             )
         elif content_type.startswith("image/"):
             multimodal_content, user_text = await _handle_image_upload(
-                file_bytes, content_type, user_text,
+                file_bytes,
+                content_type,
+                user_text,
             )
         elif content_type.startswith("audio/"):
             multimodal_content, user_text = await _handle_audio_upload(
-                file_bytes, content_type, user_text,
+                file_bytes,
+                content_type,
+                user_text,
             )
         else:
             return JSONResponse(
-                {"error": f"不支持的文件类型: {content_type}"}, status_code=400,
+                {"error": f"不支持的文件类型: {content_type}"},
+                status_code=400,
             )
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)

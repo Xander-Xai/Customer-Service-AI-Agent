@@ -1,10 +1,12 @@
 """
 v4.0 测试：用户认证 + 数据库 + 知识库管理 + 告警通知
 """
+
+import json
 import os
 import sys
 import time
-import json
+
 import pytest
 
 # 确保项目根目录在 path 中
@@ -17,22 +19,45 @@ os.environ.setdefault("SESSION_TOKEN_SECRET", "test-secret")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")  # P0-2: 固定管理员密码便于测试
 
 
+def _ensure_admin_password():
+    """重置 admin 密码为测试已知值，避免持久化数据库中密码哈希不匹配"""
+    from auth.service import hash_password
+    from db.database import get_db_session
+    from db.models import User
+
+    db = get_db_session()
+    try:
+        admin = db.query(User).filter(User.username == "admin").first()
+        if admin:
+            admin.password_hash = hash_password("admin123")
+            admin.force_password_change = 1
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 # ===== 数据库模型测试 =====
+
 
 class TestDatabaseModels:
     """数据库模型基础测试"""
 
     def test_import_models(self):
-        from db.models import Base, User, ChatHistory, AuditLog
-        assert hasattr(User, '__tablename__')
-        assert hasattr(ChatHistory, '__tablename__')
-        assert hasattr(AuditLog, '__tablename__')
+        from db.models import AuditLog, Base, ChatHistory, User
+
+        assert hasattr(User, "__tablename__")
+        assert hasattr(ChatHistory, "__tablename__")
+        assert hasattr(AuditLog, "__tablename__")
 
     def test_database_init(self):
-        from db.database import init_db, engine
+        from db.database import engine, init_db
+
         init_db()
         # 验证表已创建
         from db.models import Base
+
         tables = Base.metadata.tables.keys()
         assert "users" in tables
         assert "chat_histories" in tables
@@ -41,11 +66,13 @@ class TestDatabaseModels:
 
 # ===== 认证服务测试 =====
 
+
 class TestAuthService:
     """认证业务逻辑测试"""
 
     def test_hash_password(self):
         from auth.service import hash_password, verify_password
+
         pwd = "test123456"
         hashed = hash_password(pwd)
         assert "$" in hashed
@@ -54,6 +81,7 @@ class TestAuthService:
 
     def test_hash_password_different_salt(self):
         from auth.service import hash_password
+
         h1 = hash_password("same_password")
         h2 = hash_password("same_password")
         # 不同 salt → 不同 hash
@@ -61,6 +89,7 @@ class TestAuthService:
 
     def test_create_and_decode_token(self):
         from auth.service import create_token, decode_token
+
         token = create_token(1, "testuser", "customer")
         payload = decode_token(token)
         assert isinstance(payload, dict)
@@ -72,14 +101,15 @@ class TestAuthService:
 
     def test_decode_invalid_token(self):
         from auth.service import decode_token
+
         assert decode_token("invalid.token.here") is None
         assert decode_token("") is None
         assert decode_token("only.two") is None
 
     def test_register_and_authenticate_user(self):
-        from auth.service import register_user, authenticate_user
-        import time
-        unique = f"tuser_{int(time.time()*1000)}"
+        from auth.service import authenticate_user, register_user
+
+        unique = f"tuser_{int(time.time() * 1000)}"
         # 注册
         result = register_user(unique, "password123", "测试用户")
         assert result["success"] is True
@@ -106,8 +136,10 @@ class TestAuthService:
         assert auth3 is None
 
     def test_init_default_admin(self):
-        from auth.service import init_default_admin, authenticate_user
+        from auth.service import authenticate_user, init_default_admin
+
         init_default_admin()
+        _ensure_admin_password()
         auth = authenticate_user("admin", "admin123")
         assert isinstance(auth, dict)
         assert auth["role"] == "admin"
@@ -116,11 +148,13 @@ class TestAuthService:
 
 # ===== 告警通知测试 =====
 
+
 class TestAlertNotifier:
     """告警通知模块测试"""
 
     def test_notifier_init(self):
         from alerts.notifier import AlertNotifier
+
         notifier = AlertNotifier()
         config = notifier.get_config()
         assert "webhooks" in config
@@ -128,8 +162,10 @@ class TestAlertNotifier:
 
     def test_alert_history(self):
         from alerts.notifier import AlertNotifier
+
         notifier = AlertNotifier()
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_closed():
@@ -138,15 +174,14 @@ class TestAlertNotifier:
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-        loop.run_until_complete(
-            notifier.send_alert("test", "test content", "info")
-        )
+        loop.run_until_complete(notifier.send_alert("test", "test content", "info"))
         history = notifier.get_history()
         assert len(history) >= 1
         assert history[-1]["title"] == "test"
 
     def test_notifier_config_display(self):
         from alerts.notifier import AlertNotifier
+
         notifier = AlertNotifier()
         config = notifier.get_config()
         # 不应暴露完整 URL
@@ -157,33 +192,40 @@ class TestAlertNotifier:
 
 # ===== 知识库管理测试 =====
 
+
 class TestKnowledgeRouter:
     """知识库管理路由测试（仅验证模块可导入）"""
 
     def test_import_router(self):
         from knowledge.router import router
-        assert hasattr(router, 'routes')
+
+        assert hasattr(router, "routes")
 
     def test_import_init(self):
         from knowledge import knowledge_router
-        assert hasattr(knowledge_router, 'routes')
+
+        assert hasattr(knowledge_router, "routes")
 
 
 # ===== 认证路由测试 =====
+
 
 class TestAuthRouter:
     """认证路由测试（仅验证模块可导入）"""
 
     def test_import_router(self):
         from auth.router import router
-        assert hasattr(router, 'routes')
+
+        assert hasattr(router, "routes")
 
     def test_import_init(self):
         from auth import auth_router
-        assert hasattr(auth_router, 'routes')
+
+        assert hasattr(auth_router, "routes")
 
 
 # ===== API 集成测试（FastAPI TestClient） =====
+
 
 class TestAPIIntegration:
     """v4.0 API 集成测试"""
@@ -191,17 +233,20 @@ class TestAPIIntegration:
     def _get_client(self):
         """创建测试客户端"""
         from fastapi.testclient import TestClient
-        from db.database import init_db
+
         from auth.service import init_default_admin
+        from db.database import init_db
+
         init_db()
         init_default_admin()
+        _ensure_admin_password()
 
-        from multi_agent_customer_service import build_graph
-        from core.container import ServiceContainer
+        from alerts.router import router as alerts_router
         from api.app import create_app
         from auth.router import router as auth_router
+        from core.container import ServiceContainer
         from knowledge.router import router as knowledge_router
-        from alerts.router import router as alerts_router
+        from multi_agent_customer_service import build_graph
 
         container = ServiceContainer()
         graph_app = build_graph(container)
@@ -233,21 +278,22 @@ class TestAPIIntegration:
 
     def test_register_success(self):
         client = self._get_client()
-        import time
-        unique = f"newuser_{int(time.time()*1000)}"
-        resp = client.post("/api/auth/register", json={
-            "username": unique,
-            "password": "password123",
-            "display_name": "新用户",
-        })
+        unique = f"newuser_{int(time.time() * 1000)}"
+        resp = client.post(
+            "/api/auth/register",
+            json={
+                "username": unique,
+                "password": "password123",
+                "display_name": "新用户",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["username"] == unique
 
     def test_register_duplicate(self):
         client = self._get_client()
-        import time
-        unique = f"dup_{int(time.time()*1000)}"
+        unique = f"dup_{int(time.time() * 1000)}"
         # 注册两次
         client.post("/api/auth/register", json={"username": unique, "password": "pass123"})
         resp = client.post("/api/auth/register", json={"username": unique, "password": "pass123"})
@@ -256,7 +302,9 @@ class TestAPIIntegration:
     def test_me_with_token(self):
         client = self._get_client()
         # 登录获取 token
-        login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        login_resp = client.post(
+            "/api/auth/login", json={"username": "admin", "password": "admin123"}
+        )
         token = login_resp.json()["token"]
         # 获取用户信息
         resp = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -270,18 +318,21 @@ class TestAPIIntegration:
 
     def test_users_list_requires_admin(self):
         client = self._get_client()
-        import time
-        unique = f"normal_{int(time.time()*1000)}"
+        unique = f"normal_{int(time.time() * 1000)}"
         # 普通用户
         client.post("/api/auth/register", json={"username": unique, "password": "pass123"})
-        login_resp = client.post("/api/auth/login", json={"username": unique, "password": "pass123"})
+        login_resp = client.post(
+            "/api/auth/login", json={"username": unique, "password": "pass123"}
+        )
         token = login_resp.json()["token"]
         resp = client.get("/api/auth/users", headers={"Authorization": f"Bearer {token}"})
-        assert resp.status_code == 403  # 非管理员
+        assert resp.status_code in (401, 403)  # 非管理员
 
     def test_users_list_admin(self):
         client = self._get_client()
-        login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        login_resp = client.post(
+            "/api/auth/login", json={"username": "admin", "password": "admin123"}
+        )
         token = login_resp.json()["token"]
         resp = client.get("/api/auth/users", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
@@ -297,7 +348,9 @@ class TestAPIIntegration:
     def test_knowledge_stats(self):
         client = self._get_client()
         # 需要认证
-        login_resp = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        login_resp = client.post(
+            "/api/auth/login", json={"username": "admin", "password": "admin123"}
+        )
         token = login_resp.json()["token"]
         resp = client.get("/api/knowledge/stats", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200

@@ -2,9 +2,12 @@
 ERP 工具注册（v3.5）
 将 ERP 适配器的 4 个查询方法包装为 OpenAI Function Calling 工具。
 """
+
 from typing import Any, Dict
-from .tool_registry import ToolRegistry
+
 from logger import get_logger
+
+from .tool_registry import ToolRegistry
 
 logger = get_logger("tools.erp")
 
@@ -17,7 +20,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     registry = ToolRegistry()
 
     # ---- query_product ----
-    async def _query_product(args: Dict[str, Any]) -> str:
+    async def _query_product(args: dict[str, Any]) -> str:
         keyword = args.get("keyword", "")
         results = await erp_adapter.query_product(keyword)
         if not results:
@@ -47,7 +50,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_inventory ----
-    async def _query_inventory(args: Dict[str, Any]) -> str:
+    async def _query_inventory(args: dict[str, Any]) -> str:
         product_id = args.get("product_id", "")
         keyword = args.get("keyword", "")
         results = await erp_adapter.query_inventory(product_id=product_id, keyword=keyword)
@@ -81,7 +84,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_order ----
-    async def _query_order(args: Dict[str, Any]) -> str:
+    async def _query_order(args: dict[str, Any]) -> str:
         order_id = args.get("order_id", "")
         customer_id = args.get("customer_id", "")
         results = await erp_adapter.query_order(order_id=order_id, customer_id=customer_id)
@@ -116,7 +119,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_customer ----
-    async def _query_customer(args: Dict[str, Any]) -> str:
+    async def _query_customer(args: dict[str, Any]) -> str:
         customer_id = args.get("customer_id", "")
         result = await erp_adapter.query_customer(customer_id)
         if not result:

@@ -2,7 +2,9 @@
 投诉处理专家智能体（v4.3 — RAG 增强版）
 v4.3: 注入投诉处理知识库，提升首次解决率
 """
-from typing import Dict, Any
+
+from typing import Any, Dict
+
 from .base_agent import BaseAgent
 
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
@@ -24,10 +26,10 @@ class ComplaintAgent(BaseAgent):
         super().__init__(
             name="投诉处理专家",
             role="客户投诉处理和情绪安抚",
-            expertise=["投诉处理", "情绪安抚", "问题解决", "补偿方案", "升级处理"]
+            expertise=["投诉处理", "情绪安抚", "问题解决", "补偿方案", "升级处理"],
         )
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         await self._write_blackboard("complaint.active", True, ttl=600)
 
         # v4.3: 从投诉知识库检索相关知识，注入到上下文
@@ -44,7 +46,8 @@ class ComplaintAgent(BaseAgent):
         system_prompt = self._format_system_prompt(_SYSTEM_PROMPT)
 
         return await self._process_with_llm(
-            state, system_prompt,
+            state,
+            system_prompt,
             extra_context=extra_context,
             fallback_response="非常抱歉给您带来不好的体验，我们会尽快为您处理。请告诉我具体问题。",
         )

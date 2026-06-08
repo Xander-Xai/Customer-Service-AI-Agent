@@ -14,8 +14,9 @@ Usage:
     await container.initialize()
     # container.graph_app 在 initialize() 中自动构建
 """
+
 import asyncio
-from typing import Dict, Any
+from typing import Any, Dict
 
 from logger import get_logger
 
@@ -35,14 +36,17 @@ class ServiceContainer:
         self._initialized = False
 
         # ===== 基础设施（同步创建，无依赖）=====
-        from core.message_bus import MessageBus
-        from core.shared_blackboard import SharedBlackboard
-        from core.monitoring import MetricsCollector, CircuitBreaker, SLAAlertManager
-
         from config import (
-            CACHE_L1_MAX, CACHE_L2_MAX, CACHE_TTL,
-            SESSION_STORAGE_BACKEND, SESSION_WINDOW_SIZE, REDIS_URL,
+            CACHE_L1_MAX,
+            CACHE_L2_MAX,
+            CACHE_TTL,
+            REDIS_URL,
+            SESSION_STORAGE_BACKEND,
+            SESSION_WINDOW_SIZE,
         )
+        from core.message_bus import MessageBus
+        from core.monitoring import CircuitBreaker, MetricsCollector, SLAAlertManager
+        from core.shared_blackboard import SharedBlackboard
 
         self.bus = MessageBus()
         self.bb = SharedBlackboard()
@@ -51,12 +55,16 @@ class ServiceContainer:
         self.sla_alert_mgr = SLAAlertManager(bus=self.bus)
 
         from cache.response_cache import ResponseCache
+
         self.cache = ResponseCache(
-            l1_max=CACHE_L1_MAX, l2_max=CACHE_L2_MAX, default_ttl=CACHE_TTL,
+            l1_max=CACHE_L1_MAX,
+            l2_max=CACHE_L2_MAX,
+            default_ttl=CACHE_TTL,
         )
 
         # Session: 可选 Redis 持久化
         from session_manager import EnhancedSessionManager, default_session_manager
+
         self.session_mgr = default_session_manager
         if SESSION_STORAGE_BACKEND == "redis":
             try:
@@ -78,7 +86,7 @@ class ServiceContainer:
         self.erp: Any = None
 
         # Agents
-        self.agents_dict: Dict[str, Any] = {}
+        self.agents_dict: dict[str, Any] = {}
         self.response_agent: Any = None
 
         # Session & Router
@@ -86,6 +94,7 @@ class ServiceContainer:
 
         # Orchestrator（依赖 bus + bb，已在上面创建）
         from collaboration.orchestrator import CollaborationOrchestrator
+
         self.orchestrator = CollaborationOrchestrator(self.bus, self.bb)
 
         # RAG & Tools
@@ -116,7 +125,7 @@ class ServiceContainer:
             await self._init_llm()
 
             # 1.2. Redis 缓存预热（异步，避免阻塞事件循环）
-            if hasattr(self, '_redis_url'):
+            if hasattr(self, "_redis_url"):
                 await self.cache._init_redis(self._redis_url)
 
             # 1.5. v5.1: Vision LLM（多模态模型，仅在启用时初始化）
@@ -125,6 +134,7 @@ class ServiceContainer:
             # 2. ERP
             if self.erp is None:
                 from erp.factory import create_erp_adapter
+
                 self.erp = create_erp_adapter()
 
             # 3. RAG + Tools
@@ -140,12 +150,12 @@ class ServiceContainer:
             self._build_graph()
 
             self._initialized = True
-            logger.info(f"ServiceContainer 初始化完成 "
-                        f"({len(self.agents_dict)} agents)")
+            logger.info(f"ServiceContainer 初始化完成 ({len(self.agents_dict)} agents)")
 
     def _build_graph(self):
         """构建 LangGraph 工作流图（委托给 multi_agent_customer_service.build_graph）"""
         from multi_agent_customer_service import build_graph
+
         self.graph_app = build_graph(self)
         logger.info("[Container] LangGraph 构建完成")
 
@@ -155,8 +165,8 @@ class ServiceContainer:
         """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）"""
         if self.llm is not None:
             return
+        from config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
         from llm.client import OpenAICompatibleClient
-        from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, DEV_MODE
 
         # v4.1: 检查 API Key 是否有效
         api_key_valid = OPENAI_API_KEY and not OPENAI_API_KEY.startswith("your_")
@@ -165,6 +175,7 @@ class ServiceContainer:
             # 开发模式：API Key 无效时自动降级到规则引擎
             try:
                 from llm.rule_based_llm import RuleBasedLLM
+
                 logger.warning("⚠️ DeepSeek API Key 未配置，自动切换到规则引擎模式（开发降级）")
                 logger.warning("💡 配置真实的 API Key：编辑 .env.dev 文件第 7 行")
                 self.llm = RuleBasedLLM()
@@ -187,8 +198,15 @@ class ServiceContainer:
 
     async def _init_vision_llm(self):
         """v5.1: 初始化 Vision LLM 客户端（仅在 MULTIMODAL_ENABLED 时）"""
-        from config import MULTIMODAL_ENABLED, VISION_MODEL, VISION_BASE_URL, VISION_API_KEY
-        from config import OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+        from config import (
+            MULTIMODAL_ENABLED,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_MODEL,
+            VISION_API_KEY,
+            VISION_BASE_URL,
+            VISION_MODEL,
+        )
 
         if not MULTIMODAL_ENABLED:
             return
@@ -199,14 +217,17 @@ class ServiceContainer:
         vision_api_key = VISION_API_KEY or OPENAI_API_KEY
 
         # 如果 Vision 模型与默认模型相同，复用同一个客户端
-        if (vision_model == OPENAI_MODEL
-                and vision_base_url == OPENAI_BASE_URL
-                and vision_api_key == OPENAI_API_KEY):
+        if (
+            vision_model == OPENAI_MODEL
+            and vision_base_url == OPENAI_BASE_URL
+            and vision_api_key == OPENAI_API_KEY
+        ):
             self.vision_llm = self.llm
             logger.info("Vision LLM 复用默认 LLM 客户端")
             return
 
         from llm.client import OpenAICompatibleClient
+
         self.vision_llm = OpenAICompatibleClient(
             api_key=vision_api_key,
             base_url=vision_base_url,
@@ -218,12 +239,16 @@ class ServiceContainer:
     async def _init_rag_and_tools(self):
         """初始化 RAG 知识库 + 工具注册"""
         if self.knowledge_base is None:
+            from config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
             from rag.knowledge_base import CosmeticsKnowledgeBase
             from rag.seed_data import (
-                seed_product_knowledge, seed_faq, seed_tech_support, seed_complaint_knowledge,
+                seed_complaint_knowledge,
+                seed_faq,
+                seed_product_knowledge,
                 seed_supplementary_data,
+                seed_tech_support,
             )
-            from config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
+
             self.knowledge_base = CosmeticsKnowledgeBase(clip_enabled=CLIP_ENABLED)
             if RAG_PERSIST_DIRECTORY:
                 logger.info("ChromaDB persistent mode, skipping seed")
@@ -244,8 +269,10 @@ class ServiceContainer:
 
         if self.tool_registry is None:
             from tools.erp_tools import create_erp_tools
+
             if self.erp is None:
                 from erp.factory import create_erp_adapter
+
                 self.erp = create_erp_adapter()
             self.tool_registry = create_erp_tools(self.erp)
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
@@ -256,8 +283,13 @@ class ServiceContainer:
             return
 
         from agents import (
-            ProductAgent, TechAgent, BillingAgent, ComplaintAgent,
-            GeneralAgent, ResponseAgent, ReActAgent,
+            BillingAgent,
+            ComplaintAgent,
+            GeneralAgent,
+            ProductAgent,
+            ReActAgent,
+            ResponseAgent,
+            TechAgent,
         )
         from config import ERP_MODE
 
@@ -300,6 +332,7 @@ class ServiceContainer:
 
         # ResponseAgent
         from agents import ResponseAgent as _ResponseAgent
+
         self.response_agent = _ResponseAgent(
             session_manager=self.session_mgr,
             message_bus=self.bus,
@@ -309,16 +342,16 @@ class ServiceContainer:
         self.response_agent.set_llm(self.llm)
 
         logger.info(
-            f"初始化 {len(self.agents_dict)} 个 Agent "
-            f"(含 ReActAgent) 完成 (ERP_MODE={ERP_MODE})"
+            f"初始化 {len(self.agents_dict)} 个 Agent (含 ReActAgent) 完成 (ERP_MODE={ERP_MODE})"
         )
 
     async def _init_router(self):
         """初始化查询路由器"""
         if self.router is not None:
             return
-        from router.query_router import QueryRouter
         from config import ROUTING_COMPLEXITY_THRESHOLD
+        from router.query_router import QueryRouter
+
         self.router = QueryRouter(
             llm=self.llm,
             complexity_threshold=ROUTING_COMPLEXITY_THRESHOLD,
@@ -334,6 +367,7 @@ class ServiceContainer:
         # 1. 关闭 LLM 连接池
         try:
             from llm.client import OpenAICompatibleClient
+
             await OpenAICompatibleClient.close_all_clients()
             logger.info("  ✅ LLM 连接池已关闭")
         except Exception as e:

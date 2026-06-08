@@ -3,91 +3,113 @@
 基于用户反馈 + 规则评分，自动评估 Agent 回答质量。
 实现自我评估闭环：评估 -> 反馈聚合 -> 低分告警 -> Prompt 优化依据
 """
-import re
+
 import json
+import re
 import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List
+
 from logger import get_logger
 
 logger = get_logger("agents.evaluator")
 
 # ===== 评分基准分 =====
-SCORE_BASE_COMPLETENESS = 50.0   # 完整性基准分
-SCORE_BASE_ACCURACY = 60.0       # 准确性基准分
-SCORE_BASE_POLITENESS = 50.0     # 礼貌性基准分
-SCORE_BASE_RELEVANCE = 40.0      # 相关性基准分
+SCORE_BASE_COMPLETENESS = 50.0  # 完整性基准分
+SCORE_BASE_ACCURACY = 60.0  # 准确性基准分
+SCORE_BASE_POLITENESS = 50.0  # 礼貌性基准分
+SCORE_BASE_RELEVANCE = 40.0  # 相关性基准分
 SCORE_BASE_RELEVANCE_NO_QUERY = 60.0  # 无问题时相关性基准分
-SCORE_BASE_POLITENESS_MIN = 40.0 # 礼貌性最低保底分
+SCORE_BASE_POLITENESS_MIN = 40.0  # 礼貌性最低保底分
 
 # ===== 回答长度阈值 =====
-RESP_LEN_VERY_SHORT = 20         # 极短回答（严重扣分）
-RESP_LEN_SHORT = 50              # 短回答（轻微扣分）
-RESP_LEN_IDEAL_MAX = 500         # 理想长度上限
-RESP_LEN_LONG = 800              # 偏长
-RESP_LEN_VERY_LONG = 1000        # 过长（完整性扣分）
-RESP_LEN_EXCESSIVE = 1500        # 过于冗长
+RESP_LEN_VERY_SHORT = 20  # 极短回答（严重扣分）
+RESP_LEN_SHORT = 50  # 短回答（轻微扣分）
+RESP_LEN_IDEAL_MAX = 500  # 理想长度上限
+RESP_LEN_LONG = 800  # 偏长
+RESP_LEN_VERY_LONG = 1000  # 过长（完整性扣分）
+RESP_LEN_EXCESSIVE = 1500  # 过于冗长
 
 # ===== 简洁性评分 =====
-CONCISENESS_IDEAL = 90.0         # 理想长度简洁性分
-CONCISENESS_SHORT = 70.0         # 偏短简洁性分
-CONCISENESS_LONG = 75.0          # 偏长简洁性分
-CONCISENESS_VERY_LONG = 55.0     # 很长简洁性分
-CONCISENESS_EXCESSIVE = 35.0     # 过于冗长简洁性分
+CONCISENESS_IDEAL = 90.0  # 理想长度简洁性分
+CONCISENESS_SHORT = 70.0  # 偏短简洁性分
+CONCISENESS_LONG = 75.0  # 偏长简洁性分
+CONCISENESS_VERY_LONG = 55.0  # 很长简洁性分
+CONCISENESS_EXCESSIVE = 35.0  # 过于冗长简洁性分
 
 # ===== 评分维度权重 =====
-WEIGHT_COMPLETENESS = 0.25       # 完整性权重
-WEIGHT_ACCURACY = 0.25           # 准确性权重
-WEIGHT_CONCISENESS = 0.15        # 简洁性权重
-WEIGHT_POLITENESS = 0.10         # 礼貌性权重
-WEIGHT_RELEVANCE = 0.25          # 相关性权重
+WEIGHT_COMPLETENESS = 0.25  # 完整性权重
+WEIGHT_ACCURACY = 0.25  # 准确性权重
+WEIGHT_CONCISENESS = 0.15  # 简洁性权重
+WEIGHT_POLITENESS = 0.10  # 礼貌性权重
+WEIGHT_RELEVANCE = 0.25  # 相关性权重
 
 # ===== 评分调整量 =====
-SCORE_PENALTY_VERY_SHORT = -30   # 极短回答扣分
-SCORE_PENALTY_SHORT = -15        # 短回答扣分
-SCORE_PENALTY_LONG = -5          # 过长回答扣分
-SCORE_BONUS_STRUCTURED = 10      # 结构化回答加分
-SCORE_BONUS_KB_REFERENCE = 15    # 知识库引用加分
-SCORE_BONUS_DATA_NUMBERS = 5     # 包含具体数据加分
-SCORE_BONUS_CERTAIN_PHRASE = 3   # 确定性表达加分（每个）
+SCORE_PENALTY_VERY_SHORT = -30  # 极短回答扣分
+SCORE_PENALTY_SHORT = -15  # 短回答扣分
+SCORE_PENALTY_LONG = -5  # 过长回答扣分
+SCORE_BONUS_STRUCTURED = 10  # 结构化回答加分
+SCORE_BONUS_KB_REFERENCE = 15  # 知识库引用加分
+SCORE_BONUS_DATA_NUMBERS = 5  # 包含具体数据加分
+SCORE_BONUS_CERTAIN_PHRASE = 3  # 确定性表达加分（每个）
 SCORE_PENALTY_UNCERTAIN_PHRASE = -5  # 不确定性表达扣分（每个）
-SCORE_PENALTY_ERROR_RESPONSE = -40   # 错误降级响应扣分
-SCORE_BONUS_POLITE_PHRASE = 8    # 礼貌用语加分（每个）
-SCORE_BONUS_POLITE_MAX = 40      # 礼貌用语加分上限
-SCORE_BONUS_FRIENDLY = 5         # 友好语气加分
+SCORE_PENALTY_ERROR_RESPONSE = -40  # 错误降级响应扣分
+SCORE_BONUS_POLITE_PHRASE = 8  # 礼貌用语加分（每个）
+SCORE_BONUS_POLITE_MAX = 40  # 礼貌用语加分上限
+SCORE_BONUS_FRIENDLY = 5  # 友好语气加分
 
 # ===== 填充词/重复检测阈值 =====
-FILLER_RATIO_HIGH = 0.3          # 高填充词比例
-FILLER_RATIO_MEDIUM = 0.15       # 中等填充词比例
-FILLER_PENALTY_HIGH = -15        # 高填充词扣分
-FILLER_PENALTY_MEDIUM = -8       # 中等填充词扣分
-UNIQUE_RATIO_LOW = 0.7           # 低唯一句比例（大量重复）
-DUPLICATE_PENALTY = -15          # 重复内容扣分
+FILLER_RATIO_HIGH = 0.3  # 高填充词比例
+FILLER_RATIO_MEDIUM = 0.15  # 中等填充词比例
+FILLER_PENALTY_HIGH = -15  # 高填充词扣分
+FILLER_PENALTY_MEDIUM = -8  # 中等填充词扣分
+UNIQUE_RATIO_LOW = 0.7  # 低唯一句比例（大量重复）
+DUPLICATE_PENALTY = -15  # 重复内容扣分
 
 # ===== 建议生成阈值 =====
-SUGGESTION_COMPLETENESS_THRESHOLD = 60   # 完整性建议阈值
-SUGGESTION_ACCURACY_THRESHOLD = 60       # 准确性建议阈值
-SUGGESTION_CONCISENESS_THRESHOLD = 50    # 简洁性建议阈值
-SUGGESTION_POLITENESS_THRESHOLD = 50     # 礼貌性建议阈值
-SUGGESTION_RELEVANCE_THRESHOLD = 60      # 相关性建议阈值
-SUGGESTION_SHORT_RESPONSE_LEN = 15       # 回答过短判断阈值（字符数）
+SUGGESTION_COMPLETENESS_THRESHOLD = 60  # 完整性建议阈值
+SUGGESTION_ACCURACY_THRESHOLD = 60  # 准确性建议阈值
+SUGGESTION_CONCISENESS_THRESHOLD = 50  # 简洁性建议阈值
+SUGGESTION_POLITENESS_THRESHOLD = 50  # 礼貌性建议阈值
+SUGGESTION_RELEVANCE_THRESHOLD = 60  # 相关性建议阈值
+SUGGESTION_SHORT_RESPONSE_LEN = 15  # 回答过短判断阈值（字符数）
 
 # ===== 趋势计算 =====
-TREND_MIN_FEEDBACKS = 4          # 趋势计算最少反馈数
+TREND_MIN_FEEDBACKS = 4  # 趋势计算最少反馈数
 TREND_IMPROVING_THRESHOLD = 0.1  # 改善趋势阈值
-TREND_DECLINING_THRESHOLD = -0.1 # 恶化趋势阈值
-TREND_DEFAULT_SATISFACTION = 0.5 # 默认满意度
+TREND_DECLINING_THRESHOLD = -0.1  # 恶化趋势阈值
+TREND_DEFAULT_SATISFACTION = 0.5  # 默认满意度
 
 # ===== 礼貌用语词库 =====
 _POLITE_PHRASES = [
-    "您好", "你好", "感谢", "谢谢", "请", "很高兴",
-    "祝您", "祝你", "如有", "若有", "如有任何", "欢迎",
-    "不客气", "乐意", "帮您", "帮您解决",
+    "您好",
+    "你好",
+    "感谢",
+    "谢谢",
+    "请",
+    "很高兴",
+    "祝您",
+    "祝你",
+    "如有",
+    "若有",
+    "如有任何",
+    "欢迎",
+    "不客气",
+    "乐意",
+    "帮您",
+    "帮您解决",
 ]
 
 # ===== 冗余/低质量特征 =====
 _FILLER_PHRASES = [
-    "让我", "我来", "首先", "让我分析", "让我想想",
-    "我需要", "我来帮你", "根据我的分析", "基于我的分析",
+    "让我",
+    "我来",
+    "首先",
+    "让我分析",
+    "让我想想",
+    "我需要",
+    "我来帮你",
+    "根据我的分析",
+    "基于我的分析",
 ]
 
 # ===== 问题覆盖度关键词模式（按类别）=====
@@ -106,7 +128,7 @@ class ResponseEvaluator:
     返回综合评分(0-100)、各维度因子、改进建议。
     """
 
-    def evaluate(self, response: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    def evaluate(self, response: str, context: dict[str, Any]) -> dict[str, Any]:
         """
         评估回答质量
 
@@ -124,8 +146,13 @@ class ResponseEvaluator:
         if not response or not response.strip():
             return {
                 "score": 0,
-                "factors": {"completeness": 0, "accuracy": 0, "conciseness": 0,
-                            "politeness": 0, "relevance": 0},
+                "factors": {
+                    "completeness": 0,
+                    "accuracy": 0,
+                    "conciseness": 0,
+                    "politeness": 0,
+                    "relevance": 0,
+                },
                 "suggestions": ["回答为空，需要重新生成"],
             }
 
@@ -173,7 +200,7 @@ class ResponseEvaluator:
         )
         return result
 
-    def aggregate_feedback(self, session_feedbacks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def aggregate_feedback(self, session_feedbacks: list[dict[str, Any]]) -> dict[str, Any]:
         """
         聚合用户反馈，计算满意度
 
@@ -195,8 +222,12 @@ class ResponseEvaluator:
         """
         if not session_feedbacks:
             return {
-                "total": 0, "positive": 0, "negative": 0,
-                "satisfaction_rate": 0.0, "avg_score": 0.0, "trend": "stable",
+                "total": 0,
+                "positive": 0,
+                "negative": 0,
+                "satisfaction_rate": 0.0,
+                "avg_score": 0.0,
+                "trend": "stable",
             }
 
         total = len(session_feedbacks)
@@ -258,7 +289,7 @@ class ResponseEvaluator:
 
         return min(100, max(0, score))
 
-    def _score_accuracy(self, response: str, context: Dict[str, Any]) -> float:
+    def _score_accuracy(self, response: str, context: dict[str, Any]) -> float:
         """
         准确性评分 (0-100)
         基于回答是否包含知识库引用、数据准确性等启发式判断。
@@ -280,8 +311,14 @@ class ResponseEvaluator:
 
         # 不确定性表达扣分
         uncertain_phrases = [
-            "可能", "大概", "也许", "不太确定", "我猜测",
-            "我不确定", "建议您咨询", "建议您联系",
+            "可能",
+            "大概",
+            "也许",
+            "不太确定",
+            "我猜测",
+            "我不确定",
+            "建议您咨询",
+            "建议您联系",
         ]
         uncertain_hits = sum(1 for p in uncertain_phrases if p in response)
         score -= uncertain_hits * abs(SCORE_PENALTY_UNCERTAIN_PHRASE)
@@ -376,8 +413,9 @@ class ResponseEvaluator:
 
         return min(100, max(0, score))
 
-    def _generate_suggestions(self, factors: Dict[str, float],
-                              response: str, query: str) -> List[str]:
+    def _generate_suggestions(
+        self, factors: dict[str, float], response: str, query: str
+    ) -> list[str]:
         """根据各维度评分生成改进建议"""
         suggestions = []
 
@@ -394,13 +432,15 @@ class ResponseEvaluator:
 
         # 特定问题诊断
         if len(response.strip()) < SUGGESTION_SHORT_RESPONSE_LEN:
-            suggestions.append(f"回答过短（<{SUGGESTION_SHORT_RESPONSE_LEN}字符），可能未有效回答问题")
+            suggestions.append(
+                f"回答过短（<{SUGGESTION_SHORT_RESPONSE_LEN}字符），可能未有效回答问题"
+            )
         if response in ("处理出错，请重试", "处理出错"):
             suggestions.append("回答为错误降级响应，需要排查上游异常")
 
         return suggestions
 
-    def _compute_trend(self, feedbacks: List[Dict[str, Any]]) -> str:
+    def _compute_trend(self, feedbacks: list[dict[str, Any]]) -> str:
         """计算反馈趋势：improving / declining / stable"""
         if len(feedbacks) < TREND_MIN_FEEDBACKS:
             return "stable"
@@ -429,7 +469,7 @@ class ResponseEvaluator:
 
     # ===== P2-4: LLM-as-Judge 评估 =====
 
-    async def evaluate_with_llm(self, query: str, response: str, llm_client) -> Dict[str, Any]:
+    async def evaluate_with_llm(self, query: str, response: str, llm_client) -> dict[str, Any]:
         """
         P2-4: 使用 LLM 对客服回复进行五维度评分。
         与规则评估互补，提供更准确的质量判断。
@@ -462,24 +502,34 @@ class ResponseEvaluator:
 
         try:
             from langchain_core.messages import HumanMessage
+
             result = await llm_client.async_invoke([HumanMessage(content=prompt)])
             raw = result.content.strip()
 
             # 解析 JSON 响应
             # 尝试提取 JSON（LLM 可能输出 markdown 包裹的 JSON）
-            json_match = re.search(r'\{[^}]+\}', raw)
+            json_match = re.search(r"\{[^}]+\}", raw)
             if json_match:
                 factors = json.loads(json_match.group())
                 # 验证所有维度都存在且在 0-100 范围内
-                required_dims = ["completeness", "accuracy", "conciseness", "politeness", "relevance"]
+                required_dims = [
+                    "completeness",
+                    "accuracy",
+                    "conciseness",
+                    "politeness",
+                    "relevance",
+                ]
                 for dim in required_dims:
                     if dim not in factors:
                         factors[dim] = SCORE_BASE_COMPLETENESS
                     factors[dim] = min(100, max(0, float(factors[dim])))
 
                 weights = {
-                    "completeness": WEIGHT_COMPLETENESS, "accuracy": WEIGHT_ACCURACY, "conciseness": WEIGHT_CONCISENESS,
-                    "politeness": WEIGHT_POLITENESS, "relevance": WEIGHT_RELEVANCE,
+                    "completeness": WEIGHT_COMPLETENESS,
+                    "accuracy": WEIGHT_ACCURACY,
+                    "conciseness": WEIGHT_CONCISENESS,
+                    "politeness": WEIGHT_POLITENESS,
+                    "relevance": WEIGHT_RELEVANCE,
                 }
                 score = round(sum(factors[k] * weights[k] for k in factors), 1)
 
@@ -492,8 +542,18 @@ class ResponseEvaluator:
                 }
             else:
                 logger.warning(f"LLM-as-Judge 响应格式异常: {raw[:200]}")
-                return {"score": 0, "factors": {}, "raw_evaluation": raw, "method": "llm_judge_error"}
+                return {
+                    "score": 0,
+                    "factors": {},
+                    "raw_evaluation": raw,
+                    "method": "llm_judge_error",
+                }
 
         except Exception as e:
             logger.warning(f"LLM-as-Judge 评估失败: {e}")
-            return {"score": 0, "factors": {}, "raw_evaluation": str(e), "method": "llm_judge_error"}
+            return {
+                "score": 0,
+                "factors": {},
+                "raw_evaluation": str(e),
+                "method": "llm_judge_error",
+            }

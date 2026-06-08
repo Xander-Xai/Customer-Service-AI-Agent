@@ -8,14 +8,15 @@ v3.4 优化：
 - L2 tokenize 改用 jieba 中文分词（与 session_manager 共享），提升中文语义匹配精度
 - 缓存淘汰策略优化：每次淘汰 5% 而非 20%，避免缓存雪崩
 """
+
 import asyncio
 import hashlib
 import time
-from collections import defaultdict, OrderedDict, deque
+from collections import OrderedDict, defaultdict, deque
 from typing import Dict, List, Optional, Tuple
-from logger import get_logger
-import config
 
+import config
+from logger import get_logger
 from session_manager import _tokenize_chinese as _tokenize
 
 logger = get_logger("cache")
@@ -24,30 +25,38 @@ logger = get_logger("cache")
 class ResponseCache:
     """二级响应缓存"""
 
-    def __init__(self, l1_max: int = 500, l2_max: int = 2000, default_ttl: float = 3600,
-                 threshold_short: float = config.CACHE_SEMANTIC_THRESHOLD_SHORT,
-                 threshold_long: float = config.CACHE_SEMANTIC_THRESHOLD_LONG,
-                 short_text_max_len: int = 20):
+    def __init__(
+        self,
+        l1_max: int = 500,
+        l2_max: int = 2000,
+        default_ttl: float = 3600,
+        threshold_short: float = config.CACHE_SEMANTIC_THRESHOLD_SHORT,
+        threshold_long: float = config.CACHE_SEMANTIC_THRESHOLD_LONG,
+        short_text_max_len: int = 20,
+    ):
         self._l1: OrderedDict = OrderedDict()  # key -> (response, ts)
         self._l1_max = l1_max
-        self._l2: Dict[str, Tuple[frozenset, str, float]] = {}
+        self._l2: dict[str, tuple[frozenset, str, float]] = {}
         self._l2_order: deque = deque()  # v3.6: 改用 deque，淘汰从 O(n) 优化到 O(1)
         self._l2_counter = 0  # v3.7: 单调递增计数器，防止淘汰后键碰撞
         self._l2_max = l2_max
-        self._inverted_index: Dict[str, set] = defaultdict(set)
+        self._inverted_index: dict[str, set] = defaultdict(set)
         self._default_ttl = default_ttl
         self._threshold_short = threshold_short
         self._threshold_long = threshold_long
         self._short_text_max_len = short_text_max_len
         self._stats = {"l1_hits": 0, "l2_hits": 0, "misses": 0}
-        logger.info(f"初始化: L1_max={l1_max} L2_max={l2_max} TTL={default_ttl}s "
-                    f"threshold_short={threshold_short} threshold_long={threshold_long} "
-                    f"short_text_max_len={short_text_max_len}")
+        logger.info(
+            f"初始化: L1_max={l1_max} L2_max={l2_max} TTL={default_ttl}s "
+            f"threshold_short={threshold_short} threshold_long={threshold_long} "
+            f"short_text_max_len={short_text_max_len}"
+        )
 
     async def _init_redis(self, redis_url: str = None):
         """可选：初始化 Redis 持久化层（懒加载，不影响主功能）"""
         try:
             import redis
+
             url = redis_url or config.REDIS_URL
             self._redis = redis.Redis.from_url(url, decode_responses=True)
             await asyncio.to_thread(self._redis.ping)
@@ -63,7 +72,10 @@ class ResponseCache:
             return
         try:
             import json
-            keys = await asyncio.to_thread(lambda: list(self._redis.scan_iter("cache:resp:*", count=100)))
+
+            keys = await asyncio.to_thread(
+                lambda: list(self._redis.scan_iter("cache:resp:*", count=100))
+            )
             for key in keys[:100]:  # 限制预热数量
                 data = await asyncio.to_thread(self._redis.get, key)
                 if data:
@@ -75,7 +87,7 @@ class ResponseCache:
         except Exception as e:
             logger.warning(f"Redis 预热失败: {e}")
 
-    def get(self, query: str) -> Optional[str]:
+    def get(self, query: str) -> str | None:
         key_md5 = self._md5(query)
         if key_md5 in self._l1:
             resp, ts = self._l1[key_md5]
@@ -105,16 +117,15 @@ class ResponseCache:
         self._l1.move_to_end(key_md5)
 
         # 可选：同步写入 Redis 持久化层（非阻塞，通过线程执行）
-        if hasattr(self, '_redis') and self._redis:
+        if hasattr(self, "_redis") and self._redis:
             try:
                 import json
                 import threading
+
                 data = json.dumps({"response": response, "ts": now}, ensure_ascii=False)
                 key = f"cache:resp:{key_md5}"
                 ttl = int(self._default_ttl)
-                t = threading.Thread(
-                    target=self._redis.setex, args=(key, ttl, data), daemon=True
-                )
+                t = threading.Thread(target=self._redis.setex, args=(key, ttl, data), daemon=True)
                 t.start()
             except Exception:
                 pass
@@ -141,7 +152,7 @@ class ResponseCache:
         self._redis = None  # v3.6: 重置 Redis 客户端
         logger.info("缓存已清空")
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> dict[str, int]:
         total = self._stats["l1_hits"] + self._stats["l2_hits"] + self._stats["misses"]
         hit_rate = (self._stats["l1_hits"] + self._stats["l2_hits"]) / max(total, 1) * 100
         return {
@@ -152,11 +163,15 @@ class ResponseCache:
             "hit_rate": f"{hit_rate:.1f}%",
         }
 
-    def _semantic_search(self, query: str) -> Optional[str]:
+    def _semantic_search(self, query: str) -> str | None:
         tokens = _tokenize(query)
         if not tokens:
             return None
-        threshold = self._threshold_short if len(query) <= self._short_text_max_len else self._threshold_long
+        threshold = (
+            self._threshold_short
+            if len(query) <= self._short_text_max_len
+            else self._threshold_long
+        )
 
         candidate_keys: set = set()
         for t in tokens:
@@ -212,6 +227,8 @@ class ResponseCache:
                 tokens = self._l2[old_key][0]
                 for t in tokens:
                     self._inverted_index[t].discard(old_key)
-                    if not self._inverted_index[t]:  # v3.8 fix: clean empty sets to prevent memory leak
+                    if not self._inverted_index[
+                        t
+                    ]:  # v3.8 fix: clean empty sets to prevent memory leak
                         del self._inverted_index[t]
                 del self._l2[old_key]

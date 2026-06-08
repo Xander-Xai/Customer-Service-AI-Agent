@@ -2,10 +2,11 @@
 监控相关路由：健康检查、指标、KPI、缓存统计、告警、熔断器、Prometheus
 从 api/app.py create_app() 提取，通过 request.app.state 访问依赖。
 """
+
 import os
+import re
 import sys
 import time
-import re
 
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
@@ -16,7 +17,7 @@ router = APIRouter()
 logger = get_logger("api.monitoring")
 
 # Prometheus label 安全正则
-_PROM_LABEL_RE = re.compile(r'[^a-zA-Z0-9_]')
+_PROM_LABEL_RE = re.compile(r"[^a-zA-Z0-9_]")
 
 
 @router.get("/api/health")
@@ -42,14 +43,18 @@ async def health(request: Request):
     # LLM
     llm_api_key = os.environ.get("OPENAI_API_KEY", "")
     _placeholder_prefixes = ("sk-placeholder", "your-", "sk-xxx", "sk-your", "sk-test-placeholder")
-    llm_key_valid = bool(llm_api_key) and not any(llm_api_key.lower().startswith(p) for p in _placeholder_prefixes)
+    llm_key_valid = bool(llm_api_key) and not any(
+        llm_api_key.lower().startswith(p) for p in _placeholder_prefixes
+    )
     from config import LLM_PROVIDER
+
     llm_provider = LLM_PROVIDER
 
     # ChromaDB
     chromadb_ok = False
     try:
         import chromadb
+
         client = chromadb.Client()
         client.heartbeat()
         chromadb_ok = True
@@ -60,8 +65,10 @@ async def health(request: Request):
     db_ok = False
     db_latency_ms = None
     try:
-        from db.database import engine
         from sqlalchemy import text as _sql_text
+
+        from db.database import engine
+
         t0 = time.time()
         with engine.connect() as conn:
             conn.execute(_sql_text("SELECT 1"))
@@ -70,7 +77,8 @@ async def health(request: Request):
     except Exception as e:
         logger.debug(f"[Health] 数据库连接检查失败: {e}")
 
-    from config import VERSION, DEV_MODE, REDIS_URL
+    from config import DEV_MODE, REDIS_URL, VERSION
+
     uptime_seconds = round(time.time() - getattr(state, "module_load_time", time.time()), 2)
     circuit_state = cb_status["state"]
 
@@ -88,9 +96,16 @@ async def health(request: Request):
         "uptime_seconds": uptime_seconds,
         "python_version": sys.version.split()[0],
         "components": {
-            "circuit_breaker": {"state": circuit_state, "consecutive_failures": cb_status.get("consecutive_failures", 0)},
+            "circuit_breaker": {
+                "state": circuit_state,
+                "consecutive_failures": cb_status.get("consecutive_failures", 0),
+            },
             "redis": {"connected": redis_ok, "latency_ms": redis_latency_ms},
-            "llm": {"configured": bool(llm_api_key), "key_valid": llm_key_valid, "provider": llm_provider},
+            "llm": {
+                "configured": bool(llm_api_key),
+                "key_valid": llm_key_valid,
+                "provider": llm_provider,
+            },
             "chromadb": {"connected": chromadb_ok},
             "database": {"connected": db_ok, "latency_ms": db_latency_ms},
         },
@@ -111,6 +126,7 @@ async def metrics_endpoint(request: Request):
         await persist_fn()
 
     from config import VERSION
+
     return {"version": VERSION, "metrics": stats, "cache": cache_stats, "timestamp": time.time()}
 
 
@@ -125,6 +141,7 @@ async def kpi_endpoint(request: Request):
         await persist_fn()
 
     from config import VERSION
+
     result = {"version": VERSION, "kpi": kpi, "timestamp": time.time()}
 
     r = getattr(state, "get_redis_client", lambda: None)()
@@ -170,67 +187,71 @@ async def prometheus_metrics(request: Request):
 
     stats = await metrics.get_stats()
     from config import VERSION
+
     lines = [
-        f'# HELP csai_info Service information',
-        f'# TYPE csai_info gauge',
+        "# HELP csai_info Service information",
+        "# TYPE csai_info gauge",
         f'csai_info{{version="{VERSION}"}} 1',
-        '',
-        f'# HELP csai_requests_total Total requests',
-        f'# TYPE csai_requests_total counter',
-        f'csai_requests_total {stats.get("total_requests", 0)}',
-        '',
-        f'# HELP csai_errors_total Total errors',
-        f'# TYPE csai_errors_total counter',
-        f'csai_errors_total {stats.get("total_errors", 0)}',
-        '',
-        f'# HELP csai_avg_response_time_seconds Average response time',
-        f'# TYPE csai_avg_response_time_seconds gauge',
-        f'csai_avg_response_time_seconds {stats.get("avg_response_time", 0)}',
-        '',
+        "",
+        "# HELP csai_requests_total Total requests",
+        "# TYPE csai_requests_total counter",
+        f"csai_requests_total {stats.get('total_requests', 0)}",
+        "",
+        "# HELP csai_errors_total Total errors",
+        "# TYPE csai_errors_total counter",
+        f"csai_errors_total {stats.get('total_errors', 0)}",
+        "",
+        "# HELP csai_avg_response_time_seconds Average response time",
+        "# TYPE csai_avg_response_time_seconds gauge",
+        f"csai_avg_response_time_seconds {stats.get('avg_response_time', 0)}",
+        "",
     ]
 
     # Agent 分布
     agent_counts = stats.get("agent_call_counts", {})
     if agent_counts:
-        lines.append('# HELP csai_agent_calls_total Agent call counts')
-        lines.append('# TYPE csai_agent_calls_total counter')
+        lines.append("# HELP csai_agent_calls_total Agent call counts")
+        lines.append("# TYPE csai_agent_calls_total counter")
         for agent, count in agent_counts.items():
-            safe_agent = _PROM_LABEL_RE.sub('_', agent)
+            safe_agent = _PROM_LABEL_RE.sub("_", agent)
             lines.append(f'csai_agent_calls_total{{agent="{safe_agent}"}} {count}')
-        lines.append('')
+        lines.append("")
 
     # SLA
     sla = stats.get("sla", {})
     if sla:
-        lines.append('# HELP csai_sla_violation_rate SLA violation rate')
-        lines.append('# TYPE csai_sla_violation_rate gauge')
-        lines.append(f'csai_sla_violation_rate {sla.get("violation_rate", 0)}')
+        lines.append("# HELP csai_sla_violation_rate SLA violation rate")
+        lines.append("# TYPE csai_sla_violation_rate gauge")
+        lines.append(f"csai_sla_violation_rate {sla.get('violation_rate', 0)}")
 
     # 熔断器
     cb = getattr(state, "circuit_breaker", None)
     if cb:
         cb_status = cb.get_status()
         state_map = {"closed": 0, "open": 1, "half_open": 0.5}
-        lines.append('# HELP csai_circuit_breaker_state Circuit breaker state')
-        lines.append('# TYPE csai_circuit_breaker_state gauge')
-        lines.append(f'csai_circuit_breaker_state {state_map.get(cb_status.get("state", ""), -1)}')
+        lines.append("# HELP csai_circuit_breaker_state Circuit breaker state")
+        lines.append("# TYPE csai_circuit_breaker_state gauge")
+        lines.append(f"csai_circuit_breaker_state {state_map.get(cb_status.get('state', ''), -1)}")
 
-    return PlainTextResponse('\n'.join(lines) + '\n', media_type="text/plain")
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain")
 
 
 @router.get("/api/monitoring/quality-trends")
 async def quality_trends():
     """最近7天质量评分趋势（初始模拟数据，后续由 metrics collector 累积）"""
     from datetime import date, timedelta
+
     today = date.today()
     trends = []
     for i in range(6, -1, -1):
         d = today - timedelta(days=i)
-        trends.append({
-            "date": d.isoformat(),
-            "avg_score": round(70 + (7 - i) * 1.8, 1),
-            "total_queries": 40 + i * 5,
-        })
+        trends.append(
+            {
+                "date": d.isoformat(),
+                "avg_score": round(70 + (7 - i) * 1.8, 1),
+                "total_queries": 40 + i * 5,
+            }
+        )
     return {"trends": trends}
 
 

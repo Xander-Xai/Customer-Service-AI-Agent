@@ -4,6 +4,7 @@ Token 计数与中文分词工具模块
 - tiktoken token 计数
 - jieba 中文分词
 """
+
 import re
 
 from logger import get_logger
@@ -22,6 +23,7 @@ def _get_jieba():
         _jieba_loaded = True
         try:
             import jieba
+
             jieba.setLogLevel(jieba.logging.WARNING)
             _jieba = jieba
             logger.info("jieba 中文分词已加载")
@@ -43,6 +45,7 @@ def _get_tokenizer():
         _tokenizer_loaded = True
         try:
             import tiktoken
+
             _tokenizer = tiktoken.get_encoding("cl100k_base")
             logger.info("tiktoken 编码器已加载")
         except ImportError:

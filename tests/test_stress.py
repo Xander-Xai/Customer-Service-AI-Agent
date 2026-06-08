@@ -3,10 +3,12 @@
 验证系统在高并发和大数据量下的稳定性和性能。
 所有测试无需外部依赖，可在 CI 中运行。
 """
+
 import asyncio
 import time
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 @pytest.mark.stress
@@ -16,6 +18,7 @@ class TestCacheStress:
     def test_cache_high_frequency_read_write(self):
         """高频读写缓存"""
         from cache.response_cache import ResponseCache
+
         cache = ResponseCache(l1_max=500, l2_max=500, default_ttl=3600)
 
         start = time.time()
@@ -30,6 +33,7 @@ class TestCacheStress:
     def test_cache_eviction_under_pressure(self):
         """高负载下的缓存淘汰"""
         from cache.response_cache import ResponseCache
+
         cache = ResponseCache(l1_max=100, l2_max=100, default_ttl=3600)
 
         # 写入远超容量的数据
@@ -43,6 +47,7 @@ class TestCacheStress:
     def test_cache_concurrent_access(self):
         """缓存并发访问"""
         from cache.response_cache import ResponseCache
+
         cache = ResponseCache(l1_max=1000, l2_max=0)
 
         # 同步读写（缓存本身是同步接口）
@@ -62,7 +67,7 @@ class TestMessageBusStress:
     @pytest.mark.asyncio
     async def test_bus_high_concurrency(self):
         """高并发消息发布"""
-        from core.message_bus import MessageBus, Message, MessageType
+        from core.message_bus import Message, MessageBus, MessageType
 
         bus = MessageBus()
         received = []
@@ -74,16 +79,16 @@ class TestMessageBusStress:
 
         async def publish_batch(start_idx: int):
             for i in range(50):
-                await bus.publish(Message(
-                    msg_type=MessageType.BROADCAST,
-                    topic="stress_topic",
-                    sender=f"sender_{start_idx}",
-                    payload={"idx": start_idx * 50 + i}
-                ))
+                await bus.publish(
+                    Message(
+                        msg_type=MessageType.BROADCAST,
+                        topic="stress_topic",
+                        sender=f"sender_{start_idx}",
+                        payload={"idx": start_idx * 50 + i},
+                    )
+                )
 
-        await asyncio.gather(
-            publish_batch(0), publish_batch(1), publish_batch(2), publish_batch(3)
-        )
+        await asyncio.gather(publish_batch(0), publish_batch(1), publish_batch(2), publish_batch(3))
 
         # 等待消息处理
         await asyncio.sleep(0.1)
@@ -106,9 +111,7 @@ class TestBlackboardStress:
             for i in range(100):
                 await bb.write(f"{prefix}_{i}", f"value_{i}", ttl=60)
 
-        await asyncio.gather(
-            write_batch("a"), write_batch("b"), write_batch("c"), write_batch("d")
-        )
+        await asyncio.gather(write_batch("a"), write_batch("b"), write_batch("c"), write_batch("d"))
 
         # 读取部分数据验证
         val_a = await bb.read("a_0")
@@ -227,9 +230,7 @@ class TestMetricsStress:
                     error=(i % 20 == 0),
                 )
 
-        await asyncio.gather(
-            record_batch(0), record_batch(1), record_batch(2), record_batch(3)
-        )
+        await asyncio.gather(record_batch(0), record_batch(1), record_batch(2), record_batch(3))
 
         stats = await mc.get_stats()
         assert stats["total_requests"] == 400

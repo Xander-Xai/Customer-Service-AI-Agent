@@ -3,10 +3,13 @@ ReAct 推理智能体（v3.5）
 结合 RAG 检索 + Function Calling 的自主推理 Agent。
 实现 Thought → Action → Observation → Answer 的推理链。
 """
-from typing import Dict, Any
-from .base_agent import BaseAgent
+
+from typing import Any, Dict
+
 from config import REACT_MAX_ITERATIONS
 from logger import get_logger
+
+from .base_agent import BaseAgent
 
 logger = get_logger("agent.react")
 
@@ -44,11 +47,11 @@ class ReActAgent(BaseAgent):
         super().__init__(
             name="ReAct推理专家",
             role="复杂多步骤推理与工具调用",
-            expertise=["多步骤推理", "RAG知识检索", "ERP工具调用", "综合分析"]
+            expertise=["多步骤推理", "RAG知识检索", "ERP工具调用", "综合分析"],
         )
         self.max_iterations = max_iterations
 
-    async def process(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         """
         ReAct 处理流程：
         1. RAG 检索相关知识作为上下文

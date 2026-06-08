@@ -6,12 +6,16 @@
 - 会话上下文管理
 - 自动检测 PostgreSQL / SQLite
 """
+
 import os
 from urllib.parse import urlparse
+
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
+
 from logger import get_logger
+
 from .models import Base
 
 logger = get_logger("db")
@@ -71,6 +75,7 @@ def init_db():
         # v4.1: SQLite WAL 模式提升并发写入性能
         try:
             from sqlalchemy import text
+
             with engine.connect() as conn:
                 conn.execute(text("PRAGMA journal_mode=WAL"))
                 conn.execute(text("PRAGMA synchronous=NORMAL"))
@@ -82,6 +87,7 @@ def init_db():
     _alembic_ok = False
     try:
         from alembic.config import Config as AlembicConfig
+
         from alembic import command as alembic_command
 
         # 优先使用配置的 alembic.ini 路径
@@ -90,9 +96,7 @@ def init_db():
         except ImportError:
             _alembic_cfg = os.getenv("ALEMBIC_CONFIG_PATH", "alembic.ini")
 
-        alembic_cfg_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), _alembic_cfg
-        )
+        alembic_cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), _alembic_cfg)
 
         if os.path.exists(alembic_cfg_path):
             # 设置 DATABASE_URL 环境变量供 alembic 读取

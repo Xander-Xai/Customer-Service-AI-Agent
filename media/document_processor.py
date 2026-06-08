@@ -7,6 +7,7 @@ DocumentProcessor — 文档内容提取（v5.1）
 - 纯文本/Markdown 直接读取
 - 大小限制 + 内容截断
 """
+
 import logging
 from typing import Optional
 
@@ -35,7 +36,7 @@ class DocumentProcessor:
         self.max_size_mb = max_size_mb
         self.max_content_length = max_content_length
 
-    def validate(self, data: bytes, content_type: str) -> Optional[str]:
+    def validate(self, data: bytes, content_type: str) -> str | None:
         """校验文档文件"""
         if content_type not in ALLOWED_DOC_TYPES:
             return f"不支持的文档格式: {content_type}，支持: PDF/DOCX/TXT/MD"
@@ -66,7 +67,10 @@ class DocumentProcessor:
 
         if content_type == "application/pdf":
             text = self._extract_pdf(data)
-        elif content_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        elif (
+            content_type
+            == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ):
             text = self._extract_docx(data)
         elif content_type in ("text/plain", "text/markdown"):
             text = self._extract_text(data)
@@ -75,7 +79,7 @@ class DocumentProcessor:
 
         # 截断
         if len(text) > self.max_content_length:
-            text = text[:self.max_content_length] + f"\n\n... [内容截断，共 {len(text)} 字符]"
+            text = text[: self.max_content_length] + f"\n\n... [内容截断，共 {len(text)} 字符]"
 
         logger.info(f"文档提取完成: {content_type} → {len(text)} chars")
         return text
@@ -83,8 +87,10 @@ class DocumentProcessor:
     def _extract_pdf(self, data: bytes) -> str:
         """提取 PDF 文本"""
         try:
-            import pdfplumber
             import io
+
+            import pdfplumber
+
             text_parts = []
             with pdfplumber.open(io.BytesIO(data)) as pdf:
                 for page in pdf.pages:
@@ -101,8 +107,10 @@ class DocumentProcessor:
     def _extract_docx(self, data: bytes) -> str:
         """提取 Word 文档文本"""
         try:
-            from docx import Document
             import io
+
+            from docx import Document
+
             doc = Document(io.BytesIO(data))
             paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
             return "\n\n".join(paragraphs) if paragraphs else "[Word 文档无可提取的文本内容]"

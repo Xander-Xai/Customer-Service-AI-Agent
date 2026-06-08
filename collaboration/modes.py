@@ -7,13 +7,15 @@
 - v3.5: ReActMode 支持 RAG + Function Calling 自主推理
 - v4.3: 各模式独立 SLA 超时配置
 """
+
 import asyncio
 import time
-from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
-from core.message_bus import MessageBus, Message, MessageType
+from typing import Any, Dict, Optional
+
+from config import SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX, SLA_PARALLEL_MAX
+from core.message_bus import Message, MessageBus, MessageType
 from core.shared_blackboard import SharedBlackboard
-from config import SLA_PARALLEL_MAX, SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX
 from logger import get_logger
 
 logger = get_logger("collaboration.modes")
@@ -22,25 +24,28 @@ logger = get_logger("collaboration.modes")
 class CollaborationMode(ABC):
     """协作模式基类"""
 
-    def __init__(self, bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
+    def __init__(self, bus: MessageBus | None = None, bb: SharedBlackboard | None = None):
         self.bus = bus
         self.bb = bb
 
     @abstractmethod
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         """执行协作"""
 
     async def _safe_publish(self, topic: str, sender: str, payload: dict):
         """安全发布 MessageBus 事件（静默失败，debug 日志含异常详情）"""
         try:
             if self.bus:
-                await self.bus.publish(Message(
-                    msg_type=MessageType.BROADCAST,
-                    topic=topic,
-                    sender=sender,
-                    payload=payload,
-                ))
+                await self.bus.publish(
+                    Message(
+                        msg_type=MessageType.BROADCAST,
+                        topic=topic,
+                        sender=sender,
+                        payload=payload,
+                    )
+                )
         except Exception as e:
             logger.debug(f"{sender}: 发布 {topic} 事件失败: {e}")
 
@@ -65,23 +70,32 @@ class CollaborationMode(ABC):
 class SequentialMode(CollaborationMode):
     """顺序模式：单个 Agent 处理"""
 
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         agent_name = context.get("primary_agent", "general_agent")
         agent = agents.get(agent_name)
         if not agent:
-            return {"response": f"Agent {agent_name} not found", "mode": "sequential", "agents_used": []}
+            return {
+                "response": f"Agent {agent_name} not found",
+                "mode": "sequential",
+                "agents_used": [],
+            }
 
         start = time.time()
 
-        await self._safe_publish("agent.start", "sequential_mode",
-                                 {"agent": agent_name, "mode": "sequential"})
+        await self._safe_publish(
+            "agent.start", "sequential_mode", {"agent": agent_name, "mode": "sequential"}
+        )
 
         result = await agent.process_with_retry(dict(state))
         elapsed = time.time() - start
 
-        await self._safe_publish("agent.complete", "sequential_mode",
-                                 {"agent": agent_name, "mode": "sequential", "elapsed": elapsed})
+        await self._safe_publish(
+            "agent.complete",
+            "sequential_mode",
+            {"agent": agent_name, "mode": "sequential", "elapsed": elapsed},
+        )
 
         logger.info(f"Sequential {agent_name} {elapsed:.1f}s")
         return {
@@ -97,11 +111,15 @@ class ParallelMode(CollaborationMode):
 
     _PARALLEL_TIMEOUT = SLA_PARALLEL_MAX  # v4.3: 使用配置化超时
 
-    def __init__(self, max_workers: int = 5,
-                 bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
+    def __init__(
+        self,
+        max_workers: int = 5,
+        bus: MessageBus | None = None,
+        bb: SharedBlackboard | None = None,
+    ):
         super().__init__(bus=bus, bb=bb)
         self.max_workers = max_workers
-        self._semaphore: Optional[asyncio.Semaphore] = None  # v3.4: 懒初始化
+        self._semaphore: asyncio.Semaphore | None = None  # v3.4: 懒初始化
 
     def _get_semaphore(self) -> asyncio.Semaphore:
         """v3.4: 懒初始化信号量，限制并行 Agent 数量"""
@@ -109,8 +127,9 @@ class ParallelMode(CollaborationMode):
             self._semaphore = asyncio.Semaphore(self.max_workers)
         return self._semaphore
 
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         agent_names = context.get("agent_list", [])
         start = time.time()
         sem = self._get_semaphore()  # v3.4: 获取信号量
@@ -122,8 +141,9 @@ class ParallelMode(CollaborationMode):
                     return name, f"[{name}] Agent not found", 0
                 s = time.time()
 
-                await self._safe_publish("agent.start", "parallel_mode",
-                                         {"agent": name, "mode": "parallel"})
+                await self._safe_publish(
+                    "agent.start", "parallel_mode", {"agent": name, "mode": "parallel"}
+                )
 
                 result = await agent.process_with_retry(dict(state))
                 elapsed = time.time() - s
@@ -133,8 +153,11 @@ class ParallelMode(CollaborationMode):
                     {"response": result.get("response", ""), "elapsed": elapsed},
                 )
 
-                await self._safe_publish("agent.complete", "parallel_mode",
-                                         {"agent": name, "mode": "parallel", "elapsed": elapsed})
+                await self._safe_publish(
+                    "agent.complete",
+                    "parallel_mode",
+                    {"agent": name, "mode": "parallel", "elapsed": elapsed},
+                )
 
                 return name, result.get("response", ""), elapsed
 
@@ -161,8 +184,9 @@ class ParallelMode(CollaborationMode):
         aggregated = "\n\n---\n\n".join(responses) if responses else "无可用 Agent 响应"
         elapsed = time.time() - start
 
-        await self._safe_publish("parallel.complete", "parallel_mode",
-                                 {"agents_used": agents_used, "elapsed": elapsed})
+        await self._safe_publish(
+            "parallel.complete", "parallel_mode", {"agents_used": agents_used, "elapsed": elapsed}
+        )
 
         logger.info(f"Parallel agents={agents_used} {elapsed:.1f}s")
         return {
@@ -176,56 +200,83 @@ class ParallelMode(CollaborationMode):
 class ConsultationMode(CollaborationMode):
     """咨询模式：主 Agent 处理 + 向辅助 Agent 请求补充信息"""
 
-    def __init__(self, consult_timeout: float = SLA_CONSULTATION_MAX,
-                 bus: Optional[MessageBus] = None, bb: Optional[SharedBlackboard] = None):
+    def __init__(
+        self,
+        consult_timeout: float = SLA_CONSULTATION_MAX,
+        bus: MessageBus | None = None,
+        bb: SharedBlackboard | None = None,
+    ):
         super().__init__(bus=bus, bb=bb)
         self.consult_timeout = consult_timeout
 
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         primary = context.get("primary_agent", "general_agent")
         consultees = context.get("consult_agents", [])
         start = time.time()
 
         primary_agent = agents.get(primary)
         if not primary_agent:
-            return {"response": f"Primary agent {primary} not found", "mode": "consultation", "agents_used": []}
+            return {
+                "response": f"Primary agent {primary} not found",
+                "mode": "consultation",
+                "agents_used": [],
+            }
 
         # 先让辅助 Agent 提供信息
         consult_results = []
         if consultees:
+
             async def consult(name: str):
                 agent = agents.get(name)
                 if not agent:
                     return name, ""
                 consult_state = dict(state)
-                consult_state["customer_query"] = f"[辅助请求] 请为以下问题提供专业补充信息：{state.get('customer_query', '')}"
+                consult_state["customer_query"] = (
+                    f"[辅助请求] 请为以下问题提供专业补充信息：{state.get('customer_query', '')}"
+                )
 
-                await self._safe_publish("consultation.consultee.start", "consultation_mode",
-                                         {"agent": name, "primary": primary})
+                await self._safe_publish(
+                    "consultation.consultee.start",
+                    "consultation_mode",
+                    {"agent": name, "primary": primary},
+                )
 
                 result = await agent.process_with_retry(consult_state)
                 response = result.get("response", "")
 
-                prefix = "tech." if "tech" in name else "erp." if "billing" in name else f"consult.{name}."
-                await self._safe_bb_write(f"{prefix}consult_result",
-                                          {"agent": name, "response": response})
+                prefix = (
+                    "tech."
+                    if "tech" in name
+                    else "erp."
+                    if "billing" in name
+                    else f"consult.{name}."
+                )
+                await self._safe_bb_write(
+                    f"{prefix}consult_result", {"agent": name, "response": response}
+                )
 
                 # 通过 Bus request 模式向主 Agent 发送补充信息
                 try:
                     if self.bus:
-                        await self.bus.publish(Message(
-                            msg_type=MessageType.RESPONSE,
-                            topic=f"consultation.{primary}",
-                            sender=name,
-                            receiver=primary,
-                            payload={"response": response, "agent": name},
-                        ))
+                        await self.bus.publish(
+                            Message(
+                                msg_type=MessageType.RESPONSE,
+                                topic=f"consultation.{primary}",
+                                sender=name,
+                                receiver=primary,
+                                payload={"response": response, "agent": name},
+                            )
+                        )
                 except Exception as e:
                     logger.debug(f"Consultation: 发送补充信息失败 ({name} -> {primary}): {e}")
 
-                await self._safe_publish("consultation.consultee.complete", "consultation_mode",
-                                         {"agent": name, "primary": primary})
+                await self._safe_publish(
+                    "consultation.consultee.complete",
+                    "consultation_mode",
+                    {"agent": name, "primary": primary},
+                )
 
                 return name, response
 
@@ -260,14 +311,20 @@ class ConsultationMode(CollaborationMode):
         if bb_context:
             enriched_state["customer_query"] += "\n\n[Blackboard 参考]\n" + "\n".join(bb_context)
 
-        await self._safe_publish("consultation.primary.start", "consultation_mode",
-                                 {"agent": primary, "consultees": [n for n, _ in consult_results]})
+        await self._safe_publish(
+            "consultation.primary.start",
+            "consultation_mode",
+            {"agent": primary, "consultees": [n for n, _ in consult_results]},
+        )
 
         result = await primary_agent.process_with_retry(enriched_state)
         elapsed = time.time() - start
 
-        await self._safe_publish("consultation.primary.complete", "consultation_mode",
-                                 {"agent": primary, "elapsed": elapsed})
+        await self._safe_publish(
+            "consultation.primary.complete",
+            "consultation_mode",
+            {"agent": primary, "elapsed": elapsed},
+        )
 
         logger.info(f"Consultation primary={primary} {elapsed:.1f}s")
         return {
@@ -283,20 +340,30 @@ class HierarchicalMode(CollaborationMode):
 
     _HIERARCHICAL_TIMEOUT = SLA_HIERARCHICAL_MAX  # v4.3: 使用配置化超时
 
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         coordinator_name = context.get("coordinator", "general_agent")
         sub_tasks = context.get("sub_tasks", {})
         start = time.time()
 
         coordinator = agents.get(coordinator_name)
         if not coordinator:
-            return {"response": f"Coordinator {coordinator_name} not found", "mode": "hierarchical", "agents_used": []}
+            return {
+                "response": f"Coordinator {coordinator_name} not found",
+                "mode": "hierarchical",
+                "agents_used": [],
+            }
 
         # 协调者通过 Bus 广播子任务分配
-        await self._safe_publish("hierarchical.task.assign", "hierarchical_mode",
-                                 {"coordinator": coordinator_name,
-                                  "sub_tasks": {n: q[:100] for n, q in sub_tasks.items()}})
+        await self._safe_publish(
+            "hierarchical.task.assign",
+            "hierarchical_mode",
+            {
+                "coordinator": coordinator_name,
+                "sub_tasks": {n: q[:100] for n, q in sub_tasks.items()},
+            },
+        )
 
         # 并行执行子任务
         async def run_subtask(name: str, sub_query: str):
@@ -304,19 +371,24 @@ class HierarchicalMode(CollaborationMode):
             if not agent:
                 return name, ""
 
-            await self._safe_publish("hierarchical.subtask.start", "hierarchical_mode",
-                                     {"agent": name, "sub_query": sub_query[:100]})
+            await self._safe_publish(
+                "hierarchical.subtask.start",
+                "hierarchical_mode",
+                {"agent": name, "sub_query": sub_query[:100]},
+            )
 
             sub_state = dict(state)
             sub_state["customer_query"] = sub_query
             result = await agent.process_with_retry(sub_state)
             response = result.get("response", "")
 
-            await self._safe_bb_write(f"hierarchical.subtask.{name}",
-                                      {"response": response, "sub_query": sub_query})
+            await self._safe_bb_write(
+                f"hierarchical.subtask.{name}", {"response": response, "sub_query": sub_query}
+            )
 
-            await self._safe_publish("hierarchical.subtask.complete", "hierarchical_mode",
-                                     {"agent": name})
+            await self._safe_publish(
+                "hierarchical.subtask.complete", "hierarchical_mode", {"agent": name}
+            )
 
             return name, response
 
@@ -366,8 +438,9 @@ class HierarchicalMode(CollaborationMode):
 class ReActMode(SequentialMode):
     """ReAct 推理模式（v3.5）：复用 SequentialMode 流程，仅覆盖 Agent 选择逻辑"""
 
-    async def execute(self, agents: Dict[str, Any], state: Dict[str, Any],
-                      context: Dict[str, Any]) -> Dict[str, Any]:
+    async def execute(
+        self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
+    ) -> dict[str, Any]:
         agent_name = "react_agent"
         agent = agents.get(agent_name)
 
@@ -380,10 +453,16 @@ class ReActMode(SequentialMode):
             logger.warning(f"ReActAgent 未注册，回退到 {primary}")
 
         start = time.time()
-        await self._safe_publish("agent.start", "react_mode", {"agent": agent_name, "mode": "react"})
+        await self._safe_publish(
+            "agent.start", "react_mode", {"agent": agent_name, "mode": "react"}
+        )
         result = await agent.process_with_retry(dict(state))
         elapsed = time.time() - start
-        await self._safe_publish("agent.complete", "react_mode", {"agent": agent_name, "mode": "react", "elapsed": elapsed})
+        await self._safe_publish(
+            "agent.complete",
+            "react_mode",
+            {"agent": agent_name, "mode": "react", "elapsed": elapsed},
+        )
         logger.info(f"ReAct {agent_name} {elapsed:.1f}s")
         return {
             "response": result.get("response", ""),

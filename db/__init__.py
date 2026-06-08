@@ -1,3 +1,4 @@
 """数据库模块（v4.0 — SQLite + SQLAlchemy）"""
-from .database import get_db, init_db, engine, SessionLocal
-from .models import Base, User, ChatHistory, AuditLog, Feedback
+
+from .database import SessionLocal, engine, get_db, init_db
+from .models import AuditLog, Base, ChatHistory, Feedback, User

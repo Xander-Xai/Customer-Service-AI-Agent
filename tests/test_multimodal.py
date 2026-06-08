@@ -3,7 +3,11 @@
 覆盖：ImageProcessor / AgentState 多模态字段 / BaseAgent 多模态消息构造 / Vision LLM 选择
 运行: pytest tests/test_multimodal.py -v
 """
-import os, sys, io, base64
+
+import base64
+import io
+import os
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,12 +20,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # 1. ImageProcessor 模块
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestImageProcessor:
     """ImageProcessor 完整验证"""
 
     def _make_test_image(self, width=100, height=100, fmt="JPEG"):
         """生成测试图片字节"""
         from PIL import Image
+
         img = Image.new("RGB", (width, height), color=(255, 0, 0))
         buf = io.BytesIO()
         img.save(buf, format=fmt)
@@ -29,6 +35,7 @@ class TestImageProcessor:
 
     def test_validate_mime_allowed(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         assert p.validate_mime("image/jpeg") is True
         assert p.validate_mime("image/png") is True
@@ -36,6 +43,7 @@ class TestImageProcessor:
 
     def test_validate_mime_rejected(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         assert p.validate_mime("image/gif") is False
         assert p.validate_mime("image/svg+xml") is False
@@ -44,16 +52,19 @@ class TestImageProcessor:
 
     def test_validate_size_within_limit(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor(max_size_mb=5)
         assert p.validate_size(b"x" * 1024) is True
 
     def test_validate_size_exceeds_limit(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor(max_size_mb=1)
         assert p.validate_size(b"x" * (2 * 1024 * 1024)) is False
 
     def test_process_returns_data_url(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         data = self._make_test_image(200, 200)
         result = p.process(data, "image/jpeg")
@@ -62,15 +73,18 @@ class TestImageProcessor:
 
     def test_process_rejects_bad_mime(self):
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         data = self._make_test_image()
         with pytest.raises(ValueError, match="不支持的图片格式"):
             p.process(data, "image/bmp")
 
     def test_process_rejects_oversized(self):
-        from media.image_processor import ImageProcessor
         # 使用随机噪声图片（压缩率低）确保超过 1MB
         import random
+
+        from media.image_processor import ImageProcessor
+
         random_data = bytes(random.getrandbits(8) for _ in range(2 * 1024 * 1024))  # 2MB
         p = ImageProcessor(max_size_mb=1)
         # 直接用大文件测试 validate_size
@@ -81,8 +95,10 @@ class TestImageProcessor:
 
     def test_process_compresses_large_image(self):
         """大图应被压缩（长边 <= 2048）"""
-        from media.image_processor import ImageProcessor
         from PIL import Image
+
+        from media.image_processor import ImageProcessor
+
         p = ImageProcessor(max_long_edge=512)
         # 创建 1000x1000 图片
         data = self._make_test_image(1000, 1000)
@@ -95,8 +111,10 @@ class TestImageProcessor:
 
     def test_process_rgba_to_rgb(self):
         """RGBA 图片应转为 RGB（JPEG 不支持 alpha）"""
-        from media.image_processor import ImageProcessor
         from PIL import Image
+
+        from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         img = Image.new("RGBA", (100, 100), color=(255, 0, 0, 128))
         buf = io.BytesIO()
@@ -108,6 +126,7 @@ class TestImageProcessor:
 
     def test_get_info_returns_metadata(self):
         from media.image_processor import ImageProcessor
+
         data = self._make_test_image(300, 200)
         info = ImageProcessor.get_info(data, "image/jpeg")
         assert info["width"] == 300
@@ -117,6 +136,7 @@ class TestImageProcessor:
     def test_process_png(self):
         """PNG 图片处理"""
         from media.image_processor import ImageProcessor
+
         p = ImageProcessor()
         data = self._make_test_image(100, 100, fmt="PNG")
         result = p.process(data, "image/png")
@@ -127,11 +147,13 @@ class TestImageProcessor:
 # 2. AgentState 多模态字段
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestAgentStateMultimodal:
     """AgentState 多模态字段验证"""
 
     def test_state_has_multimodal_fields(self):
         from core.state import AgentState
+
         # 检查 TypedDict 包含新字段
         annotations = AgentState.__annotations__
         assert "multimodal_content" in annotations
@@ -139,6 +161,7 @@ class TestAgentStateMultimodal:
 
     def test_state_multimodal_content_is_list(self):
         from core.state import AgentState
+
         # total=False，所以可以只设置部分字段
         state: AgentState = {
             "multimodal_content": [
@@ -152,6 +175,7 @@ class TestAgentStateMultimodal:
     def test_state_backward_compatible(self):
         """不含多模态字段时应兼容旧代码"""
         from core.state import AgentState
+
         state: AgentState = {
             "session_id": "test",
             "customer_query": "hello",
@@ -164,6 +188,7 @@ class TestAgentStateMultimodal:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 3. BaseAgent 多模态消息构造
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBaseAgentMultimodal:
     """BaseAgent 多模态消息构造验证"""
@@ -183,12 +208,10 @@ class TestBaseAgentMultimodal:
             "session_id": "test_mm_1",
             "customer_query": "你好",
         }
-        session_id, messages, drift = await agent._prepare_llm_messages(
-            state, "你是一个客服助手"
-        )
+        session_id, messages, drift = await agent._prepare_llm_messages(state, "你是一个客服助手")
         # 最后一条消息应是 HumanMessage with string content
         human_msg = messages[-1]
-        assert hasattr(human_msg, 'content')
+        assert hasattr(human_msg, "content")
         assert isinstance(human_msg.content, str)
         assert "你好" in human_msg.content
 
@@ -211,9 +234,7 @@ class TestBaseAgentMultimodal:
             ],
             "has_multimodal": True,
         }
-        session_id, messages, drift = await agent._prepare_llm_messages(
-            state, "你是一个产品专家"
-        )
+        session_id, messages, drift = await agent._prepare_llm_messages(state, "你是一个产品专家")
         # 最后一条消息应是 HumanMessage with list content
         human_msg = messages[-1]
         assert isinstance(human_msg.content, list)
@@ -229,12 +250,14 @@ class TestBaseAgentMultimodal:
 # 4. Vision LLM 选择
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestVisionLLMSelection:
     """Vision LLM 选择逻辑验证"""
 
     def test_get_effective_llm_text_only(self):
         """纯文本应使用默认 LLM"""
         from agents.general_agent import GeneralAgent
+
         agent = GeneralAgent()
         mock_llm = MagicMock()
         mock_vision = MagicMock()
@@ -248,6 +271,7 @@ class TestVisionLLMSelection:
     def test_get_effective_llm_multimodal(self):
         """多模态应使用 Vision LLM"""
         from agents.general_agent import GeneralAgent
+
         agent = GeneralAgent()
         mock_llm = MagicMock()
         mock_vision = MagicMock()
@@ -261,6 +285,7 @@ class TestVisionLLMSelection:
     def test_get_effective_llm_no_vision_fallback(self):
         """无 Vision LLM 时应回退到默认 LLM"""
         from agents.general_agent import GeneralAgent
+
         agent = GeneralAgent()
         mock_llm = MagicMock()
         agent.set_llm(mock_llm)
@@ -275,13 +300,15 @@ class TestVisionLLMSelection:
 # 5. LLM 客户端多模态格式
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestLLMClientMultimodal:
     """LLM 客户端多模态消息格式验证"""
 
     def test_format_messages_list_content(self):
         """list content 应直接传递（多模态格式）"""
-        from llm.client import OpenAICompatibleClient
         from langchain_core.messages import HumanMessage
+
+        from llm.client import OpenAICompatibleClient
 
         client = OpenAICompatibleClient(api_key="test", base_url="http://test", model="test")
         multimodal_content = [
@@ -298,8 +325,9 @@ class TestLLMClientMultimodal:
 
     def test_format_messages_string_content(self):
         """字符串 content 应正常处理"""
-        from llm.client import OpenAICompatibleClient
         from langchain_core.messages import HumanMessage
+
+        from llm.client import OpenAICompatibleClient
 
         client = OpenAICompatibleClient(api_key="test", base_url="http://test", model="test")
         messages = [HumanMessage(content="你好")]

@@ -4,21 +4,22 @@
 - PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
+
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import time
-import hmac
-import hashlib
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import jwt
 import redis as _redis_mod
 from sqlalchemy.exc import SQLAlchemyError
 
-from db.models import User
 from db.database import get_db_session
+from db.models import User
 from logger import get_logger
 
 logger = get_logger("auth.service")
@@ -45,9 +46,13 @@ class _TokenDenylist:
         self._prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:")
         try:
             import redis as _redis_lib
+
             redis_url = getattr(_config, "REDIS_URL", "redis://localhost:6379")
             self._redis = _redis_lib.Redis.from_url(
-                redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2,
+                redis_url,
+                decode_responses=True,
+                socket_timeout=2,
+                socket_connect_timeout=2,
             )
             self._redis.ping()
             self._use_redis = True
@@ -94,6 +99,7 @@ def hash_password(password: str) -> str:
     # Migration path: hash new passwords with Argon2id, verify old ones with PBKDF2,
     # rehash on successful login. See SECURITY.md for details.
     import os
+
     salt = os.urandom(16).hex()
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600000)
     return f"{salt}${dk.hex()}"
@@ -122,7 +128,7 @@ def _create_token(
     user_id: int,
     username: str,
     role: str,
-    token_type: Optional[str],
+    token_type: str | None,
     expire_hours: int,
     jti_bytes: int = 8,
 ) -> str:
@@ -141,7 +147,7 @@ def _create_token(
     secret = _config.JWT_SECRET
     if not secret:
         raise ValueError("JWT_SECRET 未配置，无法生成 token")
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "sub": str(user_id),
         "username": username,
         "role": role,
@@ -169,8 +175,12 @@ async def create_refresh_token(user_id: int, username: str, role: str) -> str:
     """P2-3: 生成长生命周期 refresh_token（默认 7 天），存入 Redis 便于吊销"""
     expire_hours = getattr(_config, "JWT_REFRESH_EXPIRE_HOURS", 168)
     token = _create_token(
-        user_id, username, role, token_type="refresh",
-        expire_hours=expire_hours, jti_bytes=16,
+        user_id,
+        username,
+        role,
+        token_type="refresh",
+        expire_hours=expire_hours,
+        jti_bytes=16,
     )
 
     # 存储 refresh_token JTI 到 Redis（用于主动吊销）
@@ -178,7 +188,9 @@ async def create_refresh_token(user_id: int, username: str, role: str) -> str:
         # Extract jti from the just-created token for Redis storage
         try:
             payload = jwt.decode(
-                token, _config.JWT_SECRET, algorithms=[_JWT_ALGORITHM],
+                token,
+                _config.JWT_SECRET,
+                algorithms=[_JWT_ALGORITHM],
                 options={"verify_exp": False},
             )
             jti = payload.get("jti")
@@ -187,11 +199,14 @@ async def create_refresh_token(user_id: int, username: str, role: str) -> str:
         if jti:
             try:
                 refresh_prefix = getattr(
-                    _config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:",
+                    _config,
+                    "REDIS_JWT_PREFIX",
+                    "csai:jwt:blacklist:",
                 ).replace("blacklist", "refresh")
                 await asyncio.to_thread(
                     _denylist._redis.setex,
-                    f"{refresh_prefix}{jti}", expire_hours * 3600,
+                    f"{refresh_prefix}{jti}",
+                    expire_hours * 3600,
                     json.dumps({"user_id": user_id, "username": username}),
                 )
             except _redis_mod.RedisError:
@@ -200,7 +215,7 @@ async def create_refresh_token(user_id: int, username: str, role: str) -> str:
     return token
 
 
-def refresh_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
+def refresh_access_token(refresh_token: str) -> dict[str, Any] | None:
     """P2-3: 用 refresh_token 换取新的 access_token"""
     payload = decode_token(refresh_token)
     if not payload:
@@ -211,10 +226,14 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
     # 验证用户仍然有效
     db = get_db_session()
     try:
-        user = db.query(User).filter(
-            User.id == payload.get("sub"),
-            User.is_active == 1,
-        ).first()
+        user = (
+            db.query(User)
+            .filter(
+                User.id == payload.get("sub"),
+                User.is_active == 1,
+            )
+            .first()
+        )
         if not user:
             return None
 
@@ -240,7 +259,9 @@ async def revoke_user_tokens(user_id: int) -> int:
     if not _denylist._use_redis:
         return 0
     try:
-        refresh_prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:").replace("blacklist", "refresh")
+        refresh_prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:").replace(
+            "blacklist", "refresh"
+        )
         revoked = 0
         max_keys = 5000  # 最多扫描 5000 个 key，防止 Redis 阻塞
         scanned = 0
@@ -272,7 +293,7 @@ async def revoke_user_tokens(user_id: int) -> int:
         return 0
 
 
-def decode_token(token: str) -> Optional[Dict[str, Any]]:
+def decode_token(token: str) -> dict[str, Any] | None:
     """验证并解码 JWT token（v4.0: 支持 jti 吊销检查）"""
     secret = _config.JWT_SECRET
     if not secret:
@@ -305,7 +326,7 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
-async def decode_token_async(token: str) -> Optional[Dict[str, Any]]:
+async def decode_token_async(token: str) -> dict[str, Any] | None:
     """异步版本：验证并解码 JWT token，支持 Redis 黑名单检查"""
     secret = _config.JWT_SECRET
     if not secret:
@@ -326,7 +347,7 @@ async def decode_token_async(token: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
-def get_current_user(token: str) -> Optional[User]:
+def get_current_user(token: str) -> User | None:
     """从 JWT token 获取当前用户"""
     payload = decode_token(token)
     if not payload:
@@ -341,7 +362,7 @@ def get_current_user(token: str) -> Optional[User]:
         db.close()
 
 
-def get_user_id_from_request(request) -> Optional[int]:
+def get_user_id_from_request(request) -> int | None:
     """从请求中提取当前用户 ID（用于工具调用权限校验）"""
     auth_header = request.headers.get("Authorization", "")
     jwt_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
@@ -369,7 +390,7 @@ async def revoke_token(token: str) -> bool:
     return False
 
 
-def register_user(username: str, password: str, display_name: str = "") -> Dict[str, Any]:
+def register_user(username: str, password: str, display_name: str = "") -> dict[str, Any]:
     """注册用户"""
     db = get_db_session()
     try:
@@ -397,7 +418,7 @@ def register_user(username: str, password: str, display_name: str = "") -> Dict[
         db.close()
 
 
-def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     """验证用户并返回 token"""
     db = get_db_session()
     try:
@@ -428,6 +449,7 @@ def init_default_admin():
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
             import secrets
+
             admin_password = os.getenv("ADMIN_PASSWORD", secrets.token_urlsafe(16))
             admin = User(
                 username="admin",

@@ -7,12 +7,17 @@ v4.2 改造：
 - 消除 multi_agent_customer_service.py 模块级全局变量的导入
 - App 同步创建（图在 lifespan 中异步构建）
 """
+
 import asyncio
 from contextlib import asynccontextmanager
 
 from config import (
-    API_KEY_ENABLED, API_KEY, MONITORING_ADMIN_TOKEN,
-    SESSION_TOKEN_SECRET, CORS_ORIGINS, DEV_MODE,
+    API_KEY,
+    API_KEY_ENABLED,
+    CORS_ORIGINS,
+    DEV_MODE,
+    MONITORING_ADMIN_TOKEN,
+    SESSION_TOKEN_SECRET,
 )
 from logger import get_logger
 
@@ -20,13 +25,16 @@ logger = get_logger("app_factory")
 
 # ===== 数据库 + 管理员初始化（同步，模块加载时执行）=====
 from db.database import init_db
+
 init_db()
 
 from auth.service import init_default_admin
+
 init_default_admin()
 
 # ===== 生产环境强制校验安全密钥 =====
 import config as _cfg
+
 _security_errors = []
 
 if not _cfg.JWT_SECRET or _cfg.JWT_SECRET in ("", "change-me-in-production"):
@@ -34,7 +42,10 @@ if not _cfg.JWT_SECRET or _cfg.JWT_SECRET in ("", "change-me-in-production"):
         _security_errors.append("JWT_SECRET 未配置或使用默认值，生产环境必须设置")
 
 if not DEV_MODE:
-    if not _cfg.SESSION_TOKEN_SECRET or _cfg.SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production"):
+    if not _cfg.SESSION_TOKEN_SECRET or _cfg.SESSION_TOKEN_SECRET in (
+        "",
+        "change-me-session-secret-in-production",
+    ):
         _security_errors.append("SESSION_TOKEN_SECRET 未配置，会话校验将被禁用")
 
 if _security_errors:
@@ -46,6 +57,7 @@ if _security_errors:
 
 # ===== 创建 ServiceContainer（同步创建基础设施组件）=====
 from core.container import ServiceContainer
+
 _container = ServiceContainer()
 
 
@@ -58,6 +70,7 @@ async def lifespan(app):
 
     # 将容器中的服务注入到 api/app.py 的全局引用（供中间件和端点使用）
     import api.app as _app_module
+
     _app_module._session_manager = _container.session_mgr
     _app_module._response_cache = _container.cache
     _app_module._metrics = _container.metrics
@@ -93,12 +106,14 @@ app.state.container = _container
 
 # 注入 Redis 客户端工厂到 app.state（供健康检查等使用）
 from api.middleware import get_redis_client as _get_redis
+
 app.state.get_redis_client = _get_redis
 
 # 注册路由
+from alerts.router import router as alerts_router
 from auth.router import router as auth_router
 from knowledge.router import router as knowledge_router
-from alerts.router import router as alerts_router
+
 app.include_router(auth_router)
 app.include_router(knowledge_router)
 app.include_router(alerts_router)
@@ -109,6 +124,7 @@ app.router.lifespan_context = lifespan
 # P2-1: OpenTelemetry 分布式追踪（可选）
 try:
     from core.tracing import setup_tracing
+
     setup_tracing(app)
 except Exception as e:
     logger.debug(f"分布式追踪初始化跳过: {e}")
@@ -117,7 +133,9 @@ except Exception as e:
 _security_warnings = []
 
 if not API_KEY_ENABLED:
-    _security_warnings.append("API_KEY_ENABLED=false，所有端点未认证！生产环境必须启用 API Key 认证。")
+    _security_warnings.append(
+        "API_KEY_ENABLED=false，所有端点未认证！生产环境必须启用 API Key 认证。"
+    )
 
 if API_KEY_ENABLED and (not API_KEY or API_KEY in ("", "change-me-in-production")):
     _security_warnings.append("API_KEY 未设置或使用默认值，认证将拒绝所有请求或不安全。")
@@ -125,7 +143,10 @@ if API_KEY_ENABLED and (not API_KEY or API_KEY in ("", "change-me-in-production"
 if not MONITORING_ADMIN_TOKEN or MONITORING_ADMIN_TOKEN in ("", "change-me-monitoring-token"):
     _security_warnings.append("MONITORING_ADMIN_TOKEN 未设置或使用默认值，监控端点安全受限。")
 
-if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production"):
+if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in (
+    "",
+    "change-me-session-secret-in-production",
+):
     _security_warnings.append("SESSION_TOKEN_SECRET 未设置或使用默认值，会话所有权校验将被禁用。")
 
 if CORS_ORIGINS and "*" in CORS_ORIGINS:

@@ -4,6 +4,7 @@
 用法: python3 scripts/generate_prod_env.py
 输出: .env.prod.generated（自动替换所有 CHANGE_ME_* 占位符）
 """
+
 import base64
 import os
 import re
@@ -50,7 +51,7 @@ def main() -> None:
     # ERP 占位符
     erp_app_secret = generate_key(32, "hex")
 
-    with open(input_path, "r", encoding="utf-8") as f:
+    with open(input_path, encoding="utf-8") as f:
         content = f.read()
 
     # 按行处理，根据上下文替换同名占位符

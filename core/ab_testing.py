@@ -3,9 +3,11 @@ A/B 测试框架（v4.1）
 支持不同 Prompt 策略的效果对比。
 基于 user_id 哈希确定性分配变体，确保同一用户始终看到同一变体。
 """
+
 import hashlib
 import time
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
+
 from logger import get_logger
 
 logger = get_logger("core.ab_testing")
@@ -15,13 +17,13 @@ class ABTestManager:
     """A/B 测试管理器"""
 
     def __init__(self):
-        self.experiments: Dict[str, dict] = {}
+        self.experiments: dict[str, dict] = {}
 
     def create_experiment(
         self,
         name: str,
-        variants: List[str],
-        traffic_split: Optional[List[float]] = None,
+        variants: list[str],
+        traffic_split: list[float] | None = None,
         description: str = "",
     ):
         """
@@ -55,15 +57,11 @@ class ABTestManager:
         # 验证比例之和为 1.0（允许浮点误差）
         total = sum(traffic_split)
         if abs(total - 1.0) > 0.01:
-            raise ValueError(
-                f"traffic_split 之和应为 1.0，当前为 {total:.3f}"
-            )
+            raise ValueError(f"traffic_split 之和应为 1.0，当前为 {total:.3f}")
 
         for i, pct in enumerate(traffic_split):
             if pct < 0 or pct > 1:
-                raise ValueError(
-                    f"traffic_split[{i}] = {pct} 不在 [0, 1] 范围内"
-                )
+                raise ValueError(f"traffic_split[{i}] = {pct} 不在 [0, 1] 范围内")
 
         # 构建累积分配表（用于哈希映射）
         cumulative = []
@@ -86,10 +84,7 @@ class ABTestManager:
             "assignments": {},
         }
 
-        logger.info(
-            f"实验创建: name={name} variants={variants} "
-            f"split={traffic_split}"
-        )
+        logger.info(f"实验创建: name={name} variants={variants} split={traffic_split}")
 
     def assign_variant(self, experiment_name: str, user_id: str) -> str:
         """
@@ -122,7 +117,7 @@ class ABTestManager:
             return exp["assignments"][cache_key]
 
         # 确定性哈希分配
-        hash_input = f"{experiment_name}:{user_id}".encode("utf-8")
+        hash_input = f"{experiment_name}:{user_id}".encode()
         hash_hex = hashlib.sha256(hash_input).hexdigest()
         # 取前 8 位十六进制转整数，映射到 [0, 1)
         hash_int = int(hash_hex[:8], 16)
@@ -165,18 +160,18 @@ class ABTestManager:
             return
 
         if variant not in exp["metrics"]:
-            logger.warning(
-                f"记录指标失败: 变体 {variant} 不在实验 {experiment_name} 中"
-            )
+            logger.warning(f"记录指标失败: 变体 {variant} 不在实验 {experiment_name} 中")
             return
 
         if metric_name not in exp["metrics"][variant]:
             exp["metrics"][variant][metric_name] = []
 
-        exp["metrics"][variant][metric_name].append({
-            "value": value,
-            "timestamp": time.time(),
-        })
+        exp["metrics"][variant][metric_name].append(
+            {
+                "value": value,
+                "timestamp": time.time(),
+            }
+        )
 
         logger.debug(
             f"指标记录: experiment={experiment_name} variant={variant} "
@@ -231,9 +226,7 @@ class ABTestManager:
                 min_val = min(nums)
                 max_val = max(nums)
                 std_val = (
-                    (sum((x - mean_val) ** 2 for x in nums) / count) ** 0.5
-                    if count > 1
-                    else 0.0
+                    (sum((x - mean_val) ** 2 for x in nums) / count) ** 0.5 if count > 1 else 0.0
                 )
 
                 variant_metrics[metric_name] = {
@@ -271,7 +264,7 @@ class ABTestManager:
             del self.experiments[experiment_name]
             logger.info(f"实验删除: {experiment_name}")
 
-    def list_experiments(self) -> List[dict]:
+    def list_experiments(self) -> list[dict]:
         """列出所有实验概要"""
         return [
             {

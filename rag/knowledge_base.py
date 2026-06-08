@@ -4,8 +4,10 @@ ChromaDB 知识库管理器（v5.1）
 v4.3: 更换为中文 embedding 模型（BAAI/bge-small-zh-v1.5），提升中文语义检索精度。
 v5.1: 集成 CLIP 多模态 embedding，支持图片语义检索。
 """
+
 import asyncio
 from typing import Any, Dict, List, Optional
+
 from logger import get_logger
 
 logger = get_logger("rag.knowledge_base")
@@ -14,7 +16,7 @@ logger = get_logger("rag.knowledge_base")
 class CosmeticsKnowledgeBase:
     """化妆品领域知识库（基于 ChromaDB 向量检索）"""
 
-    def __init__(self, persist_directory: Optional[str] = None, clip_enabled: bool = False):
+    def __init__(self, persist_directory: str | None = None, clip_enabled: bool = False):
         """
         Args:
             persist_directory: 持久化目录。None 则使用内存模式（适合演示和测试）。
@@ -38,10 +40,14 @@ class CosmeticsKnowledgeBase:
                 self._client = chromadb.PersistentClient(path=persist_directory)
             else:
                 self._client = chromadb.Client()
-            self._collections: Dict[str, Any] = {}
+            self._collections: dict[str, Any] = {}
             self._available = True
-            clip_info = f", clip={'enabled' if self._clip_embed_fn else 'failed'}" if clip_enabled else ""
-            logger.info(f"ChromaDB 初始化成功 (persist={persist_directory}, embedding={self._embed_fn_name}{clip_info})")
+            clip_info = (
+                f", clip={'enabled' if self._clip_embed_fn else 'failed'}" if clip_enabled else ""
+            )
+            logger.info(
+                f"ChromaDB 初始化成功 (persist={persist_directory}, embedding={self._embed_fn_name}{clip_info})"
+            )
         except ImportError:
             self._available = False
             logger.warning("chromadb 未安装，RAG 功能不可用")
@@ -63,9 +69,7 @@ class CosmeticsKnowledgeBase:
         ]
         for model_name, label in models_to_try:
             try:
-                ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-                    model_name=model_name
-                )
+                ef = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
                 CosmeticsKnowledgeBase._embed_fn_name = label
                 logger.info(f"中文 embedding 模型加载成功: {model_name}")
                 return ef
@@ -84,6 +88,7 @@ class CosmeticsKnowledgeBase:
         """v5.1: 创建 CLIP 多模态 embedding 函数"""
         try:
             from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
+
             ef = OpenCLIPEmbeddingFunction()
             logger.info("CLIP embedding 模型加载成功")
             return ef
@@ -101,17 +106,20 @@ class CosmeticsKnowledgeBase:
             return None
         if name not in self._collections:
             kwargs = {"name": name}
-            if hasattr(self, '_embed_fn') and self._embed_fn is not None:
+            if hasattr(self, "_embed_fn") and self._embed_fn is not None:
                 kwargs["embedding_function"] = self._embed_fn
             self._collections[name] = self._client.get_or_create_collection(**kwargs)
             count = self._collections[name].count()
             logger.debug(f"Collection '{name}' 已加载 ({count} docs)")
         return self._collections[name]
 
-    def add_documents(self, collection_name: str,
-                      documents: List[str],
-                      metadatas: Optional[List[Dict[str, Any]]] = None,
-                      ids: Optional[List[str]] = None):
+    def add_documents(
+        self,
+        collection_name: str,
+        documents: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+        ids: list[str] | None = None,
+    ):
         """
         向 collection 添加文档。
         如果未提供 ids，自动生成。
@@ -149,8 +157,9 @@ class CosmeticsKnowledgeBase:
             seed_fn(self, collection_name=collection_name)
             logger.info(f"Collection '{collection_name}' 已种子初始化 ({collection.count()} docs)")
 
-    async def query(self, collection_name: str, query_text: str,
-                    n_results: int = 3) -> List[Dict[str, Any]]:
+    async def query(
+        self, collection_name: str, query_text: str, n_results: int = 3
+    ) -> list[dict[str, Any]]:
         """
         异步查询单个 collection，返回匹配文档列表。
         每条结果: {"content": str, "metadata": dict, "distance": float}
@@ -161,18 +170,20 @@ class CosmeticsKnowledgeBase:
         if collection.count() == 0:
             return []
         try:
-            loop = asyncio.get_running_loop()  # v3.8 fix: use get_running_loop (get_event_loop deprecated in 3.10+)
+            loop = (
+                asyncio.get_running_loop()
+            )  # v3.8 fix: use get_running_loop (get_event_loop deprecated in 3.10+)
             result = await loop.run_in_executor(
-                None,
-                lambda: collection.query(query_texts=[query_text], n_results=n_results)
+                None, lambda: collection.query(query_texts=[query_text], n_results=n_results)
             )
             return self._parse_query_result(result)
         except Exception as e:
             logger.error(f"RAG 查询失败 [{collection_name}]: {e}")
             return []
 
-    async def query_multiple(self, collection_names: List[str], query_text: str,
-                             n_results: int = 3) -> List[Dict[str, Any]]:
+    async def query_multiple(
+        self, collection_names: list[str], query_text: str, n_results: int = 3
+    ) -> list[dict[str, Any]]:
         """
         异步查询多个 collection，合并结果并按距离排序。
         每个 collection 取 top-n_results，合并后保留总 top-n_results。
@@ -195,7 +206,7 @@ class CosmeticsKnowledgeBase:
         return deduped[:n_results]
 
     @staticmethod
-    def _parse_query_result(result: dict) -> List[Dict[str, Any]]:
+    def _parse_query_result(result: dict) -> list[dict[str, Any]]:
         """解析 ChromaDB 查询结果"""
         docs = []
         if not result:
@@ -204,11 +215,13 @@ class CosmeticsKnowledgeBase:
         metadatas = result.get("metadatas", [[]])[0]
         distances = result.get("distances", [[]])[0]
         for i, doc in enumerate(documents):
-            docs.append({
-                "content": doc,
-                "metadata": metadatas[i] if i < len(metadatas) else {},
-                "distance": distances[i] if i < len(distances) else 0.0,
-            })
+            docs.append(
+                {
+                    "content": doc,
+                    "metadata": metadatas[i] if i < len(metadatas) else {},
+                    "distance": distances[i] if i < len(distances) else 0.0,
+                }
+            )
         return docs
 
     def get_collection_count(self, collection_name: str) -> int:
@@ -231,9 +244,12 @@ class CosmeticsKnowledgeBase:
             )
         return self._collections[name]
 
-    def add_image_documents(self, collection_name: str,
-                            image_paths: List[str],
-                            metadatas: Optional[List[Dict[str, Any]]] = None):
+    def add_image_documents(
+        self,
+        collection_name: str,
+        image_paths: list[str],
+        metadatas: list[dict[str, Any]] | None = None,
+    ):
         """
         向图片 collection 添加图片文档
 
@@ -258,8 +274,9 @@ class CosmeticsKnowledgeBase:
         collection.add(uris=image_paths, metadatas=metadatas, ids=ids)
         logger.debug(f"图片 collection '{collection_name}' 添加 {len(image_paths)} 张图片")
 
-    async def query_image(self, collection_name: str, query_text: str,
-                          n_results: int = 3) -> List[Dict[str, Any]]:
+    async def query_image(
+        self, collection_name: str, query_text: str, n_results: int = 3
+    ) -> list[dict[str, Any]]:
         """
         用文本查询图片 collection（CLIP 跨模态检索）
 
@@ -277,16 +294,16 @@ class CosmeticsKnowledgeBase:
         try:
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
-                None,
-                lambda: collection.query(query_texts=[query_text], n_results=n_results)
+                None, lambda: collection.query(query_texts=[query_text], n_results=n_results)
             )
             return self._parse_query_result(result)
         except Exception as e:
             logger.error(f"CLIP 图片查询失败 [{collection_name}]: {e}")
             return []
 
-    async def query_image_by_uri(self, collection_name: str, query_image_uri: str,
-                                 n_results: int = 3) -> List[Dict[str, Any]]:
+    async def query_image_by_uri(
+        self, collection_name: str, query_image_uri: str, n_results: int = 3
+    ) -> list[dict[str, Any]]:
         """
         用图片查询图片 collection（CLIP 图片-图片检索）
 
@@ -304,17 +321,20 @@ class CosmeticsKnowledgeBase:
         try:
             loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(
-                None,
-                lambda: collection.query(query_uris=[query_image_uri], n_results=n_results)
+                None, lambda: collection.query(query_uris=[query_image_uri], n_results=n_results)
             )
             return self._parse_query_result(result)
         except Exception as e:
             logger.error(f"CLIP 图片-图片查询失败 [{collection_name}]: {e}")
             return []
 
-    async def query_multimodal(self, text_query: str, image_uri: Optional[str] = None,
-                               collections: Optional[List[str]] = None,
-                               n_results: int = 3) -> List[Dict[str, Any]]:
+    async def query_multimodal(
+        self,
+        text_query: str,
+        image_uri: str | None = None,
+        collections: list[str] | None = None,
+        n_results: int = 3,
+    ) -> list[dict[str, Any]]:
         """
         v5.1: 多模态融合检索（文本 + 图片）
         同时查询文本 collection 和图片 collection，用 RRF 融合排序。
@@ -357,8 +377,9 @@ class CosmeticsKnowledgeBase:
         return self._rrf_merge(all_results, n_results)
 
     @staticmethod
-    def _rrf_merge(results: List[Dict[str, Any]], n_results: int,
-                   k: int = 60) -> List[Dict[str, Any]]:
+    def _rrf_merge(
+        results: list[dict[str, Any]], n_results: int, k: int = 60
+    ) -> list[dict[str, Any]]:
         """Reciprocal Rank Fusion 融合排序"""
         # 按 source 分组
         groups = {}

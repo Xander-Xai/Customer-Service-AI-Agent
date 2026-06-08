@@ -4,13 +4,16 @@
 - POST /api/alerts/test — 测试告警通知
 - GET  /api/alerts/history — 告警历史
 """
-from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel, Field
+
 from typing import Optional
 
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
+
 from auth.router import require_admin, require_auth
-from .notifier import alert_notifier
 from logger import get_logger
+
+from .notifier import alert_notifier
 
 logger = get_logger("alerts.router")
 
@@ -43,7 +46,10 @@ async def test_alert(data: TestAlertRequest, request: Request):
     """测试发送告警"""
     _ = require_admin(request)
     await alert_notifier.send_alert(data.title, data.content, data.severity)
-    return {"message": "测试告警已发送", "channels": len(alert_notifier.webhooks) + (1 if alert_notifier.email_enabled else 0)}
+    return {
+        "message": "测试告警已发送",
+        "channels": len(alert_notifier.webhooks) + (1 if alert_notifier.email_enabled else 0),
+    }
 
 
 @router.get("/history")

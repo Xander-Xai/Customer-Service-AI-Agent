@@ -3,11 +3,16 @@
 基于 asyncio.Queue 的发布/订阅系统，支持 Mesh 拓扑的 Agent 间通信
 新增：结构化日志
 """
-import asyncio, uuid, time
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+
+import asyncio
+import time
+import uuid
 from collections import deque
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from logger import get_logger
 
 logger = get_logger("core.message_bus")
@@ -41,7 +46,7 @@ class MessageBus:
     """异步消息总线（Mesh 拓扑，v3.7: asyncio.Lock 保护并发安全）"""
 
     def __init__(self):
-        self._subscribers: Dict[str, List[Handler]] = {}
+        self._subscribers: dict[str, list[Handler]] = {}
         self._message_log: deque = deque(maxlen=_MESSAGE_LOG_MAXLEN)
         self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
 

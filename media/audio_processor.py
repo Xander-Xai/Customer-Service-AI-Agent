@@ -7,6 +7,7 @@ AudioProcessor — 语音转文字 STT（v5.1）
 - 大小限制
 - 转写结果返回
 """
+
 import logging
 from typing import Optional
 
@@ -19,11 +20,15 @@ logger = get_logger("media.audio")
 
 # 支持的音频格式
 ALLOWED_AUDIO_TYPES = [
-    "audio/wav", "audio/x-wav", "audio/wave",
-    "audio/mpeg", "audio/mp3",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/wave",
+    "audio/mpeg",
+    "audio/mp3",
     "audio/ogg",
     "audio/webm",
-    "audio/mp4", "audio/m4a",
+    "audio/mp4",
+    "audio/m4a",
 ]
 MAX_AUDIO_SIZE_MB = 25  # Whisper API 限制 25MB
 
@@ -43,7 +48,7 @@ class AudioProcessor:
         self.model = model
         self.max_size_mb = max_size_mb
 
-    def validate_audio(self, data: bytes, content_type: str) -> Optional[str]:
+    def validate_audio(self, data: bytes, content_type: str) -> str | None:
         """校验音频文件，返回错误信息或 None"""
         if content_type not in ALLOWED_AUDIO_TYPES:
             return f"不支持的音频格式: {content_type}"
@@ -53,8 +58,7 @@ class AudioProcessor:
             return "音频文件为空"
         return None
 
-    async def transcribe(self, audio_bytes: bytes, content_type: str,
-                         language: str = "zh") -> str:
+    async def transcribe(self, audio_bytes: bytes, content_type: str, language: str = "zh") -> str:
         """
         调用 Whisper API 转写语音为文字
 
@@ -76,10 +80,15 @@ class AudioProcessor:
 
         # 确定文件扩展名
         ext_map = {
-            "audio/wav": "wav", "audio/x-wav": "wav", "audio/wave": "wav",
-            "audio/mpeg": "mp3", "audio/mp3": "mp3",
-            "audio/ogg": "ogg", "audio/webm": "webm",
-            "audio/mp4": "m4a", "audio/m4a": "m4a",
+            "audio/wav": "wav",
+            "audio/x-wav": "wav",
+            "audio/wave": "wav",
+            "audio/mpeg": "mp3",
+            "audio/mp3": "mp3",
+            "audio/ogg": "ogg",
+            "audio/webm": "webm",
+            "audio/mp4": "m4a",
+            "audio/m4a": "m4a",
         }
         ext = ext_map.get(content_type, "wav")
 

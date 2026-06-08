@@ -6,6 +6,7 @@ TTSProcessor — 文字转语音 TTS（v5.1）
 - 支持多种中文语音（zh-CN-XiaoxiaoNeural 等）
 - 返回音频字节流
 """
+
 import io
 import logging
 from typing import Optional
@@ -19,10 +20,10 @@ DEFAULT_VOICE = "zh-CN-XiaoxiaoNeural"
 
 # 可用中文语音列表
 CHINESE_VOICES = {
-    "xiaoxiao": "zh-CN-XiaoxiaoNeural",     # 女声（默认，温暖自然）
-    "yunxi": "zh-CN-YunxiNeural",           # 男声（年轻）
-    "yunjian": "zh-CN-YunjianNeural",       # 男声（成熟）
-    "xiaoyi": "zh-CN-XiaoyiNeural",         # 女声（活泼）
+    "xiaoxiao": "zh-CN-XiaoxiaoNeural",  # 女声（默认，温暖自然）
+    "yunxi": "zh-CN-YunxiNeural",  # 男声（年轻）
+    "yunjian": "zh-CN-YunjianNeural",  # 男声（成熟）
+    "xiaoyi": "zh-CN-XiaoyiNeural",  # 女声（活泼）
 }
 
 
@@ -62,12 +63,10 @@ class TTSProcessor:
         # 截断过长文本（防止超时）
         if len(text) > 2000:
             text = text[:2000] + "..."
-            logger.warning(f"TTS 文本截断至 2000 字符")
+            logger.warning("TTS 文本截断至 2000 字符")
 
         buf = io.BytesIO()
-        communicate = edge_tts.Communicate(
-            text, voice_name, rate=self.rate, volume=self.volume
-        )
+        communicate = edge_tts.Communicate(text, voice_name, rate=self.rate, volume=self.volume)
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 buf.write(chunk["data"])
