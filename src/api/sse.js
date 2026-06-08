@@ -43,7 +43,7 @@ export function sendChatStream(query, sessionId, sessionToken, callbacks = {}) {
             else if (data.type === 'done' && onDone) onDone(data);
             else if (data.type === 'error' && onError) onError(data.content);
             else if ((data.type === 'status' || data.type === 'progress') && onStatus) onStatus(data);
-          } catch { /* 忽略解析错误 */ }
+          } catch (e) { console.warn('[SSE] Parse error:', e.message); }
         }
         read();
       }).catch(err => { if (onError) onError(err.message); });

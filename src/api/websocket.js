@@ -43,12 +43,8 @@ export function connect(sessionId) {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${location.host}/ws/chat`;
 
-  const API_KEY = localStorage.getItem('api_key') || '';
-  let authUrl = wsUrl;
-  if (API_KEY) authUrl = `${wsUrl}?api_key=${encodeURIComponent(API_KEY)}`;
-
   try {
-    _ws = new WebSocket(authUrl);
+    _ws = new WebSocket(wsUrl);
     console.log('[WS] 连接中...');
   } catch (e) {
     console.error('[WS] 创建连接失败:', e);
@@ -61,12 +57,14 @@ export function connect(sessionId) {
     _reconnectCount = 0;
     _connectionReady = true;
 
-    // 通过首条消息发送 JWT token
+    // 通过首条消息发送认证信息（JWT + API Key，避免 URL 泄露）
     const jwtToken = localStorage.getItem('token');
-    if (jwtToken) {
-      try { _ws.send(JSON.stringify({ type: 'auth', token: jwtToken })); }
-      catch (e) { console.error('[WS] 发送认证消息失败:', e); }
-    }
+    const apiKey = localStorage.getItem('api_key') || '';
+    const authPayload = { type: 'auth' };
+    if (jwtToken) authPayload.token = jwtToken;
+    if (apiKey) authPayload.api_key = apiKey;
+    try { _ws.send(JSON.stringify(authPayload)); }
+    catch (e) { console.error('[WS] 发送认证消息失败:', e); }
 
     emit('connected', { sessionId: _sessionId });
     console.log('[WS] 已连接');

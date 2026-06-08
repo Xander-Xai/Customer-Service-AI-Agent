@@ -301,7 +301,12 @@ class EnhancedSessionManager:
             if token:
                 logger.warning("SESSION_TOKEN_SECRET 未配置，但收到了会话令牌，拒绝验证")
                 return False
-            return True  # 无密钥 + 无 token = 放行（开发/测试环境）
+            # v5.0: 非 DEV 模式下空 secret 应拒绝（防止 IDOR）
+            import config
+            if not getattr(config, 'DEV_MODE', False):
+                logger.warning("SESSION_TOKEN_SECRET 未配置，非 DEV 模式拒绝放行")
+                return False
+            return True  # 仅 DEV 模式放行
         if not token:
             return False
         expected = self.generate_session_token(session_id, client_fingerprint)
