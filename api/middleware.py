@@ -2,6 +2,7 @@
 API 中间件栈：限流、安全头、认证、分布式追踪
 从 api/app.py create_app() 提取。
 """
+import hmac
 import os
 import re
 import secrets
@@ -185,6 +186,87 @@ def setup_middleware(app: FastAPI):
             return await call_next(request)
 
         return JSONResponse({"error": "Unauthorized: Invalid API Key or Token"}, status_code=401)
+
+    # ── CSRF 双提交 Cookie 保护 ──
+    _CSRF_COOKIE_NAME = "csrf_token"
+    _CSRF_HEADER_NAME = "X-CSRF-Token"
+    _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+    # 浏览器请求特征：携带 Cookie 但无 Bearer Token
+    _CSRF_SKIP_PATHS = {"/", "/api/health", "/login.html", "/admin.html", "/widget.html"}
+    _CSRF_SKIP_PREFIXES = ("/static/", "/ws/")
+
+    @app.middleware("http")
+    async def csrf_middleware(request: Request, call_next):
+        path = request.url.path
+        method = request.method.upper()
+
+        # DEV_MODE 跳过 CSRF（与 auth_middleware 的 DEV_MODE bypass 一致）
+        if DEV_MODE:
+            return await call_next(request)
+
+        # 安全方法、静态资源、WebSocket 跳过 CSRF
+        if method in _CSRF_SAFE_METHODS or path in _CSRF_SKIP_PATHS:
+            response = await call_next(request)
+            # 在安全方法响应上设置 CSRF Cookie（无则生成）
+            if method in _CSRF_SAFE_METHODS:
+                existing = request.cookies.get(_CSRF_COOKIE_NAME)
+                token = existing if existing else secrets.token_hex(32)
+                response.set_cookie(
+                    key=_CSRF_COOKIE_NAME,
+                    value=token,
+                    httponly=False,       # JS 需要读取
+                    samesite="lax",
+                    secure=not DEV_MODE,  # 生产环境强制 HTTPS
+                    max_age=3600,
+                    path="/",
+                )
+            return response
+
+        if any(path.startswith(p) for p in _CSRF_SKIP_PREFIXES):
+            return await call_next(request)
+
+        # 携带 Bearer Token 的 API 客户端跳过 CSRF
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return await call_next(request)
+
+        # 携带 API Key 或 Admin Token 的系统间调用跳过
+        if request.headers.get("X-API-Key") or request.headers.get("X-Admin-Token"):
+            return await call_next(request)
+
+        # 浏览器请求验证 CSRF：Cookie 与 Header 必须匹配
+        cookie_token = request.cookies.get(_CSRF_COOKIE_NAME)
+        header_token = request.headers.get(_CSRF_HEADER_NAME)
+
+        if not cookie_token or not header_token:
+            client_ip = request.client.host if request.client else "unknown"
+            logger.warning(f"[CSRF] Missing token: cookie={'yes' if cookie_token else 'no'}, header={'yes' if header_token else 'no'}, path={path}, ip={client_ip}")
+            return JSONResponse(
+                {"error": "CSRF validation failed: missing CSRF token. "
+                          "Ensure the csrf_token cookie is set and the X-CSRF-Token header is included."},
+                status_code=403,
+            )
+
+        if not hmac.compare_digest(cookie_token, header_token):
+            client_ip = request.client.host if request.client else "unknown"
+            logger.warning(f"[CSRF] Token mismatch: path={path}, ip={client_ip}")
+            return JSONResponse(
+                {"error": "CSRF validation failed: token mismatch"},
+                status_code=403,
+            )
+
+        response = await call_next(request)
+        # 刷新 Cookie 生命周期
+        response.set_cookie(
+            key=_CSRF_COOKIE_NAME,
+            value=cookie_token,
+            httponly=False,
+            samesite="lax",
+            secure=not DEV_MODE,
+            max_age=3600,
+            path="/",
+        )
+        return response
 
     # ── 分布式追踪中间件 ──
     @app.middleware("http")

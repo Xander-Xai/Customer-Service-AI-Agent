@@ -35,7 +35,7 @@ aiofiles>=23.2.1
 # ===== v5.1: 多模态媒体处理 =====
 Pillow>=10.0.0
 edge-tts>=6.1.0
-opencv-python-headless>=4.8.0
+opencv-python-headless>=4.8.0  # Heavy dependency - consider making optional
 pdfplumber>=0.10.0
 python-docx>=1.0.0
 

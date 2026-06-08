@@ -11,6 +11,26 @@
 #
 # 用法（生产部署）:
 #   pip install -r requirements-lock.txt
+#
+# ---- 已知问题 (2026-06-08) ----
+#
+# 1. 缺失的锁定条目 — 以下 requirements.txt 中的直接依赖未出现在此文件中
+#    （可能因平台差异或 freeze 时未安装）：
+#      - alembic          (数据库迁移)
+#      - edge-tts         (TTS，可能因网络/平台未安装)
+#      - gunicorn          (WSGI 服务器，Linux-only)
+#      - opencv-python-headless (多模态媒体，较大)
+#      - pdfplumber       (PDF 解析)
+#      - psycopg2-binary   (PostgreSQL 驱动)
+#      - python-docx       (Word 文档解析)
+#    如需完整锁定，请在目标平台上重新运行 make lock。
+#
+# 2. JWT 库冲突风险 — lock 文件中包含三个 JWT 相关的传递依赖，
+#    本项目仅直接使用 PyJWT，其余均由 langchain/chromadb/Authlib 间接引入：
+#      - python-jose  (langchain 生态)
+#      - joserfc      (Authlib/chromadb)
+#      - passlib      (langchain 生态，项目使用自定义 PBKDF2-SHA256)
+#    若出现 JWT 解析异常，优先排查这些库的版本兼容性。
 # ==============================================================
 
 Authlib==1.7.2
@@ -93,7 +113,7 @@ jaraco.functools==4.5.0
 jieba==0.42.1
 jiter==0.15.0
 joblib==1.5.3
-joserfc==1.7.0
+joserfc==1.7.0  # Transitive dep (via Authlib/chromadb). NOT used directly by this project; prefer PyJWT.
 jsonpatch==1.33
 jsonpointer==2.0
 jsonref==1.1.0
@@ -137,7 +157,7 @@ orjson==3.11.9
 ormsgpack==1.12.2
 overrides==7.7.0
 packaging==26.2
-passlib==1.7.4
+passlib==1.7.4  # Transitive dep (via langchain-chromadb). NOT used directly; project uses custom PBKDF2-SHA256 (auth/service.py).
 pathable==0.6.0
 pillow==12.2.0
 platformdirs==4.10.0
@@ -157,7 +177,7 @@ pyproject_hooks==1.2.0
 python-dateutil==2.9.0.post0
 python-discovery==1.4.0
 python-dotenv==1.2.2
-python-jose==3.5.0
+python-jose==3.5.0  # Transitive dep (via langchain ecosystem). NOT used directly; project uses PyJWT.
 python-multipart==0.0.30
 pytz==2022.1
 redis==8.0.0

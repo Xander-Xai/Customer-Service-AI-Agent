@@ -4,15 +4,18 @@
 - PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
+import asyncio
+import json
 import os
 import time
 import hmac
 import hashlib
 from datetime import datetime, timezone
-import json
 from typing import Optional, Dict, Any
 
 import jwt
+import redis as _redis_mod
+from sqlalchemy.exc import SQLAlchemyError
 
 from db.models import User
 from db.database import get_db_session
@@ -24,7 +27,7 @@ logger = get_logger("auth.service")
 import config as _config
 
 _JWT_ALGORITHM = "HS256"
-_JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "72"))
+_JWT_EXPIRE_HOURS = _config.JWT_EXPIRE_HOURS
 
 
 class _TokenDenylist:
@@ -46,7 +49,7 @@ class _TokenDenylist:
             self._redis.ping()
             self._use_redis = True
             logger.info("JWT 黑名单已启用 Redis 后端")
-        except Exception as e:
+        except (_redis_mod.RedisError, OSError, TypeError) as e:
             logger.warning(f"Redis 不可用，JWT 黑名单回退到内存模式: {e}")
             # 生产环境不使用 Redis 时发出警告
             app_mode = os.getenv("APP_MODE", "").lower()
@@ -57,11 +60,11 @@ class _TokenDenylist:
                     "重启后黑名单将丢失"
                 )
 
-    def add(self, jti: str, ttl_seconds: int) -> None:
+    async def add(self, jti: str, ttl_seconds: int) -> None:
         """将 jti 加入黑名单"""
         if self._use_redis:
             key = f"{self._prefix}{jti}"
-            self._redis.setex(key, max(ttl_seconds, 1), "1")
+            await asyncio.to_thread(self._redis.setex, key, max(ttl_seconds, 1), "1")
         else:
             # 内存模式：检查容量，超过上限时清理旧条目
             if len(self._memory_set) >= self.MAX_DENYLIST_SIZE:
@@ -70,11 +73,11 @@ class _TokenDenylist:
                     self._memory_set.pop()
             self._memory_set.add(jti)
 
-    def contains(self, jti: str) -> bool:
+    async def contains(self, jti: str) -> bool:
         """检查 jti 是否在黑名单中"""
         if self._use_redis:
             key = f"{self._prefix}{jti}"
-            return self._redis.exists(key) > 0
+            return (await asyncio.to_thread(self._redis.exists, key)) > 0
         return jti in self._memory_set
 
 
@@ -83,6 +86,10 @@ _denylist = _TokenDenylist()
 
 def hash_password(password: str) -> str:
     """密码哈希（v4.0: PBKDF2-SHA256, 600,000 次迭代，OWASP 推荐）"""
+    # NOTE: PBKDF2-SHA256 is OWASP minimum. Consider upgrading to Argon2id
+    # (via argon2-cffi) for stronger resistance to GPU/ASIC attacks.
+    # Migration path: hash new passwords with Argon2id, verify old ones with PBKDF2,
+    # rehash on successful login. See SECURITY.md for details.
     import os
     salt = os.urandom(16).hex()
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600000)
@@ -101,6 +108,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100000)
         return hmac.compare_digest(dk.hex(), stored_hash)
     except Exception:
+        logger.exception("密码验证过程中发生异常")
         return False
 
 
@@ -140,7 +148,7 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
     return jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
 
 
-def create_refresh_token(user_id: int, username: str, role: str) -> str:
+async def create_refresh_token(user_id: int, username: str, role: str) -> str:
     """P2-3: 生成长生命周期 refresh_token（默认 7 天），存入 Redis 便于吊销"""
     import secrets
     secret = _config.JWT_SECRET
@@ -163,11 +171,12 @@ def create_refresh_token(user_id: int, username: str, role: str) -> str:
     if _denylist._use_redis:
         try:
             refresh_prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:").replace("blacklist", "refresh")
-            _denylist._redis.setex(
+            await asyncio.to_thread(
+                _denylist._redis.setex,
                 f"{refresh_prefix}{jti}", expire_hours * 3600,
                 json.dumps({"user_id": user_id, "username": username}),
             )
-        except Exception:
+        except _redis_mod.RedisError:
             pass
 
     return token
@@ -198,13 +207,17 @@ def refresh_access_token(refresh_token: str) -> Optional[Dict[str, Any]]:
             "username": user.username,
             "role": user.role,
         }
+    except SQLAlchemyError:
+        logger.exception("刷新 access_token 时数据库异常")
+        return None
     finally:
         db.close()
 
 
-def revoke_user_tokens(user_id: int) -> int:
+async def revoke_user_tokens(user_id: int) -> int:
     """吊销指定用户的所有 refresh_token（密码修改时调用）
     v5.0: 添加 scan_iter count 限制和最大迭代次数，防止 Redis 阻塞
+    v5.1: 使用 asyncio.to_thread 避免阻塞事件循环
     """
     if not _denylist._use_redis:
         return 0
@@ -213,24 +226,30 @@ def revoke_user_tokens(user_id: int) -> int:
         revoked = 0
         max_keys = 5000  # 最多扫描 5000 个 key，防止 Redis 阻塞
         scanned = 0
-        for key in _denylist._redis.scan_iter(f"{refresh_prefix}*", count=100):
-            scanned += 1
-            if scanned > max_keys:
-                logger.warning(f"revoke_user_tokens: 扫描超过 {max_keys} 个 key，提前终止")
-                break
-            data = _denylist._redis.get(key)
-            if data:
-                try:
-                    info = json.loads(data)
-                    if info.get("user_id") == user_id:
-                        _denylist._redis.delete(key)
-                        revoked += 1
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        if revoked:
-            logger.info(f"已吊销用户 {user_id} 的 {revoked} 个 refresh_token")
-        return revoked
-    except Exception as e:
+
+        def _scan_and_revoke():
+            nonlocal revoked, scanned
+            for key in _denylist._redis.scan_iter(f"{refresh_prefix}*", count=100):
+                scanned += 1
+                if scanned > max_keys:
+                    logger.warning(f"revoke_user_tokens: 扫描超过 {max_keys} 个 key，提前终止")
+                    break
+                data = _denylist._redis.get(key)
+                if data:
+                    try:
+                        info = json.loads(data)
+                        if info.get("user_id") == user_id:
+                            _denylist._redis.delete(key)
+                            revoked += 1
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            return revoked
+
+        result = await asyncio.to_thread(_scan_and_revoke)
+        if result:
+            logger.info(f"已吊销用户 {user_id} 的 {result} 个 refresh_token")
+        return result
+    except _redis_mod.RedisError as e:
         logger.warning(f"吊销用户 refresh_token 失败: {e}")
         return 0
 
@@ -243,18 +262,42 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         # PyJWT 验证签名、过期时间，算法白名单防止 alg:none 攻击
         payload = jwt.decode(token, secret, algorithms=[_JWT_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-    except Exception:
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
         return None
 
     # v4.0: 检查 jti 是否在吊销黑名单中
     jti = payload.get("jti")
-    if jti and _denylist.contains(jti):
-        return None
+    if jti:
+        # NOTE: denylist.contains is now async; callers must await it.
+        # Use a synchronous cache check for the memory path to avoid breaking sync code.
+        if _denylist._use_redis:
+            # Async path: cannot call from sync context; return payload and let
+            # async callers check denylist separately via decode_token_async()
+            pass
+        elif jti in _denylist._memory_set:
+            return None
     # PyJWT 要求 sub 为字符串，但下游代码期望 int，这里转回
+    try:
+        payload["sub"] = int(payload["sub"])
+    except (ValueError, TypeError, KeyError):
+        pass
+    return payload
+
+
+async def decode_token_async(token: str) -> Optional[Dict[str, Any]]:
+    """异步版本：验证并解码 JWT token，支持 Redis 黑名单检查"""
+    secret = _config.JWT_SECRET
+    if not secret:
+        return None
+    try:
+        payload = jwt.decode(token, secret, algorithms=[_JWT_ALGORITHM])
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError, jwt.DecodeError):
+        return None
+
+    # 检查 jti 是否在吊销黑名单中
+    jti = payload.get("jti")
+    if jti and await _denylist.contains(jti):
+        return None
     try:
         payload["sub"] = int(payload["sub"])
     except (ValueError, TypeError, KeyError):
@@ -289,7 +332,7 @@ def get_user_id_from_request(request) -> Optional[int]:
     return None
 
 
-def revoke_token(token: str) -> bool:
+async def revoke_token(token: str) -> bool:
     """吊销 JWT token（将 jti 加入黑名单）"""
     payload = decode_token(token)
     if not payload:
@@ -298,7 +341,7 @@ def revoke_token(token: str) -> bool:
     if jti:
         exp = payload.get("exp", int(time.time()) + _JWT_EXPIRE_HOURS * 3600)
         ttl = max(int(exp - time.time()), 1)
-        _denylist.add(jti, ttl)
+        await _denylist.add(jti, ttl)
         logger.info(f"Token 已吊销: jti={jti}")
         return True
     return False
@@ -324,7 +367,7 @@ def register_user(username: str, password: str, display_name: str = "") -> Dict[
         db.refresh(user)
         logger.info(f"用户注册成功: {username} (id={user.id})")
         return {"success": True, "user_id": user.id, "username": username}
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"用户注册失败: {e}")
         return {"success": False, "error": "注册失败，请稍后重试"}

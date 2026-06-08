@@ -150,7 +150,7 @@ async def api_logout(request: Request):
     user = require_auth(request)
     token = _get_token_from_request(request)
     if token:
-        revoke_token(token)
+        await revoke_token(token)
     return {"message": "已登出"}
 
 
