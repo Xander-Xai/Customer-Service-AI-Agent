@@ -349,7 +349,8 @@ async def stream_multimodal_chat(
 
     try:
         image_bytes = await image.read()
-    except Exception:
+    except Exception as e:
+        logger.error(f"多模态SSE图片读取失败: {e}")
         return JSONResponse({"error": "图片读取失败"}, status_code=400)
     if len(image_bytes) == 0:
         return JSONResponse({"error": "图片文件为空"}, status_code=400)
@@ -413,7 +414,8 @@ async def chat_with_voice(
 
     try:
         audio_bytes = await audio.read()
-    except Exception:
+    except Exception as e:
+        logger.error(f"音频读取失败: {e}")
         return JSONResponse({"error": "音频读取失败"}, status_code=400)
 
     try:
@@ -621,7 +623,8 @@ async def chat_with_file(
 
     try:
         file_bytes = await file.read()
-    except Exception:
+    except Exception as e:
+        logger.error(f"文件读取失败: {e}")
         return JSONResponse({"error": "文件读取失败"}, status_code=400)
     if len(file_bytes) == 0:
         return JSONResponse({"error": "文件为空"}, status_code=400)

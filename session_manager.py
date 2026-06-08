@@ -15,6 +15,8 @@
 - v4.3: 拆分为 token_counter / drift_detector / session_manager 三模块
 """
 import asyncio
+import functools
+import inspect
 import os
 import re
 import time
@@ -54,6 +56,25 @@ logger = get_logger("session_manager")
 _SESSION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9\-_]{1,64}$')
 
 
+# ---------------------------------------------------------------------------
+# 同步/异步兼容层
+# ---------------------------------------------------------------------------
+# _dual_mode 装饰器：让 async 方法同时支持同步调用。
+#
+# 设计决策（保守方案）：
+#   原实现每次同步调用都 asyncio.run() 创建新事件循环。
+#   我们评估了"缓存共享事件循环"方案（_loop = asyncio.new_event_loop()），
+#   但存在以下风险：
+#     1. run_until_complete() 在已有 task 运行时会抛 RuntimeError（嵌套调用）
+#     2. 事件循环关闭时机难以把控（进程退出时可能残留未关闭的 loop）
+#     3. 混合 asyncio.run() 和缓存 loop 会导致 asyncio.run() 关闭共享 loop
+#   因此采用更保守的改进：保留 asyncio.run() 但添加结构化日志，
+#   便于监控同步调用频率，为后续迁移到纯异步接口提供数据支撑。
+# ---------------------------------------------------------------------------
+
+_loop_creation_count = 0  # 统计同步调用创建新事件循环的次数
+
+
 def _run_async_compat(coro):
     """向后兼容：在同步上下文中运行 async 协程。
     无事件循环时用 asyncio.run()，已有循环时用 asyncio.ensure_future。
@@ -68,22 +89,27 @@ def _run_async_compat(coro):
 
 
 def _dual_mode(async_func):
-    """v4.1: 装饰器 — 让 async 方法同时支持同步调用。
-    同步调用时自动用 asyncio.run() 执行；异步调用时正常返回协程（可被 await）。
-    """
-    import functools
-    import inspect
+    """装饰器 -- 让 async 方法同时支持同步调用。
 
+    同步调用时用 asyncio.run() 执行；异步调用时正常返回协程（可被 await）。
+    v5.0: 添加结构化日志，跟踪同步调用频率以指导后续纯异步迁移。
+    """
     @functools.wraps(async_func)
     def wrapper(*args, **kwargs):
+        global _loop_creation_count
         coro = async_func(*args, **kwargs)
         if inspect.iscoroutine(coro):
             try:
-                loop = asyncio.get_running_loop()
+                asyncio.get_running_loop()
             except RuntimeError:
-                loop = None
-            if loop is None:
-                # 同步上下文：直接执行协程
+                # 同步上下文：需要创建新事件循环
+                _loop_creation_count += 1
+                if _loop_creation_count <= 5 or _loop_creation_count % 100 == 0:
+                    logger.warning(
+                        f"[DualMode] 同步调用 async 方法 '{async_func.__name__}'，"
+                        f"创建新事件循环（累计 {_loop_creation_count} 次）。"
+                        f"建议改用异步 API 以避免循环创建开销。"
+                    )
                 return asyncio.run(coro)
             else:
                 # 异步上下文：返回协程，让调用方 await
@@ -97,13 +123,35 @@ def _dual_mode(async_func):
 
 class EnhancedSessionManager:
     """
-    增强会话管理器（v4.1）
-    - 滑动窗口：token 级裁剪 + 消息数双重控制
-    - 漂移检测：4 类对话漂移识别（jieba 分词 + 多分类意图 + 扩充矛盾表）
-    - 漂移升级：频率过高时自动生成升级提示
-    - 漂移修复策略生成
-    - v4.1: 关键方法改为全异步
+    增强会话管理器
+    ──────────────────────────────────────────────────────────────────────
+    组织结构（590 行，已在 v4.3 拆出 token_counter + drift_detector）：
+
+    [S1] 初始化与存储后端配置 ............ __init__, _validate_storage_config
+    [S2] 存储后端适配 .................... _get_redis, _create_memory_backend,
+                                          _save_to_file
+    [S3] 会话生命周期 .................... _evict_idle_sessions, create_session,
+                                          get_session, _delete_session_unlocked
+    [S4] 会话所有权令牌 .................. _get_token_secret, generate_session_token,
+                                          validate_session_token
+    [S5] 用户级隔离 ...................... set_user_id
+    [S6] 消息存储与滑动窗口 .............. add_message, get_conversation_context,
+                                          _messages_to_context, _generate_summary_async
+    [S7] 漂移检测（委托 drift_detector）.. _classify_intent, detect_drift,
+                                          _check_escalation, _text_similarity
+    [S8] 管理/查询接口 .................. get_session_info, list_sessions,
+                                          list_sessions_brief, delete_session
+    [S9] 同步兼容包装 .................... *_sync 方法
+
+    注：token 计数已拆至 token_counter.py，漂移检测已拆至 drift_detector.py。
+    本文件 590 行主要为存储后端（S2）+ 会话生命周期（S3）+ 消息操作（S6），
+    拆分收益不大，保持单文件。
+    ──────────────────────────────────────────────────────────────────────
     """
+
+    # ------------------------------------------------------------------
+    # [S1] 初始化与存储后端配置
+    # ------------------------------------------------------------------
 
     def __init__(self, storage_backend: str = "memory", window_size: int = 10,
                  llm=None, max_tokens: int = None, **storage_config):
@@ -129,6 +177,10 @@ class EnhancedSessionManager:
             self.storage_config.setdefault(k, v)
         if self.storage_backend == "file":
             os.makedirs(self.storage_config["storage_dir"], exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # [S2] 存储后端适配（内存 / 文件 / Redis）
+    # ------------------------------------------------------------------
 
     def _get_redis(self):
         """获取 Redis 客户端（懒初始化，失败时回退到内存模式）"""
@@ -170,6 +222,10 @@ class EnhancedSessionManager:
                     json.dump(messages, f, ensure_ascii=False)
             except Exception as e:
                 logger.warning(f"文件保存失败: {e}")
+
+    # ------------------------------------------------------------------
+    # [S3] 会话生命周期（创建 / 获取 / 淘汰 / 删除）
+    # ------------------------------------------------------------------
 
     # ---- 会话生命周期 ----
 
@@ -262,7 +318,9 @@ class EnhancedSessionManager:
         logger.debug(f"创建会话: {session_id}")
         return session_id
 
-    # ---- 会话所有权令牌（v3.7: 防会话劫持）----
+    # ------------------------------------------------------------------
+    # [S4] 会话所有权令牌（v3.7: HMAC 防会话劫持）
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _get_token_secret() -> str:
@@ -326,6 +384,10 @@ class EnhancedSessionManager:
             await self.create_session(session_id)
         return self.sessions[session_id]
 
+    # ------------------------------------------------------------------
+    # [S5] 用户级隔离
+    # ------------------------------------------------------------------
+
     # ---- H-3: 用户级隔离 ----
 
     def set_user_id(self, session_id: str, user_id: str):
@@ -335,6 +397,10 @@ class EnhancedSessionManager:
         """
         if session_id in self.sessions and user_id:
             self.sessions[session_id]["user_id"] = user_id
+
+    # ------------------------------------------------------------------
+    # [S6] 消息存储与滑动窗口裁剪
+    # ------------------------------------------------------------------
 
     # ---- 消息操作 ----
 
@@ -451,6 +517,10 @@ class EnhancedSessionManager:
             logger.warning(f"摘要生成失败: {e}")
             return existing_summary
 
+    # ------------------------------------------------------------------
+    # [S7] 漂移检测（委托 drift_detector 模块）
+    # ------------------------------------------------------------------
+
     # ---- 漂移检测 ----
 
     def _classify_intent(self, text: str) -> Optional[str]:
@@ -481,6 +551,10 @@ class EnhancedSessionManager:
         """文本相似度（v3.1: jieba 分词提升精度）"""
         from drift_detector import _text_similarity
         return _text_similarity(a, b)
+
+    # ------------------------------------------------------------------
+    # [S8] 管理 / 查询接口
+    # ------------------------------------------------------------------
 
     # ---- 管理接口 ----
 
@@ -552,6 +626,10 @@ class EnhancedSessionManager:
                     r.delete(f"{_CFG_REDIS_PREFIX}{session_id}:meta")
                 except Exception as e:
                     logger.warning(f"Redis 会话清理失败 session={session_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # [S9] 向后兼容：同步包装方法
+    # ------------------------------------------------------------------
 
     # ---- 向后兼容：同步包装（v4.1） ----
 

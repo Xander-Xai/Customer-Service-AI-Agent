@@ -84,7 +84,8 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
         raise
     except ValueError:
         raise
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[WS] 认证异常: {e}")
         await ws.send_json({"type": "error", "message": "认证失败"})
         await ws.close(code=4003, reason="Auth error")
         raise
@@ -109,7 +110,8 @@ async def websocket_chat(ws: WebSocket):
 
     try:
         ws_api_key, session_token, ws_jwt_payload = await _ws_authenticate(ws, ws_api_key)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"[WS] 认证流程异常: {e}")
         async with _ws_lock:
             _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
         return
@@ -164,7 +166,8 @@ async def websocket_chat(ws: WebSocket):
                         await ws.send_json({"type": "error", "content": "连接空闲超时，请重新连接"})
                         await ws.close(code=4008, reason="Idle timeout")
                         break
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"[WS] ping 发送失败，关闭连接: {e}")
                     await ws.close(code=4008, reason="Idle timeout")
                     break
 
@@ -212,7 +215,8 @@ async def websocket_chat(ws: WebSocket):
                             await ws.send_json({"type": "progress", "content": status_messages[-1]})
                         else:
                             await ws.send_json({"type": "progress", "content": msg})
-                    except Exception:
+                    except Exception as e:
+                        logger.debug(f"[WS] 进度通知发送失败: {e}")
                         break
 
             notify_task = asyncio.create_task(progressive_notify())

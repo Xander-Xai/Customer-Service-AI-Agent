@@ -110,6 +110,9 @@ def verify_password(password: str, password_hash: str) -> bool:
         # 回退到旧迭代次数（100,000），验证成功后标记需要迁移
         dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100000)
         return hmac.compare_digest(dk.hex(), stored_hash)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"密码哈希格式异常: {e}")
+        return False
     except Exception:
         logger.exception("密码验证过程中发生异常")
         return False

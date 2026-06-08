@@ -67,8 +67,8 @@ class ServiceContainer:
                 )
                 # Redis 缓存预热移至 initialize()（异步执行）
                 self._redis_url = REDIS_URL
-            except Exception:
-                logger.warning("Redis 初始化失败，回退到内存模式")
+            except Exception as e:
+                logger.warning(f"Redis 初始化失败，回退到内存模式: {e}")
 
         # ===== 延迟初始化组件（initialize() 中设置）=====
         self.llm: Any = None
