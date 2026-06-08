@@ -1,0 +1,88 @@
+/**
+ * 登录页入口
+ */
+import '../styles/variables.css';
+import '../styles/login.css';
+import '../styles/animations.css';
+
+let isLogin = true;
+
+function toggleMode() {
+  isLogin = !isLogin;
+  document.getElementById('formTitle').textContent = isLogin
+    ? '智能客服系统 · 登录' : '智能客服系统 · 注册';
+  document.getElementById('submitBtn').textContent = isLogin ? '登录' : '注册';
+  document.getElementById('displayNameGroup').style.display = isLogin ? 'none' : 'block';
+  document.getElementById('switchText').textContent = isLogin ? '没有账号？' : '已有账号？';
+  document.getElementById('switchLink').textContent = isLogin ? '注册' : '登录';
+  document.getElementById('errorMsg').style.display = 'none';
+  document.getElementById('password').value = '';
+}
+
+async function handleSubmit(e) {
+  e.preventDefault();
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+  const errorMsg = document.getElementById('errorMsg');
+  const submitBtn = document.getElementById('submitBtn');
+
+  errorMsg.style.display = 'none';
+  submitBtn.disabled = true;
+  submitBtn.textContent = isLogin ? '登录中...' : '注册中...';
+
+  try {
+    const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+    const body = { username, password };
+    if (!isLogin) body.display_name = document.getElementById('displayName').value.trim();
+
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || data.error || '操作失败');
+
+    if (isLogin) {
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify({
+        user_id: data.user_id,
+        username: data.username,
+        role: data.role,
+        display_name: data.display_name,
+      }));
+      window.location.href = '/';
+    } else {
+      toggleMode();
+      document.getElementById('username').value = username;
+      document.getElementById('password').value = password;
+      errorMsg.textContent = '注册成功！请登录';
+      errorMsg.style.color = '#22c55e';
+      errorMsg.style.display = 'block';
+    }
+  } catch (err) {
+    errorMsg.textContent = err.message;
+    errorMsg.style.color = '#ef4444';
+    errorMsg.style.display = 'block';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = isLogin ? '登录' : '注册';
+  }
+}
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+  // 已登录则跳转
+  if (localStorage.getItem('token')) {
+    window.location.href = '/';
+    return;
+  }
+
+  document.getElementById('authForm').addEventListener('submit', handleSubmit);
+  document.getElementById('switchLink').addEventListener('click', toggleMode);
+
+  // 仅开发环境显示演示账号提示
+  fetch('/api/health').then(r => r.json()).then(d => {
+    if (d.mode === 'dev') document.getElementById('demoHint').style.display = 'block';
+  }).catch(() => {});
+});
