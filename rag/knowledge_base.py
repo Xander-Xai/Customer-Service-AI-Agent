@@ -6,7 +6,7 @@ v5.1: 集成 CLIP 多模态 embedding，支持图片语义检索。
 """
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from logger import get_logger
 
@@ -27,7 +27,7 @@ class CosmeticsKnowledgeBase:
 
         try:
             import chromadb
-            from chromadb.utils import embedding_functions
+            from chromadb.utils import embedding_functions  # noqa: F401
 
             # v4.3: 使用中文 embedding 模型提升语义检索精度
             self._embed_fn = self._create_embedding_function()

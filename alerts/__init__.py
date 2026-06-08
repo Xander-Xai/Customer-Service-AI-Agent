@@ -2,3 +2,5 @@
 
 from .notifier import AlertNotifier
 from .router import router as alerts_router
+
+__all__ = ["AlertNotifier", "alerts_router"]

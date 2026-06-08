@@ -13,9 +13,7 @@
   make dev  # 启动应用
 """
 
-import json
 import random
-import time
 
 from locust import HttpUser, between, events, task
 

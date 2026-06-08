@@ -12,7 +12,6 @@ ImageProcessor — 图片预处理（v5.1）
 import base64
 import io
 import logging
-from typing import Optional, Tuple
 
 from PIL import Image
 

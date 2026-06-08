@@ -5,19 +5,16 @@ API 中间件栈：限流、安全头、认证、分布式追踪
 
 import hmac
 import os
-import re
 import secrets
 import time
 import uuid
 from collections import defaultdict
-from typing import Dict
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.utils import check_admin_token, check_api_key, check_jwt_auth, is_authenticated
 from config import (
-    API_KEY_ENABLED,
     DEV_MODE,
 )
 from logger import get_logger, set_trace_id

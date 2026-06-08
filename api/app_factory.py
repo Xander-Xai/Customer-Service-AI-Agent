@@ -8,7 +8,6 @@ v4.2 改造：
 - App 同步创建（图在 lifespan 中异步构建）
 """
 
-import asyncio
 from contextlib import asynccontextmanager
 
 from config import (

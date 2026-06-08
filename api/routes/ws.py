@@ -8,7 +8,6 @@ import hmac
 import time
 import uuid
 from collections import defaultdict
-from typing import Dict
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -160,7 +159,6 @@ async def websocket_chat(ws: WebSocket):
         await bus.subscribe("agent.completed", on_agent_event)
 
     msg_timestamps: list = []
-    last_activity = time.time()
 
     try:
         while True:
@@ -188,14 +186,12 @@ async def websocket_chat(ws: WebSocket):
                 continue
 
             if data.get("type") == "pong":
-                last_activity = now
                 continue
 
             if len(msg_timestamps) >= WS_MESSAGE_RATE_LIMIT:
                 await ws.send_json({"type": "error", "content": "消息发送过于频繁，请稍后再试"})
                 continue
             msg_timestamps.append(now)
-            last_activity = now
 
             query = data.get("query", "").strip()[:MAX_QUERY_LENGTH]
             query = sanitize_input(query)

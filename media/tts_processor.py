@@ -8,8 +8,6 @@ TTSProcessor — 文字转语音 TTS（v5.1）
 """
 
 import io
-import logging
-from typing import Optional
 
 from logger import get_logger
 
@@ -56,8 +54,8 @@ class TTSProcessor:
 
         try:
             import edge_tts
-        except ImportError:
-            raise ImportError("edge_tts 未安装，请运行: pip install edge-tts")
+        except ImportError as e:
+            raise ImportError("edge_tts 未安装，请运行: pip install edge-tts") from e
 
         voice_name = voice or self.voice
         # 截断过长文本（防止超时）

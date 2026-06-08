@@ -3,7 +3,7 @@
 """
 
 import re
-from typing import Any, Dict
+from typing import Any
 
 from .base_agent import BaseAgent
 

@@ -5,7 +5,7 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 from logger import get_logger
 

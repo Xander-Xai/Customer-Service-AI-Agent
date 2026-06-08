@@ -13,7 +13,6 @@ import asyncio
 import hashlib
 import time
 from collections import OrderedDict, defaultdict, deque
-from typing import Dict, List, Optional, Tuple
 
 import config
 from logger import get_logger

@@ -4,7 +4,7 @@
 """
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from logger import get_logger
 
@@ -151,7 +151,7 @@ class RuleBasedLLM:
         import asyncio
 
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             raise RuntimeError("Use async_invoke() in async context")
         except RuntimeError as e:
             if "no running" in str(e) or "Use async" in str(e):

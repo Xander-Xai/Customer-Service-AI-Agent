@@ -9,7 +9,7 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, Request

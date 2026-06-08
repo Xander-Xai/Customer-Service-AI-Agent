@@ -5,8 +5,6 @@
 - GET  /api/alerts/history — 告警历史
 """
 
-from typing import Optional
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 

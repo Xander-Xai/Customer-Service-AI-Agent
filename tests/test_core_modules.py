@@ -4,8 +4,6 @@
 运行: pytest tests/test_core_modules.py -v --tb=short
 """
 
-import asyncio
-import hashlib
 import os
 import sys
 import time

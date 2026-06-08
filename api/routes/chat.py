@@ -9,7 +9,6 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -327,7 +326,6 @@ async def chat_with_image(
 
     multimodal_content = [{"type": "image_url", "image_url": {"url": data_url}}]
 
-    start_time = time.time()
     user_text = sanitize_input(query)[:MAX_QUERY_LENGTH] if query else "请分析这张图片"
     run_graph = request.app.state.run_graph
     try:
@@ -558,7 +556,7 @@ async def _handle_image_upload(
         processor = ImageProcessor()
         data_url = processor.process(file_bytes, content_type)
     except ValueError as e:
-        raise _SessionValidationError(400, str(e))
+        raise _SessionValidationError(400, str(e)) from e
 
     multimodal_content = [{"type": "image_url", "image_url": {"url": data_url}}]
     if not user_text:
@@ -582,10 +580,10 @@ async def _handle_audio_upload(
         stt = AudioProcessor()
         query_text = await stt.transcribe(file_bytes, content_type, language)
     except ValueError as e:
-        raise _SessionValidationError(400, str(e))
+        raise _SessionValidationError(400, str(e)) from e
     except Exception as e:
         logger.error(f"STT 转写失败: {e}", exc_info=True)
-        raise _SessionValidationError(500, "语音转写失败，请稍后重试")
+        raise _SessionValidationError(500, "语音转写失败，请稍后重试") from e
 
     if not query_text.strip():
         raise _SessionValidationError(400, "未识别到有效语音内容")
@@ -608,10 +606,10 @@ async def _handle_document_upload(
 
         dp = DocumentProcessor()
         doc_text = dp.extract(file_bytes, content_type, filename)
-    except ImportError:
-        raise _SessionValidationError(503, "文档处理不可用（依赖未安装）")
+    except ImportError as e:
+        raise _SessionValidationError(503, "文档处理不可用（依赖未安装）") from e
     except ValueError as e:
-        raise _SessionValidationError(400, str(e))
+        raise _SessionValidationError(400, str(e)) from e
 
     if user_text:
         user_text = f"{user_text}\n\n[文档内容]\n{doc_text}"
@@ -638,10 +636,10 @@ async def _handle_video_upload(
 
         vp = VideoProcessor()
         frames = vp.extract_frames(file_bytes, content_type)
-    except ImportError:
-        raise _SessionValidationError(503, "视频处理不可用（opencv 未安装）")
+    except ImportError as e:
+        raise _SessionValidationError(503, "视频处理不可用（opencv 未安装）") from e
     except ValueError as e:
-        raise _SessionValidationError(400, str(e))
+        raise _SessionValidationError(400, str(e)) from e
 
     if not frames:
         raise _SessionValidationError(400, "无法从视频中提取帧")

@@ -4,12 +4,11 @@ ERP 集成测试（v4.1）
 所有测试使用 Mock，不需要真实 API
 """
 
-import asyncio
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -202,7 +201,6 @@ class TestMockVsRealFormat:
     """确保两种适配器返回完全相同的字段集"""
 
     def test_product_keys_match(self):
-        mock = KingdeeMockAdapter()
         real_keys = {"id", "name", "category", "price", "specs", "ingredients", "suitable"}
 
         # MockAdapter 的返回字段

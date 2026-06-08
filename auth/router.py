@@ -7,7 +7,6 @@
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, validator
@@ -17,7 +16,6 @@ from db.models import AuditLog, User
 
 from .service import (
     authenticate_user,
-    decode_token,
     get_current_user,
     refresh_access_token,
     register_user,
@@ -163,7 +161,7 @@ async def api_refresh(data: RefreshRequest):
 @router.post("/logout")
 async def api_logout(request: Request):
     """用户登出（v4.0: 吊销当前 JWT token）"""
-    user = require_auth(request)
+    require_auth(request)  # side-effect: raises 401 if not authenticated
     token = _get_token_from_request(request)
     if token:
         await revoke_token(token)

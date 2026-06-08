@@ -8,7 +8,6 @@ import json
 import os
 import re
 import uuid
-from typing import Optional
 
 from auth.service import decode_token as _decode_jwt_token
 from config import API_KEY, API_KEY_ENABLED, CORS_ORIGINS, MONITORING_ADMIN_TOKEN

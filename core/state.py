@@ -1,6 +1,6 @@
 """AgentState - 单一定义点（v4.4: 消除多处重复定义；v5.1: 多模态扩展）"""
 
-from typing import List, TypedDict
+from typing import TypedDict
 
 
 class AgentState(TypedDict, total=False):

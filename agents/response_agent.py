@@ -4,7 +4,7 @@
 """
 
 import re
-from typing import Any, Dict
+from typing import Any
 
 from agents.base_agent import BaseAgent
 from agents.evaluator import ResponseEvaluator
@@ -257,7 +257,6 @@ class ResponseAgent(BaseAgent):
         - resolved: Agent 正常返回有效响应 → resolved
         """
         response = state.get("response", "")
-        mode = state.get("collaboration_mode", "")
 
         # 失败场景：空响应或错误降级
         if not response or response.strip() == "":

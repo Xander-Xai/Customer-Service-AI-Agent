@@ -2,12 +2,9 @@
 v4.0 测试：用户认证 + 数据库 + 知识库管理 + 告警通知
 """
 
-import json
 import os
 import sys
 import time
-
-import pytest
 
 # 确保项目根目录在 path 中
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,14 +42,14 @@ class TestDatabaseModels:
     """数据库模型基础测试"""
 
     def test_import_models(self):
-        from db.models import AuditLog, Base, ChatHistory, User
+        from db.models import AuditLog, ChatHistory, User
 
         assert hasattr(User, "__tablename__")
         assert hasattr(ChatHistory, "__tablename__")
         assert hasattr(AuditLog, "__tablename__")
 
     def test_database_init(self):
-        from db.database import engine, init_db
+        from db.database import init_db
 
         init_db()
         # 验证表已创建

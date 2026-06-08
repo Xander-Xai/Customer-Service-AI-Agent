@@ -15,7 +15,7 @@ import asyncio
 import json
 import time
 from collections import deque
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from config import (
     CIRCUIT_BREAKER_FAIL_THRESHOLD,

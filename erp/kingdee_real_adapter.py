@@ -11,7 +11,7 @@ import functools
 import re
 import time
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional, TypeVar
+from typing import Any
 
 import httpx
 
@@ -26,8 +26,6 @@ from erp import KingdeeAdapterBase, sanitize_erp_input
 from logger import get_logger
 
 logger = get_logger("erp.kingdee_real")
-
-T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
 # 指数退避重试装饰器

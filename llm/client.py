@@ -14,12 +14,10 @@ v4.2: 真流式调用（SSE 逐 chunk）
 
 import asyncio
 import json
-import os
 import random
-from typing import Optional
 
 import httpx
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from config import (
     HTTP_HEADERS,
@@ -137,7 +135,6 @@ class OpenAICompatibleClient:
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
 
-        last_error = None
         for attempt in range(self.max_retries):
             try:
                 resp = await client.post(
@@ -169,7 +166,6 @@ class OpenAICompatibleClient:
                     return CustomResponse(content, parsed_tool_calls)
                 return CustomResponse("API response format error")
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                last_error = e
                 if (
                     isinstance(e, httpx.HTTPStatusError)
                     and tools
@@ -251,7 +247,6 @@ class OpenAICompatibleClient:
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
 
-        last_error = None
         for attempt in range(self.max_retries):
             try:
                 async with client.stream(
@@ -284,7 +279,6 @@ class OpenAICompatibleClient:
                                 continue
                 return
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
-                last_error = e
                 if attempt == self.max_retries - 1:
                     break
                 max_delay = 10.0

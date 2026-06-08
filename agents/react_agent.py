@@ -4,7 +4,7 @@ ReAct 推理智能体（v3.5）
 实现 Thought → Action → Observation → Answer 的推理链。
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from config import REACT_MAX_ITERATIONS
 from logger import get_logger
