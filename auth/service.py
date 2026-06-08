@@ -1,7 +1,7 @@
 """
-认证业务逻辑（v4.0）
-- bcrypt 密码哈希
-- JWT token 生成/验证
+认证业务逻辑（v4.4）
+- PBKDF2-SHA256 密码哈希（600,000 次迭代，OWASP 推荐）
+- PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
 import os
@@ -10,8 +10,9 @@ import hmac
 import hashlib
 from datetime import datetime, timezone
 import json
-import base64
 from typing import Optional, Dict, Any
+
+import jwt
 
 from db.models import User
 from db.database import get_db_session
@@ -29,6 +30,8 @@ _JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "72"))
 class _TokenDenylist:
     """JWT 黑名单：优先使用 Redis，不可用时回退到内存 set"""
 
+    MAX_DENYLIST_SIZE = 10000
+
     def __init__(self):
         self._use_redis = False
         self._redis = None
@@ -45,6 +48,14 @@ class _TokenDenylist:
             logger.info("JWT 黑名单已启用 Redis 后端")
         except Exception as e:
             logger.warning(f"Redis 不可用，JWT 黑名单回退到内存模式: {e}")
+            # 生产环境不使用 Redis 时发出警告
+            app_mode = os.getenv("APP_MODE", "").lower()
+            if app_mode == "prod":
+                logger.warning(
+                    "JWT 黑名单运行在生产环境但未使用 Redis，"
+                    f"内存模式最大容量为 {self.MAX_DENYLIST_SIZE} 条，"
+                    "重启后黑名单将丢失"
+                )
 
     def add(self, jti: str, ttl_seconds: int) -> None:
         """将 jti 加入黑名单"""
@@ -52,6 +63,11 @@ class _TokenDenylist:
             key = f"{self._prefix}{jti}"
             self._redis.setex(key, max(ttl_seconds, 1), "1")
         else:
+            # 内存模式：检查容量，超过上限时清理旧条目
+            if len(self._memory_set) >= self.MAX_DENYLIST_SIZE:
+                evict_count = self.MAX_DENYLIST_SIZE // 4
+                for _ in range(evict_count):
+                    self._memory_set.pop()
             self._memory_set.add(jti)
 
     def contains(self, jti: str) -> bool:
@@ -88,38 +104,21 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _b64url_encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
-
-
-def _b64url_decode(s: str) -> bytes:
-    s += "=" * (4 - len(s) % 4)
-    return base64.urlsafe_b64decode(s)
-
-
 def create_token(user_id: int, username: str, role: str) -> str:
     """生成 JWT token（v4.0: 增加 jti claim 支持吊销）"""
     import secrets
     secret = _config.JWT_SECRET
     if not secret:
         raise ValueError("JWT_SECRET 未配置，无法生成 token")
-    header = json.dumps({"alg": _JWT_ALGORITHM, "typ": "JWT"})
-    payload = json.dumps({
-        "sub": user_id,
+    payload = {
+        "sub": str(user_id),
         "username": username,
         "role": role,
         "jti": secrets.token_hex(8),  # v4.0: 唯一 token ID，用于吊销
         "iat": int(time.time()),
         "exp": int(time.time()) + _JWT_EXPIRE_HOURS * 3600,
-    })
-    segments = [
-        _b64url_encode(header.encode()),
-        _b64url_encode(payload.encode()),
-    ]
-    signing_input = f"{segments[0]}.{segments[1]}".encode()
-    signature = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-    segments.append(_b64url_encode(signature))
-    return ".".join(segments)
+    }
+    return jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
 
 
 def create_access_token(user_id: int, username: str, role: str) -> str:
@@ -129,24 +128,16 @@ def create_access_token(user_id: int, username: str, role: str) -> str:
     if not secret:
         raise ValueError("JWT_SECRET 未配置，无法生成 token")
     expire_hours = getattr(_config, "JWT_ACCESS_EXPIRE_HOURS", 2)
-    header = json.dumps({"alg": _JWT_ALGORITHM, "typ": "JWT"})
-    payload = json.dumps({
-        "sub": user_id,
+    payload = {
+        "sub": str(user_id),
         "username": username,
         "role": role,
         "type": "access",
         "jti": secrets.token_hex(8),
         "iat": int(time.time()),
         "exp": int(time.time()) + expire_hours * 3600,
-    })
-    segments = [
-        _b64url_encode(header.encode()),
-        _b64url_encode(payload.encode()),
-    ]
-    signing_input = f"{segments[0]}.{segments[1]}".encode()
-    signature = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-    segments.append(_b64url_encode(signature))
-    return ".".join(segments)
+    }
+    return jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
 
 
 def create_refresh_token(user_id: int, username: str, role: str) -> str:
@@ -157,24 +148,16 @@ def create_refresh_token(user_id: int, username: str, role: str) -> str:
         raise ValueError("JWT_SECRET 未配置，无法生成 token")
     expire_hours = getattr(_config, "JWT_REFRESH_EXPIRE_HOURS", 168)
     jti = secrets.token_hex(16)
-    header = json.dumps({"alg": _JWT_ALGORITHM, "typ": "JWT"})
-    payload = json.dumps({
-        "sub": user_id,
+    payload = {
+        "sub": str(user_id),
         "username": username,
         "role": role,
         "type": "refresh",
         "jti": jti,
         "iat": int(time.time()),
         "exp": int(time.time()) + expire_hours * 3600,
-    })
-    segments = [
-        _b64url_encode(header.encode()),
-        _b64url_encode(payload.encode()),
-    ]
-    signing_input = f"{segments[0]}.{segments[1]}".encode()
-    signature = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-    segments.append(_b64url_encode(signature))
-    token = ".".join(segments)
+    }
+    token = jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
 
     # 存储 refresh_token JTI 到 Redis（用于主动吊销）
     if _denylist._use_redis:
@@ -250,24 +233,25 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     if not secret:
         return None
     try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return None
-        signing_input = f"{parts[0]}.{parts[1]}".encode()
-        expected_sig = hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()
-        actual_sig = _b64url_decode(parts[2])
-        if not hmac.compare_digest(expected_sig, actual_sig):
-            return None
-        payload = json.loads(_b64url_decode(parts[1]))
-        if payload.get("exp", 0) < time.time():
-            return None
-        # v4.0: 检查 jti 是否在吊销黑名单中
-        jti = payload.get("jti")
-        if jti and _denylist.contains(jti):
-            return None
-        return payload
+        # PyJWT 验证签名、过期时间，算法白名单防止 alg:none 攻击
+        payload = jwt.decode(token, secret, algorithms=[_JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
     except Exception:
         return None
+
+    # v4.0: 检查 jti 是否在吊销黑名单中
+    jti = payload.get("jti")
+    if jti and _denylist.contains(jti):
+        return None
+    # PyJWT 要求 sub 为字符串，但下游代码期望 int，这里转回
+    try:
+        payload["sub"] = int(payload["sub"])
+    except (ValueError, TypeError, KeyError):
+        pass
+    return payload
 
 
 def get_current_user(token: str) -> Optional[User]:
@@ -382,19 +366,12 @@ def init_default_admin():
             )
             db.add(admin)
             db.commit()
-            # v4.3 安全加固: 密码写入受限文件，不输出到 stderr（避免容器日志泄露）
-            import stat
-            pw_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".admin_password")
-            try:
-                with open(pw_file, "w") as f:
-                    f.write(f"username: admin\npassword: {admin_password}\n")
-                os.chmod(pw_file, stat.S_IRUSR | stat.S_IWUSR)  # 仅 owner 可读写 (0600)
-                logger.info(f"[auth] 默认管理员已创建，密码已写入 {pw_file}（请登录后立即修改并删除此文件）")
-            except OSError as e:
-                # 文件写入失败时，仅记录哈希（不记录明文）
-                pw_hash = hashlib.sha256(admin_password.encode()).hexdigest()[:12]
-                logger.warning(f"[auth] 默认管理员已创建，密码文件写入失败({e})，密码哈希前缀: {pw_hash}")
-                logger.warning("[auth] 请通过 ADMIN_PASSWORD 环境变量设置密码后重启")
+            # v4.4 安全加固: 不写入密码文件，不输出密码或哈希到日志
+            if os.getenv("ADMIN_PASSWORD"):
+                logger.info("[auth] 默认管理员已创建（密码来自 ADMIN_PASSWORD 环境变量）")
+            else:
+                logger.info("[auth] 默认管理员已创建，密码已通过 ADMIN_PASSWORD 自动生成")
+                logger.info("[auth] 请通过 ADMIN_PASSWORD 环境变量设置密码，首次登录后请修改密码")
         else:
             logger.info("管理员账号已存在，跳过初始化")
     finally:
