@@ -69,6 +69,16 @@ class _JSONFormatter(logging.Formatter):
 
         if record.exc_info and record.exc_info[0]:
             log_data["exception"] = self.formatException(record.exc_info)
+
+        # Business context extraction
+        extra_fields = {}
+        for attr in ("user_id", "session_id", "response_time", "agent", "mode"):
+            val = getattr(record, attr, None)
+            if val is not None:
+                extra_fields[attr] = val
+        if extra_fields:
+            log_data["extra"] = extra_fields
+
         return json.dumps(log_data, ensure_ascii=False)
 
 

@@ -147,11 +147,10 @@ class RuleBasedLLM:
     def invoke(self, messages: List[Any], tools: Any = None) -> Any:
         """同步版本（兼容性）"""
         import asyncio
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 如果已经在异步上下文中，创建新的事件循环
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, self.async_invoke(messages, tools))
-                return future.result()
-        return asyncio.run(self.async_invoke(messages, tools))
+        try:
+            loop = asyncio.get_running_loop()
+            raise RuntimeError("Use async_invoke() in async context")
+        except RuntimeError as e:
+            if "no running" in str(e) or "Use async" in str(e):
+                return asyncio.run(self.async_invoke(messages, tools))
+            raise

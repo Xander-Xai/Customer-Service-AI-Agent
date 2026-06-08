@@ -21,12 +21,17 @@ from typing import Optional
 from logger import get_logger, get_trace_id
 from config import (
     RETRY_MAX_ATTEMPTS, RETRY_BASE_DELAY, HTTP_TIMEOUT, HTTP_HEADERS,
-    HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS,
+    HTTPX_MAX_CONNECTIONS, HTTPX_KEEPALIVE_CONNECTIONS, LLM_MAX_TOKENS,
 )
 
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
 logger = get_logger("llm_client")
+
+
+class LLMServiceError(Exception):
+    """LLM 服务调用异常（区分于内部错误，不向调用方泄露细节）"""
+    pass
 
 
 class CustomResponse:
@@ -103,11 +108,11 @@ class OpenAICompatibleClient:
                            tools: Optional[list] = None):
         """异步调用（支持 Function Calling，不支持 tools 时自动降级）"""
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
-            raise Exception("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
+            raise LLMServiceError("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
 
         payload = {"model": self.model, "messages": self._format_messages(messages)}
         if "max_tokens" not in payload:
-            payload["max_tokens"] = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+            payload["max_tokens"] = LLM_MAX_TOKENS
         if tools:
             payload["tools"] = tools
         client = await self._get_async_client()
@@ -156,7 +161,7 @@ class OpenAICompatibleClient:
 
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
-        raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
+        raise LLMServiceError(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
 
     async def async_invoke_raw(self, messages: list, timeout: Optional[float] = None):
         """使用预格式化的消息列表直接调用（适用于多模态等需要原始 content 格式的场景）
@@ -164,11 +169,11 @@ class OpenAICompatibleClient:
         跳过 _format_messages，直接传递。
         """
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
-            raise Exception("CircuitBreaker OPEN: LLM 调用已熔断")
+            raise LLMServiceError("CircuitBreaker OPEN: LLM 调用已熔断")
 
         payload = {"model": self.model, "messages": messages}
         if "max_tokens" not in payload:
-            payload["max_tokens"] = int(os.environ.get("LLM_MAX_TOKENS", "4096"))
+            payload["max_tokens"] = LLM_MAX_TOKENS
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
 
@@ -195,18 +200,18 @@ class OpenAICompatibleClient:
 
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
-        raise Exception(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
+        raise LLMServiceError(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
 
     async def async_invoke_stream(self, messages, timeout: Optional[float] = None):
         """流式调用（SSE 逐 chunk 接收）"""
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
-            raise Exception("CircuitBreaker OPEN: LLM 流式调用已熔断")
+            raise LLMServiceError("CircuitBreaker OPEN: LLM 流式调用已熔断")
 
         payload = {
             "model": self.model,
             "messages": self._format_messages(messages),
             "stream": True,
-            "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "4096")),
+            "max_tokens": LLM_MAX_TOKENS,
         }
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)

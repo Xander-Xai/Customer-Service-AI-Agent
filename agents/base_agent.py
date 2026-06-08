@@ -19,6 +19,20 @@ from core.shared_blackboard import SharedBlackboard
 from config import TOOL_MAX_ROUNDS, AB_TEST_ENABLED
 from logger import get_logger, get_trace_id
 
+# ===== 重试参数 =====
+RETRY_MAX_ATTEMPTS = 3             # 最大重试次数
+RETRY_BASE_DELAY = 1.0             # 重试基准延迟（秒）
+RETRY_MAX_DELAY = 10.0             # 最大单次重试延迟（秒）
+RETRY_BACKOFF_FACTOR = 2           # 指数退避因子
+
+# ===== 对话上下文参数 =====
+CONTEXT_MAX_MESSAGES = 6           # 对话上下文最大消息数
+
+# ===== 知识库检索参数 =====
+KNOWLEDGE_DEFAULT_N_RESULTS = 3    # RAG 默认检索条数
+KNOWLEDGE_CONTENT_TRUNCATE = 500   # 知识库内容截断长度（字符）
+KNOWLEDGE_DEFAULT_TTL = 300.0      # SharedBlackboard 默认 TTL（秒）
+
 
 # Agent 级漂移修复指引（比通用策略更具体的操作指引），定义一次，避免每次调用重建
 _AGENT_REPAIR_PROMPTS = {
@@ -148,24 +162,23 @@ class BaseAgent(ABC):
     async def process_with_retry(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """带指数退避重试的 async process 包装（v3.4: 仅重试瞬态错误）"""
         last_exception = None
-        for attempt in range(3):
+        for attempt in range(RETRY_MAX_ATTEMPTS):
             try:
                 return await self.process(state)
             except (ConnectionError, TimeoutError, OSError) as e:
                 # v3.4: 仅重试网络/超时等瞬态错误
                 last_exception = e
-                max_delay = 10.0  # 最大单次重试延迟 10 秒
-                delay = min(1.0 * (2 ** attempt), max_delay)
-                self.logger.warning(f"attempt {attempt+1}/3 failed (transient): {e}, wait {delay:.1f}s")
-                if attempt < 2:
+                delay = min(RETRY_BASE_DELAY * (RETRY_BACKOFF_FACTOR ** attempt), RETRY_MAX_DELAY)
+                self.logger.warning(f"attempt {attempt+1}/{RETRY_MAX_ATTEMPTS} failed (transient): {e}, wait {delay:.1f}s")
+                if attempt < RETRY_MAX_ATTEMPTS - 1:
                     await asyncio.sleep(delay)
             except Exception as e:
                 # 非瞬态错误（ValueError、TypeError 等）直接抛出
-                self.logger.error(f"attempt {attempt+1}/3 failed (permanent): {e}")
+                self.logger.error(f"attempt {attempt+1}/{RETRY_MAX_ATTEMPTS} failed (permanent): {e}")
                 raise
         raise last_exception
 
-    async def _get_conversation_context(self, session_id: str, max_messages: int = 6) -> str:
+    async def _get_conversation_context(self, session_id: str, max_messages: int = CONTEXT_MAX_MESSAGES) -> str:
         """v3.4: 改为 async 以支持异步摘要生成"""
         try:
             conversation_context = await self.session_manager.get_conversation_context(session_id, max_messages)
@@ -251,7 +264,7 @@ class BaseAgent(ABC):
             except Exception as e:
                 self.logger.debug(f"事件发布失败: {e}")
 
-    async def _write_blackboard(self, key: str, value: Any, ttl: float = 300):
+    async def _write_blackboard(self, key: str, value: Any, ttl: float = KNOWLEDGE_DEFAULT_TTL):
         """写入 SharedBlackboard（v3.0: 带 TTL）"""
         if self.bb:
             try:
@@ -269,7 +282,7 @@ class BaseAgent(ABC):
 
     async def _retrieve_knowledge(self, query: str,
                                    collections: List[str] = None,
-                                   n_results: int = 3,
+                                   n_results: int = KNOWLEDGE_DEFAULT_N_RESULTS,
                                    image_uri: str = None) -> str:
         """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
         v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
@@ -295,8 +308,8 @@ class BaseAgent(ABC):
                 content = r.get("content", "")
                 if content:
                     # 截断过长的文档（保留足够信息供 LLM 生成完整回复）
-                    if len(content) > 500:
-                        content = content[:500] + "..."
+                    if len(content) > KNOWLEDGE_CONTENT_TRUNCATE:
+                        content = content[:KNOWLEDGE_CONTENT_TRUNCATE] + "..."
                     parts.append(f"[知识库] {content}")
             return "\n".join(parts)
         except Exception as e:

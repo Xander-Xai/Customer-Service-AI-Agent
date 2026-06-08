@@ -1,25 +1,27 @@
 # 版本控制
-.git
+.git/
 .gitignore
+.certs/
 .claude
 
 # 环境配置（包含密钥）
-.env
-.env.*
+.env*
 !.env.example
 *.generated
 
 # 测试和开发
 tests/
 docs/
-__pycache__
+__pycache__/
 *.pyc
 .pytest_cache
+htmlcov/
 
 # 日志和数据
 logs/
 data/
 chat_sessions/
+node_modules/
 *.db
 
 # CI/CD

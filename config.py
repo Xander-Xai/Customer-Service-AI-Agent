@@ -4,6 +4,7 @@
 """
 import os
 import sys
+import logging
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -35,6 +36,7 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "siliconflow")  # siliconflow | deepsee
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
 # ===== HTTP 请求配置 =====
 HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 30)
@@ -131,7 +133,13 @@ ERP_APP_SECRET = os.getenv("ERP_APP_SECRET", "")
 ERP_DB_ID = os.getenv("ERP_DB_ID", "")
 
 # ===== Redis 配置（v3.0 新增） =====
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+_redis_url_env = os.getenv("REDIS_URL", "").strip()
+if _redis_url_env:
+    REDIS_URL = _redis_url_env
+else:
+    _redis_password = os.getenv("REDIS_PASSWORD", "")
+    _redis_host = os.getenv("REDIS_HOST", "localhost")
+    REDIS_URL = f"redis://:{_redis_password}@{_redis_host}:6379" if _redis_password else f"redis://{_redis_host}:6379"
 
 # ===== v3.5: RAG 配置 =====
 RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
@@ -215,6 +223,8 @@ SLA_REACT_MAX = _float_env("SLA_REACT_MAX", 30.0)
 # ===== P0-3: 生产环境关键配置启动校验 =====
 def validate_required_config():
     """生产环境启动时校验关键配置项非空非占位符"""
+    warnings = []
+
     # v4.3 安全加固：生产环境禁止 DEV_MODE
     if _DEV_MODE:
         # 检测是否为生产环境（通过多个信号判断）
@@ -231,7 +241,7 @@ def validate_required_config():
         return  # 非生产环境的开发模式跳过后续校验
 
     _PLACEHOLDER_PREFIXES = (
-        "your-", "change-me", "sk-placeholder", "sk-xxx", "sk-your",
+        "your-", "change-me", "change_me", "sk-placeholder", "sk-xxx", "sk-your",
         "sk-test-placeholder", "sk-tnwwg",  # 匹配已知旧占位符
     )
     errors = []
@@ -250,10 +260,25 @@ def validate_required_config():
     if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in ("", "change-me-session-secret-in-production", "dev-session-secret-do-not-use-in-prod", "your-session-secret-change-in-production"):
         errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值")
 
+    if not _DEV_MODE and "*" in CORS_ORIGINS:
+        errors.append("Production CORS_ORIGINS must not contain wildcard *")
+
+    if not _DEV_MODE and not DATABASE_URL:
+        errors.append("Production requires DATABASE_URL (PostgreSQL)")
+
     if errors:
         for err in errors:
             print(f"🚨 配置校验失败: {err}", file=sys.stderr)
         raise SystemExit(f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件")
+
+    # Non-fatal warnings for missing optional-but-recommended config
+    if not _DEV_MODE and not RAG_PERSIST_DIRECTORY:
+        warnings.append("RAG_PERSIST_DIRECTORY not set, vector DB will run in-memory")
+    if not _DEV_MODE and not ALERT_WEBHOOKS and not SMTP_HOST:
+        warnings.append("No alert notification channels configured")
+
+    for w in warnings:
+        logging.getLogger("config").warning(f"[config] {w}")
 
 
 validate_required_config()

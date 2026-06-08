@@ -23,6 +23,9 @@ from logger import get_logger
 
 logger = get_logger("auth.service")
 
+# 本地 LRU 缓存：已吊销的 JTI 集合（Redis 不可用时的快速拒绝层）
+_revoked_jtis: set = set()
+
 # JWT 配置（v4.0 安全修复：从 config 读取，不再有硬编码默认值）
 import config as _config
 
@@ -44,7 +47,7 @@ class _TokenDenylist:
             import redis as _redis_lib
             redis_url = getattr(_config, "REDIS_URL", "redis://localhost:6379")
             self._redis = _redis_lib.Redis.from_url(
-                redis_url, decode_responses=True, socket_timeout=2, connect_timeout=2,
+                redis_url, decode_responses=True, socket_timeout=2, socket_connect_timeout=2,
             )
             self._redis.ping()
             self._use_redis = True
@@ -112,72 +115,84 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_token(user_id: int, username: str, role: str) -> str:
-    """生成 JWT token（v4.0: 增加 jti claim 支持吊销）"""
+def _create_token(
+    user_id: int,
+    username: str,
+    role: str,
+    token_type: Optional[str],
+    expire_hours: int,
+    jti_bytes: int = 8,
+) -> str:
+    """Create a signed JWT token with standard claims.
+
+    Args:
+        user_id: User ID (stored as string in ``sub`` claim).
+        username: Username (stored in ``username`` claim).
+        role: User role string.
+        token_type: Optional token type label (``"access"`` / ``"refresh"`` / ``None``).
+        expire_hours: Token lifetime in hours.
+        jti_bytes: Number of random bytes for the JTI (default 8, use 16 for refresh).
+    """
     import secrets
+
     secret = _config.JWT_SECRET
     if not secret:
         raise ValueError("JWT_SECRET 未配置，无法生成 token")
-    payload = {
+    payload: Dict[str, Any] = {
         "sub": str(user_id),
         "username": username,
         "role": role,
-        "jti": secrets.token_hex(8),  # v4.0: 唯一 token ID，用于吊销
+        "jti": secrets.token_hex(jti_bytes),
         "iat": int(time.time()),
-        "exp": int(time.time()) + _JWT_EXPIRE_HOURS * 3600,
+        "exp": int(time.time()) + expire_hours * 3600,
     }
+    if token_type is not None:
+        payload["type"] = token_type
     return jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
+
+
+def create_token(user_id: int, username: str, role: str) -> str:
+    """生成 JWT token（v4.0: 增加 jti claim 支持吊销）"""
+    return _create_token(user_id, username, role, token_type=None, expire_hours=_JWT_EXPIRE_HOURS)
 
 
 def create_access_token(user_id: int, username: str, role: str) -> str:
     """P2-3: 生成短生命周期 access_token（默认 2 小时）"""
-    import secrets
-    secret = _config.JWT_SECRET
-    if not secret:
-        raise ValueError("JWT_SECRET 未配置，无法生成 token")
     expire_hours = getattr(_config, "JWT_ACCESS_EXPIRE_HOURS", 2)
-    payload = {
-        "sub": str(user_id),
-        "username": username,
-        "role": role,
-        "type": "access",
-        "jti": secrets.token_hex(8),
-        "iat": int(time.time()),
-        "exp": int(time.time()) + expire_hours * 3600,
-    }
-    return jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
+    return _create_token(user_id, username, role, token_type="access", expire_hours=expire_hours)
 
 
 async def create_refresh_token(user_id: int, username: str, role: str) -> str:
     """P2-3: 生成长生命周期 refresh_token（默认 7 天），存入 Redis 便于吊销"""
-    import secrets
-    secret = _config.JWT_SECRET
-    if not secret:
-        raise ValueError("JWT_SECRET 未配置，无法生成 token")
     expire_hours = getattr(_config, "JWT_REFRESH_EXPIRE_HOURS", 168)
-    jti = secrets.token_hex(16)
-    payload = {
-        "sub": str(user_id),
-        "username": username,
-        "role": role,
-        "type": "refresh",
-        "jti": jti,
-        "iat": int(time.time()),
-        "exp": int(time.time()) + expire_hours * 3600,
-    }
-    token = jwt.encode(payload, secret, algorithm=_JWT_ALGORITHM)
+    token = _create_token(
+        user_id, username, role, token_type="refresh",
+        expire_hours=expire_hours, jti_bytes=16,
+    )
 
     # 存储 refresh_token JTI 到 Redis（用于主动吊销）
     if _denylist._use_redis:
+        # Extract jti from the just-created token for Redis storage
         try:
-            refresh_prefix = getattr(_config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:").replace("blacklist", "refresh")
-            await asyncio.to_thread(
-                _denylist._redis.setex,
-                f"{refresh_prefix}{jti}", expire_hours * 3600,
-                json.dumps({"user_id": user_id, "username": username}),
+            payload = jwt.decode(
+                token, _config.JWT_SECRET, algorithms=[_JWT_ALGORITHM],
+                options={"verify_exp": False},
             )
-        except _redis_mod.RedisError:
-            pass
+            jti = payload.get("jti")
+        except (jwt.DecodeError, jwt.InvalidTokenError):
+            jti = None
+        if jti:
+            try:
+                refresh_prefix = getattr(
+                    _config, "REDIS_JWT_PREFIX", "csai:jwt:blacklist:",
+                ).replace("blacklist", "refresh")
+                await asyncio.to_thread(
+                    _denylist._redis.setex,
+                    f"{refresh_prefix}{jti}", expire_hours * 3600,
+                    json.dumps({"user_id": user_id, "username": username}),
+                )
+            except _redis_mod.RedisError:
+                pass
 
     return token
 
@@ -268,6 +283,9 @@ def decode_token(token: str) -> Optional[Dict[str, Any]]:
     # v4.0: 检查 jti 是否在吊销黑名单中
     jti = payload.get("jti")
     if jti:
+        # 本地 LRU 缓存快速拒绝（Redis 异步检查由 decode_token_async 负责）
+        if jti in _revoked_jtis:
+            return None
         # NOTE: denylist.contains is now async; callers must await it.
         # Use a synchronous cache check for the memory path to avoid breaking sync code.
         if _denylist._use_redis:
@@ -342,6 +360,7 @@ async def revoke_token(token: str) -> bool:
         exp = payload.get("exp", int(time.time()) + _JWT_EXPIRE_HOURS * 3600)
         ttl = max(int(exp - time.time()), 1)
         await _denylist.add(jti, ttl)
+        _revoked_jtis.add(jti)
         logger.info(f"Token 已吊销: jti={jti}")
         return True
     return False

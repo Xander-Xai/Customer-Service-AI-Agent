@@ -20,8 +20,8 @@ services:
   app:
     build: .
     container_name: customer-service-ai
-    ports:
-      - "${APP_PORT:-8000}:8000"
+    expose:
+      - "8000"
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
@@ -134,8 +134,8 @@ services:
   prometheus:
     image: prom/prometheus:v2.51.0
     container_name: customer-service-prometheus
-    ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+    expose:
+      - "9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alert_rules.yml:/etc/prometheus/rules/alert_rules.yml:ro
@@ -148,6 +148,7 @@ services:
       - cs-network
 
   # ===== Grafana 仪表盘 =====
+  # NOTE: In production, Grafana should be proxied via Nginx rather than exposing the port directly
   grafana:
     image: grafana/grafana:10.4.1
     container_name: customer-service-grafana

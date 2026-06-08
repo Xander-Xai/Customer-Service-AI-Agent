@@ -11,6 +11,72 @@ from logger import get_logger
 
 logger = get_logger("agents.evaluator")
 
+# ===== 评分基准分 =====
+SCORE_BASE_COMPLETENESS = 50.0   # 完整性基准分
+SCORE_BASE_ACCURACY = 60.0       # 准确性基准分
+SCORE_BASE_POLITENESS = 50.0     # 礼貌性基准分
+SCORE_BASE_RELEVANCE = 40.0      # 相关性基准分
+SCORE_BASE_RELEVANCE_NO_QUERY = 60.0  # 无问题时相关性基准分
+SCORE_BASE_POLITENESS_MIN = 40.0 # 礼貌性最低保底分
+
+# ===== 回答长度阈值 =====
+RESP_LEN_VERY_SHORT = 20         # 极短回答（严重扣分）
+RESP_LEN_SHORT = 50              # 短回答（轻微扣分）
+RESP_LEN_IDEAL_MAX = 500         # 理想长度上限
+RESP_LEN_LONG = 800              # 偏长
+RESP_LEN_VERY_LONG = 1000        # 过长（完整性扣分）
+RESP_LEN_EXCESSIVE = 1500        # 过于冗长
+
+# ===== 简洁性评分 =====
+CONCISENESS_IDEAL = 90.0         # 理想长度简洁性分
+CONCISENESS_SHORT = 70.0         # 偏短简洁性分
+CONCISENESS_LONG = 75.0          # 偏长简洁性分
+CONCISENESS_VERY_LONG = 55.0     # 很长简洁性分
+CONCISENESS_EXCESSIVE = 35.0     # 过于冗长简洁性分
+
+# ===== 评分维度权重 =====
+WEIGHT_COMPLETENESS = 0.25       # 完整性权重
+WEIGHT_ACCURACY = 0.25           # 准确性权重
+WEIGHT_CONCISENESS = 0.15        # 简洁性权重
+WEIGHT_POLITENESS = 0.10         # 礼貌性权重
+WEIGHT_RELEVANCE = 0.25          # 相关性权重
+
+# ===== 评分调整量 =====
+SCORE_PENALTY_VERY_SHORT = -30   # 极短回答扣分
+SCORE_PENALTY_SHORT = -15        # 短回答扣分
+SCORE_PENALTY_LONG = -5          # 过长回答扣分
+SCORE_BONUS_STRUCTURED = 10      # 结构化回答加分
+SCORE_BONUS_KB_REFERENCE = 15    # 知识库引用加分
+SCORE_BONUS_DATA_NUMBERS = 5     # 包含具体数据加分
+SCORE_BONUS_CERTAIN_PHRASE = 3   # 确定性表达加分（每个）
+SCORE_PENALTY_UNCERTAIN_PHRASE = -5  # 不确定性表达扣分（每个）
+SCORE_PENALTY_ERROR_RESPONSE = -40   # 错误降级响应扣分
+SCORE_BONUS_POLITE_PHRASE = 8    # 礼貌用语加分（每个）
+SCORE_BONUS_POLITE_MAX = 40      # 礼貌用语加分上限
+SCORE_BONUS_FRIENDLY = 5         # 友好语气加分
+
+# ===== 填充词/重复检测阈值 =====
+FILLER_RATIO_HIGH = 0.3          # 高填充词比例
+FILLER_RATIO_MEDIUM = 0.15       # 中等填充词比例
+FILLER_PENALTY_HIGH = -15        # 高填充词扣分
+FILLER_PENALTY_MEDIUM = -8       # 中等填充词扣分
+UNIQUE_RATIO_LOW = 0.7           # 低唯一句比例（大量重复）
+DUPLICATE_PENALTY = -15          # 重复内容扣分
+
+# ===== 建议生成阈值 =====
+SUGGESTION_COMPLETENESS_THRESHOLD = 60   # 完整性建议阈值
+SUGGESTION_ACCURACY_THRESHOLD = 60       # 准确性建议阈值
+SUGGESTION_CONCISENESS_THRESHOLD = 50    # 简洁性建议阈值
+SUGGESTION_POLITENESS_THRESHOLD = 50     # 礼貌性建议阈值
+SUGGESTION_RELEVANCE_THRESHOLD = 60      # 相关性建议阈值
+SUGGESTION_SHORT_RESPONSE_LEN = 15       # 回答过短判断阈值（字符数）
+
+# ===== 趋势计算 =====
+TREND_MIN_FEEDBACKS = 4          # 趋势计算最少反馈数
+TREND_IMPROVING_THRESHOLD = 0.1  # 改善趋势阈值
+TREND_DECLINING_THRESHOLD = -0.1 # 恶化趋势阈值
+TREND_DEFAULT_SATISFACTION = 0.5 # 默认满意度
+
 # ===== 礼貌用语词库 =====
 _POLITE_PHRASES = [
     "您好", "你好", "感谢", "谢谢", "请", "很高兴",
@@ -83,11 +149,11 @@ class ResponseEvaluator:
 
         # 加权综合评分
         weights = {
-            "completeness": 0.25,
-            "accuracy": 0.25,
-            "conciseness": 0.15,
-            "politeness": 0.10,
-            "relevance": 0.25,
+            "completeness": WEIGHT_COMPLETENESS,
+            "accuracy": WEIGHT_ACCURACY,
+            "conciseness": WEIGHT_CONCISENESS,
+            "politeness": WEIGHT_POLITENESS,
+            "relevance": WEIGHT_RELEVANCE,
         }
         score = sum(factors[k] * weights[k] for k in factors)
         score = round(min(100, max(0, score)), 1)
@@ -161,20 +227,20 @@ class ResponseEvaluator:
         完整性评分 (0-100)
         评估回答是否覆盖了问题的多个方面。
         """
-        score = 50.0  # 基准分
+        score = SCORE_BASE_COMPLETENESS
 
         # 回答长度合理性（太短扣分，太长也轻微扣分）
         resp_len = len(response.strip())
-        if resp_len < 20:
-            score -= 30
-        elif resp_len < 50:
-            score -= 15
-        elif resp_len > 1000:
-            score -= 5  # 过长但不至于严重
+        if resp_len < RESP_LEN_VERY_SHORT:
+            score += SCORE_PENALTY_VERY_SHORT
+        elif resp_len < RESP_LEN_SHORT:
+            score += SCORE_PENALTY_SHORT
+        elif resp_len > RESP_LEN_VERY_LONG:
+            score += SCORE_PENALTY_LONG  # 过长但不至于严重
 
         # 分点回答加分（有结构化内容）
         if re.search(r"[1-9][.、）)]\s|[-*]\s|•\s", response):
-            score += 10
+            score += SCORE_BONUS_STRUCTURED
 
         # 包含对问题类型的覆盖关键词
         expected_keywords = _COVERAGE_KEYWORDS.get(query_type, [])
@@ -197,20 +263,20 @@ class ResponseEvaluator:
         准确性评分 (0-100)
         基于回答是否包含知识库引用、数据准确性等启发式判断。
         """
-        score = 60.0  # 基准分
+        score = SCORE_BASE_ACCURACY
 
         # 包含知识库引用标记加分
         if "[知识库]" in response or "根据" in response or "根据系统记录" in response:
-            score += 15
+            score += SCORE_BONUS_KB_REFERENCE
 
         # 包含具体数据/数字加分（价格、订单号等）
         if re.search(r"\d{4,}", response):
-            score += 5
+            score += SCORE_BONUS_DATA_NUMBERS
 
         # 包含确定性表达加分
         certain_phrases = ["已确认", "查询结果", "系统显示", "记录显示", "当前状态"]
         certain_hits = sum(1 for p in certain_phrases if p in response)
-        score += min(certain_hits * 3, 10)
+        score += min(certain_hits * SCORE_BONUS_CERTAIN_PHRASE, 10)
 
         # 不确定性表达扣分
         uncertain_phrases = [
@@ -218,11 +284,11 @@ class ResponseEvaluator:
             "我不确定", "建议您咨询", "建议您联系",
         ]
         uncertain_hits = sum(1 for p in uncertain_phrases if p in response)
-        score -= uncertain_hits * 5
+        score -= uncertain_hits * abs(SCORE_PENALTY_UNCERTAIN_PHRASE)
 
         # 回答中包含错误降级标记扣分
         if response in ("处理出错，请重试", "处理出错"):
-            score -= 40
+            score += SCORE_PENALTY_ERROR_RESPONSE
 
         return min(100, max(0, score))
 
@@ -234,32 +300,32 @@ class ResponseEvaluator:
         resp_len = len(response.strip())
 
         # 理想长度范围：50-500 字符
-        if 50 <= resp_len <= 500:
-            score = 90.0
-        elif resp_len < 50:
-            score = 70.0  # 偏短，但不一定差
-        elif resp_len <= 800:
-            score = 75.0
-        elif resp_len <= 1500:
-            score = 55.0
+        if RESP_LEN_SHORT <= resp_len <= RESP_LEN_IDEAL_MAX:
+            score = CONCISENESS_IDEAL
+        elif resp_len < RESP_LEN_SHORT:
+            score = CONCISENESS_SHORT  # 偏短，但不一定差
+        elif resp_len <= RESP_LEN_LONG:
+            score = CONCISENESS_LONG
+        elif resp_len <= RESP_LEN_EXCESSIVE:
+            score = CONCISENESS_VERY_LONG
         else:
-            score = 35.0  # 过长
+            score = CONCISENESS_EXCESSIVE  # 过长
 
         # 检查填充词比例（信息密度）
         filler_count = sum(response.count(f) for f in _FILLER_PHRASES)
         filler_ratio = filler_count / max(resp_len / 10, 1)
-        if filler_ratio > 0.3:
-            score -= 15
-        elif filler_ratio > 0.15:
-            score -= 8
+        if filler_ratio > FILLER_RATIO_HIGH:
+            score += FILLER_PENALTY_HIGH
+        elif filler_ratio > FILLER_RATIO_MEDIUM:
+            score += FILLER_PENALTY_MEDIUM
 
         # 检查重复内容
         sentences = re.split(r"[。！？\n]", response)
         sentences = [s.strip() for s in sentences if s.strip()]
         if sentences:
             unique_ratio = len(set(sentences)) / len(sentences)
-            if unique_ratio < 0.7:
-                score -= 15  # 大量重复内容
+            if unique_ratio < UNIQUE_RATIO_LOW:
+                score += DUPLICATE_PENALTY  # 大量重复内容
 
         return min(100, max(0, score))
 
@@ -268,19 +334,19 @@ class ResponseEvaluator:
         礼貌性评分 (0-100)
         评估回答是否使用了礼貌用语和友好语气。
         """
-        score = 50.0  # 基准分
+        score = SCORE_BASE_POLITENESS
 
         polite_hits = sum(1 for p in _POLITE_PHRASES if p in response)
-        score += min(polite_hits * 8, 40)  # 最多加 40 分
+        score += min(polite_hits * SCORE_BONUS_POLITE_PHRASE, SCORE_BONUS_POLITE_MAX)
 
         # 语气友好加分
         friendly_endings = ["吗？", "呢？", "哦", "哈", "哟"]
         if any(response.rstrip().endswith(e) for e in friendly_endings):
-            score += 5
+            score += SCORE_BONUS_FRIENDLY
 
         # 无礼貌用语但也不粗鲁
         if polite_hits == 0:
-            score = max(score, 40.0)  # 至少 40 分
+            score = max(score, SCORE_BASE_POLITENESS_MIN)
 
         return min(100, max(0, score))
 
@@ -290,9 +356,9 @@ class ResponseEvaluator:
         评估回答是否与问题相关。
         """
         if not query:
-            return 60.0  # 无问题时给基准分
+            return SCORE_BASE_RELEVANCE_NO_QUERY  # 无问题时给基准分
 
-        score = 40.0  # 基准分
+        score = SCORE_BASE_RELEVANCE
 
         # 词汇重叠度
         query_chars = set(re.findall(r"[一-鿿]+", query))
@@ -315,20 +381,20 @@ class ResponseEvaluator:
         """根据各维度评分生成改进建议"""
         suggestions = []
 
-        if factors["completeness"] < 60:
+        if factors["completeness"] < SUGGESTION_COMPLETENESS_THRESHOLD:
             suggestions.append("回答不够完整，建议覆盖问题的更多方面")
-        if factors["accuracy"] < 60:
+        if factors["accuracy"] < SUGGESTION_ACCURACY_THRESHOLD:
             suggestions.append("回答准确性偏低，建议引用知识库或系统数据")
-        if factors["conciseness"] < 50:
+        if factors["conciseness"] < SUGGESTION_CONCISENESS_THRESHOLD:
             suggestions.append("回答过于冗长，建议精简内容、提高信息密度")
-        if factors["politeness"] < 50:
+        if factors["politeness"] < SUGGESTION_POLITENESS_THRESHOLD:
             suggestions.append("建议增加礼貌用语，提升用户体验")
-        if factors["relevance"] < 60:
+        if factors["relevance"] < SUGGESTION_RELEVANCE_THRESHOLD:
             suggestions.append("回答与问题关联度不够，建议紧扣用户问题")
 
         # 特定问题诊断
-        if len(response.strip()) < 15:
-            suggestions.append("回答过短（<15字符），可能未有效回答问题")
+        if len(response.strip()) < SUGGESTION_SHORT_RESPONSE_LEN:
+            suggestions.append(f"回答过短（<{SUGGESTION_SHORT_RESPONSE_LEN}字符），可能未有效回答问题")
         if response in ("处理出错，请重试", "处理出错"):
             suggestions.append("回答为错误降级响应，需要排查上游异常")
 
@@ -336,7 +402,7 @@ class ResponseEvaluator:
 
     def _compute_trend(self, feedbacks: List[Dict[str, Any]]) -> str:
         """计算反馈趋势：improving / declining / stable"""
-        if len(feedbacks) < 4:
+        if len(feedbacks) < TREND_MIN_FEEDBACKS:
             return "stable"
 
         sorted_feedbacks = sorted(feedbacks, key=lambda f: f.get("timestamp", 0))
@@ -347,7 +413,7 @@ class ResponseEvaluator:
 
         def _satisfaction_half(fb_list):
             if not fb_list:
-                return 0.5
+                return TREND_DEFAULT_SATISFACTION
             pos = sum(1 for f in fb_list if f.get("rating", 0) > 0)
             return pos / len(fb_list)
 
@@ -355,9 +421,9 @@ class ResponseEvaluator:
         second_sat = _satisfaction_half(second_half)
 
         diff = second_sat - first_sat
-        if diff > 0.1:
+        if diff > TREND_IMPROVING_THRESHOLD:
             return "improving"
-        elif diff < -0.1:
+        elif diff < TREND_DECLINING_THRESHOLD:
             return "declining"
         return "stable"
 
@@ -408,12 +474,12 @@ class ResponseEvaluator:
                 required_dims = ["completeness", "accuracy", "conciseness", "politeness", "relevance"]
                 for dim in required_dims:
                     if dim not in factors:
-                        factors[dim] = 50.0
+                        factors[dim] = SCORE_BASE_COMPLETENESS
                     factors[dim] = min(100, max(0, float(factors[dim])))
 
                 weights = {
-                    "completeness": 0.25, "accuracy": 0.25, "conciseness": 0.15,
-                    "politeness": 0.10, "relevance": 0.25,
+                    "completeness": WEIGHT_COMPLETENESS, "accuracy": WEIGHT_ACCURACY, "conciseness": WEIGHT_CONCISENESS,
+                    "politeness": WEIGHT_POLITENESS, "relevance": WEIGHT_RELEVANCE,
                 }
                 score = round(sum(factors[k] * weights[k] for k in factors), 1)
 
