@@ -4,7 +4,7 @@
 import { API } from '../api/index.js';
 import { initAuthState, logout } from '../auth/index.js';
 import { showToast } from '../utils/toast.js';
-import { appendSystemMessage, showProgressStatus, removeProgressStatus, setSessionId, initCodeCopyDelegate, appendAssistantMessage } from './messages.js';
+import { appendSystemMessage, showProgressStatus, removeProgressStatus, setSessionId, initCodeCopyDelegate, appendAssistantMessage, setFeedbackHandler } from './messages.js';
 import { getCurrentSessionId, getCurrentSessionToken, updateSessionInfo, addToHistory, startNewChat, loadSessionList, selectSession } from './sessions.js';
 import { sendMessage, initInputEvents, initDragAndDrop, updateSendButton, useQuickPrompt } from './input.js';
 import { initShortcuts } from './shortcuts.js';
@@ -17,6 +17,9 @@ export function init() {
 
   // 初始化代码块复制事件委托
   initCodeCopyDelegate();
+
+  // 注入反馈提交函数（解耦 messages.js 对 API 的直接依赖）
+  setFeedbackHandler(API.submitRating);
 
   // 检查登录状态
   const user = initAuthState();

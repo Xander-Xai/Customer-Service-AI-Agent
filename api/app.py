@@ -260,6 +260,13 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         cleanup_task = asyncio.create_task(_periodic_ws_cleanup())
 
+        # v5.0: 设置 circuit_breaker 到 app.state（供路由模块访问）
+        container = getattr(app.state, "container", None)
+        if container and container.circuit_breaker:
+            app.state.circuit_breaker = container.circuit_breaker
+        elif _circuit_breaker_ref:
+            app.state.circuit_breaker = _circuit_breaker_ref
+
         yield
 
         cleanup_task.cancel()
@@ -274,6 +281,26 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         logger.info("httpx 连接池已关闭")
 
     app = FastAPI(title="药妆智多星多智能体客服系统", version=VERSION, lifespan=lifespan)
+
+    # v5.0: 存储依赖到 app.state（供 APIRouter 路由访问）
+    app.state.session_manager = session_manager
+    app.state.response_cache = response_cache
+    app.state.metrics = metrics
+    app.state.message_bus = message_bus
+    app.state.sla_alert_mgr = sla_alert_mgr
+    app.state.circuit_breaker = None  # 在 lifespan 中从容器设置
+    app.state.dev_mode = DEV_MODE
+    app.state.module_load_time = _MODULE_LOAD_TIME
+    app.state.get_redis_client = _get_redis_client
+    app.state.persist_metrics_snapshot = _persist_metrics_snapshot
+
+    # v5.0: 挂载提取的路由模块
+    from api.routes.monitoring import router as monitoring_router
+    from api.routes.sessions import router as sessions_router
+    from api.routes.feedback import router as feedback_router
+    app.include_router(monitoring_router)
+    app.include_router(sessions_router)
+    app.include_router(feedback_router)
 
     # ── CORS（v3.9: 从环境变量读取） ──
     resolved_origins = _resolve_cors_origins()
@@ -905,458 +932,10 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
             "elapsed": 0,
         }
 
-    # ── 健康检查（P0-1: 从 app.state.container 获取服务） ──
-
-    @app.get("/api/health")
-    async def health(request: Request):
-        """
-        增强健康检查端点（v4.2）
-        返回各子系统的健康状态、版本和运行信息。
-        状态逻辑：
-          - healthy: 所有关键组件（DB/LLM）正常
-          - degraded: 非关键组件（Redis/ChromaDB）异常但核心功能可用
-          - unhealthy: 数据库或 LLM 不可用
-        """
-        # P0-1: 优先从容器获取 circuit_breaker，回退到模块级变量
-        container = getattr(request.app.state, "container", None)
-        if container and container.circuit_breaker:
-            cb_status = container.circuit_breaker.get_status()
-        elif _circuit_breaker_ref is not None:
-            cb_status = _circuit_breaker_ref.get_status()
-        else:
-            cb_status = {"state": "unknown", "consecutive_failures": 0}
-
-        # Redis 检查
-        redis_ok = False
-        redis_latency_ms = None
-        r = _get_redis_client()
-        if r:
-            try:
-                t0 = time.time()
-                r.ping()
-                redis_latency_ms = round((time.time() - t0) * 1000, 2)
-                redis_ok = True
-            except Exception:
-                redis_ok = False
-
-        # LLM 可达性检查（v4.1: 检查 API Key 是否有效，非占位符）
-        llm_api_key = os.environ.get("OPENAI_API_KEY", "")
-        _placeholder_prefixes = ("sk-placeholder", "your-", "sk-xxx", "sk-your", "sk-test-placeholder")
-        llm_key_valid = bool(llm_api_key) and not any(
-            llm_api_key.lower().startswith(p) for p in _placeholder_prefixes
-        )
-        llm_configured = bool(llm_api_key)
-        llm_provider = LLM_PROVIDER
-
-        # ChromaDB 检查
-        chromadb_ok = False
-        try:
-            import chromadb
-            client = chromadb.Client()
-            client.heartbeat()
-            chromadb_ok = True
-        except Exception:
-            chromadb_ok = False
-
-        # 数据库检查（SELECT 1 延迟测试）
-        db_ok = False
-        db_latency_ms = None
-        try:
-            from db.database import engine
-            from sqlalchemy import text as _sql_text
-            t0 = time.time()
-            with engine.connect() as conn:
-                conn.execute(_sql_text("SELECT 1"))
-            db_latency_ms = round((time.time() - t0) * 1000, 2)
-            db_ok = True
-        except Exception:
-            db_ok = False
-
-        # 运行时间
-        uptime_seconds = round(time.time() - _MODULE_LOAD_TIME, 2)
-
-        # 系统状态汇总
-        circuit_state = cb_status["state"]
-        overall = "healthy"
-
-        # 关键组件不可用 → unhealthy
-        if not db_ok or not llm_key_valid:
-            overall = "unhealthy"
-        # 非关键组件异常但核心可用 → degraded
-        elif circuit_state == "open" or (not redis_ok and REDIS_URL) or not chromadb_ok:
-            overall = "degraded"
-
-        return {
-            "status": overall,
-            "version": VERSION,
-            "mode": "dev" if DEV_MODE else "prod",
-            "timestamp": time.time(),
-            "uptime_seconds": uptime_seconds,
-            "python_version": sys.version.split()[0],
-            "components": {
-                "circuit_breaker": {
-                    "state": circuit_state,
-                    "consecutive_failures": cb_status.get("consecutive_failures", 0),
-                },
-                "redis": {
-                    "connected": redis_ok,
-                    "latency_ms": redis_latency_ms,
-                },
-                "llm": {
-                    "configured": llm_configured,
-                    "key_valid": llm_key_valid,
-                    "provider": llm_provider,
-                },
-                "chromadb": {
-                    "connected": chromadb_ok,
-                },
-                "database": {
-                    "connected": db_ok,
-                    "latency_ms": db_latency_ms,
-                },
-            },
-        }
-
-    # ── 指标端点 ──
-
-    @app.get("/api/metrics")
-    async def metrics_endpoint():
-        if _metrics:
-            stats = await _metrics.get_stats()
-        else:
-            stats = {"error": "metrics not initialized"}
-        cache_stats = _response_cache.get_stats() if _response_cache else {}
-        await _persist_metrics_snapshot()
-        return {
-            "version": VERSION,
-            "metrics": stats,
-            "cache": cache_stats,
-            "timestamp": time.time(),
-        }
-
-    @app.get("/api/kpi")
-    async def kpi_endpoint():
-        if _metrics:
-            kpi = await _metrics.get_kpi_stats()
-        else:
-            kpi = {"error": "metrics not initialized"}
-        await _persist_metrics_snapshot()
-        result = {
-            "version": VERSION,
-            "kpi": kpi,
-            "timestamp": time.time(),
-        }
-        r = _get_redis_client()
-        if r and _metrics:
-            try:
-                snapshot = _metrics.load_snapshot(r)
-                if snapshot:
-                    result["last_snapshot"] = snapshot
-            except Exception:
-                pass
-        return result
-
-    @app.get("/api/cache/stats")
-    async def cache_stats():
-        if _response_cache:
-            return _response_cache.get_stats()
-        return {"error": "cache not initialized"}
 
     # H-3: 会话用户级隔离辅助函数
-    def _check_session_ownership(session: dict, user_id: str | None) -> bool:
-        """检查会话是否属于当前用户。DEV_MODE 或无 user_id 时放行。"""
-        if DEV_MODE or not user_id:
-            return True
-        session_user = session.get("user_id")
-        # 会话未关联用户（旧数据），放行以兼容
-        if not session_user:
-            return True
-        return session_user == user_id
 
-    # ── 会话端点 ──
 
-    @app.get("/api/sessions")
-    async def list_sessions(request: Request, offset: int = 0, limit: int = 20):
-        if _session_manager:
-            offset = max(offset, 0)
-            limit = min(max(limit, 1), 100)
-            result = await _session_manager.list_sessions_brief(offset=offset, limit=limit)
-            # H-3: 用户级隔离 — 非 DEV_MODE 下只返回当前用户的会话
-            user_id = _extract_user_id(request)
-            if user_id and not DEV_MODE:
-                filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
-                result["sessions"] = filtered
-                result["total"] = len(filtered)
-            return result
-        return {"sessions": [], "total": 0, "offset": offset, "limit": limit}
-
-    @app.get("/api/sessions/{session_id}")
-    async def get_session(session_id: str, request: Request):
-        if _session_manager:
-            # v4.1: DEV_MODE 下跳过会话令牌校验
-            if not DEV_MODE:
-                token = request.headers.get("X-Session-Token", "")
-                if not _session_manager.validate_session_token(session_id, token):
-                    return JSONResponse({"error": "会话令牌无效或无权访问"}, status_code=403)
-            session = await _session_manager.get_session(session_id)
-            if session:
-                # H-3: 用户级隔离 — 校验会话所有权
-                user_id = _extract_user_id(request)
-                if not _check_session_ownership(session, user_id):
-                    return JSONResponse({"error": "无权访问该会话"}, status_code=403)
-                return {"session": {
-                    "session_id": session_id,
-                    "messages": session.get("messages", []),
-                    "created_at": session.get("created_at"),
-                    "last_activity": session.get("last_activity"),
-                    "message_count": session.get("message_count", 0),
-                    "summary": session.get("summary", ""),
-                }}
-            return JSONResponse({"error": "session not found"}, status_code=404)
-        return JSONResponse({"error": "session manager not initialized"}, status_code=500)
-
-    @app.delete("/api/sessions/{session_id}")
-    async def delete_session(session_id: str, request: Request):
-        if _session_manager:
-            # H-3: 用户级隔离 — 校验会话所有权
-            user_id = _extract_user_id(request)
-            session = await _session_manager.get_session(session_id)
-            if session and not _check_session_ownership(session, user_id):
-                return JSONResponse({"error": "无权删除该会话"}, status_code=403)
-            if not DEV_MODE:
-                token = request.headers.get("X-Session-Token", "")
-                if not _session_manager.validate_session_token(session_id, token):
-                    return JSONResponse({"error": "会话令牌无效或无权删除"}, status_code=403)
-            await _session_manager.delete_session(session_id)
-            return {"message": f"会话 {session_id} 已删除"}
-        return JSONResponse({"error": "session manager not initialized"}, status_code=500)
-
-    # ── D2: 历史会话端点 ──
-
-    @app.get("/api/history")
-    async def list_history(request: Request, offset: int = 0, limit: int = 20):
-        """获取当前用户的历史会话列表（支持分页，使用批量摘要避免 N+1 查询）"""
-        if not _session_manager:
-            return {"sessions": [], "total": 0, "offset": offset, "limit": limit}
-        offset = max(offset, 0)
-        limit = min(max(limit, 1), 100)
-        result = await _session_manager.list_sessions_brief(offset=offset, limit=limit)
-        # H-3: 用户级隔离 — 非 DEV_MODE 下只返回当前用户的会话
-        user_id = _extract_user_id(request)
-        if user_id and not DEV_MODE:
-            filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
-            result["sessions"] = filtered
-            result["total"] = len(filtered)
-        return result
-
-    @app.get("/api/history/{session_id}/messages")
-    async def get_history_messages(session_id: str, request: Request):
-        """获取指定会话的消息历史（需要 session_token 验证）"""
-        if not _session_manager:
-            return JSONResponse({"error": "session manager not initialized"}, status_code=500)
-
-        # H-3: 用户级隔离 — 校验会话所有权
-        user_id = _extract_user_id(request)
-        session = await _session_manager.get_session(session_id)
-        if session and not _check_session_ownership(session, user_id):
-            return JSONResponse({"error": "无权访问该会话"}, status_code=403)
-
-        token = request.headers.get("X-Session-Token", "")
-        if not _session_manager.validate_session_token(session_id, token):
-            return JSONResponse({"error": "会话令牌无效或无权访问"}, status_code=403)
-
-        if not session:
-            return JSONResponse({"error": "会话不存在"}, status_code=404)
-
-        messages = session.get("messages", [])
-        return {"messages": [
-            {"role": m.get("role", ""), "content": m.get("content", ""), "timestamp": m.get("timestamp", 0)}
-            for m in messages
-        ]}
-
-    # ── 反馈端点 ──
-
-    @app.post("/api/feedback")
-    async def submit_feedback(data: FeedbackRequest):
-        session_id = data.session_id.strip()
-        resolved = data.resolved
-        rating = data.rating
-        message_index = data.message_index
-        comment = _sanitize_input(data.comment)
-
-        if not session_id:
-            return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
-
-        if _session_manager:
-            session = await _session_manager.get_session(session_id)
-            if not session or not session.get("messages"):
-                return JSONResponse({"error": "会话不存在或无对话记录"}, status_code=404)
-
-        # D3: 持久化反馈到数据库
-        try:
-            from db.database import get_db_session
-            from db.models import Feedback
-            db = get_db_session()
-            try:
-                feedback = Feedback(
-                    session_id=session_id,
-                    message_index=message_index,
-                    rating=rating,
-                    comment=comment,
-                    created_at=datetime.now(timezone.utc),
-                )
-                db.add(feedback)
-                db.commit()
-            except Exception as e:
-                db.rollback()
-                logger.warning(f"反馈数据库写入失败: {e}")
-            finally:
-                db.close()
-        except Exception as e:
-            logger.debug(f"反馈数据库模块加载失败: {e}")
-
-        if _metrics:
-            await _metrics.record_feedback(resolved=bool(resolved))
-
-        if _bus:
-            try:
-                from core.message_bus import Message, MessageType
-                await _bus.publish(Message(
-                    msg_type=MessageType.BROADCAST,
-                    topic="feedback.received",
-                    sender="api_feedback",
-                    payload={"session_id": session_id, "resolved": resolved, "rating": rating, "comment": comment},
-                ))
-            except Exception as e:
-                logger.debug(f"Feedback Bus 事件发布失败: {e}")
-
-        logger.info(f"[Feedback] session={session_id} resolved={resolved} rating={rating} comment={comment[:50]}")
-        return {"status": "ok", "session_id": session_id, "resolved": resolved, "rating": rating}
-
-    @app.get("/api/feedback/stats")
-    async def feedback_stats():
-        """D3: 获取反馈统计数据"""
-        try:
-            from db.database import get_db_session
-            from db.models import Feedback
-            db = get_db_session()
-            try:
-                total = db.query(Feedback).count()
-                positive = db.query(Feedback).filter(Feedback.rating == 1).count()
-                negative = db.query(Feedback).filter(Feedback.rating == -1).count()
-                rate = round(positive / total, 4) if total > 0 else 0.0
-                return {"total": total, "positive": positive, "negative": negative, "rate": rate}
-            finally:
-                db.close()
-        except Exception as e:
-            logger.warning(f"反馈统计查询失败: {e}")
-            return {"total": 0, "positive": 0, "negative": 0, "rate": 0.0}
-
-    # ── 告警端点 ──
-
-    @app.get("/api/alerts")
-    async def get_alerts(limit: int = 20):
-        limit = min(max(limit, 1), 100)
-        if _sla_alert_mgr:
-            return {"alerts": _sla_alert_mgr.get_alerts(limit=limit)}
-        return {"alerts": [], "message": "alert manager not initialized"}
-
-    @app.get("/api/circuit-breaker")
-    async def get_circuit_breaker(request: Request):
-        # P0-1: 优先从容器获取 circuit_breaker
-        container = getattr(request.app.state, "container", None)
-        if container and container.circuit_breaker:
-            status = container.circuit_breaker.get_status()
-        elif _circuit_breaker_ref is not None:
-            status = _circuit_breaker_ref.get_status()
-        else:
-            status = {"state": "unknown", "total_failures": 0, "total_successes": 0}
-        return {"circuit_breaker": {
-            "state": status["state"],
-            "total_failures": status["total_failures"],
-            "total_successes": status["total_successes"],
-        }}
-
-    # ── Prometheus 指标端点（v3.9） ──
-
-    @app.get("/metrics/prometheus")
-    async def prometheus_metrics(request: Request):
-        """
-        Prometheus 文本格式指标导出（v4.0: 内网访问限制）
-        部署时应通过 Nginx 限制仅 Prometheus Server IP 可访问此端点。
-        nginx.conf 中配置: allow 10.0.0.0/8; deny all;
-        """
-        if not _metrics:
-            return JSONResponse({"error": "metrics not initialized"}, status_code=503)
-
-        stats = await _metrics.get_stats()
-        kpi = await _metrics.get_kpi_stats()
-
-        # P0-1: 优先从容器获取 circuit_breaker
-        container = getattr(request.app.state, "container", None)
-        if container and container.circuit_breaker:
-            cb = container.circuit_breaker.get_status()
-        elif _circuit_breaker_ref is not None:
-            cb = _circuit_breaker_ref.get_status()
-        else:
-            cb = {"state": "unknown", "consecutive_failures": 0}
-
-        lines = []
-
-        def _gauge(name, value, help_text):
-            lines.append(f"# HELP {name} {help_text}")
-            lines.append(f"# TYPE {name} gauge")
-            lines.append(f"{name} {value}")
-
-        def _counter(name, value, help_text):
-            lines.append(f"# HELP {name} {help_text}")
-            lines.append(f"# TYPE {name} counter")
-            lines.append(f"{name} {value}")
-
-        _counter("csai_requests_total", stats["total_requests"], "Total requests handled")
-        _counter("csai_errors_total", stats["total_errors"], "Total errors")
-        _gauge("csai_error_rate_percent", stats["error_rate"], "Error rate percentage")
-        _gauge("csai_avg_response_time_seconds", stats["avg_response_time"], "Average response time")
-        _gauge("csai_p95_response_time_seconds", stats["p95_response_time"], "P95 response time")
-        _gauge("csai_cache_hit_rate_percent", stats["cache_hit_rate"], "Cache hit rate percentage")
-
-        # v4.0 安全修复: 标签值转义（防止注入破坏 Prometheus 格式）
-        _PROM_LABEL_RE = re.compile(r'[^a-zA-Z0-9_]')
-
-        def _safe_label(v: str) -> str:
-            return _PROM_LABEL_RE.sub("_", str(v))
-
-        # Agent 调用计数
-        agent_counts = stats.get("agent_call_counts", {})
-        for agent, count in agent_counts.items():
-            _counter(f'csai_agent_calls_total{{agent="{_safe_label(agent)}"}}', count, f"Agent {agent} call count")
-
-        # 协作模式计数
-        mode_counts = stats.get("mode_counts", {})
-        for mode, count in mode_counts.items():
-            _counter(f'csai_collaboration_mode_total{{mode="{_safe_label(mode)}"}}', count, f"Mode {mode} invocation count")
-
-        # SLA 指标
-        sla = stats.get("sla", {})
-        _counter("csai_sla_violations_total", sla.get("violations_slow", 0), "SLA violations (too slow)")
-        _gauge("csai_sla_violation_rate_percent", sla.get("violation_rate", 0), "SLA violation rate")
-        _gauge("csai_sla_window_violation_rate_percent", sla.get("window_violation_rate", 0), "SLA window violation rate")
-
-        # 熔断器
-        _gauge("csai_circuit_breaker_consecutive_failures", cb.get("consecutive_failures", 0), "Circuit breaker consecutive failures")
-        _gauge("csai_circuit_breaker_state{state=\"" + cb.get("state", "closed") + "\"}", 1, "Circuit breaker state (1=current state)")
-
-        # KPI
-        _gauge("csai_total_ai_handled", kpi.get("total_ai_handled", 0), "Total AI handled requests")
-        _gauge("csai_total_escalated", kpi.get("total_escalated", 0), "Total escalated requests")
-        _gauge("csai_total_single_turn_resolved", kpi.get("total_single_turn_resolved", 0), "Total single-turn resolved")
-
-        # 系统信息
-        lines.append(f'# HELP csai_info System information')
-        lines.append(f'# TYPE csai_info gauge')
-        lines.append(f'csai_info{{version="{VERSION}"}} 1')
-
-        return "\n".join(lines) + "\n", {"Content-Type": "text/plain; charset=utf-8"}
 
     return app
 
