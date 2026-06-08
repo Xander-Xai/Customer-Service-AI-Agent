@@ -757,7 +757,7 @@ class TestChatRoutes:
         """POST /api/chat/file -- 文件读取失败"""
         # Create a mock file that raises on read
         bad_file = MagicMock()
-        bad_file.read = AsyncMock(side_effect=IOError("read error"))
+        bad_file.read = AsyncMock(side_effect=OSError("read error"))
         bad_file.content_type = "text/plain"
         bad_file.filename = "bad.txt"
         resp = self.client.post(
@@ -969,7 +969,6 @@ class TestWebSocketRoutes:
                 for i in range(12):
                     ws.send_json({"query": f"msg_{i}"})
                 messages = self._drain_messages(ws, max_msgs=100)
-                error_msgs = [m for m in messages if m.get("type") == "error"]
                 # 在测试环境中速率限制行为可能因时序而异，只验证连接不崩溃
                 assert len(messages) >= 0, f"WebSocket 连接异常, got: {len(messages)} messages"
 

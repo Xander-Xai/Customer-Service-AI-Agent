@@ -16,7 +16,7 @@ Usage:
 """
 
 import asyncio
-from typing import Any, Dict
+from typing import Any
 
 from logger import get_logger
 
@@ -288,7 +288,6 @@ class ServiceContainer:
             GeneralAgent,
             ProductAgent,
             ReActAgent,
-            ResponseAgent,
             TechAgent,
         )
         from config import ERP_MODE

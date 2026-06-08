@@ -46,7 +46,6 @@ def main() -> None:
 
     # GRAFANA_PASSWORD 使用独立的占位符（与 POSTGRES 不同行上可能同名，需按上下文处理）
     grafana_password = generate_key(16, "base64url")
-    postgres_password = replacements["CHANGE_ME_TO_STRONG_PASSWORD"]
 
     # ERP 占位符
     erp_app_secret = generate_key(32, "hex")

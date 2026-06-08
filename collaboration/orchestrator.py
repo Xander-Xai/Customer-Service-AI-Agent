@@ -8,7 +8,7 @@
 - v4.3: 运行时模式升级（低质量响应自动升级到更复杂模式）
 """
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from config import MODE_UPGRADE_ENABLED, REACT_COMPLEXITY_THRESHOLD
 from core.message_bus import MessageBus
@@ -127,7 +127,6 @@ class CollaborationOrchestrator:
             return current_mode, {}
 
         primary_agent = state.get("current_agent", "general_agent")
-        query = state.get("customer_query", "")
 
         # 升级路径映射
         upgrade_map = {

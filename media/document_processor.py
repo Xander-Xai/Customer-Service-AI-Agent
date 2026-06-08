@@ -8,8 +8,6 @@ DocumentProcessor — 文档内容提取（v5.1）
 - 大小限制 + 内容截断
 """
 
-import logging
-from typing import Optional
 
 from logger import get_logger
 
@@ -98,8 +96,8 @@ class DocumentProcessor:
                     if page_text:
                         text_parts.append(page_text)
             return "\n\n".join(text_parts) if text_parts else "[PDF 文件无可提取的文本内容]"
-        except ImportError:
-            raise ImportError("pdfplumber 未安装，请运行: pip install pdfplumber")
+        except ImportError as e:
+            raise ImportError("pdfplumber 未安装，请运行: pip install pdfplumber") from e
         except Exception as e:
             logger.error(f"PDF 提取失败: {e}")
             return f"[PDF 提取失败: {e}]"
@@ -114,8 +112,8 @@ class DocumentProcessor:
             doc = Document(io.BytesIO(data))
             paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
             return "\n\n".join(paragraphs) if paragraphs else "[Word 文档无可提取的文本内容]"
-        except ImportError:
-            raise ImportError("python-docx 未安装，请运行: pip install python-docx")
+        except ImportError as e:
+            raise ImportError("python-docx 未安装，请运行: pip install python-docx") from e
         except Exception as e:
             logger.error(f"DOCX 提取失败: {e}")
             return f"[DOCX 提取失败: {e}]"

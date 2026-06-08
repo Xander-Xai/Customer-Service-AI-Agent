@@ -9,9 +9,6 @@ VideoProcessor — 视频抽帧处理（v5.1）
 """
 
 import base64
-import io
-import logging
-from typing import List, Optional
 
 from logger import get_logger
 
@@ -67,11 +64,11 @@ class VideoProcessor:
 
         try:
             import cv2
-            import numpy as np
-        except ImportError:
+            import numpy as np  # noqa: F401
+        except ImportError as e:
             raise ImportError(
                 "opencv-python-headless 未安装，请运行: pip install opencv-python-headless"
-            )
+            ) from e
 
         # 写入临时文件（OpenCV 需要文件路径）
         import tempfile

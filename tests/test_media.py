@@ -5,7 +5,6 @@ media 包测试（v5.1）
 运行: pytest tests/test_media.py -v --tb=short
 """
 
-import asyncio
 import base64
 import io
 import os
@@ -565,7 +564,7 @@ class TestDocumentProcessor:
         from media.document_processor import DocumentProcessor
 
         proc = DocumentProcessor()
-        text_data = "这是一个测试文档".encode("utf-8")
+        text_data = "这是一个测试文档".encode()
         result = proc.extract(text_data, "text/plain")
         assert result == "这是一个测试文档"
 
@@ -574,7 +573,7 @@ class TestDocumentProcessor:
         from media.document_processor import DocumentProcessor
 
         proc = DocumentProcessor()
-        md_data = "# 标题\n\n内容".encode("utf-8")
+        md_data = "# 标题\n\n内容".encode()
         result = proc.extract(md_data, "text/markdown")
         assert "# 标题" in result
 
@@ -876,7 +875,7 @@ class TestTTSProcessor:
 
     def test_list_voices_returns_dict(self):
         """list_voices() 返回语音字典"""
-        from media.tts_processor import TTSProcessor, CHINESE_VOICES
+        from media.tts_processor import TTSProcessor
 
         voices = TTSProcessor.list_voices()
         assert isinstance(voices, dict)
@@ -888,7 +887,7 @@ class TestTTSProcessor:
 
     def test_default_voice(self):
         """TTSProcessor 默认语音为 XiaoxiaoNeural"""
-        from media.tts_processor import TTSProcessor, DEFAULT_VOICE
+        from media.tts_processor import DEFAULT_VOICE, TTSProcessor
 
         proc = TTSProcessor()
         assert proc.voice == DEFAULT_VOICE

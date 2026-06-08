@@ -7,7 +7,7 @@
 - 漂移自动修复策略
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from config import (
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,

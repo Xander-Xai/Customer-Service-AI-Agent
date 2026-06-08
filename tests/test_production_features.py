@@ -5,7 +5,6 @@ P1-5: 补齐缺失测试 — SSE / WebSocket / 多模态 / DI 容器 / 并发
 import asyncio
 import os
 import sys
-import time
 
 import pytest
 
@@ -194,7 +193,6 @@ class TestConfigValidation:
     def test_validate_required_config_in_dev_mode(self):
         """开发模式跳过校验"""
         # DEV_MODE=true 时不应抛出异常
-        import importlib
 
         import config
 
@@ -318,6 +316,15 @@ class TestLLMAsJudge:
 
 class TestOpenTelemetry:
     """OpenTelemetry 追踪模块测试"""
+
+    @pytest.fixture(autouse=True)
+    def _reset_tracing_state(self):
+        """Reset global tracing state before each test for isolation."""
+        import core.tracing as tracing_mod
+
+        tracing_mod._TRACING_INITIALIZED = False
+        yield
+        tracing_mod._TRACING_INITIALIZED = False
 
     def test_tracing_module_importable(self):
         """追踪模块可导入"""

@@ -6,10 +6,8 @@
 """
 
 import asyncio
-import json
 import os
 import random
-import statistics
 import sys
 import time
 
@@ -89,7 +87,7 @@ class TestImports:
         assert callable(build_graph)
 
     def test_import_agents(self):
-        from agents import BillingAgent, ComplaintAgent, GeneralAgent, ProductAgent, TechAgent
+        from agents import ProductAgent
 
         assert callable(ProductAgent)
 
@@ -801,7 +799,7 @@ class TestSessionTokens:
         from session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
-        token = sm.generate_session_token("test-session-1")
+        sm.generate_session_token("test-session-1")  # side-effect: creates token
         assert sm.validate_session_token("test-session-1", "wrong-token") is False
 
     @pytest.mark.asyncio
@@ -1200,7 +1198,7 @@ class TestConcurrencySafety:
         await cb.record_failure()
         await cb.record_failure()
         assert cb.state == "open"
-        results = await asyncio.gather(*[cb.should_allow() for _ in range(10)])
+        await asyncio.gather(*[cb.should_allow() for _ in range(10)])
         assert cb.state == "half_open"
 
     @pytest.mark.asyncio
@@ -1307,7 +1305,7 @@ class TestLogicFixes:
 
         sm = EnhancedSessionManager()
         # 异步调用 create_session
-        result = await sm.create_session("async_test")
+        await sm.create_session("async_test")
         assert "async_test" in sm.sessions
         # 异步调用 get_conversation_context
         ctx = await sm.get_conversation_context("async_test")
@@ -1744,7 +1742,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_long_message_truncation(self):
         """超长消息触发按 token 裁剪，消息数被压缩到 2 条以下时停止"""
-        from session_manager import EnhancedSessionManager, _count_tokens
+        from session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=2, max_tokens=50)
         await sm.create_session("long_msg")

@@ -5,12 +5,11 @@
 """
 
 import asyncio
-import json
 import os
 import re
 import sys
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -1254,7 +1253,6 @@ class TestStreamingLLM:
         agent = DummyAgent(name="test", role="test", expertise=["test"])
 
         # Mock LLM with async_invoke_stream
-        collected_chunks = []
 
         async def mock_stream(messages):
             for token in ["Hello", " ", "World"]:
@@ -1284,7 +1282,7 @@ class TestStreamingLLM:
         sm.create_session = AsyncMock(return_value="test_stream")
         agent.set_session_manager(sm)
 
-        result = await agent.process(state)
+        await agent.process(state)
 
         # 验证：stream_callback 收到了 chunk 事件
         chunk_events = [e for e in streamed_events if e.get("type") == "chunk"]
@@ -1330,7 +1328,7 @@ class TestStreamingLLM:
             # 无 stream_callback
         }
 
-        result = await agent.process(state)
+        await agent.process(state)
         assert state["response"] == "标准回复"
         mock_llm.async_invoke.assert_called_once()
 

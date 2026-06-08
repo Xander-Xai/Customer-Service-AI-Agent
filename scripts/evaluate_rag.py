@@ -11,10 +11,9 @@ RAG 检索质量评估脚本（面试用）
 
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 # 添加项目根目录到 path
 sys.path.insert(0, str(Path(__file__).parent.parent))

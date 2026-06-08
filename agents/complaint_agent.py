@@ -3,7 +3,7 @@
 v4.3: 注入投诉处理知识库，提升首次解决率
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from .base_agent import BaseAgent
 

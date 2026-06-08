@@ -8,7 +8,7 @@ import os
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool  # noqa: F401
 
 from alembic import context
 

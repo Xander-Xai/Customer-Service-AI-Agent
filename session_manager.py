@@ -26,19 +26,10 @@ import re
 import time
 import uuid
 from collections import deque
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from config import (
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
-)
-from config import (
-    DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
-)
-from config import (
-    DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
-)
-from config import (
-    MAX_SESSIONS as _CFG_MAX_SESSIONS,
 )
 from config import (
     REDIS_SESSION_PREFIX as _CFG_REDIS_PREFIX,
@@ -47,15 +38,14 @@ from config import (
     REDIS_URL as _CFG_REDIS_URL,
 )
 from config import (
-    SESSION_IDLE_TTL as _CFG_SESSION_IDLE_TTL,
-)
-from config import (
     SESSION_MAX_TOKENS as _CFG_SESSION_MAX_TOKENS,
 )
 from config import (
     SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
 )
-from drift_detector import (
+
+# Re-exports: symbols imported from split modules by external callers (agents, cache, orchestrator, tests)
+from drift_detector import (  # noqa: F401
     DRIFT_REPAIR_STRATEGIES,
     INTENT_KEYWORDS,
     NEGATION_PAIRS,
@@ -65,7 +55,10 @@ from drift_detector import (
 from logger import get_logger
 
 # v4.3: 从拆分模块导入，保持所有原有公开符号可从 session_manager 导入
-from token_counter import _count_tokens, _get_jieba, _get_tokenizer, _tokenize_chinese
+from token_counter import (
+    _count_tokens,
+    _tokenize_chinese,  # noqa: F401
+)
 
 logger = get_logger("session_manager")
 

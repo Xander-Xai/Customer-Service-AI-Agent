@@ -2,7 +2,7 @@
 产品专家智能体（v3.5: 增加 RAG 知识检索）
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from .base_agent import BaseAgent
 

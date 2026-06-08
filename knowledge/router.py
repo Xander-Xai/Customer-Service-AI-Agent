@@ -7,9 +7,8 @@
 - POST   /api/knowledge/sync — 从 ERP 同步产品数据
 """
 
-from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth.router import require_admin
@@ -76,7 +75,7 @@ async def reseed_knowledge(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"种子失败: {e}")
+        raise HTTPException(status_code=500, detail=f"种子失败: {e}") from e
 
 
 @router.post("/{collection}/add")
@@ -107,7 +106,7 @@ async def add_documents(collection: str, data: AddDocRequest, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"添加失败: {e}")
+        raise HTTPException(status_code=500, detail=f"添加失败: {e}") from e
 
 
 @router.post("/sync")
@@ -196,4 +195,4 @@ async def sync_from_erp(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"同步失败: {e}")
+        raise HTTPException(status_code=500, detail=f"同步失败: {e}") from e

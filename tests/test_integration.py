@@ -12,7 +12,6 @@ Mock LLM 集成测试（v3.9）
 所有测试无需真实 LLM API Key，100% Mock。
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,7 +59,6 @@ class TestGraphEndToEnd:
     def setup(self):
         """每个测试前创建 Mock ServiceContainer"""
         from core.container import ServiceContainer
-        from multi_agent_customer_service import build_graph
 
         # 创建 mock LLM
         self.mock_llm = _make_mock_llm("产品成分包含玻尿酸和烟酰胺，适合各种肤质。")
@@ -638,7 +636,7 @@ class TestRoutingLogic:
         from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
-        from router.query_router import QueryRouter, RoutingResult
+        from router.query_router import RoutingResult
 
         bus = MessageBus()
         bb = SharedBlackboard()

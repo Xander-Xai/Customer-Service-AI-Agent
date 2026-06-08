@@ -3,7 +3,7 @@ ERP 工具注册（v3.5）
 将 ERP 适配器的 4 个查询方法包装为 OpenAI Function Calling 工具。
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from logger import get_logger
 
