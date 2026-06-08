@@ -1,4 +1,6 @@
 /* ===== 响应式 ===== */
+
+/* 平板（≤1200px） */
 @media (max-width: 1200px) {
   .monitor-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -6,16 +8,91 @@
   .card-full { grid-column: span 2; }
 }
 
+/* 移动端（≤768px）：侧边栏改为抽屉模式 */
 @media (max-width: 768px) {
-  .sidebar { display: none; }
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: var(--header-height);
+    bottom: 0;
+    width: 280px;
+    z-index: 150;
+    transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--ease-out);
+    box-shadow: none;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: var(--shadow-lg);
+  }
+
+  /* 汉堡菜单按钮（仅移动端显示） */
+  .nav-menu-btn {
+    display: flex !important;
+  }
+
+  /* 侧边栏遮罩 */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-overlay);
+    z-index: 140;
+    display: none;
+  }
+  .sidebar-backdrop.open {
+    display: block;
+  }
+
   .monitor-sidebar { display: none; }
   .monitor-grid { grid-template-columns: 1fr; }
   .card-wide, .card-full { grid-column: span 1; }
   .quick-prompts { grid-template-columns: 1fr; }
   .message { max-width: 95%; }
+
+  /* 触摸目标优化：最小 44×44px */
+  .btn-feedback,
+  .btn-msg-action,
+  .btn-delete-session {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .btn-send {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* 消息气泡内边距增大 */
+  .message-bubble {
+    padding: 14px 16px;
+  }
+
+  /* 隐藏版本号（节省空间） */
+  .nav-logo-version { display: none; }
 }
 
-/* ===== 管理后台响应式 ===== */
+/* 超小屏幕（≤480px） */
+@media (max-width: 480px) {
+  .nav-header {
+    padding: 0 12px;
+  }
+  .nav-logo-text {
+    font-size: 14px;
+  }
+  .chat-input-area {
+    padding: 12px 12px 16px;
+  }
+  .chat-messages {
+    padding: 16px 12px;
+  }
+  .welcome-title {
+    font-size: 20px;
+  }
+  .welcome-subtitle {
+    font-size: 13px;
+  }
+}
+
+/* 管理后台响应式 */
 @media (max-width: 768px) {
   .admin-grid {
     grid-template-columns: 1fr;

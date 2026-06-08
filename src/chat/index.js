@@ -9,6 +9,7 @@ import { getCurrentSessionId, getCurrentSessionToken, updateSessionInfo, addToHi
 import { sendMessage, initInputEvents, initDragAndDrop, updateSendButton, useQuickPrompt } from './input.js';
 import { initShortcuts } from './shortcuts.js';
 import { bindQuickPrompts } from './welcome.js';
+import { initSearch } from './search.js';
 import { switchPage, initMonitor } from '../monitor/index.js';
 
 export function init() {
@@ -26,6 +27,9 @@ export function init() {
 
   // 初始化快捷键
   initShortcuts();
+
+  // 初始化消息搜索
+  initSearch();
 
   // 初始化拖拽上传
   initDragAndDrop();
@@ -71,6 +75,35 @@ export function init() {
 
   // 设置会话 ID
   setSessionId(getCurrentSessionId());
+
+  // 初始化移动端侧边栏抽屉
+  initMobileSidebar();
+}
+
+// ===== 移动端侧边栏抽屉 =====
+
+function initMobileSidebar() {
+  const menuBtn = document.getElementById('navMenuBtn');
+  const sidebar = document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  if (!menuBtn || !sidebar || !backdrop) return;
+
+  function openSidebar() {
+    sidebar.classList.add('open');
+    backdrop.classList.add('open');
+  }
+  function closeSidebar() {
+    sidebar.classList.remove('open');
+    backdrop.classList.remove('open');
+  }
+
+  menuBtn.addEventListener('click', openSidebar);
+  backdrop.addEventListener('click', closeSidebar);
+
+  // 选择会话时关闭抽屉
+  sidebar.addEventListener('click', (e) => {
+    if (e.target.closest('.session-item')) closeSidebar();
+  });
 }
 
 // ===== WebSocket 事件处理 =====

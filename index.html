@@ -16,6 +16,7 @@
       <span class="nav-logo-text">药妆智多星</span>
       <span class="nav-logo-version">v5.0</span>
     </div>
+    <button class="nav-menu-btn" id="navMenuBtn" aria-label="打开菜单" style="display:none;background:none;border:none;color:var(--text-primary);font-size:20px;cursor:pointer;padding:4px 8px">☰</button>
     <nav class="nav-links" aria-label="页面导航">
       <button class="nav-link active" data-page="chat">
         💬 对话
@@ -45,10 +46,16 @@
           ＋ 新建对话
         </button>
       </div>
+      <div class="sidebar-search">
+        <input type="text" class="search-input" id="searchInput" placeholder="搜索当前消息..." aria-label="搜索消息">
+      </div>
       <div class="session-list" id="sessionList">
         <!-- 动态填充 -->
       </div>
     </aside>
+
+    <!-- 侧边栏遮罩（移动端） -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
     <!-- 聊天主区域 -->
     <main class="chat-area">

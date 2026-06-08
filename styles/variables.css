@@ -33,7 +33,7 @@
   /* 文字层级 */
   --text-primary: #e8eaed;
   --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-muted: #94a3b8;  /* WCAG AA: ≥4.5:1 on bg-base */
   --text-inverse: #0f1117;
 
   /* 边框 */
