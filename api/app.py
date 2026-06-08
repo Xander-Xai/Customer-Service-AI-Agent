@@ -490,22 +490,53 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
         response.headers["X-Trace-ID"] = trace_id
         return response
 
+    # ── WebSocket 认证辅助函数 ──
+
+    async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
+        """WebSocket 首条消息认证。返回 (ws_api_key, session_token, ws_jwt_payload) 或抛出异常。
+        认证失败时直接关闭连接并抛出 ValueError。
+        """
+        if not (API_KEY_ENABLED and not DEV_MODE and not ws_api_key):
+            return ws_api_key, "", None
+
+        try:
+            auth_msg = await asyncio.wait_for(ws.receive_json(), timeout=10)
+            msg_api_key = auth_msg.get("api_key", "")
+            if msg_api_key and hmac.compare_digest(msg_api_key, API_KEY):
+                return msg_api_key, "", None
+
+            ws_jwt = auth_msg.get("token", "")
+            session_token = auth_msg.get("session_token", "")
+            if not ws_jwt:
+                await ws.send_json({"type": "error", "message": "认证失败: 缺少 token 或 api_key"})
+                await ws.close(code=4001, reason="Unauthorized")
+                raise ValueError("Missing credentials")
+
+            from auth.service import decode_token
+            payload = decode_token(ws_jwt)
+            if not payload:
+                await ws.send_json({"type": "error", "message": "认证失败: 无效的 token"})
+                await ws.close(code=4001, reason="Invalid token")
+                raise ValueError("Invalid token")
+
+            return ws_api_key, session_token, payload
+        except asyncio.TimeoutError:
+            await ws.send_json({"type": "error", "message": "认证超时"})
+            await ws.close(code=4002, reason="Auth timeout")
+            raise
+        except ValueError:
+            raise
+        except Exception:
+            await ws.send_json({"type": "error", "message": "认证失败"})
+            await ws.close(code=4003, reason="Auth error")
+            raise
+
     # ── WebSocket 实时对话 ──
 
     @app.websocket("/ws/chat")
     async def websocket_chat(ws: WebSocket):
-        # API Key 可从 URL 或首条消息传递（v5.0: 首条消息优先，URL 保留向后兼容）
+        # API Key 可从 URL 或首条消息传递
         ws_api_key = ws.query_params.get("api_key", "") or ws.headers.get("x-api-key", "")
-
-        if API_KEY_ENABLED:
-            # URL 中有 API Key → 直接认证
-            if ws_api_key and hmac.compare_digest(ws_api_key, API_KEY):
-                pass  # 已认证
-            elif DEV_MODE:
-                pass  # DEV 模式跳过
-            else:
-                # 尝试从首条消息获取 API Key 或 JWT（在 accept 后处理）
-                pass
 
         client_ip = ws.client.host if ws.client else "unknown"
         async with _ws_lock:
@@ -516,39 +547,13 @@ def create_app(graph_app, session_manager=None, response_cache=None, metrics=Non
 
         await ws.accept()
 
-        # v4.3 安全加固: 从首条消息获取认证信息（JWT Token 或 API Key）
-        # v5.0: API Key 也可通过首条消息传递（避免 URL 泄露到日志/浏览器历史）
-        session_token = ""
-        ws_jwt_payload = None
-        if API_KEY_ENABLED and not DEV_MODE and not ws_api_key:
-            try:
-                auth_msg = await asyncio.wait_for(ws.receive_json(), timeout=10)
-                # 首条消息中的 API Key
-                msg_api_key = auth_msg.get("api_key", "")
-                if msg_api_key and hmac.compare_digest(msg_api_key, API_KEY):
-                    ws_api_key = msg_api_key  # 认证通过
-                else:
-                    ws_jwt = auth_msg.get("token", "")
-                    session_token = auth_msg.get("session_token", "")
-                    if not ws_jwt:
-                        await ws.send_json({"type": "error", "message": "认证失败: 缺少 token 或 api_key"})
-                        await ws.close(code=4001, reason="Unauthorized")
-                        return
-                    from auth.service import decode_token
-                    payload = decode_token(ws_jwt)
-                    if not payload:
-                        await ws.send_json({"type": "error", "message": "认证失败: 无效的 token"})
-                        await ws.close(code=4001, reason="Invalid token")
-                        return
-                    ws_jwt_payload = payload
-            except asyncio.TimeoutError:
-                await ws.send_json({"type": "error", "message": "认证超时"})
-                await ws.close(code=4002, reason="Auth timeout")
-                return
-            except Exception:
-                await ws.send_json({"type": "error", "message": "认证失败"})
-                await ws.close(code=4003, reason="Auth error")
-                return
+        # 认证（URL API Key 或首条消息中的 JWT/API Key）
+        try:
+            ws_api_key, session_token, ws_jwt_payload = await _ws_authenticate(ws, ws_api_key)
+        except Exception:
+            async with _ws_lock:
+                _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
+            return
 
         session_id = str(uuid.uuid4())
         if _session_manager and not session_token:

@@ -43,7 +43,8 @@ htmlcov/
 *.sqlite
 *.sqlite3
 chat_sessions/
-data/
+data/*
+!data/seed/
 *.checkpoint
 logs/
 loki/
