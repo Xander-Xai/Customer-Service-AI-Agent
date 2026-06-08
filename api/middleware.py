@@ -105,10 +105,12 @@ def setup_middleware(app: FastAPI):
             _rate_limit_store[auth_key].append(now)
             return await call_next(request)
 
-        if get_redis_client():
-            if not _redis_rate_limit(client_ip, _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW):
-                return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
+        # Redis 优先，失败则回退到内存限流
+        redis_ok = _redis_rate_limit(client_ip, _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW)
+        if get_redis_client() and redis_ok:
             return await call_next(request)
+        elif get_redis_client() and not redis_ok:
+            return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
 
         _rate_limit_store[client_ip] = [t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW]
         if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX:
@@ -142,6 +144,12 @@ def setup_middleware(app: FastAPI):
     @app.middleware("http")
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
+
+        # 输入大小保护：拒绝超过 1MB 的 POST 请求体
+        if request.method == "POST" and path.startswith("/api/"):
+            cl = request.headers.get("content-length")
+            if cl and int(cl) > 1000000:
+                return JSONResponse({"error": "Payload too large"}, status_code=413)
 
         if path in ("/", "/api/health", "/login.html", "/admin.html", "/widget.html") or path.startswith("/static/"):
             return await call_next(request)

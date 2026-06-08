@@ -25,6 +25,17 @@ from config import (
 
 logger = get_logger("monitoring")
 
+# ===== 性能指标常量 =====
+RESPONSE_TIMES_MAXLEN = 200        # 响应时间 deque 最大长度
+STATS_RECENT_COUNT = 100           # 统计时取最近 N 次响应时间
+P95_MIN_SAMPLES = 20               # 计算 P95 最少样本数
+SESSION_TTL = 3600.0               # 会话统计过期时间（秒，1 小时）
+CLEANUP_INTERVAL = 100             # 每 N 次请求清理一次过期会话
+METRICS_SNAPSHOT_TTL = 86400       # Redis 快照 TTL（秒，24 小时）
+METRICS_HISTORY_MAX = 24           # Redis 历史快照保留数
+PERCENTAGE_MULTIPLIER = 100        # 百分比乘数
+P95_PERCENTILE = 0.95              # P95 百分位
+
 
 # ===== 性能指标采集器 =====
 class MetricsCollector:
@@ -34,7 +45,7 @@ class MetricsCollector:
         self._lock = asyncio.Lock()  # P1-2: 直接初始化，消除懒初始化竞态
         self.total_requests = 0
         self.total_errors = 0
-        self.response_times = deque(maxlen=200)  # 自动截断，保留最近 200 条
+        self.response_times = deque(maxlen=RESPONSE_TIMES_MAXLEN)  # 自动截断，保留最近 N 条
         self.agent_call_counts: Dict[str, int] = {}
         self.mode_counts: Dict[str, int] = {}
         self.cache_hits = 0
@@ -48,7 +59,7 @@ class MetricsCollector:
         self.total_escalated = 0
         self.session_turn_counts: Dict[str, int] = {}
         self.session_last_activity: Dict[str, float] = {}
-        self._session_ttl: float = 3600.0  # 会话统计 1 小时过期
+        self._session_ttl: float = SESSION_TTL  # 会话统计过期时间
         # v3.2: 细粒度解决率追踪
         self.resolution_counts: Dict[str, int] = {
             "resolved": 0, "uncertain": 0, "failed": 0, "escalated": 0,
@@ -93,7 +104,7 @@ class MetricsCollector:
                 if is_first_turn and not escalated and not cached and resolution_status == "resolved":
                     self.total_single_turn_resolved += 1
                 # 定期清理过期会话统计（每 100 次请求清理一次）
-                if self.total_requests % 100 == 0:
+                if self.total_requests % CLEANUP_INTERVAL == 0:
                     self._cleanup_expired_sessions(now)
             if escalated:
                 self.total_escalated += 1
@@ -123,14 +134,14 @@ class MetricsCollector:
 
     async def get_stats(self) -> Dict[str, Any]:
         async with self._ensure_lock():
-            times = list(self.response_times)[-100:]  # 最近 100 次
+            times = list(self.response_times)[-STATS_RECENT_COUNT:]  # 最近 N 次
             return {
                 "total_requests": self.total_requests,
                 "total_errors": self.total_errors,
-                "error_rate": round(self.total_errors / max(self.total_requests, 1) * 100, 1),
+                "error_rate": round(self.total_errors / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1),
                 "avg_response_time": round(sum(times) / max(len(times), 1), 2),
-                "p95_response_time": round(sorted(times)[int(len(times) * 0.95)] if len(times) >= 20 else (max(times) if times else 0), 2),
-                "cache_hit_rate": round(self.cache_hits / max(self.cache_hits + self.cache_misses, 1) * 100, 1),
+                "p95_response_time": round(sorted(times)[int(len(times) * P95_PERCENTILE)] if len(times) >= P95_MIN_SAMPLES else (max(times) if times else 0), 2),
+                "cache_hit_rate": round(self.cache_hits / max(self.cache_hits + self.cache_misses, 1) * PERCENTAGE_MULTIPLIER, 1),
                 "agent_call_counts": dict(self.agent_call_counts),
                 "mode_counts": dict(self.mode_counts),
                 "sla": {
@@ -138,7 +149,7 @@ class MetricsCollector:
                     "target_max": RESPONSE_TIME_TARGET_MAX,
                     "violations_slow": self.sla_violations,
                     "violations_fast": self.sla_too_fast,
-                    "violation_rate": round(self.sla_violations / max(self.total_requests, 1) * 100, 1),
+                    "violation_rate": round(self.sla_violations / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER, 1),
                     "window_violation_rate": await self.get_sla_window_violation_rate(_internal=True),
                 },
             }
@@ -149,24 +160,24 @@ class MetricsCollector:
             if not self._sla_window:
                 return 0.0
             violations = sum(1 for t in self._sla_window if t > RESPONSE_TIME_TARGET_MAX)
-            return round(violations / len(self._sla_window) * 100, 1)
+            return round(violations / len(self._sla_window) * PERCENTAGE_MULTIPLIER, 1)
         async with self._ensure_lock():
             if not self._sla_window:
                 return 0.0
             violations = sum(1 for t in self._sla_window if t > RESPONSE_TIME_TARGET_MAX)
-            return round(violations / len(self._sla_window) * 100, 1)
+            return round(violations / len(self._sla_window) * PERCENTAGE_MULTIPLIER, 1)
 
     async def get_kpi_stats(self) -> Dict[str, Any]:
         async with self._ensure_lock():
             total_sessions = len(self.session_turn_counts)
             single_turn_sessions = sum(1 for v in self.session_turn_counts.values() if v == 1)
-            first_resolution_rate = single_turn_sessions / max(total_sessions, 1) * 100
-            ai_handled_rate = self.total_ai_handled / max(self.total_requests, 1) * 100
+            first_resolution_rate = single_turn_sessions / max(total_sessions, 1) * PERCENTAGE_MULTIPLIER
+            ai_handled_rate = self.total_ai_handled / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER
 
             # v3.2 口径：基于 Agent 信号的解决率（更准确）
             total_resolution = sum(self.resolution_counts.values())
             resolved = self.resolution_counts.get("resolved", 0)
-            resolution_rate = resolved / max(total_resolution, 1) * 100
+            resolution_rate = resolved / max(total_resolution, 1) * PERCENTAGE_MULTIPLIER
 
             return {
                 "first_resolution_rate": f"{first_resolution_rate:.1f}%",
@@ -198,9 +209,9 @@ class MetricsCollector:
                 "stats": await self.get_stats(),
                 "kpi": await self.get_kpi_stats(),
             }
-            redis_client.setex("metrics:snapshot", 86400, json.dumps(snapshot, ensure_ascii=False))
+            redis_client.setex("metrics:snapshot", METRICS_SNAPSHOT_TTL, json.dumps(snapshot, ensure_ascii=False))
             redis_client.lpush("metrics:history", json.dumps(snapshot, ensure_ascii=False))
-            redis_client.ltrim("metrics:history", 0, 23)
+            redis_client.ltrim("metrics:history", 0, METRICS_HISTORY_MAX - 1)
             return True
         except Exception as e:
             logger.warning(f"[Metrics] 持久化快照失败: {e}")

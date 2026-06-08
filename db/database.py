@@ -10,6 +10,7 @@ import os
 from urllib.parse import urlparse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.pool import StaticPool
 from logger import get_logger
 from .models import Base
 
@@ -57,6 +58,7 @@ else:
         connect_args={"check_same_thread": False},  # SQLite 需要
         echo=False,
         pool_pre_ping=True,
+        poolclass=StaticPool,
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

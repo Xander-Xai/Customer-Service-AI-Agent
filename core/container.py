@@ -223,13 +223,17 @@ class ServiceContainer:
                 seed_product_knowledge, seed_faq, seed_tech_support, seed_complaint_knowledge,
                 seed_supplementary_data,
             )
-            from config import CLIP_ENABLED
+            from config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
             self.knowledge_base = CosmeticsKnowledgeBase(clip_enabled=CLIP_ENABLED)
-            seed_product_knowledge(self.knowledge_base)
-            seed_faq(self.knowledge_base)
-            seed_tech_support(self.knowledge_base)
-            seed_complaint_knowledge(self.knowledge_base)
-            seed_supplementary_data(self.knowledge_base)
+            if RAG_PERSIST_DIRECTORY:
+                logger.info("ChromaDB persistent mode, skipping seed")
+            else:
+                logger.info("ChromaDB in-memory mode, seeding data")
+                seed_product_knowledge(self.knowledge_base)
+                seed_faq(self.knowledge_base)
+                seed_tech_support(self.knowledge_base)
+                seed_complaint_knowledge(self.knowledge_base)
+                seed_supplementary_data(self.knowledge_base)
             logger.info(
                 f"RAG 知识库初始化完成 "
                 f"(product={self.knowledge_base.get_collection_count('product_knowledge')}, "

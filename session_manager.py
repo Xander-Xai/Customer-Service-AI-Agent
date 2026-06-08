@@ -35,6 +35,7 @@ from config import (
     REDIS_URL as _CFG_REDIS_URL,
     MAX_SESSIONS as _CFG_MAX_SESSIONS,
     SESSION_IDLE_TTL as _CFG_SESSION_IDLE_TTL,
+    REDIS_SESSION_PREFIX as _CFG_REDIS_PREFIX,
 )
 
 # v4.3: 从拆分模块导入，保持所有原有公开符号可从 session_manager 导入
@@ -219,10 +220,10 @@ class EnhancedSessionManager:
             if r:
                 try:
                     def _redis_load():
-                        stored = r.get(f"session:{session_id}:messages")
+                        stored = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:messages")
                         if stored:
                             msgs = json.loads(stored)
-                            meta_raw = r.get(f"session:{session_id}:meta")
+                            meta_raw = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:meta")
                             meta = json.loads(meta_raw) if meta_raw else {}
                             return msgs, meta
                         return None, None
@@ -365,7 +366,7 @@ class EnhancedSessionManager:
                 try:
                     ttl = self.storage_config.get("ttl", 86400)
                     def _redis_save():
-                        r.setex(f"session:{session_id}:messages", ttl, json.dumps(session["messages"], ensure_ascii=False))
+                        r.setex(f"{_CFG_REDIS_PREFIX}{session_id}:messages", ttl, json.dumps(session["messages"], ensure_ascii=False))
                         meta = {
                             "created_at": session["created_at"],
                             "last_activity": session["last_activity"],
@@ -374,7 +375,7 @@ class EnhancedSessionManager:
                             "drift_log": session.get("drift_log", []),
                             "topic_history": list(session.get("topic_history", [])),
                         }
-                        r.setex(f"session:{session_id}:meta", ttl, json.dumps(meta, ensure_ascii=False))
+                        r.setex(f"{_CFG_REDIS_PREFIX}{session_id}:meta", ttl, json.dumps(meta, ensure_ascii=False))
                     await asyncio.to_thread(_redis_save)
                 except Exception as e:
                     logger.warning(f"Redis 保存失败: {e}")
@@ -547,8 +548,8 @@ class EnhancedSessionManager:
             r = self._get_redis()
             if r:
                 try:
-                    r.delete(f"session:{session_id}:messages")
-                    r.delete(f"session:{session_id}:meta")
+                    r.delete(f"{_CFG_REDIS_PREFIX}{session_id}:messages")
+                    r.delete(f"{_CFG_REDIS_PREFIX}{session_id}:meta")
                 except Exception as e:
                     logger.warning(f"Redis 会话清理失败 session={session_id}: {e}")
 
