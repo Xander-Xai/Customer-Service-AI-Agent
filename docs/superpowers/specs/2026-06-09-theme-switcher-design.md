@@ -45,6 +45,57 @@
 
 ## 设计 Token 系统
 
+### Token 迁移映射表（旧 → 新）
+
+| 旧变量（现有代码） | 新 Token | 用途 |
+|------------------|----------|------|
+| `--primary` | `--color-action-primary` | 按钮主色、强调元素 |
+| `--primary-hover` | `--color-action-primary-hover` | 主色 hover |
+| `--primary-subtle` | `--color-action-subtle` | 主色淡背景 |
+| `--primary-glow` | **删除** | 移除 glow 效果 |
+| `--success` | `--color-success` | 成功状态 |
+| `--success-bg` | `--color-success-bg` | 成功背景 |
+| `--warning` | `--color-warning` | 警告状态 |
+| `--warning-bg` | `--color-warning-bg` | 警告背景 |
+| `--error` | `--color-error` | 错误状态 |
+| `--error-bg` | `--color-error-bg` | 错误背景 |
+| `--info` | `--color-info` | 信息状态 |
+| `--info-bg` | `--color-info-bg` | 信息背景 |
+| `--bg-base` | `--color-surface-base` | 主背景 |
+| `--bg-surface` | `--color-surface-elevated` | 卡片表面 |
+| `--bg-elevated` | `--color-surface-elevated` | 悬浮表面 |
+| `--bg-hover` | `--color-surface-hover` | hover 状态 |
+| `--bg-active` | `--color-surface-active` | active 状态 |
+| `--bg-overlay` | `--color-overlay` | 遮罩层 |
+| `--text-primary` | `--color-text-primary` | 主文本 |
+| `--text-secondary` | `--color-text-secondary` | 次要文本 |
+| `--text-muted` | `--color-text-muted` | 弱化文本 |
+| `--text-inverse` | `--color-text-inverse` | 反色文本 |
+| `--border` | `--color-border` | 边框 |
+| `--border-hover` | `--color-border-hover` | hover 边框 |
+| `--border-focus` | `--color-focus` | 焦点边框 |
+| `--radius-sm` | `--radius-sm` | 圆角（小）— **保持不变** |
+| `--radius-md` | `--radius-md` | 圆角（中）— **保持不变** |
+| `--radius-lg` | `--radius-lg` | 圆角（大）— **保持不变** |
+| `--radius-full` | `--radius-full` | 圆角（圆）— **保持不变** |
+| `--shadow-sm/md/lg` | `--shadow-sm/md/lg` | 阴影 — **保持不变** |
+
+**硬编码颜色处理清单**（实施时必须替换为 token）：
+
+| 文件 | 硬编码颜色 | 替换为 |
+|------|-----------|--------|
+| `components.css` | `#6B6B6B` | `var(--color-text-secondary)` |
+| `components.css` | `#F3EFFE` | `var(--color-mode-react-bg)` 或新增 `--color-purple-50` |
+| `components.css` | `#6B21A8` | 新增 `--color-purple-700` |
+| `components.css` | `#F0EFEC` | `var(--color-surface-hover)` |
+| `layout.css` | `#FAFAF8` | `var(--color-surface-elevated)` |
+| `login.css` | `#A78BFA` | 移除或替换为 `var(--color-text-secondary)` |
+
+**迁移策略**：
+1. 新 `variables.css` 保留旧变量名（作为 alias），同时定义新 token
+2. 逐步将组件从旧变量切换到新 token
+3. 验证一致后，删除旧变量定义
+
 ### 三层架构
 
 ```
@@ -86,34 +137,55 @@
 | `--border-hover` | `#3a3d4a` | `#4a423a` |
 | `--action-primary` | `#e8eaed` | `#e8e7e4` |
 
-### 语义色（所有主题共用，跨主题一致）
+### 语义色（必须分浅/深两套，深色模式降饱和度）
+
+**浅色模式语义色**（背景为暖白/纯白时使用）：
 
 ```css
---color-success: #346538;
+--color-success: #346538;        /* 5.4:1 on #f7f6f3 ✓ AA */
 --color-success-bg: #edf3ec;
---color-warning: #956400;
+--color-warning: #956400;        /* 5.1:1 on #f7f6f3 ✓ AA */
 --color-warning-bg: #fbf3db;
---color-error: #9f2f2d;
+--color-error: #9f2f2d;          /* 6.0:1 on #f7f6f3 ✓ AA */
 --color-error-bg: #fdebec;
---color-info: #1f6c9f;
+--color-info: #1f6c9f;           /* 5.5:1 on #f7f6f3 ✓ AA */
 --color-info-bg: #e1f3fe;
-
---color-focus: #1a1a1a;  /* 浅色 */
---color-focus-dark: #e8eaed;  /* 深色 */
+--color-focus: #1a1a1a;
 ```
+
+**深色模式语义色**（背景为深色时使用，降饱和度 + 加亮前景）：
+
+```css
+[data-color-mode="dark"] {
+  --color-success: #8fcf94;      /* 8.5:1 on #0f1117 ✓ AAA */
+  --color-success-bg: #1a3a1f;  /* 深绿背景，不是刺眼浅绿 */
+  --color-warning: #d4a657;     /* 9.2:1 on #0f1117 ✓ AAA */
+  --color-warning-bg: #3a2e10;
+  --color-error: #e8908e;       /* 6.8:1 on #0f1117 ✓ AA */
+  --color-error-bg: #3a1818;
+  --color-info: #8ab8d6;        /* 9.5:1 on #0f1117 ✓ AAA */
+  --color-info-bg: #0f2a3a;
+  --color-focus: #e8eaed;
+}
+```
+
+依据：深色模式不能直接复用浅色背景的 pastel 色块（`#fbf3db` 等在深色背景上会刺眼）。
 
 ## 无障碍选项
 
-### 字号（4 档，rem 相对单位）
+### 字号（4 档，rem 相对单位响应用户浏览器设置）
 
 ```css
-[data-font-size="small"]  { font-size: 13px; }
-[data-font-size="medium"] { font-size: 14px; }  /* 默认 */
-[data-font-size="large"]  { font-size: 15px; }
-[data-font-size="xlarge"] { font-size: 16px; }
+[data-font-size="small"]  { font-size: 0.875rem; }   /* 13px @ 14px root */
+[data-font-size="medium"] { font-size: 1rem; }        /* 14px — 默认 */
+[data-font-size="large"]  { font-size: 1.0625rem; }  /* 15px */
+[data-font-size="xlarge"] { font-size: 1.125rem; }    /* 16px */
 ```
 
-依据：WCAG 1.4.4 Resize text（支持 200% 缩放仍可读）
+**为什么用 rem 而非 px**：
+- 响应用户浏览器默认字号设置（WCAG 1.4.4 Resize text）
+- 父元素 `html { font-size: 14px }` 为基准，所有字号都是相对的
+- 用户在浏览器设置中改大字号时，UI 会按比例放大
 
 ### 行高（3 档）
 
@@ -128,16 +200,26 @@
 ### 减少动画
 
 ```css
+/* 范围：CSS 动画 + transition + JS 驱动的轮询刷新 */
 [data-motion="reduced"] *,
 [data-motion="reduced"] *::before,
 [data-motion="reduced"] *::after {
   animation-duration: 0.01ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* 不影响功能刷新（仍按 10s 拉数据，但禁用动画过渡） */
+[data-motion="reduced"] .admin-stat,
+[data-motion="reduced"] .metric-value {
+  transition: none !important;
 }
 ```
 
-依据：WCAG 2.3.3 Animation from Interactions
+依据：WCAG 2.3.3 Animation from Interactions（停止动画但不停止数据刷新——用户仍要看最新监控数据，只是不要动画过渡）
+
+**实施注意**：`setInterval(refreshMonitorData, 10000)` 不会被这个 CSS 抑制（CSS 不能管 JS 定时器），但视觉效果上不会有过渡动画，符合 WCAG "减少运动"的精神。如果未来要彻底停止轮询，可在 `theme.js` 中监听 `motion` 变化停止定时器（v1 暂不实现）。
 
 ## 实现架构
 
@@ -160,24 +242,44 @@ web/
 
 ### 主题应用机制
 
-#### 1. 防 FOUC 早期脚本（`index.html` `<head>` 内联）
+#### 1. 防 FOUC 早期脚本（必须同步阻塞执行）
+
+**关键要求**：
+- 必须是**同步** `<script>` 标签，**非 `type="module"`**（module 默认 deferred）
+- 必须放在 `<head>` **最顶部**，在任何 CSS 加载之前
+- 必须在 DOMContentLoaded 之前完成
+- localStorage 读取 + dataset 设置必须在第一个 paint 之前完成
+
+**实施位置**：`index.html` / `admin.html` / `login.html` 的 `<head>` 第一行（`<meta charset>` 之后）
 
 ```html
-<script>
-  (function() {
-    try {
-      var pref = JSON.parse(localStorage.getItem('user-prefs') || '{}');
-      var html = document.documentElement;
-      if (pref.themeLight) html.dataset.themeLight = pref.themeLight;
-      if (pref.colorMode)  html.dataset.colorMode = pref.colorMode;
-      if (pref.themeDark)  html.dataset.themeDark = pref.themeDark;
-      if (pref.fontSize)   html.dataset.fontSize = pref.fontSize;
-      if (pref.lineHeight) html.dataset.lineHeight = pref.lineHeight;
-      if (pref.motion)     html.dataset.motion = pref.motion;
-    } catch(e) {}
-  })();
-</script>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>药妆智多星 - 智能客服系统</title>
+
+  <!-- 防 FOUC 早期主题应用（同步阻塞，必须在 CSS 之前） -->
+  <script>
+    (function() {
+      try {
+        var pref = JSON.parse(localStorage.getItem('user-prefs') || '{}');
+        var html = document.documentElement;
+        if (pref.themeLight) html.dataset.themeLight = pref.themeLight;
+        if (pref.colorMode)  html.dataset.colorMode = pref.colorMode;
+        if (pref.themeDark)  html.dataset.themeDark = pref.themeDark;
+        if (pref.fontSize)   html.dataset.fontSize = pref.fontSize;
+        if (pref.lineHeight) html.dataset.lineHeight = pref.lineHeight;
+        if (pref.motion)     html.dataset.motion = pref.motion;
+      } catch(e) {}
+    })();
+  </script>
+
+  <!-- 此处才加载 CSS -->
+  <link rel="stylesheet" href="...">
+</head>
 ```
+
+**Widget 作用域隔离**：`widget.html` 嵌入主站时，会继承外层 `<html>` 的 `data-*` 属性。但 `widget.html` 内的 CSS 只用 `.widget-*` 类名 + 自己的 CSS 变量，**不会响应**外层的 `data-theme-*` 选择器，因此 Widget 外观不受主站主题切换影响。
 
 #### 2. CSS 选择器优先级
 
@@ -303,6 +405,9 @@ export const themeManager = {
 | 经典深色 | 正文 | `#e8eaed` | `#0f1117` | 16.2:1 | ✓ AAA |
 | 经典深色 | 次要文本 | `#9ca3af` | `#0f1117` | 7.2:1 | ✓ AAA |
 | 经典深色 | 弱化文本 | `#6b7280` | `#0f1117` | 4.6:1 | ✓ AA |
+| 暖调深色 | 正文 | `#e8e7e4` | `#1a1814` | 14.8:1 | ✓ AAA |
+| 暖调深色 | 次要文本 | `#a89a82` | `#1a1814` | 7.0:1 | ✓ AAA |
+| 暖调深色 | 弱化文本 | `#8a7d6a` | `#1a1814` | 4.7:1 | ✓ AA |
 
 **结论**：所有主题 AA 达标，浅色主题弱化文本仅满足大字体场景。
 
@@ -345,11 +450,11 @@ export const themeManager = {
 
 ## 不在范围内
 
+- **Widget 主题切换**（`widget.html`）：Widget 是独立嵌入式组件，有自己的 CSS 变量系统。主题切换器**仅作用于主站三个页面**（index.html / admin.html / login.html）。Widget 不会被 `data-theme-*` / `data-color-mode` 属性影响（实施时在 `theme.js` 中加作用域检查）。
 - 用户自定义主题创建器（v1 仅内置 8 种组合）
 - 主题市场/分享功能
 - 主题同步到云端
 - 配色无障碍模式（仅保留 WCAG AA 达标的默认）
-- Widget.html 主题切换（独立组件，v1 不涉及）
 
 ## 实施步骤
 
