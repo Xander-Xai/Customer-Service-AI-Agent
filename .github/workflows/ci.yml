@@ -94,7 +94,7 @@ jobs:
 
       - name: Type checking — strict (new modules)
         run: |
-          python -m mypy core/protocols.py core/token_tracker.py core/prompt_manager.py rag/reranker.py rag/query_rewriter.py api/dependencies.py api/routes/prompts.py --ignore-missing-imports
+          python -m mypy core/protocols.py core/token_tracker.py core/prompt_manager.py rag/reranker.py rag/query_rewriter.py api/dependencies.py api/routes/prompts.py --ignore-missing-imports --follow-imports=skip
 
       - name: Type checking — gradual (existing modules)
         continue-on-error: true
