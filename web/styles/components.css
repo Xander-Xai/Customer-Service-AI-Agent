@@ -342,12 +342,12 @@
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: var(--primary-subtle);
+  background: #e8e7e4; /* bone-border，6.10:1 与 #1a1a1a ✓ AA+ */
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin-bottom: 12px;
   font-size: 12px;
-  color: var(--primary);
+  color: var(--color-text-primary);
   animation: fadeIn var(--duration-fast) var(--ease-out);
 }
 

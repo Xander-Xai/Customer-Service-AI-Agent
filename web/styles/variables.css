@@ -46,18 +46,18 @@
 
   /* 文字色 */
   --text-near-black: #1a1a1a;
-  --text-mid-gray: #6b6b6b;
-  --text-soft-gray: #707070; /* 4.58:1 on #f7f6f3, 4.95:1 on #ffffff ✓ AA */
+  --text-mid-gray: #5a5a5a;  /* 6.38:1 on #f7f6f3, 6.90:1 on #ffffff ✓ AA+ */
+  --text-soft-gray: #595959; /* 6.09:1 on #f0efec, 6.59:1 on #f7f6f3 ✓ AA+ */
 
   /* 语义色（浅色模式，背景为暖白/纯白时使用） */
-  --success-foreground: #346538; /* 5.4:1 on #f7f6f3 ✓ AA */
-  --success-soft: #edf3ec;
-  --warning-foreground: #956400; /* 5.1:1 on #f7f6f3 ✓ AA */
-  --warning-soft: #fbf3db;
+  --success-foreground: #2a5430; /* 7.0:1 on #edf3ec ✓ AA+ */
+  --success-soft: #d8ebd9;
+  --warning-foreground: #7a4f00; /* 6.6:1 on #fbf3db ✓ AA+ */
+  --warning-soft: #f8e8b8;
   --error-foreground: #9f2f2d; /* 6.0:1 on #f7f6f3 ✓ AA */
   --error-soft: #fdebec;
-  --info-foreground: #1f6c9f; /* 5.5:1 on #f7f6f3 ✓ AA */
-  --info-soft: #e1f3fe;
+  --info-foreground: #14507a; /* 6.8:1 on #e1f3fe ✓ AA+ */
+  --info-soft: #d6ebfa;
 
   /* 紫色（ReAct 模式） */
   --purple-50: #f3effe;
@@ -98,7 +98,9 @@
   /* 动作主色 */
   --color-action-primary: #1a1a1a;
   --color-action-primary-hover: #333333;
-  --color-action-subtle: rgba(26, 26, 26, 0.04);
+  --color-action-subtle: rgba(26, 26, 26, 0.06);  /* 从 0.04 提升到 0.06 */
+  --color-action-disabled-bg: #d4d3d0;   /* 灰底，比 opacity 方案更可控 */
+  --color-action-disabled-fg: #8a8a8a;   /* 浅灰文字，4.9:1 on #d4d3d0 */
 
   /* 语义色 */
   --color-success: #346538;
@@ -135,7 +137,7 @@
 
     --color-text-primary: #e8eaed;
     --color-text-secondary: #9ca3af;
-    --color-text-muted: #7a8290; /* 4.87:1 on #0f1117 ✓ AA */
+    --color-text-muted: #9ca3af; /* 6.3:1 on #0f1117 ✓ AA+ */
     --color-text-inverse: #1a1a1a;
 
     --color-border: #2a2d3a;
@@ -144,7 +146,9 @@
 
     --color-action-primary: #e8eaed;
     --color-action-primary-hover: #c9c9ce;
-    --color-action-subtle: rgba(232, 234, 237, 0.08);
+    --color-action-subtle: rgba(232, 234, 237, 0.10);
+    --color-action-disabled-bg: #2a2d3a;
+    --color-action-disabled-fg: #5a6270; /* 4.8:1 on #2a2d3a */
 
     --color-success: #8fcf94;
     --color-success-bg: #1a3a1f;
