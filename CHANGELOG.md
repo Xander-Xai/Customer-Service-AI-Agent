@@ -4,13 +4,24 @@
 
 ---
 
-## v5.2 (2026-06-10) — 无障碍合规 + 交互增强 + 死代码清理
+## v5.2 (2026-06-10) — 无障碍合规 + 交互增强 + 对比度全量修复 + CI 升级
 
 ### 无障碍合规（WCAG AA/AAA）
 - **全局交互色 AAA 达标**：push 所有 `--color-*-hover/active` token 到 ≥7.0 对比度
 - **禁用态对比度 AA 修复**：`btn-send:disabled` 改用 `--color-disabled` token，补齐 `.btn-secondary`
 - **弱化文字 AA 加深**：`--text-muted` / `--text-secondary` / `--progress-bg` 色值加深至 ≥4.5:1
 - **Disabled token 统一修正**：所有 disabled 状态色彩通过语义 token 控制
+
+### 对比度全量修复（8+ 处）
+- **btn-send:disabled**：opacity 方案→专用 disabled token（2.07→4.61:1）
+- **btn-primary:disabled**：bg-hover→disabled token（3.9→4.61:1）
+- **btn-secondary**：补全缺失的样式定义（4.61:1 AA）
+- **btn-reset**：加深默认边框 border→border-hover
+- **#logoutBtn**：加深边框 + hover 背景（3.28→5.2:1）
+- **cream 主题**：text-secondary #6c5f4f→#5d5240（6.0:1 AA+）
+- **cream 主题**：text-muted #756a58→#645840（5.5:1 AA）
+- **暖深色主题**：新增 disabled token（4.90:1 AA）
+- **自动化测试**：contrast.test.js 18 个 token 对比度回归测试（全部通过）
 
 ### 交互增强
 - **TTS 语音选择器**：`index.html` 添加 `#selectTTSVoice` 元素，激活 `main.js` 已有逻辑
@@ -22,9 +33,14 @@
 - **删除 `monitor/index.js`**：223 行死代码文件，admin-analytics.js 已完全替代
 - **清理对应 re-export**：`api/index.js` 移除已删除函数的重导出
 
+### CI 升级
+- **GitHub Actions v6**：actions/checkout、setup-python、upload-artifact 升级到 v6（Node.js 24）
+- **Node.js 20 弃用修复**：解决 2026-09-16 移除前的弃用警告
+
 ### 测试改进
 - **Ruff lint 清理**：346 → 73 warning（删除无用导入 + 断言优化）
 - **Flaky 测试修复**：修复异步 mock + 类型适配问题
+- **对比度回归测试**：18 个 token 对比度自动验证（覆盖 6 种主题）
 
 ---
 
