@@ -97,7 +97,7 @@ RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "5.0.0"
+VERSION = "5.2.0"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)

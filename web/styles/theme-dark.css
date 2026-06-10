@@ -63,6 +63,8 @@
   --color-action-primary: #e8e7e4;
   --color-action-primary-hover: #d4d0c8;
   --color-action-subtle: rgba(232, 231, 228, 0.08);
+  --color-action-disabled-bg: #3a322a;
+  --color-action-disabled-fg: #b0a080; /* 4.90:1 on #3a322a ✓ AA */
 
   --color-success: #a3d4a6;
   --color-success-bg: #1f331a;

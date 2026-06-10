@@ -87,8 +87,8 @@
 }
 
 .btn-primary:disabled {
-  background: var(--bg-hover);
-  color: var(--text-muted);
+  background: var(--color-action-disabled-bg);
+  color: var(--color-action-disabled-fg);
   cursor: not-allowed;
 }
 
