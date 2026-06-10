@@ -4,10 +4,21 @@
 
 ---
 
-## v5.2.2 (2026-06-11) — 会话列表标题字段修正
+## v5.2.2 (2026-06-11) — 会话列表标题字段修正 + CI 覆盖率修复
 
 ### 修复
-- **会话列表标题字段错位**：`web/src/chat/sessions.js` 的 `loadSessionList()` 渲染时会话项标题从 `s.summary` 改为 `s.title`。后端 `list_sessions_brief` 接口（`/api/sessions` 与 `/api/history`）返回的字段是 `title`（取自首条消息内容前 50 字符），`summary` 字段只存在于详细会话接口 `getSession`（`/api/sessions/{id}`）中。此前列表请求读取 `summary` 始终为 `undefined`，导致所有会话项均回退到“对话 {session_id 前 8 位}”占位符，用户无法看到真实标题。修正后会话列表正确显示首条消息截取的可读标题，详情面板仍保留 `session.summary` 长摘要的展示。
+- **会话列表标题字段错位**：`web/src/chat/sessions.js` 的 `loadSessionList()` 渲染时会话项标题从 `s.summary` 改为 `s.title`。后端 `list_sessions_brief` 接口（`/api/sessions` 与 `/api/history`）返回的字段是 `title`（取自首条消息内容前 50 字符），`summary` 字段只存在于详细会话接口 `getSession`（`/api/sessions/{id}`）中。此前列表请求读取 `summary` 始终为 `undefined`，导致所有会话项均回退到”对话 {session_id 前 8 位}”占位符，用户无法看到真实标题。修正后会话列表正确显示首条消息截取的可读标题，详情面板仍保留 `session.summary` 长摘要的展示。
+
+### CI 覆盖率修复
+- **pytest.ini `addopts` 配置错误**：`--cov` 从 `addopts` 移除。此前每次 pytest 运行都触发 `fail_under=80` 检查，导致 integration/e2e/stress 单独运行时因覆盖率不足 80% 而失败。现在只有显式传入 `--cov` 时才检查覆盖率门槛（CI 覆盖率报告步骤已显式传入 `--cov=.`）
+- **.coveragerc 排除不可测文件**：`erp/kingdee_real_adapter.py`（需要真实 ERP 后端，覆盖率 0%）从覆盖率统计中排除；移除 `source` 中冗余的 `.` catch-all
+- **新增 151 个测试用例（6 个文件）**：
+  - `test_collaboration_modes.py`（35 tests）：Sequential/Parallel/Consultation/Hierarchical/ReAct 全分支覆盖（22% → 97%）
+  - `test_collaboration_orchestrator.py`（25 tests）：模式选择 + 运行时模式升级全分支（48% → 99%）
+  - `test_query_router_coverage.py`（34 tests）：规则分类 + LLM 分类 + 双层路由（0% → 100%）
+  - `test_alert_notifier_coverage.py`（20 tests）：Webhook + 邮件 + SSRF 防护
+  - `test_base_agent_billing_coverage.py`（32 tests）：A/B 变体 + 漂移修复 + 账单 Agent
+  - `test_graph_builder_coverage.py`（5 tests）：工具函数 + 向后兼容包装器
 
 ---
 
