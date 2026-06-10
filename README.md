@@ -2,7 +2,7 @@
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **v5.2** 无障碍 WCAG AA/AAA 全量达标 + TTS 语音选择器 + 会话详情侧面板 + 死代码清理 + Ruff lint 346→73
+> **v5.2** 无障碍 WCAG AA/AAA 全量达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话详情侧面板 + CI v6 升级 + 死代码清理 + Ruff lint 346→73
 >
 > **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
 >
@@ -19,7 +19,7 @@
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **测试能过** | `make test` | 1151 passed, 覆盖率 ≥80% |
+| **测试能过** | `make test` | 1191 passed, 覆盖率 ≥80% |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
 | **CI 能过** | `.github/workflows/ci.yml` | 4 Job 流水线（测试→安全→构建→部署） |
 
@@ -607,7 +607,7 @@ customer-service-ai-agent/
 ├── knowledge/         # 知识库管理路由
 ├── web/               # 前端（原生 JS + Vite 8 构建 + 22 模块 + 12 CSS + 5 页面）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
-├── tests/             # 测试套件（1151 Python + 4 Vitest：unit/integration/e2e/stress/performance）
+├── tests/             # 测试套件（1191 Python + 5 Vitest：unit/integration/e2e/stress/performance）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
@@ -654,8 +654,9 @@ customer-service-ai-agent/
 | `chatState.test.js` | `web/src/__tests__/` | 聊天状态管理 |
 | `copy.test.js` | `web/src/__tests__/` | 剪贴板复制 |
 | `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
+| `contrast.test.js` | `web/src/__tests__/` | WCAG AA 对比度回归（18 个 token 对） |
 
-**总计：1151 Python 测试用例 + 4 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
+**总计：1191 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
@@ -808,7 +809,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
-| **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + TTS 语音选择器 + 会话侧面板 + 死代码清理 + Ruff 346→73 |
+| **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73 |
 | **v5.1** | 2026-06-10 | 全量清理 320 临时文件 + 文档同步 + 隐私检查通过 |
 | **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1151 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
 | **v4.6** | 2026-06-08 | 文档扫描 20/20 项完成 + pre-commit + 覆盖率 80% + api/app.py 路由拆分 7 模块 |
