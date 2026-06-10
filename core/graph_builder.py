@@ -21,8 +21,8 @@ import time
 from langgraph.graph import StateGraph
 
 from core.container import ServiceContainer
+from core.logger import get_logger, set_trace_id
 from core.state import AgentState
-from logger import get_logger, set_trace_id
 from router.query_router import RoutingResult
 
 logger = get_logger("graph")
@@ -38,7 +38,7 @@ def _format_duration(seconds: float) -> str:
 # ===== v4.5: 唯一图构建入口 =====
 
 
-def build_graph(container: ServiceContainer):
+def build_graph(container: ServiceContainer, checkpointer=None):
     """通过 ServiceContainer 构建 LangGraph 工作流图（唯一图构建入口）
 
     三层状态机架构：
@@ -48,11 +48,19 @@ def build_graph(container: ServiceContainer):
       Layer 3: ResponseAgent（final_response_node）— 缓存/会话/SLA/事件
 
     v4.3: 运行时模式升级（sequential -> consultation -> parallel -> react）
+    v5.2: 支持 checkpointer 参数，实现对话状态持久化和断点续传
+
+    Args:
+        container: ServiceContainer 依赖注入容器
+        checkpointer: LangGraph Checkpointer（如 MemorySaver），None 则不启用持久化
 
     Usage:
         container = ServiceContainer()
         await container.initialize()
-        app = build_graph(container)
+        app = build_graph(container, checkpointer=MemorySaver())
+        # 使用 thread_id 实现对话续传
+        config = {"configurable": {"thread_id": session_id}}
+        result = await app.ainvoke(state, config=config)
     """
     c = container  # 短别名，闭包捕获
 
@@ -305,7 +313,11 @@ def build_graph(container: ServiceContainer):
     # 结束
     workflow.set_finish_point("final_response")
 
-    app = workflow.compile()
+    # v5.2: 支持 checkpointer 实现对话状态持久化
+    compile_kwargs = {}
+    if checkpointer is not None:
+        compile_kwargs["checkpointer"] = checkpointer
+    app = workflow.compile(**compile_kwargs)
     logger.info("[Graph] LangGraph v4.5 构建完成 - 缓存前置 + 5种协作模式 + RAG + 模式升级")
     return app
 
@@ -313,20 +325,19 @@ def build_graph(container: ServiceContainer):
 # ===== 向后兼容：make_graph() 包装器 =====
 
 
+_default_container = None
+
 def make_graph():
-    """向后兼容包装器：内部创建 ServiceContainer 并调用 build_graph()。
+    """向后兼容包装器：内部使用单例 ServiceContainer 并调用 build_graph()。
 
-    已弃用 —— 新代码应直接使用:
-        container = ServiceContainer()
-        await container.initialize()
-        app = build_graph(container)
-
-    注意：此函数会创建一个新的 ServiceContainer 实例，
+    注意：此函数会使用一个单例的 ServiceContainer 实例，
     仅包含同步初始化的基础设施组件（不包含 LLM/Agents/Router 等异步组件）。
     图节点会在首次调用时懒初始化所需组件。
     """
-    container = ServiceContainer()
-    return build_graph(container)
+    global _default_container
+    if _default_container is None:
+        _default_container = ServiceContainer()
+    return build_graph(_default_container, checkpointer=getattr(_default_container, "checkpointer", None))
 
 
 if __name__ == "__main__":

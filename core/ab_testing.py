@@ -7,7 +7,7 @@ A/B 测试框架（v4.1）
 import hashlib
 import time
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("core.ab_testing")
 

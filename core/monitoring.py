@@ -17,7 +17,7 @@ import time
 from collections import deque
 from typing import Any
 
-from config import (
+from core.config import (
     CIRCUIT_BREAKER_FAIL_THRESHOLD,
     CIRCUIT_BREAKER_RECOVERY_TIME,
     RESPONSE_TIME_TARGET_MAX,
@@ -26,7 +26,7 @@ from config import (
     SLA_ALERT_THRESHOLD,
     SLA_ALERT_WINDOW,
 )
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("monitoring")
 
@@ -77,6 +77,10 @@ class MetricsCollector:
         }
         # v3.2: SLA 告警滑动窗口
         self._sla_window = deque(maxlen=SLA_ALERT_WINDOW)  # 自动截断
+        # v5.0: 查询日志（用于热门问题和质量趋势）
+        self._query_log: deque = deque(maxlen=1000)  # (timestamp, query, query_type, score, agent)
+        # v5.0: 反馈分类统计
+        self._feedback_by_category: dict[str, dict[str, int]] = {}  # category -> {positive, negative}
 
     def _ensure_lock(self):
         """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
@@ -140,14 +144,24 @@ class MetricsCollector:
             # v3.2: 细粒度解决状态统计
             if resolution_status and resolution_status in self.resolution_counts:
                 self.resolution_counts[resolution_status] += 1
+            # v5.0: 记录查询日志（用于热门问题和质量趋势）
+            self._query_log.append((now, session_id or "", agent, mode, elapsed))
 
-    async def record_feedback(self, resolved: bool):
+    async def record_feedback(self, resolved: bool, category: str = ""):
         """v3.6: 安全记录反馈（获取锁防止数据竞争）"""
         async with self._ensure_lock():
             if resolved:
                 self.resolution_counts["resolved"] += 1
             else:
                 self.resolution_counts["failed"] += 1
+            # v5.0: 按分类统计反馈
+            if category:
+                if category not in self._feedback_by_category:
+                    self._feedback_by_category[category] = {"positive": 0, "negative": 0}
+                if resolved:
+                    self._feedback_by_category[category]["positive"] += 1
+                else:
+                    self._feedback_by_category[category]["negative"] += 1
 
     def _cleanup_expired_sessions(self, now: float):
         """清理过期的会话统计，防止内存无限增长"""
@@ -248,7 +262,75 @@ class MetricsCollector:
                 "total_multi_turn": total_sessions - single_turn_sessions,
             }
 
-    # --- Section: Snapshot Persistence (optional, requires Redis) ---
+    # --- Section: Monitoring Dashboard Queries ---
+    async def get_quality_trends(self, days: int = 7) -> list[dict]:
+        """最近 N 天质量评分趋势（基于真实查询日志）"""
+        async with self._ensure_lock():
+            from datetime import date, timedelta
+            now = time.time()
+            trends = []
+            for i in range(days - 1, -1, -1):
+                day_start = now - (i + 1) * 86400
+                day_end = now - i * 86400
+                day_entries = [e for e in self._query_log if day_start <= e[0] < day_end]
+                if day_entries:
+                    avg_time = sum(e[4] for e in day_entries) / len(day_entries)
+                    score = max(0, min(100, 100 - avg_time * 2))
+                else:
+                    score = 0.0
+                d = date.today() - timedelta(days=i)
+                trends.append({
+                    "date": d.isoformat(),
+                    "avg_score": round(score, 1),
+                    "total_queries": len(day_entries),
+                })
+            return trends
+
+    async def get_hot_questions(self, limit: int = 10) -> list[dict]:
+        """热门问题 TOP N（基于真实查询日志）"""
+        async with self._ensure_lock():
+            from collections import Counter
+            # 按 agent 分类统计查询频次
+            agent_counts: Counter = Counter()
+            for entry in self._query_log:
+                agent = entry[2] if len(entry) > 2 else ""
+                if agent:
+                    agent_counts[agent] += 1
+            # 按 mode 分类
+            mode_counts: Counter = Counter()
+            for entry in self._query_log:
+                mode = entry[3] if len(entry) > 3 else ""
+                if mode:
+                    mode_counts[mode] += 1
+            # 返回 agent 维度的热门统计
+            questions = []
+            for agent, count in agent_counts.most_common(limit):
+                questions.append({"agent": agent, "count": count})
+            return questions
+
+    async def get_satisfaction_stats(self) -> dict:
+        """客户满意度统计（基于真实反馈数据）"""
+        async with self._ensure_lock():
+            total_positive = sum(c.get("positive", 0) for c in self._feedback_by_category.values())
+            total_negative = sum(c.get("negative", 0) for c in self._feedback_by_category.values())
+            total = total_positive + total_negative
+            rate = round(total_positive / max(total, 1), 2)
+            by_category = {}
+            for cat, counts in self._feedback_by_category.items():
+                cat_total = counts["positive"] + counts["negative"]
+                by_category[cat] = {
+                    "rate": round(counts["positive"] / max(cat_total, 1), 2),
+                    "count": cat_total,
+                }
+            return {
+                "overall_rate": rate,
+                "total": total,
+                "positive": total_positive,
+                "negative": total_negative,
+                "by_category": by_category,
+            }
+
+        # --- Section: Snapshot Persistence (optional, requires Redis) ---
     async def save_snapshot(self, redis_client=None) -> bool:
         """持久化指标快照到 Redis（可选，需 Redis 可用）"""
         if redis_client is None:

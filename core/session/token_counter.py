@@ -7,7 +7,7 @@ Token 计数与中文分词工具模块
 
 import re
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("token_counter")
 

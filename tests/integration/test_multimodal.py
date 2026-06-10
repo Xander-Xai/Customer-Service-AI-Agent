@@ -197,7 +197,7 @@ class TestBaseAgentMultimodal:
     async def test_prepare_messages_text_only(self):
         """纯文本消息应使用字符串 content"""
         from agents.general_agent import GeneralAgent
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         agent = GeneralAgent()
         sm = EnhancedSessionManager()
@@ -219,7 +219,7 @@ class TestBaseAgentMultimodal:
     async def test_prepare_messages_with_multimodal(self):
         """含多模态内容时应构造 list content"""
         from agents.general_agent import GeneralAgent
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         agent = GeneralAgent()
         sm = EnhancedSessionManager()

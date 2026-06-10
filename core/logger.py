@@ -16,7 +16,7 @@ import os
 import time
 from pathlib import Path
 
-from config import LOG_CONFIG
+from core.config import LOG_CONFIG
 
 # ===== 分布式追踪上下文变量 =====
 _trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="")

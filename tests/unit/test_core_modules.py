@@ -4,12 +4,14 @@
 运行: pytest tests/test_core_modules.py -v --tb=short
 """
 
+import asyncio
 import os
 import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -376,10 +378,9 @@ class TestAlertNotifierSend:
             notifier = AlertNotifier()
             assert notifier.email_enabled is True
 
-        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email:
-            with patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
-                await notifier.send_alert("严重故障", "系统宕机", severity="critical")
-                mock_email.assert_called_once()
+        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email, patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
+            await notifier.send_alert("严重故障", "系统宕机", severity="critical")
+            mock_email.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_send_alert_warning_no_email(self):
@@ -397,10 +398,9 @@ class TestAlertNotifierSend:
         with patch.dict(os.environ, env):
             notifier = AlertNotifier()
 
-        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email:
-            with patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
-                await notifier.send_alert("警告", "延迟偏高", severity="warning")
-                mock_email.assert_not_called()
+        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email, patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
+            await notifier.send_alert("警告", "延迟偏高", severity="warning")
+            mock_email.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_send_webhook_ssrf_blocked(self):
@@ -777,6 +777,16 @@ def _make_admin_request():
     return mock_request, mock_user
 
 
+def _make_request_with_container(kb=None, erp=None):
+    """构造一个带 container 的 mock Request（替代 multi_agent_customer_service mock）"""
+    mock_request = MagicMock()
+    container = MagicMock()
+    container.knowledge_base = kb
+    container.erp = erp
+    mock_request.app.state.container = container
+    return mock_request
+
+
 def _make_mock_knowledge_base(available=True, count=10):
     """构造一个 mock KnowledgeBase"""
     kb = MagicMock()
@@ -794,61 +804,45 @@ class TestKnowledgeStats:
         from knowledge.router import knowledge_stats
 
         kb = _make_mock_knowledge_base(available=True, count=5)
+        req = _make_request_with_container(kb=kb)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=kb)},
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                result = await knowledge_stats(MagicMock())
-                assert result["available"] is True
-                assert "collections" in result
-                assert result["total"] > 0
+            result = await knowledge_stats(req)
+            assert result["available"] is True
+            assert "collections" in result
+            assert result["total"] > 0
 
     @pytest.mark.asyncio
     async def test_stats_unavailable(self):
         from knowledge.router import knowledge_stats
 
         kb = _make_mock_knowledge_base(available=False)
+        req = _make_request_with_container(kb=kb)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=kb)},
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                result = await knowledge_stats(MagicMock())
-                assert result["available"] is False
+            result = await knowledge_stats(req)
+            assert result["available"] is False
 
     @pytest.mark.asyncio
     async def test_stats_none_knowledge_base(self):
         from knowledge.router import knowledge_stats
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=None)},
-            ):
-                import multi_agent_customer_service as mas_mod
+        req = _make_request_with_container(kb=None)
 
-                mas_mod.knowledge_base = None
-                result = await knowledge_stats(MagicMock())
-                assert result["available"] is False
+        with patch("knowledge.router.require_admin", return_value=MagicMock()):
+            result = await knowledge_stats(req)
+            assert result["available"] is False
 
     @pytest.mark.asyncio
     async def test_stats_exception_handling(self):
         from knowledge.router import knowledge_stats
 
+        req = MagicMock()
+        req.app.state.container = None  # no container
+
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict("sys.modules", {"multi_agent_customer_service": None}):
-                # Force an import error
-                result = await knowledge_stats(MagicMock())
-                assert result["available"] is False
+            result = await knowledge_stats(req)
+            assert result["available"] is False
 
 
 class TestKnowledgeAddDocuments:
@@ -860,18 +854,12 @@ class TestKnowledgeAddDocuments:
 
         kb = _make_mock_knowledge_base(available=True, count=15)
         data = AddDocRequest(documents=["新品面膜", "补水精华"])
+        req = _make_request_with_container(kb=kb)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=kb)},
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                result = await add_documents("product_knowledge", data, MagicMock())
-                assert "已添加 2 条文档" in result["message"]
-                kb.add_documents.assert_called_once()
+            result = await add_documents("product_knowledge", data, req)
+            assert "已添加 2 条文档" in result["message"]
+            kb.add_documents.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_add_documents_invalid_collection(self):
@@ -879,17 +867,11 @@ class TestKnowledgeAddDocuments:
 
         kb = _make_mock_knowledge_base(available=True)
         data = AddDocRequest(documents=["test"])
+        req = _make_request_with_container(kb=kb)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=kb)},
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                with pytest.raises(Exception):
-                    await add_documents("invalid_collection", data, MagicMock())
+            with pytest.raises(HTTPException):
+                await add_documents("invalid_collection", data, req)
 
     @pytest.mark.asyncio
     async def test_add_documents_unavailable(self):
@@ -897,17 +879,11 @@ class TestKnowledgeAddDocuments:
 
         kb = _make_mock_knowledge_base(available=False)
         data = AddDocRequest(documents=["test"])
+        req = _make_request_with_container(kb=kb)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {"multi_agent_customer_service": MagicMock(knowledge_base=kb)},
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                with pytest.raises(Exception):
-                    await add_documents("product_knowledge", data, MagicMock())
+            with pytest.raises(HTTPException):
+                await add_documents("product_knowledge", data, req)
 
 
 class TestKnowledgeSync:
@@ -939,22 +915,12 @@ class TestKnowledgeSync:
             },
         ]
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {
-                    "multi_agent_customer_service": MagicMock(
-                        knowledge_base=kb, erp=mock_erp
-                    )
-                },
-            ):
-                import multi_agent_customer_service as mas_mod
+        req = _make_request_with_container(kb=kb, erp=mock_erp)
 
-                mas_mod.knowledge_base = kb
-                mas_mod.erp = mock_erp
-                result = await sync_from_erp(MagicMock())
-                assert result["synced"] == 2
-                assert result["total"] == 5
+        with patch("knowledge.router.require_admin", return_value=MagicMock()):
+            result = await sync_from_erp(req)
+            assert result["synced"] == 2
+            assert result["total"] == 5
 
     @pytest.mark.asyncio
     async def test_sync_erp_returns_empty(self):
@@ -963,45 +929,22 @@ class TestKnowledgeSync:
         kb = _make_mock_knowledge_base(available=True)
         mock_erp = AsyncMock()
         mock_erp.query_product.return_value = []
+        req = _make_request_with_container(kb=kb, erp=mock_erp)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {
-                    "multi_agent_customer_service": MagicMock(
-                        knowledge_base=kb, erp=mock_erp
-                    )
-                },
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                mas_mod.erp = mock_erp
-                result = await sync_from_erp(MagicMock())
-                assert result["synced"] == 0
+            result = await sync_from_erp(req)
+            assert result["synced"] == 0
 
     @pytest.mark.asyncio
     async def test_sync_erp_unavailable(self):
         from knowledge.router import sync_from_erp
 
         kb = _make_mock_knowledge_base(available=True)
-        mock_erp = None
+        req = _make_request_with_container(kb=kb, erp=None)
 
         with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {
-                    "multi_agent_customer_service": MagicMock(
-                        knowledge_base=kb, erp=mock_erp
-                    )
-                },
-            ):
-                import multi_agent_customer_service as mas_mod
-
-                mas_mod.knowledge_base = kb
-                mas_mod.erp = None
-                with pytest.raises(Exception):
-                    await sync_from_erp(MagicMock())
+            with pytest.raises(HTTPException):
+                await sync_from_erp(req)
 
 
 class TestKnowledgeReseed:
@@ -1021,19 +964,12 @@ class TestKnowledgeReseed:
             "seed_supplementary_data": MagicMock(),
         }
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {
-                    "multi_agent_customer_service": MagicMock(knowledge_base=kb),
-                    "rag.seed_data": MagicMock(**seed_patches),
-                },
-            ):
-                import multi_agent_customer_service as mas_mod
+        req = _make_request_with_container(kb=kb)
 
-                mas_mod.knowledge_base = kb
-                result = await reseed_knowledge(MagicMock())
-                assert "种子数据已更新" in result["message"]
+        with patch("knowledge.router.require_admin", return_value=MagicMock()), \
+             patch.dict("sys.modules", {"rag.seed_data": MagicMock(**seed_patches)}):
+            result = await reseed_knowledge(req)
+            assert "种子数据已更新" in result["message"]
 
     @pytest.mark.asyncio
     async def test_reseed_unavailable(self):
@@ -1041,16 +977,912 @@ class TestKnowledgeReseed:
 
         kb = _make_mock_knowledge_base(available=False)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with patch.dict(
-                "sys.modules",
-                {
-                    "multi_agent_customer_service": MagicMock(knowledge_base=kb),
-                    "rag.seed_data": MagicMock(),
-                },
-            ):
-                import multi_agent_customer_service as mas_mod
+        req = _make_request_with_container(kb=kb)
 
-                mas_mod.knowledge_base = kb
-                with pytest.raises(Exception):
-                    await reseed_knowledge(MagicMock())
+        with patch("knowledge.router.require_admin", return_value=MagicMock()), \
+             patch.dict("sys.modules", {"rag.seed_data": MagicMock()}):
+            with pytest.raises(HTTPException):
+                await reseed_knowledge(req)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. core/exceptions.py — 自定义异常层次
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestExceptions:
+    """core/exceptions.py 覆盖"""
+
+    # --- AppError (base) ---
+
+    def test_app_error_is_exception_subclass(self):
+        from core.exceptions import AppError
+
+        assert issubclass(AppError, Exception)
+
+    def test_app_error_default_message(self):
+        from core.exceptions import AppError
+
+        exc = AppError()
+        assert str(exc) == ""
+        assert exc.code == ""
+
+    def test_app_error_custom_message_and_code(self):
+        from core.exceptions import AppError
+
+        exc = AppError("something broke", "ERR_001")
+        assert str(exc) == "something broke"
+        assert exc.code == "ERR_001"
+
+    def test_app_error_can_be_raised_and_caught(self):
+        from core.exceptions import AppError
+
+        with pytest.raises(AppError):
+            raise AppError("boom")
+
+    # --- AuthError ---
+
+    def test_auth_error_inherits_app_error(self):
+        from core.exceptions import AppError, AuthError
+
+        assert issubclass(AuthError, AppError)
+
+    def test_auth_error_defaults(self):
+        from core.exceptions import AuthError
+
+        exc = AuthError()
+        assert "认证失败" in str(exc)
+        assert exc.code == "AUTH_ERROR"
+
+    def test_auth_error_custom_message(self):
+        from core.exceptions import AuthError
+
+        exc = AuthError("token expired")
+        assert str(exc) == "token expired"
+        assert exc.code == "AUTH_ERROR"
+
+    # --- RateLimitError ---
+
+    def test_rate_limit_error_defaults(self):
+        from core.exceptions import AppError, RateLimitError
+
+        assert issubclass(RateLimitError, AppError)
+        exc = RateLimitError()
+        assert "请求过于频繁" in str(exc)
+        assert exc.code == "RATE_LIMIT"
+
+    def test_rate_limit_error_custom(self):
+        from core.exceptions import RateLimitError
+
+        exc = RateLimitError("too many requests", "RL_429")
+        assert str(exc) == "too many requests"
+        assert exc.code == "RL_429"
+
+    # --- ValidationError ---
+
+    def test_validation_error_defaults(self):
+        from core.exceptions import AppError, ValidationError
+
+        assert issubclass(ValidationError, AppError)
+        exc = ValidationError()
+        assert "输入校验失败" in str(exc)
+        assert exc.code == "VALIDATION_ERROR"
+
+    def test_validation_error_custom(self):
+        from core.exceptions import ValidationError
+
+        exc = ValidationError("field required", "VAL_FIELD")
+        assert str(exc) == "field required"
+        assert exc.code == "VAL_FIELD"
+
+    # --- LLMError ---
+
+    def test_llm_error_defaults(self):
+        from core.exceptions import AppError, LLMError
+
+        assert issubclass(LLMError, AppError)
+        exc = LLMError()
+        assert "LLM" in str(exc)
+        assert exc.code == "LLM_ERROR"
+
+    # --- LLMTimeoutError ---
+
+    def test_llm_timeout_error_inherits_llm_error(self):
+        from core.exceptions import LLMError, LLMTimeoutError
+
+        assert issubclass(LLMTimeoutError, LLMError)
+        assert issubclass(LLMTimeoutError, Exception)
+
+    def test_llm_timeout_error_defaults(self):
+        from core.exceptions import LLMTimeoutError
+
+        exc = LLMTimeoutError()
+        assert "超时" in str(exc)
+        assert exc.code == "LLM_TIMEOUT"
+
+    def test_llm_timeout_error_custom(self):
+        from core.exceptions import LLMTimeoutError
+
+        exc = LLMTimeoutError("request timed out after 30s", "TIMEOUT_30")
+        assert "30s" in str(exc)
+        assert exc.code == "TIMEOUT_30"
+
+    # --- LLMRateLimitError ---
+
+    def test_llm_rate_limit_error_inherits_llm_error(self):
+        from core.exceptions import LLMError, LLMRateLimitError
+
+        assert issubclass(LLMRateLimitError, LLMError)
+
+    def test_llm_rate_limit_error_defaults(self):
+        from core.exceptions import LLMRateLimitError
+
+        exc = LLMRateLimitError()
+        assert "限流" in str(exc)
+        assert exc.code == "LLM_RATE_LIMIT"
+
+    # --- KnowledgeError ---
+
+    def test_knowledge_error_defaults(self):
+        from core.exceptions import AppError, KnowledgeError
+
+        assert issubclass(KnowledgeError, AppError)
+        exc = KnowledgeError()
+        assert "知识库" in str(exc)
+        assert exc.code == "KNOWLEDGE_ERROR"
+
+    def test_knowledge_error_custom(self):
+        from core.exceptions import KnowledgeError
+
+        exc = KnowledgeError("ChromaDB connection failed")
+        assert str(exc) == "ChromaDB connection failed"
+
+    # --- SessionError ---
+
+    def test_session_error_defaults(self):
+        from core.exceptions import AppError, SessionError
+
+        assert issubclass(SessionError, AppError)
+        exc = SessionError()
+        assert "会话" in str(exc)
+        assert exc.code == "SESSION_ERROR"
+
+    # --- ERPError ---
+
+    def test_erp_error_defaults(self):
+        from core.exceptions import AppError, ERPError
+
+        assert issubclass(ERPError, AppError)
+        exc = ERPError()
+        assert "ERP" in str(exc)
+        assert exc.code == "ERP_ERROR"
+
+    def test_erp_error_custom(self):
+        from core.exceptions import ERPError
+
+        exc = ERPError("金蝶接口超时")
+        assert str(exc) == "金蝶接口超时"
+
+    # --- Hierarchy completeness ---
+
+    def test_all_exceptions_are_catchable_as_app_error(self):
+        """所有自定义异常都能被 AppError 捕获"""
+        from core.exceptions import (
+            AppError,
+            AuthError,
+            ERPError,
+            KnowledgeError,
+            LLMError,
+            LLMRateLimitError,
+            LLMTimeoutError,
+            RateLimitError,
+            SessionError,
+            ValidationError,
+        )
+
+        exc_classes = [
+            AuthError,
+            RateLimitError,
+            ValidationError,
+            LLMError,
+            LLMTimeoutError,
+            LLMRateLimitError,
+            KnowledgeError,
+            SessionError,
+            ERPError,
+        ]
+        for cls in exc_classes:
+            exc = cls("test")
+            assert isinstance(exc, AppError), f"{cls.__name__} not caught by AppError"
+            assert isinstance(exc, Exception), f"{cls.__name__} not caught by Exception"
+
+    def test_exception_code_attribute_on_all(self):
+        """所有异常类都有 code 属性"""
+        from core.exceptions import (
+            AuthError,
+            ERPError,
+            KnowledgeError,
+            LLMError,
+            LLMRateLimitError,
+            LLMTimeoutError,
+            RateLimitError,
+            SessionError,
+            ValidationError,
+        )
+
+        for cls in [
+            AuthError,
+            RateLimitError,
+            ValidationError,
+            LLMError,
+            LLMTimeoutError,
+            LLMRateLimitError,
+            KnowledgeError,
+            SessionError,
+            ERPError,
+        ]:
+            exc = cls()
+            assert hasattr(exc, "code"), f"{cls.__name__} missing code attribute"
+            assert isinstance(exc.code, str), f"{cls.__name__}.code should be str"
+            assert len(exc.code) > 0, f"{cls.__name__}.code should not be empty"
+
+    def test_exceptions_can_be_used_in_try_except_chain(self):
+        """异常可以在 try/except 链中正确捕获"""
+        from core.exceptions import AppError, AuthError, LLMError, LLMTimeoutError
+
+        # LLMTimeoutError -> LLMError -> AppError 的捕获链
+        try:
+            raise LLMTimeoutError("timeout")
+        except LLMTimeoutError:
+            pass  # 正确
+        else:
+            assert False, "LLMTimeoutError not caught"
+
+        try:
+            raise LLMTimeoutError("timeout")
+        except LLMError:
+            pass  # 父类捕获
+        else:
+            assert False, "LLMTimeoutError not caught by LLMError"
+
+        try:
+            raise LLMTimeoutError("timeout")
+        except AppError:
+            pass  # 基类捕获
+        else:
+            assert False, "LLMTimeoutError not caught by AppError"
+
+        try:
+            raise AuthError("denied")
+        except LLMError:
+            assert False, "AuthError should not be caught by LLMError"
+        except AppError:
+            pass  # 正确
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. alerts/router.py — 告警管理路由
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAlertsRouter:
+    """alerts/router.py — 告警管理路由端点"""
+
+    @pytest.mark.asyncio
+    async def test_get_alert_config_admin(self):
+        """GET /api/alerts/config — 管理员可查看配置"""
+        from alerts.router import get_alert_config
+
+        mock_user = MagicMock()
+        mock_user.role = "admin"
+        mock_request = MagicMock()
+
+        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.get_config.return_value = {"webhooks": [], "email": False}
+            result = await get_alert_config(mock_request)
+            assert "webhooks" in result
+
+    @pytest.mark.asyncio
+    async def test_get_alert_config_supervisor(self):
+        """GET /api/alerts/config — 主管可查看配置"""
+        from alerts.router import get_alert_config
+
+        mock_user = MagicMock()
+        mock_user.role = "supervisor"
+        mock_request = MagicMock()
+
+        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.get_config.return_value = {"webhooks": ["http://hook"]}
+            result = await get_alert_config(mock_request)
+            assert "webhooks" in result
+
+    @pytest.mark.asyncio
+    async def test_get_alert_config_forbidden_for_agent(self):
+        """GET /api/alerts/config — 普通客服无权限"""
+        from alerts.router import get_alert_config
+
+        mock_request = MagicMock()
+
+        with patch("alerts.router.require_supervisor_or_admin",
+                    side_effect=HTTPException(status_code=403)):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_alert_config(mock_request)
+            assert exc_info.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_test_alert_sends_notification(self):
+        """POST /api/alerts/test — 管理员可发送测试告警"""
+        from alerts.router import test_alert, TestAlertRequest
+
+        mock_user = MagicMock()
+        mock_request = MagicMock()
+        data = TestAlertRequest(title="测试", content="测试内容", severity="info")
+
+        with patch("alerts.router.require_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.send_alert = AsyncMock()
+            mock_notifier.webhooks = ["http://hook1", "http://hook2"]
+            mock_notifier.email_enabled = True
+            result = await test_alert(data, mock_request)
+            mock_notifier.send_alert.assert_called_once_with("测试", "测试内容", "info")
+            assert result["channels"] == 3
+
+    @pytest.mark.asyncio
+    async def test_test_alert_no_channels(self):
+        """POST /api/alerts/test — 无 webhook 且邮件关闭时 channels=0"""
+        from alerts.router import test_alert, TestAlertRequest
+
+        mock_user = MagicMock()
+        mock_request = MagicMock()
+        data = TestAlertRequest()
+
+        with patch("alerts.router.require_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.send_alert = AsyncMock()
+            mock_notifier.webhooks = []
+            mock_notifier.email_enabled = False
+            result = await test_alert(data, mock_request)
+            assert result["channels"] == 0
+
+    @pytest.mark.asyncio
+    async def test_alert_history(self):
+        """GET /api/alerts/history — 管理员可查看告警历史"""
+        from alerts.router import alert_history
+
+        mock_user = MagicMock()
+        mock_user.role = "admin"
+        mock_request = MagicMock()
+
+        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.get_history.return_value = [
+                {"id": 1, "title": "CPU过高", "severity": "critical"},
+                {"id": 2, "title": "内存告警", "severity": "warning"},
+            ]
+            result = await alert_history(mock_request, limit=10)
+            assert len(result["alerts"]) == 2
+            mock_notifier.get_history.assert_called_once_with(10)
+
+    @pytest.mark.asyncio
+    async def test_alert_history_default_limit(self):
+        """GET /api/alerts/history — 默认 limit=20"""
+        from alerts.router import alert_history
+
+        mock_user = MagicMock()
+        mock_user.role = "supervisor"
+        mock_request = MagicMock()
+
+        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
+             patch("alerts.router.alert_notifier") as mock_notifier:
+            mock_notifier.get_history.return_value = []
+            result = await alert_history(mock_request)
+            mock_notifier.get_history.assert_called_once_with(20)
+
+    def test_require_supervisor_or_admin_role_check(self):
+        """require_supervisor_or_admin 对 admin/supervisor 放行，其他角色拒绝"""
+        from alerts.router import require_supervisor_or_admin
+
+        for role in ("admin", "supervisor"):
+            mock_user = MagicMock()
+            mock_user.role = role
+            mock_req = MagicMock()
+            with patch("alerts.router.require_auth", return_value=mock_user):
+                result = require_supervisor_or_admin(mock_req)
+                assert result is mock_user
+
+        mock_user_bad = MagicMock()
+        mock_user_bad.role = "agent"
+        with patch("alerts.router.require_auth", return_value=mock_user_bad):
+            with pytest.raises(HTTPException) as exc_info:
+                require_supervisor_or_admin(MagicMock())
+            assert exc_info.value.status_code == 403
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 8. core/monitoring.py — MetricsCollector / CircuitBreaker / SLAAlertManager
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestMetricsCollectorSnapshot:
+    """MetricsCollector.save_snapshot / load_snapshot 覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_save_snapshot_with_redis(self):
+        """save_snapshot 带 Redis 客户端时持久化"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(elapsed=1.0, agent="test", mode="sequential")
+
+        mock_redis = MagicMock()
+        result = await mc.save_snapshot(redis_client=mock_redis)
+        assert result is True
+        mock_redis.setex.assert_called_once()
+        mock_redis.lpush.assert_called_once()
+        mock_redis.ltrim.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_save_snapshot_no_redis(self):
+        """save_snapshot 无 Redis 客户端时返回 False"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        result = await mc.save_snapshot(redis_client=None)
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_save_snapshot_redis_exception(self):
+        """save_snapshot Redis 异常时返回 False"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        mock_redis = MagicMock()
+        mock_redis.setex.side_effect = RuntimeError("Redis down")
+
+        result = await mc.save_snapshot(redis_client=mock_redis)
+        assert result is False
+
+    def test_load_snapshot_with_redis(self):
+        """load_snapshot 从 Redis 加载快照"""
+        from core.monitoring import MetricsCollector
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = '{"timestamp": 123, "stats": {}, "kpi": {}}'
+
+        result = MetricsCollector.load_snapshot(redis_client=mock_redis)
+        assert result is not None
+        assert result["timestamp"] == 123
+
+    def test_load_snapshot_no_redis(self):
+        """load_snapshot 无 Redis 时返回 None"""
+        from core.monitoring import MetricsCollector
+
+        result = MetricsCollector.load_snapshot(redis_client=None)
+        assert result is None
+
+    def test_load_snapshot_empty_data(self):
+        """load_snapshot Redis 返回空数据时返回 None"""
+        from core.monitoring import MetricsCollector
+
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        result = MetricsCollector.load_snapshot(redis_client=mock_redis)
+        assert result is None
+
+    def test_load_snapshot_exception(self):
+        """load_snapshot 异常时返回 None"""
+        from core.monitoring import MetricsCollector
+
+        mock_redis = MagicMock()
+        mock_redis.get.side_effect = RuntimeError("Redis error")
+
+        result = MetricsCollector.load_snapshot(redis_client=mock_redis)
+        assert result is None
+
+
+class TestMetricsCollectorDashboard:
+    """MetricsCollector.get_quality_trends / get_hot_questions / get_satisfaction_stats"""
+
+    @pytest.mark.asyncio
+    async def test_get_quality_trends(self):
+        """get_quality_trends 返回趋势数据"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(elapsed=0.5, agent="ProductAgent", mode="sequential")
+        await mc.record_request(elapsed=1.0, agent="FAQAgent", mode="parallel")
+
+        trends = await mc.get_quality_trends(days=3)
+        assert len(trends) == 3
+        assert "date" in trends[0]
+        assert "avg_score" in trends[0]
+        assert "total_queries" in trends[0]
+
+    @pytest.mark.asyncio
+    async def test_get_hot_questions(self):
+        """get_hot_questions 返回热门问题"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(elapsed=0.5, agent="ProductAgent", mode="sequential")
+        await mc.record_request(elapsed=0.3, agent="ProductAgent", mode="sequential")
+        await mc.record_request(elapsed=0.4, agent="FAQAgent", mode="parallel")
+
+        hot = await mc.get_hot_questions(limit=10)
+        assert len(hot) >= 1
+        # ProductAgent should be top
+        assert hot[0]["agent"] == "ProductAgent"
+        assert hot[0]["count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_get_satisfaction_stats(self):
+        """get_satisfaction_stats 返回满意度统计"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_feedback(True, category="product")
+        await mc.record_feedback(False, category="product")
+        await mc.record_feedback(True, category="service")
+
+        stats = await mc.get_satisfaction_stats()
+        assert stats["overall_rate"] > 0
+        assert stats["total"] == 3
+        assert stats["positive"] == 2
+        assert stats["negative"] == 1
+        assert "product" in stats["by_category"]
+
+    @pytest.mark.asyncio
+    async def test_get_satisfaction_stats_empty(self):
+        """get_satisfaction_stats 无数据时返回零值"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        stats = await mc.get_satisfaction_stats()
+        assert stats["total"] == 0
+        assert stats["overall_rate"] == 0
+
+
+class TestMetricsCollectorRecordFeedback:
+    """MetricsCollector.record_feedback 覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_record_feedback_resolved(self):
+        """record_feedback resolved=True"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_feedback(True, category="product")
+        assert mc.resolution_counts["resolved"] == 1
+
+    @pytest.mark.asyncio
+    async def test_record_feedback_not_resolved(self):
+        """record_feedback resolved=False"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_feedback(False, category="product")
+        assert mc.resolution_counts["failed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_record_feedback_no_category(self):
+        """record_feedback 无 category"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_feedback(True)
+        assert mc.resolution_counts["resolved"] == 1
+
+    @pytest.mark.asyncio
+    async def test_record_feedback_category_tracking(self):
+        """record_feedback 按分类统计"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_feedback(True, category="product")
+        await mc.record_feedback(True, category="product")
+        await mc.record_feedback(False, category="product")
+        assert mc._feedback_by_category["product"]["positive"] == 2
+        assert mc._feedback_by_category["product"]["negative"] == 1
+
+
+class TestMetricsCollectorSLAWindow:
+    """MetricsCollector SLA 窗口和 KPI 覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_sla_window_violation_rate(self):
+        """get_sla_window_violation_rate 计算窗口违约率"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        # Add some slow responses (above max threshold)
+        for _ in range(30):
+            await mc.record_request(elapsed=50.0)  # well above threshold
+        for _ in range(20):
+            await mc.record_request(elapsed=1.0)
+
+        rate = await mc.get_sla_window_violation_rate()
+        assert rate > 0
+
+    @pytest.mark.asyncio
+    async def test_sla_window_violation_rate_empty(self):
+        """get_sla_window_violation_rate 空窗口返回 0"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        rate = await mc.get_sla_window_violation_rate()
+        assert rate == 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_kpi_stats(self):
+        """get_kpi_stats 返回 KPI 指标"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(elapsed=1.0, session_id="s1", resolution_status="resolved")
+        await mc.record_request(elapsed=2.0, session_id="s2", escalated=True)
+        await mc.record_request(elapsed=0.5, session_id="s1")
+
+        kpi = await mc.get_kpi_stats()
+        assert "first_resolution_rate" in kpi
+        assert "resolution_rate" in kpi
+        assert "ai_handled_rate" in kpi
+        assert "total_escalated" in kpi
+
+    @pytest.mark.asyncio
+    async def test_record_request_with_all_params(self):
+        """record_request 带所有参数"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(
+            elapsed=50.0,  # above max threshold (30.0)
+            agent="ProductAgent",
+            mode="parallel",
+            cached=False,
+            error=True,
+            session_id="session_1",
+            escalated=False,
+            resolution_status="resolved",
+        )
+        stats = await mc.get_stats()
+        assert stats["total_requests"] == 1
+        assert stats["total_errors"] == 1
+        assert mc.sla_violations == 1
+
+    @pytest.mark.asyncio
+    async def test_record_request_cached(self):
+        """record_request cached=True"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        await mc.record_request(elapsed=0.001, cached=True)
+        assert mc.cache_hits == 1
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_sessions(self):
+        """_cleanup_expired_sessions 清理过期会话"""
+        from core.monitoring import MetricsCollector
+
+        mc = MetricsCollector()
+        mc._session_ttl = 0.1  # 100ms TTL for testing
+        await mc.record_request(elapsed=1.0, session_id="old_session")
+        time.sleep(0.2)
+        # Trigger cleanup
+        mc._cleanup_expired_sessions(time.time())
+        assert "old_session" not in mc.session_turn_counts
+
+
+class TestSLAAlertManagerCoverage:
+    """SLAAlertManager.check_and_alert 覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_triggers_alert(self):
+        """check_and_alert 违约率超阈值时触发告警"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        mc = MetricsCollector()
+        # Fill window with slow responses to exceed 30% threshold
+        for _ in range(40):
+            await mc.record_request(elapsed=50.0)  # well above max threshold
+
+        manager = SLAAlertManager()
+        with patch("core.monitoring.alert_notifier", create=True) as _:
+            pass  # just suppress the import
+        alert = await manager.check_and_alert(mc)
+        assert alert is not None
+        assert alert["type"] == "sla_violation_high"
+        assert alert["severity"] in ("warning", "critical")
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_no_alert(self):
+        """check_and_alert 违约率未超阈值时不告警"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        mc = MetricsCollector()
+        for _ in range(10):
+            await mc.record_request(elapsed=1.0)  # well within SLA
+
+        manager = SLAAlertManager()
+        alert = await manager.check_and_alert(mc)
+        assert alert is None
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_cooldown(self):
+        """check_and_alert 冷却期内不重复告警"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        mc = MetricsCollector()
+        for _ in range(40):
+            await mc.record_request(elapsed=50.0)
+
+        manager = SLAAlertManager()
+        alert1 = await manager.check_and_alert(mc)
+        assert alert1 is not None
+
+        # Second check within cooldown should return None
+        alert2 = await manager.check_and_alert(mc)
+        assert alert2 is None
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_critical_severity(self):
+        """check_and_alert 违约率超过 2x 阈值时 critical"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        mc = MetricsCollector()
+        # 100% violation rate
+        for _ in range(50):
+            await mc.record_request(elapsed=50.0)
+
+        manager = SLAAlertManager()
+        alert = await manager.check_and_alert(mc)
+        assert alert is not None
+        # With 100% violation rate (> 60%), severity should be critical
+        assert alert["severity"] == "critical"
+
+    def test_get_alerts(self):
+        """get_alerts 返回告警历史"""
+        from core.monitoring import SLAAlertManager
+
+        manager = SLAAlertManager()
+        manager.alerts = [{"id": i} for i in range(50)]
+        result = manager.get_alerts(limit=10)
+        assert len(result) == 10
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_with_bus(self):
+        """check_and_alert 带 MessageBus 时发布事件"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        mc = MetricsCollector()
+        for _ in range(50):
+            await mc.record_request(elapsed=50.0)
+
+        mock_bus = AsyncMock()
+        mock_bus.publish = AsyncMock()
+
+        manager = SLAAlertManager(bus=mock_bus)
+        manager.last_alert_time.clear()
+        alert = await manager.check_and_alert(mc)
+        assert alert is not None
+
+    @pytest.mark.asyncio
+    async def test_check_and_alert_alert_history_cap(self):
+        """check_and_alert 告警历史上限"""
+        from core.monitoring import MetricsCollector, SLAAlertManager
+
+        manager = SLAAlertManager()
+        manager.alerts = [{"id": i} for i in range(100)]
+
+        mc = MetricsCollector()
+        for _ in range(50):
+            await mc.record_request(elapsed=50.0)
+
+        # Reset cooldown
+        manager.last_alert_time.clear()
+        await manager.check_and_alert(mc)
+        assert len(manager.alerts) <= 101  # 100 + 1 new
+
+
+class TestCircuitBreakerAdvanced:
+    """CircuitBreaker 状态转换全覆盖"""
+
+    @pytest.mark.asyncio
+    async def test_should_allow_closed(self):
+        """CLOSED 状态允许请求"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=3, recovery_time=1)
+        assert await cb.should_allow() is True
+
+    @pytest.mark.asyncio
+    async def test_should_allow_open_before_recovery(self):
+        """OPEN 状态恢复时间前拒绝请求"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=2, recovery_time=10)
+        await cb.record_failure()
+        await cb.record_failure()
+        assert cb.state == "open"
+        assert await cb.should_allow() is False
+
+    @pytest.mark.asyncio
+    async def test_should_allow_open_after_recovery(self):
+        """OPEN 状态恢复时间后进入 HALF_OPEN 并允许探测"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=2, recovery_time=0)
+        await cb.record_failure()
+        await cb.record_failure()
+        assert cb.state == "open"
+        await asyncio.sleep(0.01)  # Wait for recovery time
+        assert await cb.should_allow() is True
+        assert cb.state == "half_open"
+
+    @pytest.mark.asyncio
+    async def test_half_open_success_closes(self):
+        """HALF_OPEN 状态成功后关闭"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=2, recovery_time=0)
+        await cb.record_failure()
+        await cb.record_failure()
+        await asyncio.sleep(0.01)
+        await cb.should_allow()  # transition to HALF_OPEN
+        await cb.record_success()
+        assert cb.state == "closed"
+        assert cb.consecutive_failures == 0
+
+    @pytest.mark.asyncio
+    async def test_half_open_failure_reopens(self):
+        """HALF_OPEN 状态失败后重新打开"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=2, recovery_time=0)
+        await cb.record_failure()
+        await cb.record_failure()
+        await asyncio.sleep(0.01)
+        await cb.should_allow()  # HALF_OPEN
+        await cb.record_failure()
+        assert cb.state == "open"
+
+    @pytest.mark.asyncio
+    async def test_half_open_no_permits(self):
+        """HALF_OPEN 状态无探测配额时拒绝"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=2, recovery_time=0)
+        await cb.record_failure()
+        await cb.record_failure()
+        await asyncio.sleep(0.01)
+        first = await cb.should_allow()  # uses permit
+        assert first is True
+        second = await cb.should_allow()  # no more permits
+        assert second is False
+
+    @pytest.mark.asyncio
+    async def test_consecutive_failures_below_threshold(self):
+        """失败次数未达阈值时不熔断"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=5, recovery_time=1)
+        await cb.record_failure()
+        await cb.record_failure()
+        assert cb.state == "closed"
+        assert cb.total_failures == 2
+
+    def test_get_status(self):
+        """get_status 返回完整状态"""
+        from core.monitoring import CircuitBreaker
+
+        cb = CircuitBreaker(fail_threshold=3, recovery_time=30)
+        status = cb.get_status()
+        assert status["state"] == "closed"
+        assert status["fail_threshold"] == 3
+        assert status["recovery_time"] == 30
+        assert status["consecutive_failures"] == 0
+        assert status["total_failures"] == 0
+        assert status["total_successes"] == 0

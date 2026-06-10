@@ -4,8 +4,8 @@ ERP 适配器工厂（v3.0）
 包含配置校验与诊断日志
 """
 
-from config import ERP_APP_ID, ERP_APP_SECRET, ERP_BASE_URL, ERP_DB_ID, ERP_MODE
-from logger import get_logger
+from core.config import ERP_APP_ID, ERP_APP_SECRET, ERP_BASE_URL, ERP_DB_ID, ERP_MODE
+from core.logger import get_logger
 
 logger = get_logger("erp.factory")
 

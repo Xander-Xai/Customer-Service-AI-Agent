@@ -11,10 +11,29 @@ import time
 from fastapi import APIRouter, Request
 from fastapi.responses import PlainTextResponse
 
-from logger import get_logger
+from core.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("api.monitoring")
+
+
+def _require_monitoring_auth(request: Request):
+    """监控端点权限检查：admin token / admin/supervisor JWT 可访问，其他 401/403"""
+    from fastapi import HTTPException
+
+    # 优先检查 X-Admin-Token（供监控系统使用）
+    from api.utils import check_admin_token
+
+    if check_admin_token(request):
+        return None  # admin token 通过，无需返回 user 对象
+
+    # 回退到 JWT 认证
+    from auth.router import require_auth
+
+    user = require_auth(request)
+    if user.role not in ("admin", "supervisor"):
+        raise HTTPException(status_code=403, detail="需要管理员或主管权限")
+    return user
 
 # Prometheus label 安全正则
 _PROM_LABEL_RE = re.compile(r"[^a-zA-Z0-9_]")
@@ -22,7 +41,10 @@ _PROM_LABEL_RE = re.compile(r"[^a-zA-Z0-9_]")
 
 @router.get("/api/health")
 async def health(request: Request):
-    """增强健康检查（各子系统状态、版本、运行信息）"""
+    """增强健康检查（各子系统状态、版本、运行信息）
+    注意：此端点无需认证，供负载均衡器和监控系统使用。
+    详细监控指标请使用 /api/metrics（需要 supervisor+ 权限）。
+    """
     state = request.app.state
     cb = getattr(state, "circuit_breaker", None)
     cb_status = cb.get_status() if cb else {"state": "unknown", "consecutive_failures": 0}
@@ -46,7 +68,7 @@ async def health(request: Request):
     llm_key_valid = bool(llm_api_key) and not any(
         llm_api_key.lower().startswith(p) for p in _placeholder_prefixes
     )
-    from config import LLM_PROVIDER
+    from core.config import LLM_PROVIDER
 
     llm_provider = LLM_PROVIDER
 
@@ -77,7 +99,7 @@ async def health(request: Request):
     except Exception as e:
         logger.debug(f"[Health] 数据库连接检查失败: {e}")
 
-    from config import DEV_MODE, REDIS_URL, VERSION
+    from core.config import DEV_MODE, REDIS_URL, VERSION
 
     uptime_seconds = round(time.time() - getattr(state, "module_load_time", time.time()), 2)
     circuit_state = cb_status["state"]
@@ -114,6 +136,7 @@ async def health(request: Request):
 
 @router.get("/api/metrics")
 async def metrics_endpoint(request: Request):
+    _require_monitoring_auth(request)
     state = request.app.state
     metrics = getattr(state, "metrics", None)
     cache = getattr(state, "response_cache", None)
@@ -125,13 +148,14 @@ async def metrics_endpoint(request: Request):
     if persist_fn:
         await persist_fn()
 
-    from config import VERSION
+    from core.config import VERSION
 
     return {"version": VERSION, "metrics": stats, "cache": cache_stats, "timestamp": time.time()}
 
 
 @router.get("/api/kpi")
 async def kpi_endpoint(request: Request):
+    _require_monitoring_auth(request)
     state = request.app.state
     metrics = getattr(state, "metrics", None)
     kpi = await metrics.get_kpi_stats() if metrics else {"error": "metrics not initialized"}
@@ -140,7 +164,7 @@ async def kpi_endpoint(request: Request):
     if persist_fn:
         await persist_fn()
 
-    from config import VERSION
+    from core.config import VERSION
 
     result = {"version": VERSION, "kpi": kpi, "timestamp": time.time()}
 
@@ -157,12 +181,14 @@ async def kpi_endpoint(request: Request):
 
 @router.get("/api/cache/stats")
 async def cache_stats(request: Request):
+    _require_monitoring_auth(request)
     cache = getattr(request.app.state, "response_cache", None)
     return cache.get_stats() if cache else {"error": "cache not initialized"}
 
 
 @router.get("/api/alerts")
 async def list_alerts(request: Request, limit: int = 20):
+    _require_monitoring_auth(request)
     sla_mgr = getattr(request.app.state, "sla_alert_mgr", None)
     if sla_mgr:
         return {"alerts": sla_mgr.get_alerts(limit)}
@@ -171,6 +197,7 @@ async def list_alerts(request: Request, limit: int = 20):
 
 @router.get("/api/circuit-breaker")
 async def circuit_breaker_status(request: Request):
+    _require_monitoring_auth(request)
     cb = getattr(request.app.state, "circuit_breaker", None)
     if cb:
         return cb.get_status()
@@ -180,13 +207,14 @@ async def circuit_breaker_status(request: Request):
 @router.get("/metrics/prometheus")
 async def prometheus_metrics(request: Request):
     """Prometheus 格式指标输出"""
+    _require_monitoring_auth(request)
     state = request.app.state
     metrics = getattr(state, "metrics", None)
     if not metrics:
         return PlainTextResponse("# Metrics not available\n", media_type="text/plain")
 
     stats = await metrics.get_stats()
-    from config import VERSION
+    from core.config import VERSION
 
     lines = [
         "# HELP csai_info Service information",
@@ -237,56 +265,50 @@ async def prometheus_metrics(request: Request):
 
 
 @router.get("/api/monitoring/quality-trends")
-async def quality_trends():
-    """最近7天质量评分趋势（初始模拟数据，后续由 metrics collector 累积）"""
-    from datetime import date, timedelta
-
-    today = date.today()
-    trends = []
-    for i in range(6, -1, -1):
-        d = today - timedelta(days=i)
-        trends.append(
-            {
-                "date": d.isoformat(),
-                "avg_score": round(70 + (7 - i) * 1.8, 1),
-                "total_queries": 40 + i * 5,
-            }
-        )
+async def quality_trends(request: Request):
+    """最近7天质量评分趋势（基于真实查询数据）"""
+    _require_monitoring_auth(request)
+    metrics = getattr(request.app.state, "metrics", None)
+    if not metrics:
+        return {"trends": []}
+    trends = await metrics.get_quality_trends(days=7)
     return {"trends": trends}
 
 
 @router.get("/api/monitoring/hot-questions")
-async def hot_questions():
-    """热门问题 TOP10（初始模拟数据，后续由 metrics collector 累积）"""
-    return {
-        "questions": [
-            {"query": "精华液成分有哪些", "count": 23, "category": "product_info"},
-            {"query": "如何退货退款", "count": 18, "category": "billing"},
-            {"query": "面膜适合什么肤质", "count": 15, "category": "product_info"},
-            {"query": "订单物流查询", "count": 14, "category": "order"},
-            {"query": "会员积分怎么用", "count": 12, "category": "membership"},
-            {"query": "防晒霜SPF怎么选", "count": 11, "category": "product_info"},
-            {"query": "过敏了怎么办", "count": 10, "category": "complaint"},
-            {"query": "活动优惠有哪些", "count": 9, "category": "promotion"},
-            {"query": "产品保质期多久", "count": 8, "category": "product_info"},
-            {"query": "怎么修改收货地址", "count": 7, "category": "order"},
-        ]
-    }
+async def hot_questions(request: Request):
+    """热门问题 TOP10（基于真实查询数据）"""
+    _require_monitoring_auth(request)
+    metrics = getattr(request.app.state, "metrics", None)
+    if not metrics:
+        return {"questions": []}
+    questions = await metrics.get_hot_questions(limit=10)
+    return {"questions": questions}
 
 
 @router.get("/api/monitoring/satisfaction")
-async def satisfaction():
-    """客户满意度统计（初始模拟数据，后续由 metrics collector 累积）"""
+async def satisfaction(request: Request):
+    """客户满意度统计（基于真实反馈数据）"""
+    _require_monitoring_auth(request)
+    metrics = getattr(request.app.state, "metrics", None)
+    if not metrics:
+        return {"overall_rate": 0, "total": 0, "positive": 0, "negative": 0, "by_category": {}}
+    stats = await metrics.get_satisfaction_stats()
+    return stats
+
+
+@router.get("/api/monitoring/tokens")
+async def token_usage(request: Request):
+    """LLM Token 用量与延迟统计（v5.1）"""
+    _require_monitoring_auth(request)
+    from core.token_tracker import get_token_tracker
+
+    tracker = get_token_tracker()
+    if not tracker:
+        return {"error": "TokenTracker 未初始化"}
+
     return {
-        "overall_rate": 0.85,
-        "total": 120,
-        "positive": 102,
-        "negative": 18,
-        "by_category": {
-            "product_info": {"rate": 0.92, "count": 45},
-            "billing": {"rate": 0.78, "count": 28},
-            "order": {"rate": 0.88, "count": 25},
-            "complaint": {"rate": 0.65, "count": 12},
-            "membership": {"rate": 0.90, "count": 10},
-        },
+        "global": tracker.get_summary(),
+        "by_agent": tracker.get_agent_summary(),
+        "by_model": tracker.get_model_summary(),
     }

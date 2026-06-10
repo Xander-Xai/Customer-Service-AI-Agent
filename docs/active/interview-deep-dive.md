@@ -341,19 +341,18 @@ evict_count = max(1, len(cache) * 5 // 100)
 
 ---
 
-## Q8: "测试策略是什么？388 个测试怎么分类的？"
+## Q8: "测试策略是什么？1,100+ 个测试怎么分类的？"
 
 ### 核心回答
 
-> "四层测试金字塔：单元 → 集成 → E2E Mock → E2E Real。全部可离线运行（E2E Real 除外）。"
+> "四层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。"
 
 | 层级 | 文件 | 测试数 | 覆盖范围 | 依赖 |
 |------|------|--------|---------|------|
-| 单元测试 | test_modules.py | ~90 | Session/Cache/Router/Agent/ERP | 无外部依赖 |
-| 集成测试 | test_integration.py + test_v4_production.py | ~80 | 图调用/协作模式/API 端点/认证 | Mock LLM |
-| 功能测试 | test_all.py + test_erp_integration.py + test_production_features.py | ~160 | 端到端/SLA/熔断器/安全 | Mock LLM |
-| 压力测试 | test_stress.py | ~20 | 并发/吞吐/内存 | 无外部依赖 |
-| E2E Real | test_e2e_real_llm.py | 5 | 真实 LLM 完整链路 | 需要 API Key |
+| 单元测试 | 13 个文件（test_api_routes/test_middleware/test_core_modules 等） | ~812 | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具 | 无外部依赖 |
+| 集成测试 | test_integration + test_erp_integration + test_multimodal | ~86 | 图调用/ERP 适配器/多模态 | Mock LLM |
+| E2E 测试 | test_all + test_production_features + test_v4_production + test_e2e_real_llm | ~208 | 全图执行/生产特性/真实 LLM | Mock/Real LLM |
+| 压力测试 | test_stress | ~12 | 并发/吞吐 | 无外部依赖 |
 
 **设计决策**：
 - **Mock LLM**：所有测试用 `MockLLMClient` 替代真实 API，确保 100% 离线可运行、CI 友好

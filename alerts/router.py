@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth.router import require_admin, require_auth
-from logger import get_logger
+from core.logger import get_logger
 
 from .notifier import alert_notifier
 

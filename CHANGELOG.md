@@ -4,6 +4,57 @@
 
 ---
 
+## v5.0 (2026-06-08) — 前端重构 + 前后端对齐 + 版本号统一
+
+### 前端重构（Phase 1-4）
+- **Vite 8 构建管线**：34 个源文件（22 JS + 12 CSS），原生 ES Module + Tree-shaking + Hashed 产物
+- **marked.js + DOMPurify**：替换正则 Markdown 解析，双重 XSS 防护
+- **SSE 流式打字框架**：逐 token 推送 + 进度条 + Agent 流转轨迹显示
+- **Toast 通知 + 消息搜索**：用户交互增强
+- **无障碍**：ARIA 标签 + 焦点环 + 对比度修复 + 跳转链接
+- **移动端**：抽屉式导航 + 响应式布局
+- **主题系统**：亮色（pure/warm/soft/cream）+ 暗色（classic/warm）+ 字号/行高控制 + 减弱动效切换
+- **冗余清理（-4269 行）**：删除旧前端 templates/ + static/，迁移 LLM 客户端
+
+### 前后端匹配修复（15 项）
+- **P0（4 项）**：ReAct 模式标签补全 / SSE done 完整数据传递 / 反馈 message_index 精确定位 / Token 自动刷新
+- **P1（3 项）**：语音按钮 + voice.js / 文件上传扩展（PDF/DOCX/视频/文本）/ SSE Agent 轨迹
+- **P2（3 项）**：版本号对齐 5.0.0 / admin 显示 ChromaDB+DB 健康状态 / complaint_knowledge 统计
+- **P3（2 项）**：escapeHtml 统一 / rest.js API 层替代直接 fetch
+
+### 安全审查修复（7 项）
+- admin.js innerHTML 数据转义 / WebSocket API Key 防日志泄露 / DB 日志移除凭据 / LoginRequest max_length / 非 DEV 空 secret 拒绝
+
+### 测试与工具链
+- **测试用例**：1151 条（新增 middleware / prompt_manager / protocols_di / rag_reranker / token_tracker_db 等测试文件）
+- **Ruff 工具链**：`pyproject.toml` 统一配置 + `make lint` / `make format`
+- **覆盖率门槛**：`fail_under=80`（从 60 提升）
+- **mypy 渐进严格**：`setup.cfg` 配置 + CI 集成（continue-on-error）
+- **pre-commit hooks**：防止 .env 文件提交 + Ruff lint/format
+
+---
+
+## v4.6 (2026-06-08) — 文档扫描与优化实施
+
+- **扫描 20/20 项全部完成**：docs/superpowers/specs/ 下 4 份设计文档的优化建议
+- **pre-commit 配置**：`.pre-commit-config.yaml` 防止 .env 文件提交
+- **覆盖率门槛提升**：`.coveragerc` fail_under 60→80
+- **未用导入清理**：api/app.py / core/container.py / agents/evaluator.py 移除多余导入
+- **REACT 配置对齐**：`.env` / `.env.dev` REACT_MAX_ITERATIONS 5→3 与 config.py 默认值一致
+- **api/app.py 路由拆分**：1359 行单体 → 7 个模块（249 + 91 + 189 + 553 + 256 + 105 + 218 + 138 行）
+
+---
+
+## v4.5 (2026-06-08) — 图构建统一 + 测试加固 + mypy CI
+
+- **图构建代码冗余消除**：删除 `make_graph()` 及 4 个全局锁，`build_graph(container)` 成为唯一入口，净减 317 行
+- **测试断言加固**：49 个宽泛断言 → 具体值/类型/属性断言（7 类修复）
+- **mypy CI 集成**：新增 `setup.cfg` mypy 配置 + CI Type checking 步骤
+- **create_session await 修复**：修复 v4.3 遗留的 async 调用 bug
+- **Orchestrator 初始化优化**：移到 ServiceContainer.__init__() 同步创建
+
+---
+
 ## v4.4 (2026-06-08) — 安全加固 + 代码重构 + 测试覆盖率 + 文档完善
 
 ### 安全加固 (6 项)

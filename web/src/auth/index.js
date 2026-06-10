@@ -1,3 +1,5 @@
+import { ROLE_LABELS } from '../utils/copy.js';
+
 /**
  * 用户认证状态管理（含 Token 自动刷新）
  */
@@ -68,8 +70,8 @@ function scheduleTokenRefresh() {
  */
 export async function fetchWithAuth(url, options = {}) {
   const token = localStorage.getItem('token');
-  if (token && !options.headers?.['Authorization']) {
-    options.headers = { ...options.headers, 'Authorization': 'Bearer ' + token };
+  if (token && !options.headers?.Authorization) {
+    options.headers = { ...options.headers, Authorization: `Bearer ${token}` };
   }
 
   let resp = await fetch(url, options);
@@ -79,7 +81,7 @@ export async function fetchWithAuth(url, options = {}) {
     if (refreshed) {
       // 用新 token 重试
       const newToken = localStorage.getItem('token');
-      options.headers = { ...options.headers, 'Authorization': 'Bearer ' + newToken };
+      options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
       resp = await fetch(url, options);
     }
   }
@@ -104,19 +106,19 @@ export function initAuthState() {
     const logoutBtn = document.getElementById('logoutBtn');
 
     if (userInfo) {
-      const roleLabels = { customer: '客户', agent: '客服', supervisor: '主管', admin: '管理员' };
+      const roleLabels = ROLE_LABELS;
       const roleLabel = roleLabels[user.role] || user.role;
       userInfo.textContent = `👤 ${user.display_name || user.username} [${roleLabel}]`;
     }
-    if (adminLink && (user.role === 'admin' || user.role === 'supervisor')) adminLink.style.display = 'inline';
+    if (adminLink && (user.role === 'admin' || user.role === 'supervisor'))
+      adminLink.style.display = 'inline';
     if (logoutBtn) logoutBtn.style.display = 'inline-block';
 
     // 安排 Token 自动刷新
     scheduleTokenRefresh();
 
     return user;
-  } catch (e) {
-    console.error('[Auth] 用户信息解析失败:', e);
+  } catch (_e) {
     window.location.href = '/login.html';
     return null;
   }
@@ -130,10 +132,12 @@ export function logout() {
   if (token) {
     fetch('/api/auth/logout', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token },
-    }).catch(() => {}).finally(() => {
-      _clearAuth();
-    });
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .catch(() => {})
+      .finally(() => {
+        _clearAuth();
+      });
   } else {
     _clearAuth();
   }
@@ -146,4 +150,47 @@ function _clearAuth() {
   localStorage.removeItem('currentSessionId');
   localStorage.removeItem('currentSessionToken');
   window.location.href = '/login.html';
+}
+
+/** 获取当前用户的能力列表（基于角色） */
+export function getCapabilities() {
+  try {
+    const userRaw = localStorage.getItem('user');
+    if (!userRaw) return [];
+    const user = JSON.parse(userRaw);
+    const role = user.role || 'customer';
+
+    const capabilities = ['chat']; // 所有角色都有聊天能力
+
+    if (role === 'supervisor') {
+      capabilities.push('monitoring', 'alert_management');
+    }
+    if (role === 'admin') {
+      capabilities.push(
+        'monitoring',
+        'user_management',
+        'knowledge_management',
+        'alert_management',
+        'system_config',
+      );
+    }
+
+    return capabilities;
+  } catch {
+    return ['chat'];
+  }
+}
+
+/** 页面权限守卫：检查当前用户是否有权访问页面 */
+export function guardPage(requiredCapability) {
+  const user = initAuthState();
+  if (!user) return false;
+
+  const caps = getCapabilities();
+  if (!caps.includes(requiredCapability)) {
+    document.body.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg-base,#F7F6F3);color:var(--text-secondary,#6B6B6B);font-size:16px;font-family:SF Pro Display,-apple-system,BlinkMacSystemFont,sans-serif"><div style="text-align:center"><div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#9670;</div>您没有权限访问此页面<br><a href="/" style="color:var(--primary,#1A1A1A);margin-top:12px;display:inline-block;text-decoration:underline">返回首页</a></div></div>';
+    return false;
+  }
+  return true;
 }

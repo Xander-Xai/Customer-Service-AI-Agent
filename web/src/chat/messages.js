@@ -2,14 +2,16 @@
  * 消息渲染模块
  * 包含用户消息、AI 回复、系统消息、打字指示器、进度状态、反馈
  */
+
+import { getSessionId } from '../state/chatState.js';
+import { getAgentDisplayName, getAgentIcon } from '../utils/agents.js';
+import { copyToClipboard, escapeHtml, scrollToBottom } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
-import { escapeHtml, scrollToBottom, copyToClipboard } from '../utils/dom.js';
-import { getAgentIcon, getModeLabel } from '../utils/agents.js';
 
 let progressStatusEl = null;
-let currentSessionId = null;
-let _feedbackSubmitter = null;  // v5.0: 解耦反馈提交（由外部注入）
-let messageIndex = 0;           // 追踪 AI 回复序号（用于 feedback message_index）
+// 会话 ID 从 chatState 读取
+let _feedbackSubmitter = null; // v5.0: 解耦反馈提交（由外部注入）
+let messageIndex = 0; // 追踪 AI 回复序号（用于 feedback message_index）
 
 /** 注入反馈提交函数（由 chat/index.js 调用，避免直接依赖 API 层） */
 export function setFeedbackHandler(submitter) {
@@ -17,9 +19,10 @@ export function setFeedbackHandler(submitter) {
 }
 
 /** 设置当前会话 ID（由 session 模块调用） */
+let _localSessionId = null; // 本地缓存用于 messageIndex 重置判断
 export function setSessionId(id) {
-  currentSessionId = id;
-  messageIndex = 0; // 切换会话时重置回复计数
+  _localSessionId = id;
+  messageIndex = 0;
 }
 
 // ===== 消息渲染 =====
@@ -52,16 +55,8 @@ export function appendAssistantMessage(content, meta = {}) {
 
   const agentIcon = getAgentIcon(meta.agent);
 
-  // Agent 流转轨迹
-  let agentFlowHtml = '';
-  if (meta.agentsUsed && meta.agentsUsed.length > 1) {
-    const steps = meta.agentsUsed.map((a, i) => {
-      const icon = getAgentIcon(a);
-      const cls = i === meta.agentsUsed.length - 1 ? 'active' : 'completed';
-      return `<div class="agent-flow-step ${cls}">${icon} ${escapeHtml(a)}</div>`;
-    }).join('<span class="agent-flow-arrow">→</span>');
-    agentFlowHtml = `<div class="agent-flow">${steps}</div>`;
-  }
+  // Agent 流转轨迹（客户端不展示）
+  const agentFlowHtml = '';
 
   const html = `
     <div class="message assistant">
@@ -71,14 +66,9 @@ export function appendAssistantMessage(content, meta = {}) {
         ${agentFlowHtml}
         <div class="message-agent-tag">
           <span class="agent-icon">${agentIcon}</span>
-          ${escapeHtml(meta.agent || 'AI 助手')}
+          ${escapeHtml(getAgentDisplayName(meta.agent))}
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="mode-badge ${meta.mode || 'sequential'}">
-            ${escapeHtml(getModeLabel(meta.mode))}
-          </span>
-          ${meta.cached ? '<span class="cached-badge">⚡ 缓存命中</span>' : ''}
-          ${meta.resolutionStatus ? `<span class="meta-item resolution-${escapeHtml(meta.resolutionStatus)}">${escapeHtml(meta.resolutionStatus)}</span>` : ''}
           <span class="message-meta">
             ${meta.elapsed ? `<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>` : ''}
           </span>
@@ -130,7 +120,7 @@ export function showTypingIndicator() {
   const container = document.getElementById('chatMessages');
   const html = `
     <div class="typing-indicator" id="typingIndicator">
-      <div class="message-avatar" style="background:linear-gradient(135deg,var(--primary),#a855f7)">🤖</div>
+      <div class="message-avatar" style="background:var(--bg-hover)">···</div>
       <div class="typing-dots">
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
@@ -166,7 +156,10 @@ export function showProgressStatus(text) {
 }
 
 export function removeProgressStatus() {
-  if (progressStatusEl) { progressStatusEl.remove(); progressStatusEl = null; }
+  if (progressStatusEl) {
+    progressStatusEl.remove();
+    progressStatusEl = null;
+  }
 }
 
 // ===== SSE 流式消息 =====
@@ -186,9 +179,8 @@ export function createStreamingMessage() {
     <div class="message-avatar">${agentIcon}</div>
     <div class="message-content">
       <div class="message-bubble"><span class="streaming-text"></span><span class="streaming-cursor">▊</span></div>
-      <div class="message-agent-tag"><span class="agent-icon">${agentIcon}</span> AI 助手</div>
+      <div class="message-agent-tag"><span class="agent-icon">${agentIcon}</span> 客服助手</div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="mode-badge sequential">快速通道</span>
         <span class="message-meta"></span>
       </div>
       <div class="feedback-bar">
@@ -226,33 +218,21 @@ export function createStreamingMessage() {
       const agentTag = wrapper.querySelector('.message-agent-tag');
       if (meta.agent) {
         const icon = getAgentIcon(meta.agent);
-        agentTag.innerHTML = `<span class="agent-icon">${icon}</span> ${escapeHtml(meta.agent)}`;
+        agentTag.innerHTML = `<span class="agent-icon">${icon}</span> ${escapeHtml(getAgentDisplayName(meta.agent))}`;
       }
 
-      const modeBadge = wrapper.querySelector('.mode-badge');
-      if (meta.mode) {
-        modeBadge.className = `mode-badge ${meta.mode}`;
-        modeBadge.textContent = getModeLabel(meta.mode);
-      }
+      // mode badge 不在客户端展示
 
-      // Agent 流转轨迹（多 Agent 协作时显示）
-      if (meta.agentsUsed && meta.agentsUsed.length > 1) {
-        const steps = meta.agentsUsed.map((a, i) => {
-          const icon = getAgentIcon(a);
-          const cls = i === meta.agentsUsed.length - 1 ? 'active' : 'completed';
-          return `<div class="agent-flow-step ${cls}">${icon} ${escapeHtml(a)}</div>`;
-        }).join('<span class="agent-flow-arrow">→</span>');
-        const flowHtml = `<div class="agent-flow">${steps}</div>`;
-        agentTag.insertAdjacentHTML('beforebegin', flowHtml);
-      }
+      // Agent 流转轨迹不在客户端展示
 
       // 更新 meta 行：耗时 + 缓存 + 解决状态
-      const metaContainer = modeBadge.parentElement;
+      const metaContainer =
+        wrapper.querySelector('.mode-badge')?.parentElement ||
+        wrapper.querySelector('.message-content');
       const metaSpan = metaContainer.querySelector('.message-meta');
       const metaParts = [];
-      if (meta.elapsed) metaParts.push(`<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>`);
-      if (meta.cached) metaParts.push(`<span class="cached-badge">⚡ 缓存命中</span>`);
-      if (meta.resolutionStatus) metaParts.push(`<span class="meta-item resolution-${escapeHtml(meta.resolutionStatus)}">${escapeHtml(meta.resolutionStatus)}</span>`);
+      if (meta.elapsed)
+        metaParts.push(`<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>`);
       if (metaSpan) metaSpan.innerHTML = metaParts.join('');
 
       // 追踪 messageIndex
@@ -260,41 +240,50 @@ export function createStreamingMessage() {
 
       // 绑定事件
       if (positiveBtn) positiveBtn.addEventListener('click', () => sendFeedback(positiveBtn, true));
-      if (negativeBtn) negativeBtn.addEventListener('click', () => sendFeedback(negativeBtn, false));
+      if (negativeBtn)
+        negativeBtn.addEventListener('click', () => sendFeedback(negativeBtn, false));
       if (copyBtn) copyBtn.addEventListener('click', () => copyMessageText(copyBtn, rawText));
 
       // 绑定代码块复制
-      bubble.querySelectorAll('.code-copy-btn').forEach(btn => {
+      bubble.querySelectorAll('.code-copy-btn').forEach((btn) => {
         btn.addEventListener('click', () => copyCodeBlock(btn));
       });
 
       scrollToBottom(container);
       return rawText;
     },
-    getText() { return rawText; },
+    getText() {
+      return rawText;
+    },
   };
 }
 
 // ===== 反馈 =====
 
 function sendFeedback(btn, resolved) {
-  if (!currentSessionId || !_feedbackSubmitter) return;
+  const sid = _localSessionId || getSessionId();
+  if (!sid || !_feedbackSubmitter) return;
   const rating = resolved ? 1 : -1;
   const idx = parseInt(btn.closest('.message')?.dataset.messageIndex || '0', 10);
-  _feedbackSubmitter(currentSessionId, rating, idx).then(() => {
-    const bar = btn.parentElement;
-    bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
-  }).catch(() => {});
+  _feedbackSubmitter(sid, rating, idx)
+    .then(() => {
+      const bar = btn.parentElement;
+      bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
+    })
+    .catch(() => {});
 }
 
 // ===== 复制 =====
 
 function copyMessageText(btn, text) {
-  copyToClipboard(text).then(ok => {
+  copyToClipboard(text).then((ok) => {
     if (ok) {
       btn.classList.add('copied');
       btn.textContent = '✅ 已复制';
-      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋 复制'; }, 2000);
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = '📋 复制';
+      }, 2000);
     }
   });
 }
@@ -302,11 +291,14 @@ function copyMessageText(btn, text) {
 export function copyCodeBlock(btn) {
   const code = btn.parentElement.querySelector('code');
   if (!code) return;
-  copyToClipboard(code.textContent).then(ok => {
+  copyToClipboard(code.textContent).then((ok) => {
     if (ok) {
       btn.classList.add('copied');
       btn.textContent = '✅';
-      setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋'; }, 2000);
+      setTimeout(() => {
+        btn.classList.remove('copied');
+        btn.textContent = '📋';
+      }, 2000);
     }
   });
 }

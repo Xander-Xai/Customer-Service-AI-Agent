@@ -12,11 +12,19 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth.router import require_admin
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("knowledge.router")
 
 router = APIRouter(prefix="/api/knowledge", tags=["知识库"])
+
+
+def _get_container_deps(request: Request):
+    """从 app.state.container 获取知识库和 ERP 依赖"""
+    container = getattr(request.app.state, "container", None)
+    if not container:
+        return None, None
+    return getattr(container, "knowledge_base", None), getattr(container, "erp", None)
 
 
 class AddDocRequest(BaseModel):
@@ -29,7 +37,7 @@ async def knowledge_stats(request: Request):
     """查看知识库统计（v4.0: 需要管理员权限）"""
     _ = require_admin(request)
     try:
-        from multi_agent_customer_service import knowledge_base
+        knowledge_base, _ = _get_container_deps(request)
 
         if not knowledge_base or not knowledge_base.available:
             return {"available": False, "message": "RAG 知识库未初始化"}
@@ -48,7 +56,7 @@ async def reseed_knowledge(request: Request):
     """重新种子数据（admin only）"""
     _ = require_admin(request)
     try:
-        from multi_agent_customer_service import knowledge_base
+        knowledge_base, _ = _get_container_deps(request)
 
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")
@@ -83,7 +91,7 @@ async def add_documents(collection: str, data: AddDocRequest, request: Request):
     """向知识库添加文档（admin only）"""
     _ = require_admin(request)
     try:
-        from multi_agent_customer_service import knowledge_base
+        knowledge_base, _ = _get_container_deps(request)
 
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")
@@ -116,7 +124,7 @@ async def sync_from_erp(request: Request):
     """
     _ = require_admin(request)
     try:
-        from multi_agent_customer_service import erp, knowledge_base
+        knowledge_base, erp = _get_container_deps(request)
 
         if not knowledge_base or not knowledge_base.available:
             raise HTTPException(status_code=503, detail="RAG 知识库不可用")

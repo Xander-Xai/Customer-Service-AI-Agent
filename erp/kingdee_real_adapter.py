@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from config import (
+from core.config import (
     HTTP_TIMEOUT,
     HTTPX_KEEPALIVE_CONNECTIONS,
     HTTPX_MAX_CONNECTIONS,
@@ -23,7 +23,7 @@ from config import (
     RETRY_MAX_ATTEMPTS,
 )
 from erp import KingdeeAdapterBase, sanitize_erp_input
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("erp.kingdee_real")
 

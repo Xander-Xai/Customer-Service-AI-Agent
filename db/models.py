@@ -8,7 +8,18 @@ v4.3 变更：
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -54,6 +65,11 @@ class ChatHistory(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
 
     user = relationship("User", back_populates="chat_histories")
+
+    # v5.1: 复合索引，加速按 session 查询历史（按时间排序）
+    __table_args__ = (
+        Index("ix_chat_session_created", "session_id", "created_at"),
+    )
 
 
 class AuditLog(Base):

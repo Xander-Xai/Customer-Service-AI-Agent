@@ -4,8 +4,8 @@ FastAPI 应用工厂 + 核心路由（v5.0 — 路由拆分后）
 中间件 → api/middleware.py | 聊天路由 → api/routes/chat.py
 WebSocket → api/routes/ws.py | 监控 → api/routes/monitoring.py
 """
-
 import asyncio
+import contextlib
 import os
 import time
 from contextlib import asynccontextmanager
@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from config import (
+from core.config import (
     DEV_MODE,
     HTTPX_KEEPALIVE_CONNECTIONS,
     HTTPX_MAX_CONNECTIONS,
@@ -25,7 +25,7 @@ from config import (
     RESPONSE_TIME_TARGET_MIN,
     VERSION,
 )
-from logger import get_logger, get_trace_id
+from core.logger import get_logger, get_trace_id
 
 logger = get_logger("api")
 
@@ -73,9 +73,15 @@ async def _run_graph(
         state["has_multimodal"] = True
 
     try:
-        result = await _graph_app.ainvoke(state)
-    except AttributeError:
-        result = await asyncio.to_thread(_graph_app.invoke, state)
+        # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传
+        # 无 checkpointer 时 config 被忽略，保持向后兼容
+        graph_config = {"configurable": {"thread_id": session_id}}
+        result = await _graph_app.ainvoke(state, config=graph_config)
+    except (AttributeError, TypeError):
+        try:
+            result = await _graph_app.ainvoke(state)
+        except AttributeError:
+            result = await asyncio.to_thread(_graph_app.invoke, state)
 
     elapsed = time.time() - start
     result["elapsed"] = elapsed
@@ -180,10 +186,8 @@ def create_app(
         yield
 
         cleanup_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
-        except asyncio.CancelledError:
-            pass
 
         await app.state.http_client.aclose()
         from llm.client import OpenAICompatibleClient
@@ -199,6 +203,7 @@ def create_app(
     app.state.metrics = metrics
     app.state.message_bus = message_bus
     app.state.sla_alert_mgr = sla_alert_mgr
+    app.state.graph_app = graph_app  # v5.1: 统一通过 app.state 访问
     app.state.circuit_breaker = None
     app.state.dev_mode = DEV_MODE
     app.state.module_load_time = _MODULE_LOAD_TIME
@@ -228,6 +233,7 @@ def create_app(
 
     # ── 挂载路由模块 ──
     from api.routes.chat import router as chat_router
+    from api.routes.chat_multimodal import router as chat_multimodal_router
     from api.routes.feedback import router as feedback_router
     from api.routes.monitoring import router as monitoring_router
     from api.routes.sessions import router as sessions_router
@@ -237,16 +243,24 @@ def create_app(
     app.include_router(sessions_router)
     app.include_router(feedback_router)
     app.include_router(chat_router)
+    app.include_router(chat_multimodal_router)
     app.include_router(ws_router)
 
     # ── 静态资源 ──
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    static_dir = os.path.join(project_root, "static")
-    dist_dir = os.path.join(project_root, "static", "dist")
+    web_dir = os.path.join(project_root, "web")
+    static_dir = os.path.join(web_dir, "static")
+    dist_dir = os.path.join(web_dir, "static", "dist")
 
     if os.path.isdir(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
         logger.info(f"静态资源已挂载: {static_dir}")
+
+    # /assets/ → Vite 构建产物 (base:'/' 时 HTML 引用 /assets/xxx.js)
+    assets_dir = os.path.join(dist_dir, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        logger.info(f"构建资源已挂载: {assets_dir}")
 
     def _serve_html(request: Request, file_path: str, fallback_msg: str):
         if os.path.exists(file_path):
@@ -275,7 +289,7 @@ def create_app(
 
     @app.get("/widget.html", response_class=HTMLResponse)
     async def serve_widget(request: Request):
-        widget_path = os.path.join(project_root, "widget.html")
+        widget_path = os.path.join(web_dir, "widget.html")
         return _serve_html(request, widget_path, "Widget 未找到")
 
     return app

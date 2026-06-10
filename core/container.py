@@ -1,5 +1,5 @@
 """
-依赖注入容器（v4.5）
+依赖注入容器（v5.1 — Protocol 类型注解）
 管理所有系统组件的生命周期和依赖关系。
 
 替代 multi_agent_customer_service.py 中的模块级全局变量，
@@ -7,6 +7,7 @@
 
 v4.5: 图构建统一委托给 build_graph(container)，
 消除容器内 _build_graph() 的重复图拓扑定义。
+v5.1: Protocol 类型注解替代 Any，编译期类型安全。
 
 Usage:
     # 推荐方式：通过容器初始化
@@ -18,7 +19,15 @@ Usage:
 import asyncio
 from typing import Any
 
-from logger import get_logger
+from core.protocols import (
+    ERPProtocol,
+    KnowledgeBaseProtocol,
+    LLMProtocol,
+    SessionManagerProtocol,
+    ToolRegistryProtocol,
+)
+
+from core.logger import get_logger
 
 logger = get_logger("core.container")
 
@@ -36,7 +45,7 @@ class ServiceContainer:
         self._initialized = False
 
         # ===== 基础设施（同步创建，无依赖）=====
-        from config import (
+        from core.config import (
             CACHE_L1_MAX,
             CACHE_L2_MAX,
             CACHE_TTL,
@@ -63,7 +72,7 @@ class ServiceContainer:
         )
 
         # Session: 可选 Redis 持久化
-        from session_manager import EnhancedSessionManager, default_session_manager
+        from core.session.session_manager import EnhancedSessionManager, default_session_manager
 
         self.session_mgr = default_session_manager
         if SESSION_STORAGE_BACKEND == "redis":
@@ -79,11 +88,11 @@ class ServiceContainer:
                 logger.warning(f"Redis 初始化失败，回退到内存模式: {e}")
 
         # ===== 延迟初始化组件（initialize() 中设置）=====
-        self.llm: Any = None
-        self.vision_llm: Any = None  # v5.1: Vision LLM（多模态模型）
+        self.llm: LLMProtocol | None = None
+        self.vision_llm: LLMProtocol | None = None
 
         # ERP
-        self.erp: Any = None
+        self.erp: ERPProtocol | None = None
 
         # Agents
         self.agents_dict: dict[str, Any] = {}
@@ -97,9 +106,24 @@ class ServiceContainer:
 
         self.orchestrator = CollaborationOrchestrator(self.bus, self.bb)
 
+        # v5.2: LangGraph Checkpointer（对话状态持久化）
+        try:
+            from langgraph.checkpoint.memory import MemorySaver
+
+            self.checkpointer = MemorySaver()
+        except ImportError:
+            self.checkpointer = None
+            logger.debug("langgraph.checkpoint.memory 不可用，断点续传功能禁用")
+
         # RAG & Tools
-        self.knowledge_base: Any = None
-        self.tool_registry: Any = None
+        self.knowledge_base: KnowledgeBaseProtocol | None = None
+        self.tool_registry: ToolRegistryProtocol | None = None
+
+        # v5.1: Prompt 版本管理器
+        self.prompt_manager: Any = None
+
+        # v5.1: Token 用量追踪器
+        self.token_tracker: Any = None
 
         # v4.1: LangGraph 应用实例
         self.graph_app: Any = None
@@ -131,6 +155,9 @@ class ServiceContainer:
             # 1.5. v5.1: Vision LLM（多模态模型，仅在启用时初始化）
             await self._init_vision_llm()
 
+            # 1.6. v5.1: Token 用量追踪器
+            await self._init_token_tracker()
+
             # 2. ERP
             if self.erp is None:
                 from erp.factory import create_erp_adapter
@@ -139,6 +166,9 @@ class ServiceContainer:
 
             # 3. RAG + Tools
             await self._init_rag_and_tools()
+
+            # 3.5. v5.1: Prompt 版本管理器
+            await self._init_prompt_manager()
 
             # 4. Agents
             await self._init_agents()
@@ -154,10 +184,18 @@ class ServiceContainer:
 
     def _build_graph(self):
         """构建 LangGraph 工作流图（委托给 multi_agent_customer_service.build_graph）"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
-        self.graph_app = build_graph(self)
-        logger.info("[Container] LangGraph 构建完成")
+        if self.checkpointer is None:
+            try:
+                from langgraph.checkpoint.memory import MemorySaver
+                self.checkpointer = MemorySaver()
+            except ImportError:
+                pass
+
+        self.graph_app = build_graph(self, checkpointer=self.checkpointer)
+        cp_status = "enabled" if self.checkpointer else "disabled"
+        logger.info(f"[Container] LangGraph 构建完成 (checkpointer={cp_status})")
 
     # ===== 内部初始化方法 =====
 
@@ -165,7 +203,7 @@ class ServiceContainer:
         """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）"""
         if self.llm is not None:
             return
-        from config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+        from core.config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
         from llm.client import OpenAICompatibleClient
 
         # v4.1: 检查 API Key 是否有效
@@ -198,7 +236,7 @@ class ServiceContainer:
 
     async def _init_vision_llm(self):
         """v5.1: 初始化 Vision LLM 客户端（仅在 MULTIMODAL_ENABLED 时）"""
-        from config import (
+        from core.config import (
             MULTIMODAL_ENABLED,
             OPENAI_API_KEY,
             OPENAI_BASE_URL,
@@ -236,10 +274,19 @@ class ServiceContainer:
         )
         logger.info(f"Vision LLM 初始化完成: {vision_model} @ {vision_base_url}")
 
+    async def _init_token_tracker(self):
+        """v5.1: 初始化 Token 用量追踪器"""
+        if self.token_tracker is not None:
+            return
+        from core.token_tracker import init_token_tracker
+
+        self.token_tracker = init_token_tracker()
+        logger.info("Token 用量追踪器初始化完成")
+
     async def _init_rag_and_tools(self):
         """初始化 RAG 知识库 + 工具注册"""
         if self.knowledge_base is None:
-            from config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
+            from core.config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
             from rag.knowledge_base import CosmeticsKnowledgeBase
             from rag.seed_data import (
                 seed_complaint_knowledge,
@@ -277,6 +324,15 @@ class ServiceContainer:
             self.tool_registry = create_erp_tools(self.erp)
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
 
+    async def _init_prompt_manager(self):
+        """v5.1: 初始化 Prompt 版本管理器"""
+        if self.prompt_manager is not None:
+            return
+        from core.prompt_manager import init_prompt_manager
+
+        self.prompt_manager = init_prompt_manager()
+        logger.info("Prompt 版本管理器初始化完成")
+
     async def _init_agents(self):
         """初始化所有 Agent 实例"""
         if self.agents_dict:
@@ -290,7 +346,7 @@ class ServiceContainer:
             ReActAgent,
             TechAgent,
         )
-        from config import ERP_MODE
+        from core.config import ERP_MODE
 
         agent_classes = {
             "product_agent": ProductAgent,
@@ -301,14 +357,15 @@ class ServiceContainer:
         }
 
         for name, cls in agent_classes.items():
-            agent = cls()
-            agent.set_llm(self.llm)
+            agent = cls(llm=self.llm)
             agent.set_session_manager(self.session_mgr)
             agent.set_bus(self.bus)
             agent.set_blackboard(self.bb)
             agent.set_erp(self.erp)
             if self.vision_llm:  # v5.1: 注入 Vision LLM
                 agent.set_vision_llm(self.vision_llm)
+            if self.prompt_manager:  # v5.1: 注入 Prompt 版本管理器
+                agent.set_prompt_manager(self.prompt_manager)
             self.agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
@@ -317,8 +374,7 @@ class ServiceContainer:
                 self.agents_dict[name].set_knowledge_base(self.knowledge_base)
 
         # ReAct 推理 Agent
-        react_agent = ReActAgent()
-        react_agent.set_llm(self.llm)
+        react_agent = ReActAgent(llm=self.llm)
         react_agent.set_session_manager(self.session_mgr)
         react_agent.set_bus(self.bus)
         react_agent.set_blackboard(self.bb)
@@ -327,6 +383,8 @@ class ServiceContainer:
         react_agent.set_tool_registry(self.tool_registry)
         if self.vision_llm:  # v5.1: 注入 Vision LLM
             react_agent.set_vision_llm(self.vision_llm)
+        if self.prompt_manager:  # v5.1: 注入 Prompt 版本管理器
+            react_agent.set_prompt_manager(self.prompt_manager)
         self.agents_dict["react_agent"] = react_agent
 
         # ResponseAgent
@@ -348,7 +406,7 @@ class ServiceContainer:
         """初始化查询路由器"""
         if self.router is not None:
             return
-        from config import ROUTING_COMPLEXITY_THRESHOLD
+        from core.config import ROUTING_COMPLEXITY_THRESHOLD
         from router.query_router import QueryRouter
 
         self.router = QueryRouter(

@@ -16,8 +16,15 @@ export function closeShortcuts() {
 function handleGlobalKeydown(e) {
   const isInput = ['INPUT', 'TEXTAREA'].includes(e.target.tagName);
 
-  if (e.key === 'Escape') { closeShortcuts(); return; }
-  if (e.key === '?' && !isInput) { e.preventDefault(); toggleShortcuts(); return; }
+  if (e.key === 'Escape') {
+    closeShortcuts();
+    return;
+  }
+  if (e.key === '?' && !isInput) {
+    e.preventDefault();
+    toggleShortcuts();
+    return;
+  }
   if (e.key === '/' && !isInput) {
     e.preventDefault();
     const input = document.getElementById('chatInput');
@@ -36,8 +43,9 @@ export function initShortcuts() {
   const shortcutsOverlay = document.getElementById('shortcutsOverlay');
 
   if (btnShortcuts) btnShortcuts.addEventListener('click', toggleShortcuts);
-  if (shortcutsOverlay) shortcutsOverlay.addEventListener('click', (e) => {
-    if (e.target === shortcutsOverlay) closeShortcuts();
-  });
+  if (shortcutsOverlay)
+    shortcutsOverlay.addEventListener('click', (e) => {
+      if (e.target === shortcutsOverlay) closeShortcuts();
+    });
   document.addEventListener('keydown', handleGlobalKeydown);
 }

@@ -1,0 +1,349 @@
+/*
+ * 设置面板 UI — 齿轮按钮 + 右侧滑出抽屉
+ */
+
+/* ── 齿轮按钮 ── */
+.btn-settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.btn-settings:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+}
+
+.btn-settings:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* 登录页齿轮按钮（放在 login-card header 右上角） */
+.login-settings {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+}
+
+/* ── 设置面板容器 ── */
+.settings-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.settings-panel[aria-hidden="false"] {
+  pointer-events: auto;
+  visibility: visible;
+}
+
+/* ── 遮罩 ── */
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background: var(--color-overlay);
+  opacity: 0;
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+.settings-panel[aria-hidden="false"] .settings-backdrop {
+  opacity: 1;
+}
+
+/* ── 抽屉 ── */
+.settings-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  max-width: 90vw;
+  height: 100%;
+  background: var(--color-surface-base);
+  border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(100%);
+  transition: transform var(--duration-normal) var(--ease-out);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.settings-panel[aria-hidden="false"] .settings-drawer {
+  transform: translateX(0);
+}
+
+/* ── 抽屉头部 ── */
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.settings-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.settings-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.settings-close:hover {
+  background: var(--color-surface-hover);
+}
+
+.settings-close:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 抽屉内容 ── */
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+
+/* ── 设置分组 ── */
+.settings-group {
+  border: none;
+  padding: 0;
+  margin: 0 0 20px;
+}
+
+.settings-group legend {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* ── 浅色/深色主题网格选项 ── */
+.theme-light-grid,
+.theme-dark-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+  min-height: 44px;
+}
+
+.theme-option:hover {
+  border-color: var(--color-border-hover);
+}
+
+.theme-option:has(input:checked) {
+  border-color: var(--color-focus-ring);
+  box-shadow: 0 0 0 1px var(--color-focus-ring);
+}
+
+.theme-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-action-primary);
+  flex-shrink: 0;
+}
+
+.theme-option input[type="radio"]:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 分段控制（颜色模式 / 字号 / 行高） ── */
+.seg-control {
+  display: flex;
+  background: var(--color-surface-sunken);
+  border-radius: var(--radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+
+.seg-control button {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+  min-height: 36px;
+}
+
+.seg-control button:hover {
+  color: var(--color-text-primary);
+}
+
+.seg-control button[aria-pressed="true"] {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+  font-weight: 500;
+}
+
+.seg-control button:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 开关行 ── */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  min-height: 44px;
+}
+
+.switch-row label {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+/* 原生 checkbox 模拟开关 */
+.switch-row input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 44px;
+  height: 24px;
+  background: var(--color-surface-active);
+  border-radius: var(--radius-full);
+  position: relative;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.switch-row input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: var(--color-surface-elevated);
+  border-radius: 50%;
+  transition: transform var(--duration-fast) var(--ease-out);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.switch-row input[type="checkbox"]:checked {
+  background: var(--color-action-primary);
+}
+
+.switch-row input[type="checkbox"]:checked::after {
+  transform: translateX(20px);
+}
+
+.switch-row input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 隐藏深色主题组（浅色模式下不显示） ── */
+.settings-group[data-show-when="dark"] {
+  display: none;
+}
+
+/* 深色模式下显示深色主题组 */
+html[data-color-mode="dark"] .settings-group[data-show-when="dark"],
+html:not([data-color-mode="light"]):not([data-color-mode="dark"])
+  .settings-group[data-show-when="dark"][data-system-dark="true"] {
+  display: block;
+}
+
+/* ── 底部操作区 ── */
+.settings-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.btn-reset {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+  min-height: 44px;
+}
+
+.btn-reset:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.btn-reset:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ── 移动端：全屏抽屉 ── */
+@media (max-width: 480px) {
+  .settings-drawer {
+    width: 100%;
+    max-width: 100%;
+  }
+}

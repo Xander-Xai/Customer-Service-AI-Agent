@@ -235,8 +235,8 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 ### 已知限制与改进方向
 1. **ERP Mock**：生产 ERP 集成仅完成接口抽象，真实适配器未完整实现 → 已预留 `ERP_MODE=real` 开关
-2. **RAG Embedding 局限**：默认 all-MiniLM-L6-v2 为英文模型，中文 Hit Rate@3 仅 63% → 计划替换为 BGE 中文模型（预计提升 10-15%）
-3. **前端 XSS**：CSP 允许 `unsafe-inline`，前端使用 `innerHTML` → 计划迁移到 DOMPurify 净化
+2. **RAG Embedding 优化**：已从默认 all-MiniLM-L6-v2（英文）替换为中文 embedding 降级链（bge-small-zh-v1.5 → text2vec-base-chinese），Hit Rate@3 从 63% 提升到 80%
+3. **前端 XSS**：style-src CSP 使用 `unsafe-inline`（65 处内联样式），但 script-src 已用 nonce 且 54 处 innerHTML 全量审计安全（DOMPurify + escapeHtml）
 4. **小模型注入防御**：Qwen2.5-7B 对"不泄露系统提示"的指令遵从不足 → 已在输出层增加正则检测兜底（v4.2 修复）
 
 ### 真实 LLM 测试发现的问题（v4.2）
@@ -250,11 +250,11 @@ E2E 集成测试（硅基流动 Qwen2.5-7B-Instruct）暴露了两个 Mock 测�
 
 | 层级 | 覆盖范围 | 数量 |
 |------|---------|------|
-| 单元测试 | SessionManager / Cache / Router / Agent 各组件 | ~90 |
-| 集成测试 | 端到端图调用 / 协作模式 / API 端点 / 安全审计 | ~80 |
-| 功能测试 | 端到端 / SLA / 熔断器 / ERP / 生产特性 | ~160 |
-| 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 / API 并发 | ~20 |
-| E2E 真实 LLM | 真实 LLM 完整链路（需 API Key） | 5 |
-| **总计** | | **388** |
+| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 等 13 个文件 | ~812 |
+| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 | ~86 |
+| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key） | ~208 |
+| 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 | ~12 |
+| 前端测试 | Agent 映射 / 状态管理 / 主题 / i18n | ~35 |
+| **总计** | | **~1,150** |
 
 所有核心测试 **无需 LLM API Key 或网络**，Mock 适配器 + 内存 ChromaDB + Mock LLM 实现 100% 离线测试。

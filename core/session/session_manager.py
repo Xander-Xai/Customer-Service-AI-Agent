@@ -28,34 +28,34 @@ import uuid
 from collections import deque
 from typing import Any
 
-from config import (
+from core.config import (
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
 )
-from config import (
+from core.config import (
     REDIS_SESSION_PREFIX as _CFG_REDIS_PREFIX,
 )
-from config import (
+from core.config import (
     REDIS_URL as _CFG_REDIS_URL,
 )
-from config import (
+from core.config import (
     SESSION_MAX_TOKENS as _CFG_SESSION_MAX_TOKENS,
 )
-from config import (
+from core.config import (
     SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
 )
+from core.logger import get_logger
 
 # Re-exports: symbols imported from split modules by external callers (agents, cache, orchestrator, tests)
-from drift_detector import (  # noqa: F401
+from core.session.drift_detector import (  # noqa: F401
     DRIFT_REPAIR_STRATEGIES,
     INTENT_KEYWORDS,
     NEGATION_PAIRS,
     DriftDetector,
     DriftType,
 )
-from logger import get_logger
 
 # v4.3: 从拆分模块导入，保持所有原有公开符号可从 session_manager 导入
-from token_counter import (
+from core.session.token_counter import (
     _count_tokens,
     _tokenize_chinese,  # noqa: F401
 )
@@ -257,7 +257,7 @@ class EnhancedSessionManager:
 
     def _evict_idle_sessions(self):
         """v3.4: 淘汰超过上限的空闲会话，防止内存无限增长"""
-        import config  # 动态读取，支持运行时修改
+        from core import config  # 动态读取，支持运行时修改
 
         now = time.time()
         max_sessions = config.MAX_SESSIONS
@@ -354,7 +354,7 @@ class EnhancedSessionManager:
     @staticmethod
     def _get_token_secret() -> str:
         """获取令牌签名密钥（运行时从 config 读取，支持动态配置）"""
-        import config
+        from core import config
 
         secret = config.SESSION_TOKEN_SECRET
         # v4.0: 占位符值视为未配置（安全启发式），生产环境应配置真实密钥
@@ -394,7 +394,7 @@ class EnhancedSessionManager:
                 logger.warning("SESSION_TOKEN_SECRET 未配置，但收到了会话令牌，拒绝验证")
                 return False
             # v5.0: 非 DEV 模式下空 secret 应拒绝（防止 IDOR）
-            import config
+            from core import config
 
             if not getattr(config, "DEV_MODE", False):
                 logger.warning("SESSION_TOKEN_SECRET 未配置，非 DEV 模式拒绝放行")
@@ -585,7 +585,7 @@ class EnhancedSessionManager:
 
     def _classify_intent(self, text: str) -> str | None:
         """多分类意图识别（v3.1: 7 类意图）"""
-        from drift_detector import _classify_intent as _classify
+        from core.session.drift_detector import _classify_intent as _classify
 
         return _classify(text)
 
@@ -604,14 +604,14 @@ class EnhancedSessionManager:
     @staticmethod
     def _check_escalation(session: dict[str, Any], session_id: str = "") -> dict[str, Any] | None:
         """v3.1: 检查漂移频率是否触发升级"""
-        from drift_detector import _check_escalation
+        from core.session.drift_detector import _check_escalation
 
         return _check_escalation(session, session_id)
 
     @staticmethod
     def _text_similarity(a: str, b: str) -> float:
         """文本相似度（v3.1: jieba 分词提升精度）"""
-        from drift_detector import _text_similarity
+        from core.session.drift_detector import _text_similarity
 
         return _text_similarity(a, b)
 

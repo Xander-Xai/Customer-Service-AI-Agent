@@ -103,7 +103,7 @@ class TestAuthService:
         assert decode_token("") is None
         assert decode_token("only.two") is None
 
-    def test_register_and_authenticate_user(self):
+    async def test_register_and_authenticate_user(self):
         from auth.service import authenticate_user, register_user
 
         unique = f"tuser_{int(time.time() * 1000)}"
@@ -118,26 +118,26 @@ class TestAuthService:
         assert "已存在" in result2["error"]
 
         # 认证
-        auth = authenticate_user(unique, "password123")
+        auth = await authenticate_user(unique, "password123")
         assert isinstance(auth, dict)
         assert "token" in auth
         assert auth["username"] == unique
         assert auth["role"] == "customer"
 
         # 错误密码
-        auth2 = authenticate_user(unique, "wrong_password")
+        auth2 = await authenticate_user(unique, "wrong_password")
         assert auth2 is None
 
         # 不存在的用户
-        auth3 = authenticate_user("nonexistent_xxxx", "password123")
+        auth3 = await authenticate_user("nonexistent_xxxx", "password123")
         assert auth3 is None
 
-    def test_init_default_admin(self):
+    async def test_init_default_admin(self):
         from auth.service import authenticate_user, init_default_admin
 
         init_default_admin()
         _ensure_admin_password()
-        auth = authenticate_user("admin", "admin123")
+        auth = await authenticate_user("admin", "admin123")
         assert isinstance(auth, dict)
         assert auth["role"] == "admin"
         assert auth["username"] == "admin"
@@ -243,7 +243,7 @@ class TestAPIIntegration:
         from auth.router import router as auth_router
         from core.container import ServiceContainer
         from knowledge.router import router as knowledge_router
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         container = ServiceContainer()
         graph_app = build_graph(container)

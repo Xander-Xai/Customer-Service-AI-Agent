@@ -2,38 +2,64 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="description" content="药妆智多星管理后台 - 系统监控、用户管理、知识库维护">
+  <meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
+  <script>
+    (() => {
+      try {
+        const pref = JSON.parse(localStorage.getItem('user-prefs') || '{}');
+        const html = document.documentElement;
+        if (pref.themeLight) html.dataset.themeLight = pref.themeLight;
+        if (pref.colorMode && pref.colorMode !== 'system') html.dataset.colorMode = pref.colorMode;
+        if (pref.themeDark) html.dataset.themeDark = pref.themeDark;
+        if (pref.fontSize) html.dataset.fontSize = pref.fontSize;
+        if (pref.lineHeight) html.dataset.lineHeight = pref.lineHeight;
+        if (pref.motion) html.dataset.motion = pref.motion;
+      } catch(_e) {}
+    })();
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>管理后台 - 药妆智多星</title>
 </head>
 <body>
   <header class="nav-header" aria-label="主导航">
     <div class="nav-logo">
-      <div class="nav-logo-icon">🤖</div>
+      <div class="nav-logo-icon">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+          <path d="M10 1L18 5.5V14.5L10 19L2 14.5V5.5L10 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M10 7V13M7 10H13" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
       <span class="nav-logo-text">药妆智多星</span>
       <span class="nav-logo-version">v5.0</span>
     </div>
     <nav class="nav-links" aria-label="页面导航">
-      <a class="nav-link" href="/">💬 对话</a>
-      <a class="nav-link active" href="/admin.html">⚙️ 管理</a>
+      <a class="nav-link" href="/">对话</a>
+      <a class="nav-link active" href="/admin.html">管理</a>
     </nav>
     <div class="nav-status">
-      <span id="userDisplay" style="font-size:13px;color:#888"></span>
-      <button class="btn-sm" id="logoutBtn" style="margin-left:8px">退出</button>
+      <button type="button" class="btn-settings" id="btnSettings" aria-label="打开偏好设置" title="偏好设置">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <span id="userDisplay"></span>
+      <button type="button" class="btn-sm" id="logoutBtn">退出</button>
     </div>
   </header>
 
-  <div class="admin-layout">
+  <main class="admin-layout">
     <div class="admin-header">
-      <div class="admin-title">⚙️ 系统管理</div>
+      <div class="admin-title">系统管理</div>
     </div>
 
     <!-- 角色动态导航 -->
     <nav class="admin-nav" id="adminNav">
-      <button class="admin-nav-btn active" data-section="monitor">📊 监控概览</button>
-      <button class="admin-nav-btn" data-section="users" data-roles="admin">👥 用户管理</button>
-      <button class="admin-nav-btn" data-section="knowledge" data-roles="admin">📚 知识库</button>
-      <button class="admin-nav-btn" data-section="alerts" data-roles="admin,supervisor">🔔 告警通知</button>
-      <button class="admin-nav-btn" data-section="system" data-roles="admin">⚙️ 系统状态</button>
+      <button type="button" class="admin-nav-btn active" data-section="monitor">📊 监控概览</button>
+      <button type="button" class="admin-nav-btn" data-section="users" data-roles="admin">👥 用户管理</button>
+      <button type="button" class="admin-nav-btn" data-section="knowledge" data-roles="admin">📚 知识库</button>
+      <button type="button" class="admin-nav-btn" data-section="prompts" data-roles="admin">📝 Prompt 管理</button>
+      <button type="button" class="admin-nav-btn" data-section="alerts" data-roles="admin,supervisor">🔔 告警通知</button>
+      <button type="button" class="admin-nav-btn" data-section="system" data-roles="admin">⚙️ 系统状态</button>
     </nav>
 
     <!-- monitor section -->
@@ -42,17 +68,17 @@
         <div class="monitor-grid" id="metricCards"></div>
         <div class="monitor-grid">
           <div class="metric-card card-wide" id="agentChartCard">
-            <div class="card-header"><div class="card-title">📊 Agent 负载分布</div></div>
+            <div class="card-header"><div class="card-title">Agent 负载分布</div></div>
             <div class="bar-chart" id="agentChart"></div>
           </div>
           <div class="metric-card card-wide" id="modeChartCard">
-            <div class="card-header"><div class="card-title">🔄 协作模式分布</div></div>
+            <div class="card-header"><div class="card-title">协作模式分布</div></div>
             <div class="bar-chart" id="modeChart"></div>
           </div>
         </div>
         <div class="monitor-grid">
           <div class="metric-card" id="slaCard">
-            <div class="card-header"><div class="card-title">⏱️ SLA 达标率</div></div>
+            <div class="card-header"><div class="card-title">SLA 达标率</div></div>
             <div style="display:flex;align-items:center;gap:24px;justify-content:center">
               <div class="donut-chart" id="slaDonut">
                 <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="SLA 达标率">
@@ -71,7 +97,7 @@
             </div>
           </div>
           <div class="metric-card" id="cacheCard">
-            <div class="card-header"><div class="card-title">💾 缓存命中率</div></div>
+            <div class="card-header"><div class="card-title">缓存命中率</div></div>
             <div style="text-align:center">
               <div class="donut-chart" id="cacheDonut">
                 <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="缓存命中率">
@@ -87,7 +113,7 @@
             </div>
           </div>
           <div class="metric-card" id="resolutionCard">
-            <div class="card-header"><div class="card-title">✅ 首次解决率</div></div>
+            <div class="card-header"><div class="card-title">首次解决率</div></div>
             <div style="text-align:center">
               <div class="donut-chart" id="resolutionDonut">
                 <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="首次解决率">
@@ -103,7 +129,7 @@
             </div>
           </div>
           <div class="metric-card" id="aiCard">
-            <div class="card-header"><div class="card-title">🤖 AI 处理率</div></div>
+            <div class="card-header"><div class="card-title">AI 处理率</div></div>
             <div style="text-align:center">
               <div class="donut-chart" id="aiDonut">
                 <svg width="100" height="100" viewBox="0 0 100 100" role="img" aria-label="AI 处理率">
@@ -122,8 +148,8 @@
         <div class="monitor-grid">
           <div class="metric-card card-wide" id="sessionsCard">
             <div class="card-header">
-              <div class="card-title">📋 最近会话</div>
-              <button class="btn-sm" id="btnRefreshMonitor" style="padding:4px 10px;font-size:11px">🔄 刷新</button>
+              <div class="card-title">最近会话</div>
+              <button type="button" class="btn-sm" id="btnRefreshMonitor">刷新</button>
             </div>
             <table class="data-table" id="sessionsTable">
               <thead><tr><th>会话 ID</th><th>消息数</th><th>漂移次数</th><th>最后活动</th><th>状态</th></tr></thead>
@@ -131,21 +157,21 @@
             </table>
           </div>
           <div class="metric-card card-wide" id="alertsCard">
-            <div class="card-header"><div class="card-title">🔔 SLA 告警</div></div>
-            <div id="alertsList"><div style="text-align:center;padding:20px;color:var(--text-muted)">暂无告警</div></div>
+            <div class="card-header"><div class="card-title">SLA 告警</div></div>
+            <div id="alertsList"><div class="empty-state">暂无告警</div></div>
           </div>
         </div>
         <div class="monitor-grid">
           <div class="metric-card card-wide" id="qualityTrendsCard">
-            <div class="card-header"><div class="card-title">📈 质量趋势（近7天）</div></div>
+            <div class="card-header"><div class="card-title">质量趋势（近7天）</div></div>
             <div class="bar-chart" id="qualityTrendsChart" style="display:flex;align-items:flex-end;gap:8px;height:160px;padding-top:8px"></div>
           </div>
           <div class="metric-card" id="hotQuestionsCard">
-            <div class="card-header"><div class="card-title">🔥 热门问题 TOP10</div></div>
+            <div class="card-header"><div class="card-title">热门问题 TOP10</div></div>
             <div id="hotQuestionsList"></div>
           </div>
           <div class="metric-card" id="satisfactionCard">
-            <div class="card-header"><div class="card-title">😊 客户满意度</div></div>
+            <div class="card-header"><div class="card-title">客户满意度</div></div>
             <div id="satisfactionStats"></div>
           </div>
         </div>
@@ -156,9 +182,9 @@
     <div class="admin-section" id="sectionUsers" style="display:none">
       <div class="admin-grid">
         <div class="admin-card" style="grid-column: 1 / -1">
-          <h3>👥 用户管理</h3>
+          <h3>用户管理</h3>
           <table class="data-table">
-            <thead><tr><th>ID</th><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>注册时间</th></tr></thead>
+            <thead><tr><th>ID</th><th>用户名</th><th>显示名</th><th>角色</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead>
             <tbody id="usersTableBody"></tbody>
           </table>
         </div>
@@ -169,13 +195,63 @@
     <div class="admin-section" id="sectionKnowledge" style="display:none">
       <div class="admin-grid">
         <div class="admin-card">
-          <h3>📚 知识库管理</h3>
+          <h3>知识库管理</h3>
           <div id="knowledgeStats"></div>
           <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn-sm primary" id="btnReseedKnowledge">🔄 重新种子</button>
-            <button class="btn-sm" id="btnSyncFromErp">📥 从ERP同步</button>
-            <button class="btn-sm" id="btnRefreshKnowledge">🔄 刷新</button>
+            <button type="button" class="btn-sm primary" id="btnReseedKnowledge">重新种子</button>
+            <button type="button" class="btn-sm" id="btnSyncFromErp">从ERP同步</button>
+            <button type="button" class="btn-sm" id="btnRefreshKnowledge">刷新</button>
           </div>
+        </div>
+        <div class="admin-card">
+          <h3>添加知识文档</h3>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:var(--text-secondary)">目标集合</label>
+            <select id="addDocCollection" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
+              <option value="product_knowledge">产品知识 (product_knowledge)</option>
+              <option value="faq">常见问题 (faq)</option>
+              <option value="tech_support">技术支持 (tech_support)</option>
+            </select>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:var(--text-secondary)">文档内容（每行一条）</label>
+            <textarea id="addDocText" rows="5" placeholder="输入文档内容，每行一条..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px;resize:vertical;font-size:13px"></textarea>
+          </div>
+          <button type="button" class="btn-sm primary" id="btnAddDocs">添加文档</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- prompts section -->
+    <div class="admin-section" id="sectionPrompts" style="display:none">
+      <div class="admin-grid">
+        <div class="admin-card">
+          <h3>Agent Prompt 管理</h3>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:var(--text-secondary)">选择 Agent</label>
+            <select id="promptAgentSelect" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
+              <option value="">加载中...</option>
+            </select>
+          </div>
+          <button type="button" class="btn-sm" id="btnRefreshPrompts" style="margin-bottom:12px">刷新</button>
+          <div id="promptVersionsList"></div>
+        </div>
+        <div class="admin-card">
+          <h3>创建新版本</h3>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:var(--text-secondary)">版本号</label>
+            <input type="text" id="newPromptVersion" placeholder="如 v2.0" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;color:var(--text-secondary)">Prompt 内容</label>
+            <textarea id="newPromptText" rows="10" placeholder="输入 Prompt 内容..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px;resize:vertical;font-size:13px;font-family:monospace"></textarea>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="font-size:13px;display:flex;align-items:center;gap:6px">
+              <input type="checkbox" id="newPromptActivate" checked> 创建后立即激活
+            </label>
+          </div>
+          <button type="button" class="btn-sm primary" id="btnCreatePrompt">创建版本</button>
         </div>
       </div>
     </div>
@@ -184,11 +260,16 @@
     <div class="admin-section" id="sectionAlerts" style="display:none">
       <div class="admin-grid">
         <div class="admin-card">
-          <h3>🔔 告警通知</h3>
+          <h3>告警通知</h3>
           <div id="alertConfig"></div>
           <div style="margin-top:16px">
-            <button class="btn-sm primary" id="btnTestAlert">📤 测试告警</button>
+            <button type="button" class="btn-sm primary" id="btnTestAlert">测试告警</button>
           </div>
+        </div>
+        <div class="admin-card">
+          <h3>告警历史</h3>
+          <button type="button" class="btn-sm" id="btnRefreshAlertHistory" style="margin-bottom:12px">刷新</button>
+          <div id="alertHistoryList"></div>
         </div>
       </div>
     </div>
@@ -197,7 +278,7 @@
     <div class="admin-section" id="sectionSystem" style="display:none">
       <div class="admin-grid">
         <div class="admin-card" style="grid-column: 1 / -1">
-          <h3>📋 审计日志</h3>
+          <h3>审计日志</h3>
           <table class="data-table">
             <thead><tr><th>时间</th><th>操作</th><th>详情</th><th>IP</th></tr></thead>
             <tbody id="auditTableBody"></tbody>
@@ -205,24 +286,100 @@
         </div>
 
         <div class="admin-card">
-          <h3>📊 系统状态</h3>
+          <h3>系统状态</h3>
           <div id="systemHealth"></div>
         </div>
 
         <div class="admin-card">
-          <h3>📈 运行指标</h3>
+          <h3>运行指标</h3>
           <div id="metricsStats"></div>
         </div>
 
         <div class="admin-card">
-          <h3>💬 用户反馈</h3>
+          <h3>用户反馈</h3>
           <div id="feedbackStats"></div>
+        </div>
+
+        <div class="admin-card">
+          <h3>LLM Token 用量</h3>
+          <button type="button" class="btn-sm" id="btnRefreshTokens" style="margin-bottom:12px">刷新</button>
+          <div id="tokenUsageStats"></div>
         </div>
       </div>
     </div>
-  </div>
+  </main>
 
   <div class="toast" id="toast"></div>
+
+
+  <!-- 偏好设置面板 -->
+  <div class="settings-panel" id="settingsPanel" role="dialog" aria-modal="true" aria-label="偏好设置" aria-hidden="true">
+    <div class="settings-backdrop" id="settingsBackdrop"></div>
+    <aside class="settings-drawer">
+      <div class="settings-header">
+        <h2>⚙️ 偏好设置</h2>
+        <button type="button" class="settings-close" id="btnSettingsClose" aria-label="关闭">✕</button>
+      </div>
+      <div class="settings-body">
+        <fieldset class="settings-group">
+          <legend>外观（浅色主题）</legend>
+          <div class="theme-light-grid">
+            <label class="theme-option"><input type="radio" name="themeLight" value="pure"><span>纯白简洁</span></label>
+            <label class="theme-option"><input type="radio" name="themeLight" value="warm" checked><span>暖骨白 ⭐</span></label>
+            <label class="theme-option"><input type="radio" name="themeLight" value="soft"><span>柔和灰</span></label>
+            <label class="theme-option"><input type="radio" name="themeLight" value="cream"><span>奶油米</span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>颜色模式</legend>
+          <div class="seg-control" data-key="colorMode">
+            <button type="button" data-value="light" aria-pressed="false">浅色</button>
+            <button type="button" data-value="dark" aria-pressed="false">深色</button>
+            <button type="button" data-value="system" aria-pressed="true">跟随系统</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group" data-show-when="dark">
+          <legend>深色主题</legend>
+          <div class="theme-dark-grid">
+            <label class="theme-option"><input type="radio" name="themeDark" value="classic" checked><span>经典深色</span></label>
+            <label class="theme-option"><input type="radio" name="themeDark" value="warm"><span>暖调深色</span></label>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>字号</legend>
+          <div class="seg-control" data-key="fontSize">
+            <button type="button" data-value="small" aria-pressed="false">小</button>
+            <button type="button" data-value="medium" aria-pressed="true">中</button>
+            <button type="button" data-value="large" aria-pressed="false">大</button>
+            <button type="button" data-value="xlarge" aria-pressed="false">超大</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>行高</legend>
+          <div class="seg-control" data-key="lineHeight">
+            <button type="button" data-value="compact" aria-pressed="false">紧凑</button>
+            <button type="button" data-value="standard" aria-pressed="true">标准</button>
+            <button type="button" data-value="relaxed" aria-pressed="false">宽松</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="settings-group">
+          <legend>动画</legend>
+          <div class="switch-row">
+            <label for="switchMotion">减少动画</label>
+            <input type="checkbox" id="switchMotion" role="switch" aria-checked="false">
+          </div>
+        </fieldset>
+      </div>
+      <div class="settings-footer">
+        <button type="button" class="btn-reset" id="btnResetPrefs">恢复默认设置</button>
+      </div>
+    </aside>
+  </div>
 
   <script type="module" src="/src/admin.js"></script>
 </body>

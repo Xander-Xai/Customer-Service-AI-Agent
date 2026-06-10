@@ -10,11 +10,11 @@
 
 from typing import Any
 
-from config import MODE_UPGRADE_ENABLED, REACT_COMPLEXITY_THRESHOLD
+from core.config import MODE_UPGRADE_ENABLED, REACT_COMPLEXITY_THRESHOLD
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
-from logger import get_logger
-from session_manager import INTENT_KEYWORDS
+from core.logger import get_logger
+from core.session.session_manager import INTENT_KEYWORDS
 
 from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, SequentialMode
 

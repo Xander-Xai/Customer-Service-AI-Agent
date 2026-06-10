@@ -19,7 +19,7 @@ dev-https: env-dev ## 本地 HTTPS 开发启动（支持麦克风等需要安全
 
 dev-docker: env-dev ## Docker 开发环境（自动加载 override）
 	@echo "🐳 启动 Docker 开发环境..."
-	docker compose up app --build
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.override.yml up app --build
 
 # ===== 测试 =====
 test: env-test ## 运行测试
@@ -51,21 +51,21 @@ eval-rag: ## RAG 检索质量评估
 # ===== 生产环境 =====
 prod: env-prod ## 生产部署
 	@echo "🚀 启动生产环境..."
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --build
 
 prod-down: ## 停止生产环境
 	@echo "🛑 停止生产环境..."
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml down
 
 prod-build: env-prod ## 仅构建生产镜像
 	@echo "🔨 构建生产镜像..."
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml build
 
 prod-logs: ## 查看生产日志
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml logs -f app
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml logs -f app
 
 prod-ps: ## 查看生产服务状态
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml ps
 
 # ===== 环境切换 =====
 env-dev: ## 切换到开发环境配置
@@ -124,23 +124,23 @@ backup: ## 执行数据备份
 # ===== 金丝雀部署 =====
 canary: env-prod ## 金丝雀部署（90/10 流量分割）
 	@echo "🐤 启动金丝雀部署..."
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.canary.yml up -d --build
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml -f deploy/compose/docker-compose.canary.yml up -d --build
 
 canary-down: ## 停止金丝雀部署
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.canary.yml down
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml -f deploy/compose/docker-compose.canary.yml down
 
 # ===== 水平扩展 =====
 scale: env-prod ## 水平扩展（用法: make scale N=3）
 	@echo "📈 扩展到 $(N) 个实例..."
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.scale.yml up -d --build --scale app=$(N)
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml -f deploy/compose/docker-compose.scale.yml up -d --build --scale app=$(N)
 
 scale-down: ## 恢复单实例
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --scale app=1
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --scale app=1
 
 # ===== 监控增强 =====
 monitoring-up: ## 启动 Loki 日志聚合
 	@echo "📊 启动 Loki + Promtail..."
-	docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d loki promtail
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.monitoring.yml up -d loki promtail
 
 # ===== 部署（脚本方式）=====
 deploy-prod: ## 使用 deploy.sh 部署生产环境

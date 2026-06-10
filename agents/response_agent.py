@@ -10,17 +10,17 @@ from agents.base_agent import BaseAgent
 from agents.evaluator import ResponseEvaluator
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("agent.response_agent")
-from cache.response_cache import ResponseCache
-from config import (
+from cache.response_cache import ResponseCache  # noqa: E402
+from core.config import (  # noqa: E402
     EVAL_ALERT_ENABLED,
     EVAL_LOW_SCORE_THRESHOLD,
     EVAL_RETRY_ENABLED,
     EVAL_RETRY_THRESHOLD,
 )
-from session_manager import EnhancedSessionManager
+from core.session.session_manager import EnhancedSessionManager  # noqa: E402
 
 # 解决状态常量
 RESOLUTION_RESOLVED = "resolved"
@@ -93,6 +93,14 @@ _INJECTION_SAFE_RESPONSE = (
     "订单查询、技术支持等相关问题。请问有什么可以帮您的吗？"
 )
 
+# v5.0: 截断检测 — 以连词/介词/未闭合括号结尾的不完整句子
+_RE_TRUNCATED_ENDING = re.compile(
+    r"(?:还是|而且|但是|不过|因此|所以|同时|另外|此外|以及|"
+    r"或者|并且|以及|如果|虽然|即使|除非|无论|只要|"
+    r"关于|对于|至于|基于|通过|除了|包括)\s*$"
+)
+_RE_UNCLOSED_PAREN = re.compile(r"[（\(][^）\)]*$")
+
 
 def _sanitize_response(text: str) -> str:
     """
@@ -120,7 +128,14 @@ def _sanitize_response(text: str) -> str:
     text = _RE_META_COMMENTARY.sub("", text)
     text = _RE_AI_DISCLAIMER.sub("", text)
     text = _RE_MULTIPLE_NEWLINES.sub("\n\n", text)
-    return text.strip()
+    text = text.strip()
+
+    # 截断检测：以连词/未闭合括号结尾 → 追加提示
+    if text and (_RE_TRUNCATED_ENDING.search(text) or _RE_UNCLOSED_PAREN.search(text)):
+        logger.warning(f"检测到疑似截断响应（末尾: ...{text[-20:]}）")
+        text += "\n\n（回复可能不完整，请联系人工客服获取完整信息）"
+
+    return text
 
 
 class ResponseAgent(BaseAgent):
@@ -199,8 +214,7 @@ class ResponseAgent(BaseAgent):
             )
 
             # v4.3: 低分自动重试/升级 — 评估分极低时标记需要升级
-            if EVAL_RETRY_ENABLED and eval_result["score"] < EVAL_RETRY_THRESHOLD:
-                if mode == "sequential" and not state.get("_retried"):
+            if EVAL_RETRY_ENABLED and eval_result["score"] < EVAL_RETRY_THRESHOLD and mode == "sequential" and not state.get("_retried"):
                     state["_retried"] = True
                     state["_needs_upgrade"] = True
                     self.logger.warning(
@@ -275,6 +289,11 @@ class ResponseAgent(BaseAgent):
         # 不确定场景：包含"无法回答"类短语
         response_lower = response.lower()
         if any(phrase in response_lower for phrase in UNCERTAIN_PHRASES):
+            return RESOLUTION_UNCERTAIN
+
+        # 不确定场景：响应以连词/未闭合括号结尾（截断）
+        if _RE_TRUNCATED_ENDING.search(response) or _RE_UNCLOSED_PAREN.search(response):
+            logger.warning("响应疑似被截断，标记为 uncertain")
             return RESOLUTION_UNCERTAIN
 
         # 正常解决（包括 hierarchical 模式成功处理的投诉）

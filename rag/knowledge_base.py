@@ -8,7 +8,7 @@ v5.1: 集成 CLIP 多模态 embedding，支持图片语义检索。
 import asyncio
 from typing import Any
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("rag.knowledge_base")
 
@@ -24,6 +24,8 @@ class CosmeticsKnowledgeBase:
         """
         self._clip_enabled = clip_enabled
         self._clip_embed_fn = None
+        # v5.1: Reranker（延迟加载）
+        self._reranker = None
 
         try:
             import chromadb
@@ -148,6 +150,20 @@ class CosmeticsKnowledgeBase:
         collection.add(documents=documents, metadatas=cleaned_metadatas, ids=ids)
         logger.debug(f"Collection '{collection_name}' 添加 {len(documents)} 条文档")
 
+    def delete_documents(
+        self,
+        collection_name: str,
+        ids: list[str],
+    ):
+        """从 collection 中删除指定 ID 的文档"""
+        collection = self.get_or_create_collection(collection_name)
+        if collection is None:
+            return
+        if not ids:
+            return
+        collection.delete(ids=ids)
+        logger.debug(f"Collection '{collection_name}' 删除 {len(ids)} 条文档")
+
     def seed_if_empty(self, collection_name: str, seed_fn):
         """仅在 collection 为空时执行种子函数（防止重复初始化）"""
         collection = self.get_or_create_collection(collection_name)
@@ -186,14 +202,25 @@ class CosmeticsKnowledgeBase:
     ) -> list[dict[str, Any]]:
         """
         异步查询多个 collection，合并结果并按距离排序。
+        v5.1: 集成 reranker 二次排序，提升相关性。
         每个 collection 取 top-n_results，合并后保留总 top-n_results。
         """
+        # v5.1: 查询改写（同义词扩展）
+        try:
+            from rag.query_rewriter import QueryRewriter
+
+            rewriter = QueryRewriter()
+            query_text = rewriter.expand_query(query_text)
+        except Exception:
+            pass
+
         all_results = []
         tasks = [self.query(name, query_text, n_results) for name in collection_names]
         results_list = await asyncio.gather(*tasks, return_exceptions=True)
         for results in results_list:
             if isinstance(results, list):
                 all_results.extend(results)
+
         # 按距离排序（越小越相关），去重
         all_results.sort(key=lambda r: r.get("distance", 999))
         seen = set()
@@ -203,7 +230,37 @@ class CosmeticsKnowledgeBase:
             if content not in seen:
                 seen.add(content)
                 deduped.append(r)
+
+        # v5.1: Reranker 二次排序
+        deduped = self._apply_reranker(query_text, deduped, top_k=n_results)
         return deduped[:n_results]
+
+    def _apply_reranker(
+        self, query: str, results: list[dict[str, Any]], top_k: int = 3
+    ) -> list[dict[str, Any]]:
+        """v5.1: 应用 reranker 对结果二次排序"""
+        if not results or len(results) <= 1:
+            return results
+
+        if self._reranker is None:
+            try:
+                from rag.reranker import create_reranker
+
+                self._reranker = create_reranker()
+                logger.info(f"Reranker 初始化完成: {type(self._reranker).__name__}")
+            except Exception as e:
+                logger.debug(f"Reranker 初始化失败: {e}")
+                self._reranker = False  # 标记为不可用，避免重复尝试
+                return results
+
+        if self._reranker is False:
+            return results
+
+        try:
+            return self._reranker.rerank(query, results, top_k=top_k)
+        except Exception as e:
+            logger.warning(f"Rerank 失败，使用原始排序: {e}")
+            return results
 
     @staticmethod
     def _parse_query_result(result: dict) -> list[dict[str, Any]]:
@@ -389,7 +446,7 @@ class CosmeticsKnowledgeBase:
 
         # 计算 RRF 分数
         scored = {}
-        for source, items in groups.items():
+        for _source, items in groups.items():
             for rank, item in enumerate(items):
                 content = item.get("content", "")
                 key = content[:100]  # 用前 100 字符作为去重 key
@@ -412,3 +469,90 @@ class CosmeticsKnowledgeBase:
     def clip_available(self) -> bool:
         """CLIP 是否可用"""
         return self._clip_enabled and self._clip_embed_fn is not None
+
+    # ===== v5.2: Query Rewriting + Reranker =====
+
+    async def rewrite_query(self, query: str, llm_client=None) -> str:
+        """
+        v5.2: 用 LLM 将用户口语化查询改写为更适合向量检索的形式。
+        保留核心关键词，去除口语化表达，补充隐含的领域术语。
+        无 LLM 时自动降级为原查询。
+
+        Args:
+            query: 用户原始查询
+            llm_client: LLM 客户端（需有 async_invoke 方法）
+
+        Returns:
+            改写后的查询，或原查询（降级时）
+        """
+        if not llm_client:
+            return query
+        try:
+            from langchain_core.messages import HumanMessage
+
+            prompt = (
+                "将以下用户问题改写为更适合知识库检索的形式。"
+                "保留核心关键词，去除口语化表达和冗余词语，"
+                "补充隐含的化妆品领域专业术语。"
+                "只返回改写后的查询文本，不要解释。\n\n"
+                f"用户问题：{query}\n改写查询："
+            )
+            result = await llm_client.async_invoke([HumanMessage(content=prompt)])
+            rewritten = result.content.strip() if result and result.content else ""
+            if rewritten and rewritten != query:
+                logger.debug(f"Query Rewriting: '{query[:30]}' -> '{rewritten[:30]}'")
+                return rewritten
+            return query
+        except Exception as e:
+            logger.debug(f"Query Rewriting 失败，使用原查询: {e}")
+            return query
+
+    @staticmethod
+    def simple_rerank(
+        query: str, results: list[dict[str, Any]], top_k: int = 3
+    ) -> list[dict[str, Any]]:
+        """
+        v5.3: 基于关键词覆盖率的简单重排序（无需外部模型）。
+        综合向量距离和关键词匹配度进行排序。
+
+        Args:
+            query: 用户查询
+            results: 初步检索结果列表
+            top_k: 返回结果数
+
+        Returns:
+            重排序后的结果列表
+        """
+        if not results:
+            return results
+
+        # v5.3: jieba 可用性只检查一次，失败后用 regex 分词兜底
+        try:
+            import jieba
+            _tokenize = lambda text: set(jieba.cut(text))
+        except ImportError:
+            import re as _re
+            def _tokenize(text: str) -> set[str]:
+                """regex 兜底分词：英文单词 + 单个中文字符"""
+                tokens = set(_re.findall(r"[a-z0-9]+", text.lower()))
+                tokens.update(_re.findall(r"[一-鿿]", text))
+                return tokens
+
+        query_tokens = _tokenize(query)
+
+        scored = []
+        for r in results:
+            content = r.get("content", "")
+            content_tokens = _tokenize(content)
+
+            overlap = len(query_tokens & content_tokens)
+            # 综合向量距离和关键词匹配
+            distance_score = 1.0 / (1.0 + r.get("distance", 0))
+            keyword_score = overlap / max(len(query_tokens), 1)
+            combined = 0.6 * distance_score + 0.4 * keyword_score
+            scored.append({**r, "_rerank_score": combined})
+
+        scored.sort(key=lambda x: x.get("_rerank_score", 0), reverse=True)
+        for s in scored:
+            s.pop("_rerank_score", None)
+        return scored[:top_k]

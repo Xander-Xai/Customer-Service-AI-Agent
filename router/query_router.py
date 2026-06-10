@@ -13,8 +13,8 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from config import LLM_ROUTER_TIMEOUT
-from logger import get_logger
+from core.config import LLM_ROUTER_TIMEOUT
+from core.logger import get_logger
 
 logger = get_logger("router")
 
@@ -93,10 +93,9 @@ class QueryRouter:
         rule_type, rule_scores, complexity = rule_result
         rule_override = False
         final_type = llm_result["query_type"]
-        if rule_type and rule_type != llm_result["query_type"]:
-            if llm_result.get("confidence", 0) < 0.7:
-                final_type = rule_type
-                rule_override = True
+        if rule_type and rule_type != llm_result["query_type"] and llm_result.get("confidence", 0) < 0.7:
+            final_type = rule_type
+            rule_override = True
 
         fast_path = complexity < self.complexity_threshold
         agent_name = INTENT_AGENT_MAP.get(final_type, "general_agent")

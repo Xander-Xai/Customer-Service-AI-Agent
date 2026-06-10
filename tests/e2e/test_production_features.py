@@ -99,7 +99,9 @@ class TestServiceContainer:
             "agents_used": [],
             "resolution_status": "",
         }
-        result = await container.graph_app.ainvoke(state)
+        result = await container.graph_app.ainvoke(
+            state, config={"configurable": {"thread_id": "test-container"}}
+        )
         assert result["response"]
         assert result["collaboration_mode"]
 
@@ -194,7 +196,7 @@ class TestConfigValidation:
         """开发模式跳过校验"""
         # DEV_MODE=true 时不应抛出异常
 
-        import config
+        from core import config
 
         # 已在 DEV_MODE 下加载，不应有异常
         assert config.DEV_MODE is True
@@ -264,7 +266,7 @@ class TestRefreshToken:
 
         username = f"refresh_test_{uuid.uuid4().hex[:8]}"
         register_user(username, "password123")
-        auth = authenticate_user(username, "password123")
+        auth = await authenticate_user(username, "password123")
         assert auth is not None
 
         # 创建 refresh_token

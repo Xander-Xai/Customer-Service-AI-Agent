@@ -11,8 +11,8 @@ AudioProcessor — 语音转文字 STT（v5.1）
 
 import httpx
 
-import config
-from logger import get_logger
+from core import config
+from core.logger import get_logger
 
 logger = get_logger("media.audio")
 

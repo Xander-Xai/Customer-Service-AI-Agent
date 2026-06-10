@@ -8,7 +8,8 @@ function getOrCreateContainer() {
   if (_container && document.body.contains(_container)) return _container;
   _container = document.createElement('div');
   _container.id = 'toastContainer';
-  _container.style.cssText = 'position:fixed;top:70px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:380px';
+  _container.style.cssText =
+    'position:fixed;top:70px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:380px';
   _container.setAttribute('aria-live', 'polite');
   document.body.appendChild(_container);
   return _container;
@@ -21,10 +22,10 @@ function typeIcon(type) {
 
 function typeBg(type) {
   const bgs = {
-    success: '#166534',
-    error: '#991b1b',
-    warning: '#854d0e',
-    info: '#1e3a5f',
+    success: '#346538',
+    error: '#9F2F2D',
+    warning: '#956400',
+    info: '#1F6C9F',
   };
   return bgs[type] || bgs.info;
 }

@@ -1,14 +1,32 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v4.5)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.0)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **v4.5** 图构建统一：消除 3 处图拓扑重复定义，`build_graph(container)` 作为唯一入口，运行时模式升级重试
+> **v5.0** 前端 Vite 8 重构 + 1151 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
-> **v4.4** 全面优化：安全加固 + 代码质量重构 + 测试覆盖率门槛 + 文档完善
+> **v4.5** 图构建统一：消除 3 处图拓扑重复定义，`build_graph(container)` 作为唯一入口
 >
-> **v4.3** 生产验收通过：**383 tests passed** | 安全审计 7.5/10 | 代码质量 8.0/10 | 生产就绪性 7.0/10
->
-> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · 生产安全加固 · 密钥自动生成
+> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理
+
+---
+
+## ⚡ 3 分钟验证入口
+
+> 面试官快速验证项目的 4 个入口：
+
+| 验证项 | 入口 | 预期结果 |
+|--------|------|---------|
+| **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
+| **测试能过** | `make test` | 1151 passed, 覆盖率 ≥80% |
+| **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
+| **CI 能过** | `.github/workflows/ci.yml` | 4 Job 流水线（测试→安全→构建→部署） |
+
+**详细证据文档**：
+- [Prompt Engineering 设计](docs/active/prompt-engineering.md) — Prompt 架构、策略选型、迭代演进
+- [模型选型与 Token 成本](docs/active/model-comparison.md) — 模型对比、Embedding 效果、月度成本估算
+- [RAG 评估报告](docs/active/rag-evaluation.md) — 基线 vs 改进后数据对比
+- [安全设计文档](docs/active/SECURITY.md) — 安全措施清单 + 已知限制 + 改进计划
+- [架构设计](docs/active/architecture-design.md) — 四层状态机 + 五种协作模式
 
 ---
 
@@ -25,12 +43,12 @@ graph TB
         IMG[多模态 /api/chat/image]
     end
 
-    subgraph Middleware["中间件层"]
-        TRACE[trace_id 追踪]
-        RATE[限流 60req/min/IP]
-        AUTH[API Key / JWT 双认证]
-        CSP[安全头 CSP/HSTS]
-        SANITIZE[输入净化]
+    subgraph Middleware["中间件层（5 层）"]
+        TRACE[1. trace_id 追踪]
+        CSRF[2. CSRF 防护<br/>双重 Cookie 提交]
+        AUTH[3. API Key / JWT<br/>分级 RBAC 认证]
+        CSP[4. 安全头 CSP/HSTS]
+        RATE[5. 限流 60req/min/IP]
     end
 
     subgraph Graph["LangGraph StateGraph"]
@@ -79,9 +97,11 @@ graph TB
     end
 
     subgraph External["外部集成"]
-        RAG[ChromaDB<br/>RAG 知识库 4 collection]
+        RAG[ChromaDB<br/>RAG 知识库 4+1 collection]
         ERP[金蝶 ERP<br/>Mock / Real]
         FC[Function Calling<br/>4 个 ERP 工具]
+        RWR[查询改写<br/>同义词扩展]
+        RRK[重排器<br/>BM25 + CrossEncoder]
     end
 
     subgraph Infra2["生产基础设施"]
@@ -97,11 +117,11 @@ graph TB
     REST --> TRACE
     SSE --> TRACE
     IMG --> TRACE
-    TRACE --> RATE
-    RATE --> AUTH
+    TRACE --> CSRF
+    CSRF --> AUTH
     AUTH --> CSP
-    CSP --> SANITIZE
-    SANITIZE --> C0
+    CSP --> RATE
+    RATE --> C0
 
     C0 --> L1
     L1 -. hit .-> C3
@@ -150,17 +170,17 @@ graph TB
 
 | 层级 | 节点 | 职责 | 关键实现 |
 |------|------|------|----------|
-| **Layer 0** | `check_cache` | L1 MD5 精确匹配 + L2 Jaccard 语义匹配，命中直接返回（<10ms） | `cache/response_cache.py`：L1 OrderedDict + L2 倒排索引 + Redis 持久化 |
-| **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | `router/query_router.py`：7 种意图分类 + 熔断器保护 |
-| **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | `collaboration/orchestrator.py` + `collaboration/modes.py` |
-| **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | `agents/response_agent.py` + `agents/evaluator.py` |
+| **Layer 0** | `check_cache` | L1 MD5 精确匹配 + L2 Jaccard 语义匹配，命中直接返回（<10ms） | [response_cache.py](cache/response_cache.py)：L1 OrderedDict + L2 倒排索引 + Redis 持久化 |
+| **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | [query_router.py](router/query_router.py)：7 种意图分类 + 熔断器降级 |
+| **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | [orchestrator.py](collaboration/orchestrator.py) + [modes.py](collaboration/modes.py) |
+| **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | [response_agent.py](agents/response_agent.py) + [evaluator.py](agents/evaluator.py) |
 
 ### 请求处理流程
 
 ```mermaid
 sequenceDiagram
     participant C as 客户端
-    participant MW as 中间件层
+    participant MW as 中间件层（5 层）
     participant G as LangGraph
     participant L0 as Layer 0 缓存
     participant L1 as Layer 1 路由
@@ -169,7 +189,7 @@ sequenceDiagram
     participant LLM as LLM API
 
     C->>MW: WebSocket / REST / SSE 请求
-    MW->>MW: trace_id → 限流 → 认证 → 安全头 → 输入净化
+    MW->>MW: trace_id → CSRF → 认证(RBAC) → 安全头 → 限流
     MW->>G: invoke(state)
 
     G->>L0: check_cache(query)
@@ -228,15 +248,17 @@ sequenceDiagram
 | **ReActAgent** | 多步推理：Thought → Action → Observation → Answer | RAG（3 个 collection） + FC（4 个 ERP 工具） | ReAct |
 | **ResponseAgent** | 响应消毒 + 注入防护 + 解决状态评估 + 质量评分 + 模式升级重试 + 缓存写入 + SLA + 事件广播 | Cache + Evaluator + Bus | 最终环节 |
 
-**BaseAgent 核心能力：**
+**BaseAgent 核心能力（681 行）：**
 - 会话上下文检索（滑动窗口最近 6 条）
 - 漂移检测（话题/意图/矛盾/重复 4 种类型）+ 自动注入修复提示
-- RAG 知识库检索（按 Agent 分配 collection）
-- Function Calling 多轮工具调用循环（`_process_with_tools`，最多 `TOOL_MAX_ROUNDS` 轮）
-- A/B 测试 prompt 变体分配（SHA-256 确定性分流）
+- RAG 知识库检索（按 Agent 分配 collection）+ 查询改写（同义词扩展）+ 多 collection RRF 融合 + BM25/CrossEncoder 重排
+- Function Calling 多轮工具调用循环（`_process_with_tools`，最多 `TOOL_MAX_ROUNDS` 轮）+ 自反思质量检查（v5.2）
+- A/B 测试 prompt 变体分配（SHA-256 确定性分流）+ Prompt 版本管理（DB 持久化）
 - SSE 真流式输出（检测 `stream_callback` 自动切换）
 - 指数退避重试（仅瞬态错误：`ConnectionError`/`TimeoutError`/`OSError`）
 - 对话历史 `<untrusted-data>` 标签隔离（防 prompt 注入）
+- 协议化依赖注入（`core/protocols.py`：LLMProtocol、ERPProtocol、KnowledgeBaseProtocol 等）
+- 多模态 Vision LLM 自动选择（`_get_effective_llm` 根据 state.has_multimodal 切换）
 
 ### 5 种协作模式
 
@@ -248,7 +270,7 @@ sequenceDiagram
 | **Hierarchical** | 投诉/升级场景 | GeneralAgent 协调者分配子任务 + 汇总（动态添加 product/billing 子任务） | 30s |
 | **ReAct** | 多领域（≥2）+ `complexity ≥ 60` | RAG 检索 + Function Calling 多轮推理链 | 30s |
 
-**模式选择算法**（`collaboration/orchestrator.py`）：
+**模式选择算法**（[orchestrator.py](collaboration/orchestrator.py)）：
 
 ```
 1. fast_path=True → Sequential（快速通道）
@@ -259,7 +281,7 @@ sequenceDiagram
 6. 默认 → Sequential
 ```
 
-**模式升级重试**（v4.3）：当 ResponseAgent 质量评分低于阈值时，自动升级：Sequential → Consultation → Parallel → ReAct
+**模式升级重试**（v4.3+）：当 ResponseAgent 质量评分低于阈值时，自动升级：Sequential → Consultation → Parallel → ReAct
 
 **顾问映射关系：**
 - `product_agent` → 顾问 `tech_agent`
@@ -296,14 +318,14 @@ flowchart LR
     L1 -.-> Redis[(Redis SETEX<br/>预热 + 持久化)]
 ```
 
-### 会话管理（`session_manager.py`）
+### 会话管理（[session_manager.py](core/session/session_manager.py)）
 
 | 功能 | 实现 | 配置 |
 |------|------|------|
 | 滑动窗口裁剪 | 消息数（`SESSION_WINDOW_SIZE`）+ token 数（tiktoken `cl100k_base`）双重控制 | 默认 10 条 / 4000 tokens |
 | 历史摘要 | LLM 异步生成 2-3 句摘要注入上下文 | `SESSION_SUMMARY_MAX_CHARS=500` |
 | 中文分词 | jieba 分词（lazy import，fallback 正则） | - |
-| 漂移检测（`drift_detector.py`） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40+ 否定/矛盾词对）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
+| 漂移检测（[drift_detector.py](core/session/drift_detector.py)） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40+ 否定/矛盾词对）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
 | 漂移修复 | 自动注入修复提示到 Agent 上下文 | - |
 | 漂移升级 | 累计 ≥5 次漂移建议转人工 | `DRIFT_ESCALATION_THRESHOLD=5` |
 | 存储后端 | memory / file / Redis 三种后端 | `SESSION_STORAGE_BACKEND` |
@@ -312,22 +334,33 @@ flowchart LR
 
 ### RAG 知识库（ChromaDB）
 
-| Collection | 文档数 | 用途 | 使用 Agent |
-|------------|--------|------|------------|
-| `product_knowledge` | 78 条 | 产品成分、功效、价格、适用肤质 | Product, Tech, ReAct |
-| `faq` | 84 条 | 常见问题解答 | Product, Complaint, ReAct |
-| `tech_support` | 72 条 | 使用方法、过敏处理、储存知识 | Tech, ReAct |
-| `complaint_knowledge` | 66 条 | 投诉处理流程、补偿方案 | Complaint |
+| Collection | 文档数 | 来源 | 用途 | 使用 Agent |
+|------------|--------|------|------|------------|
+| `product_knowledge` | 50 条 | `data/seed/product_knowledge.json` | 产品成分、功效、价格、适用肤质 | Product, Tech, ReAct |
+| `faq` | 45 条 | `data/seed/faq.json` | 常见问题解答 | Product, Complaint, ReAct |
+| `tech_support` | 35 条 | `data/seed/tech_support.json` | 使用方法、过敏处理、储存知识 | Tech, ReAct |
+| `complaint_knowledge` | 38 条 | `data/seed/complaint_knowledge.json` | 投诉处理流程、补偿方案 | Complaint |
+| `image_knowledge` | 可选 | `data/seed/image_knowledge.json` | CLIP 多模态图片检索 | 全部（CLIP 模式） |
 
 **嵌入模型选择**（自动降级）：
 1. `BAAI/bge-small-zh-v1.5`（中文优化轻量模型）
 2. `shibing624/text2vec-base-chinese`（通用中文向量模型）
 3. ChromaDB 默认 `all-MiniLM-L6-v2`（英文兜底）
 
+**RAG 检索增强管线（[knowledge_base.py](rag/knowledge_base.py)）：**
+```
+用户查询 → 查询改写（query_rewriter.py：同义词扩展 + 多问题拆分）
+         → 多 collection 并行检索（run_in_executor 异步包装）
+         → RRF 融合（Reciprocal Rank Fusion, k=60）合并文本 + 图片结果
+         → BM25 / CrossEncoder 重排（reranker.py：BM25 关键词密度 + 向量距离加权）
+         → 截断返回（每条 500 字符）
+```
+
 **关键操作：**
 - `query()`：单 collection 异步检索（`run_in_executor` 包装同步调用）
-- `query_multiple()`：多 collection 并行检索 + 距离合并 + 去重
-- `seed_if_empty()`：幂等种子数据加载
+- `query_multiple()`：多 collection 并行检索 + 距离合并 + 去重 + 重排
+- `query_multimodal()`：文本 + CLIP 图片 RRF 融合检索
+- `seed_if_empty()`：幂等种子数据加载（从 `data/seed/*.json` 文件）
 
 ### Function Calling 工具（OpenAI 格式）
 
@@ -354,7 +387,7 @@ Thought（推理当前需要什么信息）
 - **触发阈值**：`REACT_COMPLEXITY_THRESHOLD=60`（复杂度评分 ≥ 60 且多领域意图）
 - **RAG 检索范围**：同时查询 `product_knowledge` + `faq` + `tech_support`（5 条结果，多于普通 Agent 的 3 条）
 
-### 质量评估系统（`agents/evaluator.py`）
+### 质量评估系统（[evaluator.py](agents/evaluator.py)）
 
 | 维度 | 权重 | 评分逻辑 |
 |------|------|----------|
@@ -373,20 +406,23 @@ Thought（推理当前需要什么信息）
 | 类别 | 措施 |
 |------|------|
 | **认证** | API Key（系统间）+ JWT Bearer（终端用户）双认证模式 + `hmac.compare_digest` 防时序攻击 |
+| **RBAC 角色** | 4 级角色：customer / agent / supervisor / admin，分级权限控制（[middleware.py](api/middleware.py) `ROLE_PERMISSIONS`） |
 | **密码哈希** | PBKDF2-SHA256 + 600K 迭代 + 随机 salt（OWASP 推荐） |
 | **JWT** | PyJWT 库 + HS256 算法白名单 + jti 吊销 + Redis 黑名单 + Refresh Token（access 2h + refresh 7d） |
+| **CSRF** | 双重 Cookie 提交模式（`csrf_token` cookie + `X-CSRF-Token` header），`hmac.compare_digest` 比较 |
 | **限流** | 通用 60 req/min/IP + 登录 5次/5min + 注册 3次/h + Redis 滑动窗口优先，内存回退 |
 | **输入验证** | Pydantic 请求模型 + `MAX_QUERY_LENGTH=2000` + 控制字符 + HTML 标签净化（HTML 实体解码防绕过） |
 | **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层系统提示泄露检测 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
-| **安全头** | HSTS / CSP（nonce，无 `unsafe-inline`）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
-| **会话安全** | UUID 格式校验 + HMAC 会话令牌签名 + 用户级会话所有权隔离 |
+| **安全头** | HSTS / CSP（script-src 使用 nonce 无 `unsafe-inline`，style-src 暂用 `unsafe-inline` 已知限制）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
+| **会话安全** | UUID 格式校验 + HMAC 会话令牌签名（可绑定客户端指纹）+ 用户级会话所有权隔离 |
 | **WebSocket** | 首条消息 JWT 认证（非 URL 参数）+ 每 IP 连接限制 + 消息限流 + 空闲超时 + 定期清理 |
 | **CORS** | 环境变量配置，默认 `http://localhost:8000`，生产必须配置真实域名 |
 | **监控保护** | `/metrics/prometheus` + `/api/metrics` 等 Admin Token 认证 |
-| **启动校验** | 生产环境强制校验 `JWT_SECRET` / `SESSION_TOKEN_SECRET` / `API_KEY`，缺失则拒绝启动 |
+| **启动校验** | 生产环境强制校验 `JWT_SECRET`(≥32字符) / `SESSION_TOKEN_SECRET` / `API_KEY`，缺失则抛出 `ConfigurationError` |
 | **密钥管理** | `scripts/generate_prod_env.py` 使用 `secrets` 模块生成密码学安全随机密钥 |
 | **ERP 安全** | `sanitize_erp_input()` 白名单消毒 + 订单查询拒绝空过滤条件（防全量泄露） |
+| **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 |
 
 ---
 
@@ -394,11 +430,45 @@ Thought（推理当前需要什么信息）
 
 ### 环境要求
 
-- Python 3.10+（CI 测试 3.10 / 3.11 / 3.12 三版本兼容）
+- Python 3.10+
 - Docker & Docker Compose（生产必填）
 - Redis 7（生产必填，用于 Session / Cache / JWT 黑名单持久化）
 - PostgreSQL 15（生产推荐，开发可使用 SQLite）
-- Nginx（生产推荐，或使用内置 Nginx 容器）
+
+### 前端技术选型说明
+
+前端使用**原生 JavaScript**（非 React/Vue），技术选型理由：
+
+| 考量 | 决策 |
+|------|------|
+| **可嵌入性** | 原生 JS 可直接作为 `<script>` 标签嵌入任意页面（已实现 `widget.html`），无框架运行时依赖 |
+| **构建管线** | Vite 8 提供模块化 + Tree-shaking + Hashed 产物，开发体验接近框架项目 |
+| **安全** | DOMPurify 净化 LLM 输出 + escapeHtml 净化动态数据 + 全量 innerHTML 审计 |
+| **体积** | 无框架运行时，首屏 JS 体积更小，适合嵌入场景 |
+| **测试** | Vitest + jsdom 提供单元测试能力 |
+
+**前端已实现功能：**
+
+| 功能 | 实现 | 说明 |
+|------|------|------|
+| **聊天界面** | `web/index.html` + `chat/` 模块 | 消息渲染（marked.js Markdown）+ 历史会话侧栏 + 快捷短语 |
+| **SSE 流式** | `api/sse.js` | 逐 token 推送 + Agent 流转轨迹 + 进度条 |
+| **WebSocket** | `api/websocket.js` | 指数退避重连（2s~30s）+ 心跳 + 消息队列 |
+| **文件上传** | `chat/input.js` | 支持图片/视频/PDF/DOCX/文本，REST `/api/chat/file` |
+| **语音输入** | `chat/voice.js` | Web Speech API + 🎤 按钮 |
+| **TTS 语音** | `chat/voice.js` | Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器 |
+| **主题系统** | `utils/theme.js` + 8 个 CSS | 亮色 4 种 + 暗色 2 种 + 字号/行高/减弱动效/系统偏好 |
+| **认证** | `auth/index.js` + `login.js` | JWT 登录/注册 + Token 自动刷新（过期前 5 分钟） |
+| **管理后台** | `admin.html` + `admin.js` | 用户管理 / 知识库统计 / 告警配置 / ChromaDB+DB 健康状态 |
+| **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页 |
+| **消息搜索** | `chat/search.js` | 会话内消息关键词搜索 |
+| **反馈** | `chat/messages.js` | 👍/👎 反馈 + message_index 精确定位 |
+| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键 |
+| **移动端** | 响应式布局 + 抽屉式导航（`responsive.css`） |
+| **Toast 通知** | `utils/toast.js` | 操作反馈通知 |
+| **剪贴板** | `utils/copy.js` | 一键复制消息内容 |
+
+> 如需组件化开发，可渐进迁移到 Web Components 或轻量框架（Lit/Preact），当前架构已为迁移预留了模块边界。
 
 ### 安装
 
@@ -421,14 +491,14 @@ cp .env.example .env
 # ===== LLM 配置（必填） =====
 OPENAI_API_KEY=sk-xxx                              # API Key
 OPENAI_BASE_URL=https://api.siliconflow.cn/v1      # 兼容 OpenAI 的 API 地址
-OPENAI_MODEL=Qwen/Qwen3-8B                         # 模型名称
+OPENAI_MODEL=Qwen/Qwen2.5-7B-Instruct              # 模型名称
 # LLM_PROVIDER=siliconflow                          # siliconflow | deepseek | openai | custom
 
 # ===== 安全配置（生产必改） =====
 API_KEY_ENABLED=true                                # 是否启用 API Key 认证
 API_KEY=your-secure-api-key-here                    # API Key 值
 MONITORING_ADMIN_TOKEN=your-admin-token             # 监控端点管理令牌
-JWT_SECRET=your-jwt-secret-here                     # JWT 签名密钥
+JWT_SECRET=your-jwt-secret-here                     # JWT 签名密钥（≥32 字符）
 SESSION_TOKEN_SECRET=your-session-secret            # 会话令牌签名密钥
 CORS_ORIGINS=["https://your-domain.com"]            # CORS 允许来源
 
@@ -456,15 +526,18 @@ cp .env.prod .env
 make prod
 
 # 方式二：Docker Compose 直接启动
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d
 
 # 方式三：开发环境（热重载）
 make dev
 
-# 方式四：直接运行（仅开发，需已安装依赖）
+# 方式四：HTTPS 开发环境（支持麦克风等安全上下文功能）
+make dev-https
+
+# 方式五：直接运行（仅开发，需已安装依赖）
 uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload
 
-# 方式五：仅运行测试（无需 API Key）
+# 方式六：仅运行测试（无需 API Key）
 make test
 ```
 
@@ -487,123 +560,26 @@ make env-test    # 切换到测试环境（最小化依赖，Mock 一切）
 make env-check   # 查看当前环境配置摘要
 ```
 
-### 数据备份
-
-```bash
-# 手动备份（ChromaDB + Redis + 配置）
-make backup
-
-# 定时备份（每天凌晨 2 点，保留 7 份）
-crontab -e
-0 2 * * * /path/to/scripts/backup.sh /data/backups
-```
-
 ---
 
 ## 📡 API 参考
 
-### WebSocket 实时对话
+| 类别 | 端点数 | 说明 |
+|------|--------|------|
+| 聊天 | 8 | REST + SSE 流式 + 多模态图片 + 图片流式 + 语音 + 文件上传 + TTS + TTS 声音列表 |
+| 会话 | 6 | 列表 / 详情 / 删除 / Checkpoint / 历史 / 消息 |
+| 认证 | 8 | 注册 / 登录 / 刷新 / 登出 / 当前用户 / 用户列表 / 审计 / 角色更新 |
+| 知识库 | 4 | 统计 / 种子 / 添加 / 同步 |
+| 告警 | 3 | 配置 / 测试 / 历史 |
+| 监控 | 12 | 健康 / 指标 / KPI / 缓存 / 告警 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token 追踪 |
+| Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
+| 反馈 | 2 | 提交 / 统计 |
+| 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
+| WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
-```javascript
-// 连接（JWT 通过首条消息认证，非 URL 参数）
-const ws = new WebSocket('ws://localhost:8000/ws/chat');
+**合计：44 个端点 + 5 个页面**
 
-// 首条消息：认证 + 查询
-ws.send(JSON.stringify({
-    token: "your-jwt-token",      // JWT 认证令牌
-    query: "这款产品的成分是什么？",
-    session_id: "optional-session-id"
-}));
-
-// 接收消息（渐进式推送）
-ws.onmessage = (event) => {
-    const data = JSON.parse(event.data);
-    switch (data.type) {
-        case 'status':     // 处理状态更新
-        case 'progress':   // Agent 处理进度
-        case 'response':   // 最终响应
-        case 'error':      // 错误信息
-    }
-};
-```
-
-### REST API 端点
-
-#### 聊天接口
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| `POST` | `/api/chat` | 同步对话接口 | JWT / API Key |
-| `POST` | `/api/chat/stream` | SSE 真流式输出 | JWT / API Key |
-| `POST` | `/api/chat/image` | 多模态图片 + 文本 | JWT / API Key |
-| `WS` | `/ws/chat` | WebSocket 实时对话 | 首条消息 JWT |
-
-#### 认证接口
-
-| 方法 | 路径 | 说明 | 限流 |
-|------|------|------|------|
-| `POST` | `/api/auth/register` | 用户注册 | 3 次/h |
-| `POST` | `/api/auth/login` | 用户登录（返回 access_token + refresh_token） | 5 次/5min |
-| `POST` | `/api/auth/refresh` | 刷新 access_token | - |
-| `POST` | `/api/auth/logout` | 登出（吊销 JWT） | - |
-| `GET` | `/api/auth/me` | 当前用户信息 | JWT |
-| `GET` | `/api/auth/users` | 用户列表 | JWT (admin) |
-| `GET` | `/api/auth/audit` | 审计日志 | JWT (admin) |
-
-#### 知识库管理
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| `GET` | `/api/knowledge/stats` | 知识库统计 | JWT / API Key |
-| `POST` | `/api/knowledge/seed` | 重新种子数据 | JWT (admin) |
-| `POST` | `/api/knowledge/{collection}/add` | 添加文档 | JWT (admin) |
-| `POST` | `/api/knowledge/sync` | 从 ERP 同步 | JWT (admin) |
-
-#### 告警管理
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| `GET` | `/api/alerts/config` | 告警配置 | JWT (admin) |
-| `POST` | `/api/alerts/test` | 测试告警通知 | JWT (admin) |
-| `GET` | `/api/alerts/history` | 告警历史 | JWT (admin) |
-
-#### 监控与运维
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| `GET` | `/api/health` | 健康检查（DB/Redis/LLM/ChromaDB/熔断器） | 无 |
-| `GET` | `/api/metrics` | 性能监控指标 + 缓存统计 | Admin Token |
-| `GET` | `/api/kpi` | 业务 KPI（首解率/AI 处理率/人力节省） | Admin Token |
-| `GET` | `/api/cache/stats` | 缓存统计（L1/L2 命中率） | Admin Token |
-| `GET` | `/api/sessions` | 会话列表（用户级隔离） | JWT |
-| `GET` | `/api/sessions/{id}` | 会话详情（含所有权校验） | JWT |
-| `DELETE` | `/api/sessions/{id}` | 删除会话 | JWT |
-| `GET` | `/api/history` | 历史会话列表 | JWT |
-| `GET` | `/api/history/{id}/messages` | 会话消息历史 | JWT |
-| `POST` | `/api/feedback` | 客户满意度反馈（👍/👎） | JWT |
-| `GET` | `/api/feedback/stats` | 反馈统计 | Admin Token |
-| `GET` | `/api/alerts` | SLA 告警记录 | Admin Token |
-| `GET` | `/api/circuit-breaker` | LLM 熔断器状态 | Admin Token |
-| `GET` | `/metrics/prometheus` | Prometheus 文本格式指标 | Admin Token |
-
-#### 前端页面
-
-| 路径 | 说明 | 认证 |
-|------|------|------|
-| `GET` `/` | 主页面（对话 + 监控仪表盘） | 无 |
-| `GET` `/login.html` | 登录/注册页 | 无 |
-| `GET` `/admin.html` | 管理后台 | JWT (admin) |
-
-### 错误码
-
-| 错误码 | 含义 | 处理建议 |
-|--------|------|----------|
-| `400` | 请求参数错误 | 检查 query 字段长度和格式 |
-| `401` | 认证失败 | 检查 API Key 或 JWT 是否正确/过期 |
-| `403` | 权限不足 | 使用 Admin Token 或 admin 角色 JWT |
-| `429` | 请求过于频繁 | 降低请求频率，等待限流窗口重置 |
-| `500` | 服务内部错误 | 检查日志（`logs/app.log`），联系管理员 |
-| `503` | LLM 服务不可用 | 检查 `/api/circuit-breaker` 状态，等待恢复 |
+> 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/active/api-reference.md](docs/active/api-reference.md)
 
 ---
 
@@ -611,138 +587,30 @@ ws.onmessage = (event) => {
 
 ```
 customer-service-ai-agent/
-├── agents/                              # 多 Agent 专家体系（8 个 Agent）
-│   ├── __init__.py
-│   ├── base_agent.py                    # Agent 抽象基类（会话 + RAG + FC + 漂移 + A/B + 流式）
-│   ├── product_agent.py                 # 产品专家（ERP + RAG）
-│   ├── tech_agent.py                    # 技术支持（RAG）
-│   ├── billing_agent.py                 # 账单专家（ERP）
-│   ├── complaint_agent.py               # 投诉处理（RAG + 黑板标记）
-│   ├── general_agent.py                 # 通用咨询（ERP + 黑板桥接）
-│   ├── react_agent.py                   # ReAct 推理（RAG + FC 工具调用）
-│   ├── response_agent.py                # 响应后处理（消毒 + 评估 + 模式升级 + 缓存）
-│   └── evaluator.py                     # 响应质量评估器（5 维规则 + LLM-as-Judge）
-├── router/                              # 双层查询路由器
-│   └── query_router.py                  # LLM Router ∥ Rule Classifier + 复杂度评分
-├── collaboration/                       # 协作模式编排
-│   ├── modes.py                         # 5 种模式实现（Sequential/Parallel/Consultation/Hierarchical/ReAct）
-│   └── orchestrator.py                  # 统一模式选择 + 运行时模式升级
-├── core/                                # 通信与监控基础设施
-│   ├── state.py                         # AgentState TypedDict（LangGraph 状态定义）
-│   ├── message_bus.py                   # 异步 pub/sub 消息总线
-│   ├── shared_blackboard.py             # TTL 共享黑板（跨 Agent 数据共享）
-│   ├── container.py                     # ServiceContainer 依赖注入容器（两阶段初始化）
-│   ├── monitoring.py                    # MetricsCollector + CircuitBreaker + SLAAlertManager + LLM Client
-│   ├── tracing.py                       # OpenTelemetry 分布式追踪（可选）
-│   └── ab_testing.py                    # A/B 测试框架（SHA-256 确定性分流）
-├── cache/                               # 二级缓存系统
-│   └── response_cache.py                # L1 MD5 精确 + L2 Jaccard 语义 + Redis 持久化
-├── db/                                  # 数据库层
-│   ├── models.py                        # User / ChatHistory / AuditLog / Feedback / PromptVersion
-│   └── database.py                      # 连接管理（SQLite + PostgreSQL）+ Alembic 迁移
-├── alembic/                             # 数据库迁移（Alembic）
-│   ├── env.py
-│   └── versions/                        # 迁移版本脚本（001/002/003）
-├── auth/                                # 用户认证
-│   ├── service.py                       # PBKDF2-SHA256 密码哈希 + JWT（PyJWT + Redis 黑名单）
-│   └── router.py                        # 认证 API（register/login/refresh/logout/me/users/audit）
-├── knowledge/                           # 知识库管理
-│   └── router.py                        # 知识库 API（stats/seed/sync/add）
-├── alerts/                              # 告警通知
-│   ├── notifier.py                      # Webhook + SMTP 邮件通知（含 SSRF 防护）
-│   └── router.py                        # 告警 API（config/test/history）
-├── rag/                                 # RAG 知识库
-│   ├── knowledge_base.py                # ChromaDB 向量检索（嵌入模型自动降级）
-│   └── seed_data.py                     # 种子数据（4 个 collection，300+ 文档）
-├── tools/                               # Function Calling 工具
-│   ├── tool_registry.py                 # 工具注册中心（OpenAI FC 格式）
-│   └── erp_tools.py                     # ERP 工具封装（4 个查询工具）
-├── erp/                                 # 金蝶 ERP 集成
-│   ├── __init__.py                      # 抽象接口 + 输入消毒（白名单 + SQL 转义）
-│   ├── factory.py                       # 适配器工厂（Mock / Real 自动切换）
-│   ├── kingdee_adapter.py               # Mock 适配器（5 产品 + 3 订单 + 2 客户）
-│   └── kingdee_real_adapter.py          # 真实金蝶 API（Token 管理 + 重试 + 分页）
-├── llm/                                 # LLM 实现
-│   └── rule_based_llm.py                # 规则引擎 LLM 回退（无 API Key 时使用）
-├── session_manager.py                   # 会话管理（滑动窗口 + token 裁剪 + 摘要 + 存储后端）
-├── drift_detector.py                    # 漂移检测（jieba + 4 种类型 + 升级机制）
-├── token_counter.py                     # Token 计数 + 中文分词工具（tiktoken + jieba lazy）
-├── multi_agent_customer_service.py      # LangGraph 图构建（build_graph 唯一入口 + make_graph 兼容包装）
-├── config.py                            # 统一配置（80+ 参数 + 生产启动校验）
-├── logger.py                            # 结构化日志（gzip 轮转 + trace_id 注入 + JSON 格式）
-├── gunicorn.conf.py                     # Gunicorn 生产配置（UvicornWorker + 自动扩 Worker）
-├── api/                                 # FastAPI 服务层
-│   ├── app.py                           # 应用 + 4 层中间件 + REST/WebSocket/SSE 端点 + Prometheus
-│   └── app_factory.py                   # 入口 + ServiceContainer + 数据库 + 安全检查 + lifespan
-├── nginx/                               # Nginx 反向代理
-│   ├── nginx.conf                       # TLS + WebSocket + 负载均衡 + canary 路由
-│   └── Dockerfile
-├── monitoring/                          # 监控配置
-│   ├── prometheus.yml                   # Prometheus 抓取配置
-│   ├── alert_rules.yml                  # Prometheus 告警规则
-│   ├── alertmanager.yml                 # Alertmanager 路由配置
-│   └── grafana/                         # Grafana 仪表盘 + 数据源自动配置
-├── loki/                                # 日志聚合
-│   ├── loki-config.yaml                 # Loki 服务端配置
-│   └── promtail-config.yaml             # Promtail 日志采集配置
-├── scripts/                             # 运维脚本
-│   ├── deploy.sh                        # 一键部署
-│   ├── backup.sh                        # 数据备份（ChromaDB + Redis + 配置）
-│   ├── generate_prod_env.py             # 生产密钥自动生成（secrets 模块）
-│   └── evaluate_rag.py                  # RAG 检索质量评估
-├── static/                              # 前端静态资源
-│   ├── css/style.css                    # 暗色主题样式
-│   └── js/
-│       ├── api.js                       # API 客户端（WebSocket + REST）
-│       ├── chat.js                      # 对话 + 监控仪表盘 UI
-│       └── admin.js                     # 管理后台 JS
-├── templates/                           # HTML 模板
-│   ├── index.html                       # 主页面（对话 + 监控）
-│   ├── login.html                       # 登录/注册页
-│   └── admin.html                       # 管理后台
-├── tests/                               # 测试套件（383 离线 + 5 真实 LLM E2E）
-│   ├── test_all.py                      # 端到端集成测试（图构建/API/会话/熔断器/SLA/并发/性能）
-│   ├── test_modules.py                  # 模块级单元测试（16 个测试类，覆盖全部模块）
-│   ├── test_integration.py              # Mock LLM 集成测试（图调用/缓存/5 种协作模式/降级）
-│   ├── test_stress.py                   # 压力/性能测试（缓存/总线/黑板/会话/路由高并发）
-│   ├── test_v4_production.py            # v4 生产功能（DI 容器/并发安全/配置校验/Refresh Token）
-│   ├── test_production_features.py      # 生产特性（数据库/认证/告警/知识库 API）
-│   ├── test_erp_integration.py            # ERP 集成测试（Mock/Real 适配器/Token 管理/重试）
-│   ├── test_e2e_real_llm.py             # 真实 LLM E2E（需 OPENAI_API_KEY，默认跳过）
-│   └── performance/
-│       └── locustfile.py                # Locust 压测脚本（3 种用户类型）
-├── docs/                                # 文档
-│   ├── architecture-design.md           # 架构设计文档（面试用）
-│   ├── interview-intro.md               # 3 分钟项目介绍脚本
-│   ├── interview-deep-dive.md           # 8 个面试深挖 Q&A
-│   ├── e2e-verification-guide.md        # E2E 验证指南
-│   ├── rag-evaluation.md               # RAG 检索质量评估方法论
-│   ├── rag-evaluation-report.json       # RAG 评估数据（30 条查询）
-│   ├── 2026-06-07-v4.3-audit-and-ci-fix-summary.md  # v4.3 验收总结
-│   ├── superpowers/specs/               # 设计规格文档
-│   └── archive/                         # 归档文档（历史记录，不再维护）
-├── alembic.ini                          # Alembic 迁移配置
-├── Dockerfile                           # 多阶段构建（builder + runtime，非 root）
-├── docker-compose.yml                   # 核心栈：Nginx + App + PostgreSQL + Redis + Prometheus + Grafana
-├── docker-compose.prod.yml              # 生产覆盖（Gunicorn + 资源限制 + Loki + Promtail）
-├── docker-compose.override.yml          # 开发覆盖（uvicorn --reload，自动加载）
-├── docker-compose.canary.yml            # 灰度发布（canary 服务 + Nginx 90/10 流量分割）
-├── docker-compose.monitoring.yml        # 独立日志聚合（Loki + Promtail）
-├── docker-compose.scale.yml             # 水平扩展（多实例 + Nginx 负载均衡）
-├── requirements.txt                     # Python 依赖（18 个直接依赖）
-├── requirements-dev.txt                 # 开发依赖（pytest + pytest-asyncio + pytest-cov）
-├── requirements-lock.txt                # 依赖锁定（200+ 传递依赖）
-├── pytest.ini                           # pytest 配置（asyncio_mode=auto + 覆盖率）
-├── .coveragerc                          # 覆盖率配置（最低 60%）
-├── .github/workflows/ci.yml             # CI/CD（Python 3.10/3.11/3.12 + 安全扫描 + Docker 构建）
-├── .env.example                         # 环境变量模板（180+ 行完整注释）
-├── .env.dev                             # 开发环境配置
-├── .env.prod                            # 生产环境配置（CHANGE_ME_* 占位符）
-├── .env.test                            # 测试环境配置
-├── CHANGELOG.md                         # 变更日志（从 README 独立）
-├── SECURITY.md                          # 安全策略文档
-├── LICENSE                              # Apache 2.0 许可证
-└── langgraph.json                       # LangGraph Cloud 部署清单
+├── agents/            # 8 个 AI Agent（BaseAgent + 5 领域 + ReAct + Response + Evaluator）
+├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试）
+├── api/               # FastAPI 服务层（工厂/中间件/路由/SSE/WebSocket/依赖注入）
+├── auth/              # JWT 认证（PBKDF2 + Redis 黑名单 + Refresh Token + RBAC）
+├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
+├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
+├── rag/               # RAG 知识库（ChromaDB + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合）
+├── cache/             # 双层缓存（L1 MD5 + L2 Jaccard + Redis 持久化）
+├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
+├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
+├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具）
+├── llm/               # LLM 客户端（重试 + 熔断 + FC + SSE 流式 + 连接池）+ 规则兜底 LLM
+├── media/             # 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
+├── alerts/            # 告警通知（Webhook 钉钉/企微/飞书 + SMTP）
+├── knowledge/         # 知识库管理路由
+├── web/               # 前端（原生 JS + Vite 8 构建 + 22 模块 + 12 CSS + 5 页面）
+├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
+├── tests/             # 测试套件（1151 Python + 4 Vitest：unit/integration/e2e/stress/performance）
+├── docs/              # 文档（active/archive/decisions + ADR）
+├── alembic/           # 数据库迁移脚本（3 个版本）
+├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
+├── monitoring/        # Prometheus + Grafana + Alertmanager + Loki
+├── loki/              # 日志聚合配置（Loki + Promtail）
+└── scripts/           # 运维脚本（部署/备份/RAG 评估/密钥生成）
 ```
 
 ---
@@ -751,48 +619,73 @@ customer-service-ai-agent/
 
 ### 测试套件
 
-| 测试文件 | 覆盖范围 | 测试数 |
-|---------|---------|--------|
-| `test_all.py` | 端到端集成：图构建 / API 端点 / 会话令牌 / 熔断器 / SLA / 并发安全 / ReAct / RAG / 性能 / 工具注册 | ~130 |
-| `test_modules.py` | 模块级单元测试：Session / Cache / Router / Agent / ERP / 协作 / RAG / Tools / Config / API / Logger / 流式 | ~85 |
-| `test_integration.py` | Mock LLM 集成：图调用 / 缓存命中跳过 / 5 种协作模式 / Agent process() / 多轮上下文 / 漂移 / 错误降级 | ~20 |
-| `test_stress.py` | 压力 / 性能：缓存 2000 读写 / 总线 200 并发 / 黑板 400 写入 / 会话 1000 创建 / 路由 800 调用 | ~13 |
-| `test_v4_production.py` | v4 生产功能：DI 容器 / 并发安全 / 配置校验 / Refresh Token / LLM-as-Judge / OpenTelemetry | ~17 |
-| `test_production_features.py` | 生产特性：数据库模型 / 认证服务 / 告警通知 / 知识库 API / 认证 API 集成 | ~25 |
-| `test_erp_integration.py` | ERP 集成：Mock/Real 数据格式兼容 / Token 刷新 / 重试逻辑 / 分页合并 / 查询流程 | ~30 |
-| `test_e2e_real_llm.py` | **真实 LLM E2E**（需 OPENAI_API_KEY）：产品咨询 / 退货路由 / RAG / 多轮 / 注入防御 | 5 |
+| 测试文件 | 目录 | 测试数 | 覆盖范围 |
+|---------|------|--------|---------|
+| `test_modules.py` | `unit/` | ~115 | 模块级单元测试：Session / Cache / Router / Agent / ERP / 协作 / RAG / Tools / Config / Evaluator / ReAct / Self-Reflection / ERP Factory |
+| `test_core_modules.py` | `unit/` | ~120 | 核心模块：ABTest / Tracing / AlertNotifier / RuleBasedLLM / KnowledgeRouter / Exceptions / Monitoring / CircuitBreaker / SLA |
+| `test_api_routes.py` | `unit/` | ~115 | API 路由：Sessions / Feedback / Chat(REST+SSE+文件上传) / WebSocket / Monitoring / Dependencies |
+| `test_app_factory.py` | `unit/` | 16 | 应用工厂：create_app / lifespan / _run_graph / _persist_metrics_snapshot |
+| `test_media.py` | `unit/` | ~55 | 多模态处理：Image / Audio / Video / Document / TTS 各处理器 + 边界用例 |
+| `test_llm_rag_coverage.py` | `unit/` | ~105 | LLM 客户端 + RAG 知识库：格式化 / 重试 / 熔断器 / 流式 / CLIP / 查询改写 / 重排器 |
+| `test_session_manager_coverage.py` | `unit/` | ~65 | 会话管理器 + 漂移检测：CRUD / Token / 摘要 / 漂移 / 存储后端 / 同步包装 / TokenCounter |
+| `test_ws_coverage.py` | `unit/` | 28 | WebSocket：连接清理 / 认证 / 限流 / 模块导入 |
+| `test_middleware.py` | `unit/` | 28 | 中间件：限流白名单 / 安全头 / 限流逻辑 / 认证白名单 / 输入保护 / CSRF / 角色权限 |
+| `test_prompt_manager.py` | `unit/` | 25 | Prompt 管理器：CRUD / 缓存 / API 路由 / BaseAgent 集成 |
+| `test_protocols_di.py` | `unit/` | 15 | 协议接口 + 依赖注入：Protocol conformance / Agent 构造注入 / FastAPI DI |
+| `test_rag_reranker.py` | `unit/` | 18 | RAG 重排：BM25 / CrossEncoder / 工厂 / QueryRewriter / 知识库集成 |
+| `test_token_tracker_db.py` | `unit/` | 13 | Token 追踪：记录 / 汇总 / 分位数 / DB 回滚保护 |
+| `test_integration.py` | `integration/` | 28 | Mock LLM 集成：图调用 / 缓存命中 / 5 种协作模式 / Agent process() / 漂移 / 错误降级 |
+| `test_erp_integration.py` | `integration/` | 40 | ERP 集成：Mock/Real 格式兼容 / Token 刷新 / 重试 / 分页 / 查询流程 |
+| `test_multimodal.py` | `integration/` | 21 | 多模态集成：图片处理 / AgentState 字段 / BaseAgent 消息构建 / Vision LLM 选择 |
+| `test_all.py` | `e2e/` | ~120 | 全链路 E2E：图构建 / API / 会话 / 熔断器 / SLA / 并发 / ReAct / RAG / 性能 / 上下文压力 |
+| `test_v4_production.py` | `e2e/` | 27 | 生产功能：数据库 / Auth 服务 / 告警 / API 集成（登录/注册/me/users） |
+| `test_production_features.py` | `e2e/` | 25 | 生产特性：DI 容器 / 并发安全 / 配置校验 / Refresh Token / LLM-as-Judge / OpenTelemetry |
+| `test_e2e_real_llm.py` | `e2e/` | 5 | **真实 LLM E2E**（需 `OPENAI_API_KEY`）：产品 / 退货 / RAG / 多轮 / 注入防御 |
+| `test_stress.py` | `stress/` | 12 | 压力测试（`@pytest.mark.stress`）：缓存 2000 读写 / 总线 200 并发 / 黑板 400 写入 / 会话 1000 创建 / 路由 800 调用 |
 
-**总计：383 离线测试 + 5 真实 LLM E2E = 388 tests**
+**前端测试**（Vitest + jsdom）：
+
+| 测试文件 | 目录 | 覆盖范围 |
+|---------|------|---------|
+| `theme.test.js` | `web/src/__tests__/` | 主题切换 / 暗色模式 / 系统偏好 |
+| `chatState.test.js` | `web/src/__tests__/` | 聊天状态管理 |
+| `copy.test.js` | `web/src/__tests__/` | 剪贴板复制 |
+| `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
+
+**总计：1151 Python 测试用例 + 4 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
 ```bash
-# 全量测试（离线，无需 API Key）— 383 passed
+# 全量测试（离线，无需 API Key）
 make test
 
 # 或直接使用 pytest
-python3 -m pytest tests/ -v --ignore=tests/test_e2e_real_llm.py
+python3 -m pytest tests/ -v --ignore=tests/e2e/test_e2e_real_llm.py
 
 # 真实 LLM E2E 测试（需配置 OPENAI_API_KEY）
-python3 -m pytest tests/test_e2e_real_llm.py -v -m real_llm
+python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -m real_llm
 
-# 带覆盖率报告
+# 带覆盖率报告（最低门槛 80%）
 make test-cov
 
 # 快速测试（跳过 stress 标记的慢测试）
 make test-fast
 
 # 仅 Mock LLM 集成测试（推荐演示）
-python3 -m pytest tests/test_integration.py -v
+python3 -m pytest tests/integration/test_integration.py -v
 
 # 单个测试
-python3 -m pytest tests/test_all.py -v -k "test_router"
+python3 -m pytest tests/e2e/test_all.py -v -k "test_router"
 
 # RAG 检索质量评估
 make eval-rag
 
-# 代码语法检查
+# 代码检查（Ruff）
 make lint
+
+# 代码格式化（Ruff）
+make format
 ```
 
 ### Locust 压测
@@ -802,22 +695,6 @@ make lint
 locust -f tests/performance/locustfile.py --host=http://localhost:8000
 # 访问 http://localhost:8089 配置并发用户数
 ```
-
----
-
-## 📊 架构质量评估
-
-> 基于工业化标准的七维度评估（满分 10 分），定期审查更新。
-
-| 维度 | v4.0 | v4.1 | v4.3 | v4.4 | 说明 |
-|------|------|------|------|------|------|
-| **可扩展性** | 4.0 | 5.5 | 7.0 | 7.0 | ServiceContainer DI + Redis 限流 + 双数据库 + Alembic |
-| **可靠性** | 6.0 | 7.5 | 8.0 | 8.0 | 三态熔断器 + 重试 + 优雅关闭 + 全链路健康检查 |
-| **安全性** | 5.5 | 8.0 | 8.5 | 9.0 | PyJWT + CSP nonce + WebSocket 安全 + 占位符检测 |
-| **性能** | 5.0 | 7.0 | 7.5 | 7.5 | SSE 真流式 + SQLite WAL + 二级缓存 + 连接池 |
-| **可观测性** | 7.0 | 8.5 | 9.0 | 9.0 | trace_id + Prometheus + Grafana + Loki + Alertmanager |
-| **部署运维** | 6.5 | 8.0 | 8.5 | 8.5 | 多阶段 Docker + 非 root + 灰度发布 + 密钥自动生成 + CI/CD |
-| **代码质量** | 6.0 | 7.5 | 8.0 | 8.5 | DI 容器 + 383 tests + 覆盖率门槛 60% + 模块拆分 + 类型注解 |
 
 ---
 
@@ -874,7 +751,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `WS_MAX_CONNECTIONS_PER_IP` | 5 | 每 IP 最大 WebSocket 连接数 |
 | `WS_MESSAGE_RATE_LIMIT` | 10 | 每分钟每连接最大消息数 |
 | `WS_IDLE_TIMEOUT` | 300 | WebSocket 空闲超时（秒） |
-| `JWT_SECRET` | - | JWT 签名密钥（生产必改） |
+| `JWT_SECRET` | - | JWT 签名密钥（生产必改，≥32 字符） |
 | `SESSION_TOKEN_SECRET` | - | 会话令牌签名密钥（生产必改） |
 | `JWT_EXPIRE_HOURS` | 72 | JWT token 有效期（小时） |
 | `JWT_ACCESS_EXPIRE_HOURS` | 2 | access_token 有效期（小时） |
@@ -891,6 +768,8 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | **多模态** | | |
 | `MULTIMODAL_ENABLED` | false | 多模态图片识别开关 |
 | `MAX_IMAGE_SIZE_MB` | 5 | 最大图片大小（MB） |
+| `VISION_MODEL` | - | 多模态视觉模型（留空复用 OPENAI_MODEL） |
+| `CLIP_ENABLED` | false | CLIP 多模态图片检索开关 |
 | **A/B 测试** | | |
 | `AB_TEST_ENABLED` | false | A/B 测试开关 |
 | **数据库** | | |
@@ -909,6 +788,8 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | **RAG** | | |
 | `RAG_PERSIST_DIRECTORY` | - | RAG 持久化目录（空 = 内存模式） |
 | `RAG_N_RESULTS` | 3 | RAG 检索返回文档数 |
+| `RAG_QUERY_REWRITING` | false | 查询改写开关（同义词扩展 + 多问题拆分） |
+| `REACT_SELF_REFLECTION` | false | ReAct 自反思开关（工具调用后 LLM 质量自检） |
 | **Redis 键前缀** | | |
 | `REDIS_JWT_PREFIX` | csai:jwt:blacklist: | JWT 黑名单键前缀 |
 | `REDIS_RATE_PREFIX` | csai:rate: | 限流键前缀 |
@@ -924,59 +805,30 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
-| **v4.4** | 2026-06-08 | 安全加固（PyJWT/CSP/WS）+ 代码重构（状态拆分/DI）+ 测试覆盖率门槛 + 文档完善 |
+| **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1151 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
+| **v4.6** | 2026-06-08 | 文档扫描 20/20 项完成 + pre-commit + 覆盖率 80% + api/app.py 路由拆分 7 模块 |
+| **v4.5** | 2026-06-08 | 图构建统一 + 测试断言加固 49 项 + mypy CI + 净减 317 行 |
+| **v4.4** | 2026-06-08 | 安全加固（PyJWT/CSP/WS）+ 代码重构（状态拆分/DI）+ 测试覆盖率门槛 |
 | **v4.3** | 2026-06-07 | 生产验收 8.1/10 + 密钥自动生成 + 低分重试 + 漂移检测拆分 |
-| **v4.2** | 2026-06-06 | SSE 真流式 + ServiceContainer 完全迁移 + 真实 LLM E2E 5/5 |
+| **v4.2** | 2026-06-06 | SSE 真流式 + ServiceContainer 完全迁移 + 真实 LLM E2E |
 | **v4.1** | 2026-06-05 | DeepSeek LLM + 依赖注入 + PostgreSQL + Alembic + 反馈 + 多模态 |
 | **v4.0** | 2026-06-05 | 用户认证 + 知识库管理 + 告警通知 + 审计日志 |
-| **v3.9** | 2026-06-03 | Nginx + Gunicorn + Prometheus/Grafana + CI/CD |
 
 ---
 
 ## 🏗️ 基础设施组件
 
-### 依赖注入容器（ServiceContainer）
+### 依赖注入容器（[ServiceContainer](core/container.py)）
 
-```
-Phase 1（sync __init__）：
-  MessageBus / SharedBlackboard / MetricsCollector / CircuitBreaker / SLAAlertManager / ResponseCache / SessionManager
+两阶段初始化：Phase 1 同步创建基础设施（MessageBus / Metrics / CircuitBreaker / Cache / Session），Phase 2 异步初始化 AI 组件（LLM / Agent / Router / RAG / Tools）。幂等保护 + asyncio.Lock + 逆序关闭。
 
-Phase 2（async initialize()，幂等）：
-  1. LLM Client（API Key 无效 + DEV_MODE → RuleBasedLLM 回退）
-  2. ERP Adapter（Factory：mock / real）
-  3. RAG KnowledgeBase + ToolRegistry
-  4. 7 个 Agent（注入 llm / session / bus / blackboard / erp / knowledge / tools）
-  5. QueryRouter
-  6. CollaborationOrchestrator
-  7. LangGraph StateGraph 构建
+### 中间件栈（[middleware.py](api/middleware.py)）
 
-close()：逆序关闭（LLM 连接池 → ERP 适配器）
-```
+5 层执行顺序：Trace → CSRF → Auth（分层 RBAC）→ SecurityHeaders（CSP nonce）→ RateLimit（Redis 滑动窗口）
 
-### 中间件栈（执行顺序）
+### LLM 客户端（[client.py](llm/client.py)）
 
-```
-1. TraceMiddleware    → 生成 12 字符 trace_id，注入 contextvars + X-Trace-ID 响应头
-2. AuthMiddleware     → 分层认证：公开路径 / admin 端点 / 知识库端点 / 默认端点
-3. SecurityHeaders    → CSP(nonce) + HSTS + X-Frame-Options + X-Content-Type-Options + ...
-4. RateLimitMiddleware → 通用 60/min/IP + auth 端点专项限流 + Redis 滑动窗口优先
-```
-
-### LLM 客户端（OpenAICompatibleClient）
-
-- `async_invoke()`：非流式调用，指数退避重试 + 熔断器 + Function Calling + 工具降级
-- `async_invoke_stream()`：SSE 真流式，`httpx.stream()` 逐 chunk 推送
-- 连接池隔离：按 `base_url` 分池，`asyncio.Lock` 保护
-- 消息格式化：LangChain 消息类型 → OpenAI 格式（支持多模态 content）
-
-### CI/CD 流水线
-
-```
-push/PR → test（Python 3.10/3.11/3.12 并行）
-       → security（pip-audit + bandit + 硬编码密钥扫描）
-       → build-and-push（main 分支，Docker → GHCR）
-       → deploy（需配置 DEPLOY_HOST，SSH 部署 + 健康检查验证）
-```
+OpenAI 兼容客户端：指数退避重试 + 熔断器 + Function Calling + 工具不支持时自动降级 + SSE 真流式 + 按 base_url 连接池隔离
 
 ---
 
@@ -991,8 +843,8 @@ push/PR → test（Python 3.10/3.11/3.12 并行）
 ### 开发规范
 
 - 异步优先：所有图节点和 API 端点使用 `async/await`
-- 使用 `make test` 运行测试，确保全部通过
-- 遵循 PEP 8 代码风格（`black --line-length 100`）
+- 使用 `make test` 运行测试，确保全部通过（覆盖率 ≥ 80%）
+- 代码规范：Ruff（`make lint`）+ Ruff 格式化（`make format`）
 - 新功能需包含对应的测试用例
 - 更新相关文档
 - 结构化日志：使用 `from logger import get_logger` 获取 logger

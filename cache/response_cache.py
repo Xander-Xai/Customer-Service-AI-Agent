@@ -14,9 +14,9 @@ import hashlib
 import time
 from collections import OrderedDict, defaultdict, deque
 
-import config
-from logger import get_logger
-from session_manager import _tokenize_chinese as _tokenize
+from core import config
+from core.logger import get_logger
+from core.session.session_manager import _tokenize_chinese as _tokenize
 
 logger = get_logger("cache")
 

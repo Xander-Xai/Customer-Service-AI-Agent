@@ -13,10 +13,10 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
-from config import SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX, SLA_PARALLEL_MAX
+from core.config import SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX, SLA_PARALLEL_MAX
 from core.message_bus import Message, MessageBus, MessageType
 from core.shared_blackboard import SharedBlackboard
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("collaboration.modes")
 

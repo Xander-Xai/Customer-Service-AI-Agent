@@ -9,7 +9,7 @@ TTSProcessor — 文字转语音 TTS（v5.1）
 
 import io
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("media.tts")
 

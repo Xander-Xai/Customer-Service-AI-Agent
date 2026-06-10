@@ -1,8 +1,9 @@
 /**
  * Markdown 渲染（marked.js + DOMPurify）
  */
-import { marked } from 'marked';
+
 import DOMPurify from 'dompurify';
+import { marked } from 'marked';
 
 /** 轻量清洗：后端已做完整清洗，前端仅处理传输噪声 */
 function sanitizeResponse(text) {
@@ -16,7 +17,7 @@ function sanitizeResponse(text) {
 const renderer = new marked.Renderer();
 
 // 代码块：保留语言标签 + 复制按钮
-renderer.code = function ({ text, lang }) {
+renderer.code = ({ text, lang }) => {
   const escapedCode = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -29,15 +30,14 @@ renderer.code = function ({ text, lang }) {
 };
 
 // 链接：新窗口打开
-renderer.link = function ({ href, text }) {
+renderer.link = ({ href, text }) => {
   const safeHref = escapeAttr(href || '');
   return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
 };
 
 // 表格：添加样式类
-renderer.table = function ({ header, body }) {
-  return `<div class="table-wrapper"><table class="markdown-table"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
-};
+renderer.table = ({ header, body }) =>
+  `<div class="table-wrapper"><table class="markdown-table"><thead>${header}</thead><tbody>${body}</tbody></table></div>`;
 
 marked.setOptions({ renderer, breaks: true, gfm: true });
 

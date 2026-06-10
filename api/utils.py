@@ -10,7 +10,7 @@ import re
 import uuid
 
 from auth.service import decode_token as _decode_jwt_token
-from config import API_KEY, API_KEY_ENABLED, CORS_ORIGINS, MONITORING_ADMIN_TOKEN
+from core.config import API_KEY, API_KEY_ENABLED, CORS_ORIGINS, MONITORING_ADMIN_TOKEN
 
 # ── 输入净化 ──
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")

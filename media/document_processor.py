@@ -9,7 +9,7 @@ DocumentProcessor — 文档内容提取（v5.1）
 """
 
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("media.document")
 

@@ -1,0 +1,5 @@
+# 可选依赖（延迟导入，不影响核心功能）
+opencv-python-headless>=4.8.0  # 视频处理（VideoProcessor）
+edge-tts>=6.1.0  # 语音合成（TTSProcessor）
+pdfplumber>=0.10.0  # PDF 文档解析（DocumentProcessor）
+python-docx>=1.0.0  # Word 文档解析（DocumentProcessor）

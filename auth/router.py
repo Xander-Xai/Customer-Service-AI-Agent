@@ -24,15 +24,17 @@ from .service import (
 
 
 def _dt_to_iso(dt):
-    """将 datetime 对象转换为 ISO 格式字符串，None 安全"""
+    """将 datetime 对象转换为 unix 时间戳（秒），None 安全
+    前端使用 new Date(timestamp * 1000) 渲染。
+    """
     if dt is None:
         return None
     if isinstance(dt, datetime):
-        return dt.isoformat()
+        return dt.timestamp()
     return dt
 
 
-from logger import get_logger
+from core.logger import get_logger  # noqa: E402
 
 logger = get_logger("auth.router")
 
@@ -132,7 +134,7 @@ async def api_register(data: RegisterRequest, request: Request, db=Depends(get_d
 @router.post("/login")
 async def api_login(data: LoginRequest, request: Request, db=Depends(get_db)):
     """用户登录"""
-    result = authenticate_user(data.username, data.password)
+    result = await authenticate_user(data.username, data.password)
 
     ip = request.client.host if request.client else "unknown"
     log = AuditLog(
@@ -211,14 +213,14 @@ async def api_audit_log(request: Request, limit: int = 50, db=Depends(get_db)):
     return {
         "logs": [
             {
-                "id": l.id,
-                "user_id": l.user_id,
-                "action": l.action,
-                "detail": l.detail,
-                "ip_address": l.ip_address,
-                "timestamp": _dt_to_iso(l.timestamp),
+                "id": entry.id,
+                "user_id": entry.user_id,
+                "action": entry.action,
+                "detail": entry.detail,
+                "ip_address": entry.ip_address,
+                "timestamp": _dt_to_iso(entry.timestamp),
             }
-            for l in logs
+            for entry in logs
         ]
     }
 

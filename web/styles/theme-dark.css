@@ -1,0 +1,83 @@
+/*
+ * 深色主题变体 — 2 种深色变体
+ * 通过 [data-color-mode="dark"] + [data-theme-dark] 切换
+ * 使用 :root 前缀确保特异性高于 @media prefers-color-scheme 规则
+ */
+
+/* ── 深色模式基础（经典深色默认） ── */
+:root[data-color-mode="dark"] {
+  --color-surface-base: #0f1117;
+  --color-surface-base-glass: rgba(15, 17, 23, 0.85);
+  --color-surface-elevated: #1a1a1a;
+  --color-surface-sunken: #080a0e;
+  --color-surface-hover: #252836;
+  --color-surface-active: #2a2d3a;
+
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #7a8290; /* 4.87:1 on #0f1117 ✓ AA */
+  --color-text-inverse: #1a1a1a;
+
+  --color-border: #2a2d3a;
+  --color-border-hover: #3a3d4a;
+  --color-focus: #e8eaed;
+
+  --color-action-primary: #e8eaed;
+  --color-action-primary-hover: #c9c9ce;
+  --color-action-subtle: rgba(232, 234, 237, 0.08);
+
+  --color-success: #8fcf94;
+  --color-success-bg: #1a3a1f;
+  --color-warning: #d4a657;
+  --color-warning-bg: #3a2e10;
+  --color-warning-border: rgba(212, 166, 87, 0.25);
+  --color-error: #e8908e;
+  --color-error-bg: #3a1818;
+  --color-info: #8ab8d6;
+  --color-info-bg: #0f2a3a;
+  --color-focus-ring: #e8eaed;
+
+  --color-mode-react-bg: #2a1a3e;
+  --color-mode-react-text: #c4a3e8;
+
+  --color-search-hl: rgba(212, 166, 87, 0.25);
+  --color-overlay: rgba(0, 0, 0, 0.6);
+}
+
+/* ── 暖调深色 ── */
+:root[data-color-mode="dark"][data-theme-dark="warm"] {
+  --color-surface-base: #1a1814;
+  --color-surface-base-glass: rgba(26, 24, 20, 0.85);
+  --color-surface-elevated: #2d2620;
+  --color-surface-sunken: #100e0a;
+  --color-surface-hover: #3a322a;
+  --color-surface-active: #4a423a;
+
+  --color-text-primary: #e8e7e4;
+  --color-text-secondary: #b8a88e;
+  --color-text-muted: #907f6a; /* 4.58:1 on #1a1814 ✓ AA */
+
+  --color-border: #3a322a;
+  --color-border-hover: #4a423a;
+
+  --color-action-primary: #e8e7e4;
+  --color-action-primary-hover: #d4d0c8;
+  --color-action-subtle: rgba(232, 231, 228, 0.08);
+
+  --color-success: #a3d4a6;
+  --color-success-bg: #1f331a;
+  --color-warning: #d4b06a;
+  --color-warning-bg: #332a10;
+  --color-warning-border: rgba(212, 176, 106, 0.25);
+  --color-error: #e8a0a0;
+  --color-error-bg: #331a1a;
+  --color-info: #9ac0d8;
+  --color-info-bg: #142a33;
+  --color-focus-ring: #e8e7e4;
+
+  --color-mode-react-bg: #2e1e38;
+  --color-mode-react-text: #c8a8e0;
+
+  --color-search-hl: rgba(212, 176, 106, 0.25);
+  --color-overlay: rgba(0, 0, 0, 0.65);
+}

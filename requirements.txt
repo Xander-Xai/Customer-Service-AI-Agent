@@ -50,3 +50,4 @@ psycopg2-binary>=2.9.9
 # opentelemetry-instrumentation-httpx>=0.43b0
 # opentelemetry-instrumentation-sqlalchemy>=0.43b0
 # opentelemetry-exporter-otlp>=1.22.0
+mypy

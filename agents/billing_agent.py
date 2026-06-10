@@ -19,11 +19,12 @@ _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 
 
 class BillingAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, llm=None):
         super().__init__(
             name="账单专家",
             role="财务、订单和账单问题处理",
             expertise=["退款处理", "订单查询", "发票管理", "物流跟踪", "支付问题"],
+            llm=llm,
         )
 
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:

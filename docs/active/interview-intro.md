@@ -10,7 +10,7 @@
 >
 > 这是一个面向化妆品企业的 AI 客服系统，核心目标是：**让多个 AI Agent 协同工作，处理从简单问候到复杂投诉的各种客户问题**。
 >
-> 项目基于 **LangGraph** 构建，用了 8 个 AI Agent、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。整体大约 **9,700 行 Python**，配备了 **388 个测试用例**和完整的 Docker 生产部署方案。
+> 项目基于 **LangGraph** 构建，用了 8 个 AI Agent、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。整体大约 **31,000 行 Python**，配备了 **1,100+ 个测试用例**和完整的 Docker 生产部署方案。
 
 ---
 
@@ -53,7 +53,7 @@
 >
 > 1. **ERP 集成是 Mock 的**——接口抽象和适配器工厂都做好了，但真实 API 对接需要企业配合
 > 2. **前端 CSP 允许了 `unsafe-inline`**——因为使用了内联事件处理器，后续计划迁移到 DOMPurify
-> 3. **RAG Embedding 模型局限**——当前用 ChromaDB 默认的 all-MiniLM-L6-v2（英文模型），中文 Hit Rate@3 只有 63%。已准备评估脚本量化问题，下一步替换为 BGE 中文模型
+> 3. **RAG 已优化**——初期用 ChromaDB 默认英文 embedding，Hit Rate@3 只有 63%。已替换为中文 embedding 降级链（bge-small-zh-v1.5 → text2vec-base-chinese），配合 query rewriting 和 reranker，Hit Rate@3 提升到 80%，MRR 从 0.500 提升到 0.778
 >
 > 另外在真实 LLM 集成测试中发现了两个 Mock 测试无法覆盖的问题：路由优先级排序缺陷和小模型注入泄露，都已在输出层修复。这让我深刻理解了 E2E 真实测试的不可替代性。
 >

@@ -1,10 +1,10 @@
 /**
  * API 层统一导出
  */
-import { on, off, emit } from './events.js';
-import * as ws from './websocket.js';
+import { emit, off, on } from './events.js';
 import * as rest from './rest.js';
 import { sendChatStream, sendChatStreamWithImage } from './sse.js';
+import * as ws from './websocket.js';
 
 export const API = {
   // WebSocket

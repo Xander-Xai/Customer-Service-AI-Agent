@@ -8,16 +8,17 @@ import os
 import secrets
 import time
 import uuid
-from collections import defaultdict
+import asyncio
+from collections import defaultdict, deque
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from api.utils import check_admin_token, check_api_key, check_jwt_auth, is_authenticated
-from config import (
+from core.config import (
     DEV_MODE,
 )
-from logger import get_logger, set_trace_id
+from core.logger import get_logger, set_trace_id
 
 logger = get_logger("api.middleware")
 
@@ -32,7 +33,7 @@ def get_redis_client():
         try:
             import redis
 
-            from config import REDIS_URL
+            from core.config import REDIS_URL
 
             _redis_client = redis.Redis.from_url(
                 REDIS_URL, decode_responses=True, socket_connect_timeout=3
@@ -67,25 +68,44 @@ def setup_middleware(app: FastAPI):
     """注册所有 HTTP 中间件到 FastAPI 应用"""
 
     # ── 限流中间件 ──
-    _rate_limit_store: dict[str, list] = defaultdict(list)
+    _rate_limit_store: dict[str, deque] = defaultdict(deque)
     _RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "60"))
     _RATE_LIMIT_WINDOW = int(os.environ.get("RATE_LIMIT_WINDOW", "60"))
-    _rate_limit_cleanup_counter = 0
 
-    def _cleanup_rate_limit_store():
+    _RATE_LIMIT_STORE_MAX = 100_000
+
+    def _sync_cleanup(store: dict, expiry: int) -> int:
+        """同步清理过期条目，返回清理数量。在线程池中运行避免阻塞事件循环。"""
         now = time.time()
         expired_keys = [
             key
-            for key, timestamps in _rate_limit_store.items()
-            if not timestamps or now - timestamps[-1] > 3600
+            for key, timestamps in store.items()
+            if not timestamps or now - timestamps[-1] > expiry
         ]
         for key in expired_keys:
-            del _rate_limit_store[key]
+            store.pop(key, None)
+        return len(expired_keys)
+
+    async def _periodic_cleanup():
+        loop = asyncio.get_event_loop()
+        while True:
+            await asyncio.sleep(600)  # 每 10 分钟清理一次
+            expiry = max(_RATE_LIMIT_WINDOW * 2, 300)  # 过期阈值 ≥ 300s
+            cleaned = await loop.run_in_executor(
+                None, _sync_cleanup, _rate_limit_store, expiry
+            )
+            if cleaned:
+                logger.debug(f"[RateLimit] 清理 {cleaned} 个过期条目，剩余 {len(_rate_limit_store)}")
+
+    @app.on_event("startup")
+    async def _start_periodic_cleanup():
+        asyncio.create_task(_periodic_cleanup())
 
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next):
+        path_norm = request.url.path.rstrip("/").lower()
         if (
-            request.url.path in ("/", "/api/health", "/login.html", "/admin.html", "/widget.html")
+            path_norm in ("", "/api/health", "/login.html", "/admin.html", "/widget.html")
             or request.url.path.startswith("/static/")
             or request.url.path.startswith("/ws/")
         ):
@@ -93,30 +113,24 @@ def setup_middleware(app: FastAPI):
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
-        nonlocal _rate_limit_cleanup_counter
-        _rate_limit_cleanup_counter += 1
-        if _rate_limit_cleanup_counter >= 1000:
-            _rate_limit_cleanup_counter = 0
-            _cleanup_rate_limit_store()
-
         auth_path = request.url.path
         if auth_path == "/api/auth/login":
             auth_key = f"auth_login:{client_ip}"
-            _rate_limit_store[auth_key] = [
-                t for t in _rate_limit_store.get(auth_key, []) if now - t < 300
-            ]
-            if len(_rate_limit_store[auth_key]) >= 5:
+            q = _rate_limit_store[auth_key]
+            while q and now - q[0] > 300:
+                q.popleft()
+            if len(q) >= 5:
                 return JSONResponse({"error": "登录尝试过于频繁，请 5 分钟后重试"}, status_code=429)
-            _rate_limit_store[auth_key].append(now)
+            q.append(now)
             return await call_next(request)
         if auth_path == "/api/auth/register":
             auth_key = f"auth_register:{client_ip}"
-            _rate_limit_store[auth_key] = [
-                t for t in _rate_limit_store.get(auth_key, []) if now - t < 3600
-            ]
-            if len(_rate_limit_store[auth_key]) >= 3:
+            q = _rate_limit_store[auth_key]
+            while q and now - q[0] > 3600:
+                q.popleft()
+            if len(q) >= 3:
                 return JSONResponse({"error": "注册过于频繁，请稍后再试"}, status_code=429)
-            _rate_limit_store[auth_key].append(now)
+            q.append(now)
             return await call_next(request)
 
         # Redis 优先，失败则回退到内存限流
@@ -126,12 +140,17 @@ def setup_middleware(app: FastAPI):
         elif get_redis_client() and not redis_ok:
             return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
 
-        _rate_limit_store[client_ip] = [
-            t for t in _rate_limit_store[client_ip] if now - t < _RATE_LIMIT_WINDOW
-        ]
-        if len(_rate_limit_store[client_ip]) >= _RATE_LIMIT_MAX:
+        # v5.3: 防止内存无限增长 — 新 IP 且存储超限时直接放行
+        if client_ip not in _rate_limit_store and len(_rate_limit_store) >= _RATE_LIMIT_STORE_MAX:
+            logger.warning(f"[RateLimit] 存储已达上限 {_RATE_LIMIT_STORE_MAX}，放行 {client_ip}")
+            return await call_next(request)
+
+        q = _rate_limit_store[client_ip]
+        while q and now - q[0] > _RATE_LIMIT_WINDOW:
+            q.popleft()
+        if len(q) >= _RATE_LIMIT_MAX:
             return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
-        _rate_limit_store[client_ip].append(now)
+        q.append(now)
         return await call_next(request)
 
     # ── 安全响应头 ──
@@ -167,8 +186,9 @@ def setup_middleware(app: FastAPI):
             if cl and int(cl) > 1000000:
                 return JSONResponse({"error": "Payload too large"}, status_code=413)
 
-        if path in (
-            "/",
+        path_norm = path.rstrip("/").lower()
+        if path_norm in (
+            "",
             "/api/health",
             "/login.html",
             "/admin.html",
@@ -251,7 +271,8 @@ def setup_middleware(app: FastAPI):
             return await call_next(request)
 
         # 安全方法、静态资源、WebSocket 跳过 CSRF
-        if method in _CSRF_SAFE_METHODS or path in _CSRF_SKIP_PATHS:
+        path_lower = path.rstrip("/").lower()
+        if method in _CSRF_SAFE_METHODS or path_lower in _CSRF_SKIP_PATHS:
             response = await call_next(request)
             # 在安全方法响应上设置 CSRF Cookie（无则生成）
             if method in _CSRF_SAFE_METHODS:
@@ -268,16 +289,20 @@ def setup_middleware(app: FastAPI):
                 )
             return response
 
-        if any(path.startswith(p) for p in _CSRF_SKIP_PREFIXES):
+        if any(path_lower.startswith(p) for p in _CSRF_SKIP_PREFIXES):
             return await call_next(request)
 
-        # 携带 Bearer Token 的 API 客户端跳过 CSRF
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
+        # 无 Cookie 的请求不存在 CSRF 风险，跳过
+        if not request.cookies:
             return await call_next(request)
 
         # 携带 API Key 或 Admin Token 的系统间调用跳过
         if request.headers.get("X-API-Key") or request.headers.get("X-Admin-Token"):
+            return await call_next(request)
+
+        # v5.3: Bearer Token 是 API 认证，非浏览器发起，跳过 CSRF
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
             return await call_next(request)
 
         # 浏览器请求验证 CSRF：Cookie 与 Header 必须匹配
