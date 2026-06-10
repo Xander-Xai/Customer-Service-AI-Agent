@@ -51,6 +51,9 @@ export function startNewChat() {
   resetWaiting();
   setSessionId(null);
 
+  const detailPanel = document.getElementById('sessionDetailPanel');
+  if (detailPanel) detailPanel.classList.remove('open');
+
   const chatInput = document.getElementById('chatInput');
   if (chatInput) {
     chatInput.value = '';
@@ -211,11 +214,16 @@ function _showSessionDetail(sessionId, session) {
   panel.classList.add('open');
 }
 
-// 初始化面板关闭按钮
+// 初始化面板关闭按钮 + Esc 键关闭
 (function _initPanelClose() {
   const btn = document.getElementById('btnClosePanel');
   const panel = document.getElementById('sessionDetailPanel');
   if (btn && panel) {
     btn.addEventListener('click', () => panel.classList.remove('open'));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && panel.classList.contains('open')) {
+        panel.classList.remove('open');
+      }
+    });
   }
 })();
