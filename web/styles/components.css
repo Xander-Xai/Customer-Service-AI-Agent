@@ -1025,6 +1025,38 @@
   padding: 0 1px;
 }
 
+/* ===== TTS 语音选择器 ===== */
+.tts-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  margin-top: 4px;
+}
+
+.tts-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.tts-voice-select {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  max-width: 200px;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .tts-selector {
+    display: none;
+  }
+}
+
 /* ===== 加载骨架屏 ===== */
 .session-item .skeleton {
   height: 14px;

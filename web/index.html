@@ -92,6 +92,12 @@
           </button>
         </div>
         <div class="input-hint" id="inputHint">按 Enter 发送，Shift + Enter 换行 · 支持图片/文档/视频上传 · <span class="input-help-hint" id="btnShortcuts">快捷键 <kbd>?</kbd></span></div>
+        <div class="tts-selector" id="ttsSelectorContainer">
+          <label for="selectTTSVoice" class="tts-label">🔊 语音：</label>
+          <select id="selectTTSVoice" class="tts-voice-select" aria-label="选择 TTS 语音">
+            <option value="">加载中...</option>
+          </select>
+        </div>
         <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp,video/*,.pdf,.docx,.doc,.txt,.md" style="display:none">
       </div>
     </main>
