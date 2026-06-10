@@ -4,6 +4,39 @@
 
 ---
 
+## v5.2 (2026-06-10) — 无障碍合规 + 交互增强 + 死代码清理
+
+### 无障碍合规（WCAG AA/AAA）
+- **全局交互色 AAA 达标**：push 所有 `--color-*-hover/active` token 到 ≥7.0 对比度
+- **禁用态对比度 AA 修复**：`btn-send:disabled` 改用 `--color-disabled` token，补齐 `.btn-secondary`
+- **弱化文字 AA 加深**：`--text-muted` / `--text-secondary` / `--progress-bg` 色值加深至 ≥4.5:1
+- **Disabled token 统一修正**：所有 disabled 状态色彩通过语义 token 控制
+
+### 交互增强
+- **TTS 语音选择器**：`index.html` 添加 `#selectTTSVoice` 元素，激活 `main.js` 已有逻辑
+- **会话详情侧面板**：点击会话项时自动打开侧面板，显示会话元信息（Agent / 模式 / 时间）
+- **Esc 键关闭面板**：侧面板支持 Esc 键 dismiss + 新会话自动关闭面板
+
+### 死代码清理
+- **删除 `getHistory()` / `getHistoryMessages()`**：`web/src/api/rest.js` 中 2 个无调用点的函数
+- **删除 `monitor/index.js`**：223 行死代码文件，admin-analytics.js 已完全替代
+- **清理对应 re-export**：`api/index.js` 移除已删除函数的重导出
+
+### 测试改进
+- **Ruff lint 清理**：346 → 73 warning（删除无用导入 + 断言优化）
+- **Flaky 测试修复**：修复异步 mock + 类型适配问题
+
+---
+
+## v5.1 (2026-06-10) — 全量清理与文档同步
+
+- **清理 320 个临时文件**：删除 docs/superpowers/specs/、旧计划文档、临时脚本
+- **新增模块文档同步**：theme-panel.css / theme-a11y.css / admin-analytics.js 等新模块补入项目结构说明
+- **隐私检查通过**：无遗留 API Key / Secret / Token 泄露
+- **文档结构优化**：active/ 存放当前有效文档，archive/ 存放历史归档，decisions/ 存放 ADR
+
+---
+
 ## v5.0 (2026-06-08) — 前端重构 + 前后端对齐 + 版本号统一
 
 ### 前端重构（Phase 1-4）

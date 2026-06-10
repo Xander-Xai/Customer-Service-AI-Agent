@@ -1,10 +1,12 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.0)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.2)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **v5.0** 前端 Vite 8 重构 + 1151 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
+> **v5.2** 无障碍 WCAG AA/AAA 全量达标 + TTS 语音选择器 + 会话详情侧面板 + 死代码清理 + Ruff lint 346→73
 >
-> **v4.5** 图构建统一：消除 3 处图拓扑重复定义，`build_graph(container)` 作为唯一入口
+> **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
+>
+> **v5.0** 前端 Vite 8 重构 + 1151 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
 > 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理
 
@@ -44,69 +46,69 @@ graph TB
     end
 
     subgraph Middleware["中间件层（5 层）"]
-        TRACE[1. trace_id 追踪]
-        CSRF[2. CSRF 防护<br/>双重 Cookie 提交]
-        AUTH[3. API Key / JWT<br/>分级 RBAC 认证]
-        CSP[4. 安全头 CSP/HSTS]
-        RATE[5. 限流 60req/min/IP]
+        TRACE["1. trace_id 追踪"]
+        CSRF["2. CSRF 防护 — 双重 Cookie 提交"]
+        AUTH["3. API Key / JWT — 分级 RBAC 认证"]
+        CSP["4. 安全头 CSP/HSTS"]
+        RATE["5. 限流 60req/min/IP"]
     end
 
     subgraph Graph["LangGraph StateGraph"]
-        C0[Layer 0: check_cache<br/>缓存检查]
-        C1[Layer 1: classify_query<br/>双层路由]
-        C2[Layer 2: 协作模式<br/>5 种动态选择]
-        C3[Layer 3: final_response<br/>响应后处理]
+        C0["Layer 0: check_cache — 缓存检查"]
+        C1["Layer 1: classify_query — 双层路由"]
+        C2["Layer 2: 协作模式 — 5 种动态选择"]
+        C3["Layer 3: final_response — 响应后处理"]
     end
 
     subgraph Cache["缓存层"]
-        L1[L1 精确缓存<br/>MD5 + LRU OrderedDict]
-        L2[L2 语义缓存<br/>Jaccard + jieba 分词 + 倒排索引]
-        RD2[Redis 持久化<br/>可选预热]
+        L1["L1 精确缓存 — MD5 + LRU OrderedDict"]
+        L2["L2 语义缓存 — Jaccard + jieba 分词 + 倒排索引"]
+        RD2["Redis 持久化 — 可选预热"]
     end
 
     subgraph Router["路由层"]
-        LLM[LLM Router<br/>JSON 分类]
-        RULE[Rule Classifier<br/>正则 + 复杂度评分]
+        LLM["LLM Router — JSON 分类"]
+        RULE["Rule Classifier — 正则 + 复杂度评分"]
     end
 
     subgraph Agents["5 种协作模式"]
-        SEQ[Sequential<br/>单 Agent]
-        PARA[Parallel<br/>并发 + 聚合]
-        CONS[Consultation<br/>主 + 顾问]
-        HIERS[Hierarchical<br/>协调者 + 子任务]
-        REACT[ReAct<br/>RAG + FC 推理链]
+        SEQ["Sequential — 单 Agent"]
+        PARA["Parallel — 并发 + 聚合"]
+        CONS["Consultation — 主 + 顾问"]
+        HIERS["Hierarchical — 协调者 + 子任务"]
+        REACT["ReAct — RAG + FC 推理链"]
     end
 
     subgraph Expert["7 个专家 Agent"]
-        PA[ProductAgent<br/>产品 + RAG + ERP]
-        TA[TechAgent<br/>技术支持 + RAG]
-        BA[BillingAgent<br/>账单 + ERP]
-        CA[ComplaintAgent<br/>投诉 + RAG]
-        GA[GeneralAgent<br/>通用 + 黑板桥接]
-        RA[ReActAgent<br/>多步推理 + FC]
-        RPA[ResponseAgent<br/>后处理 + 评估]
+        PA["ProductAgent — 产品 + RAG + ERP"]
+        TA["TechAgent — 技术支持 + RAG"]
+        BA["BillingAgent — 账单 + ERP"]
+        CA["ComplaintAgent — 投诉 + RAG"]
+        GA["GeneralAgent — 通用 + 黑板桥接"]
+        RA["ReActAgent — 多步推理 + FC"]
+        RPA["ResponseAgent — 后处理 + 评估"]
     end
 
     subgraph Infra["基础设施"]
-        MB[MessageBus<br/>async pub/sub]
-        BB[SharedBlackboard<br/>TTL KV]
+        MB["MessageBus — async pub/sub"]
+        BB["SharedBlackboard — TTL KV"]
         MET[MetricsCollector]
-        CB[CircuitBreaker<br/>三态熔断]
-        SLA[SLAAlertManager<br/>滑动窗口]
-        DI[ServiceContainer<br/>依赖注入]
+        CB["CircuitBreaker — 三态熔断"]
+        SLA["SLAAlertManager — 滑动窗口"]
+        DI["ServiceContainer — 依赖注入"]
     end
 
     subgraph External["外部集成"]
-        RAG[ChromaDB<br/>RAG 知识库 4+1 collection]
-        ERP[金蝶 ERP<br/>Mock / Real]
-        FC[Function Calling<br/>4 个 ERP 工具]
-        RWR[查询改写<br/>同义词扩展]
-        RRK[重排器<br/>BM25 + CrossEncoder]
+        RAG["ChromaDB — RAG 知识库 4+1 collection"]
+        ERP["金蝶 ERP — Mock / Real"]
+        FC["Function Calling — 4 个 ERP 工具"]
+        RWR["查询改写 — 同义词扩展"]
+        RRK["重排器 — BM25 + CrossEncoder"]
     end
 
     subgraph Infra2["生产基础设施"]
         NG[Nginx 反向代理 + TLS]
-        RD[Redis 7<br/>Session/Cache/JWT]
+        RD["Redis 7 — Session/Cache/JWT"]
         PG[PostgreSQL 15]
         PROM[Prometheus]
         GRAF[Grafana 仪表盘]
@@ -292,30 +294,30 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    Query[用户查询] --> L1[L1 精确缓存<br/>MD5 哈希 O(1)]
-    L1 -- hit --> Response[直接响应 <10ms]
-    L1 -- miss --> L2[L2 语义缓存<br/>Jaccard + jieba]
-    L2 -- hit --> Response
-    L2 -- miss --> Router[→ Layer 1 路由]
+    Query["用户查询"] --> L1["L1 精确缓存 — MD5 哈希 O(1)"]
+    L1 -->|"hit"| Response["直接响应 &lt;10ms"]
+    L1 -->|"miss"| L2["L2 语义缓存 — Jaccard + jieba"]
+    L2 -->|"hit"| Response
+    L2 -->|"miss"| Router["→ Layer 1 路由"]
 
     subgraph L1Detail["L1 实现"]
         direction TB
-        OD[OrderedDict LRU]
-        EVICT1[满时淘汰 5%]
-        TTL1[TTL 3600s]
+        OD["OrderedDict LRU"]
+        EVICT1["满时淘汰 5%"]
+        TTL1["TTL 3600s"]
     end
 
     subgraph L2Detail["L2 实现"]
         direction TB
-        FROZEN[frozenset 存储分词]
-        INV[倒排索引快速候选]
-        DYN[动态阈值：短文本 0.7 / 长文本 0.5]
-        EVICT2[deque FIFO 淘汰 5%]
+        FROZEN["frozenset 存储分词"]
+        INV["倒排索引快速候选"]
+        DYN["动态阈值 — 短文本 0.7 / 长文本 0.5"]
+        EVICT2["deque FIFO 淘汰 5%"]
     end
 
     L1Detail --> L1
     L2Detail --> L2
-    L1 -.-> Redis[(Redis SETEX<br/>预热 + 持久化)]
+    L1 -.-> Redis[("Redis SETEX — 预热 + 持久化")]
 ```
 
 ### 会话管理（[session_manager.py](core/session/session_manager.py)）
@@ -456,7 +458,8 @@ Thought（推理当前需要什么信息）
 | **WebSocket** | `api/websocket.js` | 指数退避重连（2s~30s）+ 心跳 + 消息队列 |
 | **文件上传** | `chat/input.js` | 支持图片/视频/PDF/DOCX/文本，REST `/api/chat/file` |
 | **语音输入** | `chat/voice.js` | Web Speech API + 🎤 按钮 |
-| **TTS 语音** | `chat/voice.js` | Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器 |
+| **TTS 语音** | `chat/voice.js` | Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器 `<select>` |
+| **会话侧面板** | `chat/sessions.js` | 点击会话项弹出侧面板（Agent/模式/时间），Esc 关闭 |
 | **主题系统** | `utils/theme.js` + 8 个 CSS | 亮色 4 种 + 暗色 2 种 + 字号/行高/减弱动效/系统偏好 |
 | **认证** | `auth/index.js` + `login.js` | JWT 登录/注册 + Token 自动刷新（过期前 5 分钟） |
 | **管理后台** | `admin.html` + `admin.js` | 用户管理 / 知识库统计 / 告警配置 / ChromaDB+DB 健康状态 |
@@ -805,6 +808,8 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
+| **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + TTS 语音选择器 + 会话侧面板 + 死代码清理 + Ruff 346→73 |
+| **v5.1** | 2026-06-10 | 全量清理 320 临时文件 + 文档同步 + 隐私检查通过 |
 | **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1151 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
 | **v4.6** | 2026-06-08 | 文档扫描 20/20 项完成 + pre-commit + 覆盖率 80% + api/app.py 路由拆分 7 模块 |
 | **v4.5** | 2026-06-08 | 图构建统一 + 测试断言加固 49 项 + mypy CI + 净减 317 行 |
