@@ -96,7 +96,7 @@ class TestGraphEndToEnd:
     @pytest.mark.asyncio
     async def test_simple_query_end_to_end(self):
         """简单查询：缓存未命中 → 路由 → Sequential → 响应"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         app = build_graph(self.container)
         state = _make_state("这款精华液多少钱？")
@@ -112,7 +112,7 @@ class TestGraphEndToEnd:
     @pytest.mark.asyncio
     async def test_cache_hit_skips_routing(self):
         """缓存命中 → 直接跳到 final_response，跳过路由"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         app = build_graph(self.container)
 
@@ -134,7 +134,7 @@ class TestGraphEndToEnd:
     async def test_complaint_query_end_to_end(self):
         """投诉查询 → 端到端走通（mock LLM 路由器可能返回非 complaint 分类，
         但图应仍能完整执行并返回响应。投诉→hierarchical 路由逻辑由 TestRoutingLogic 单独验证）"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         app = build_graph(self.container)
         state = _make_state("我要投诉！你们的产品导致我皮肤过敏，要求退款赔偿！")
@@ -149,7 +149,7 @@ class TestGraphEndToEnd:
     async def test_multi_domain_query_end_to_end(self):
         """多领域查询 → 端到端走通（mock LLM 路由器分类有限，但图应完整执行。
         多领域→parallel/react 路由逻辑由 TestRoutingLogic 单独验证）"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         app = build_graph(self.container)
         state = _make_state("我买了你们的精华液，想查一下订单物流，另外产品成分安全吗？")
@@ -163,7 +163,7 @@ class TestGraphEndToEnd:
     @pytest.mark.asyncio
     async def test_general_inquiry_sequential(self):
         """通用咨询 → Sequential 模式（使用唯一查询避免缓存干扰）"""
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         app = build_graph(self.container)
         # 使用带时间戳的唯一查询，避免被之前的测试缓存命中
@@ -185,7 +185,7 @@ class TestAgentProcess:
     def setup(self):
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -307,7 +307,7 @@ class TestAgentSessionContext:
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -361,7 +361,7 @@ class TestDriftDetection:
 
     @pytest.fixture(autouse=True)
     async def setup(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.session_id = "drift-test"
@@ -414,7 +414,7 @@ class TestCollaborationModes:
         from core.message_bus import MessageBus
         from core.shared_blackboard import SharedBlackboard
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -529,7 +529,7 @@ class TestErrorHandling:
 
     @pytest.fixture(autouse=True)
     def setup(self):
-        import multi_agent_customer_service as graph_mod
+        from core import graph_builder as graph_mod
 
         self.graph_mod = graph_mod
         graph_mod.llm = None
@@ -548,7 +548,7 @@ class TestErrorHandling:
         """LLM 超时 → 降级到 fallback 响应"""
         from agents import ProductAgent
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         agent = ProductAgent()
@@ -577,7 +577,7 @@ class TestErrorHandling:
     async def test_llm_connection_error_graceful_degradation(self):
         """LLM 连接错误 → 降级到 fallback"""
         from agents import TechAgent
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         agent = TechAgent()
@@ -603,7 +603,7 @@ class TestErrorHandling:
     async def test_erp_unavailable_graceful_degradation(self):
         """ERP 不可用 → Agent 仍能返回响应"""
         from agents import BillingAgent
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         mock_llm = _make_mock_llm("订单信息暂时无法获取，请稍后重试。")

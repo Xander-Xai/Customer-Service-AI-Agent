@@ -16,11 +16,19 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
-from config import AB_TEST_ENABLED, TOOL_MAX_ROUNDS
+from core.config import AB_TEST_ENABLED, TOOL_MAX_ROUNDS
+from llm.client import LLMServiceError
 from core.message_bus import Message, MessageBus, MessageType
+from core.protocols import (
+    ERPProtocol,
+    KnowledgeBaseProtocol,
+    LLMProtocol,
+    SessionManagerProtocol,
+    ToolRegistryProtocol,
+)
 from core.shared_blackboard import SharedBlackboard
-from logger import get_logger, get_trace_id
-from session_manager import DRIFT_REPAIR_STRATEGIES, DriftType, EnhancedSessionManager
+from core.logger import get_logger, get_trace_id
+from core.session.session_manager import DRIFT_REPAIR_STRATEGIES, DriftType, EnhancedSessionManager
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3  # 最大重试次数
@@ -56,33 +64,36 @@ class BaseAgent(ABC):
         name: str,
         role: str,
         expertise: list[str],
-        session_manager: EnhancedSessionManager = None,
-        message_bus: MessageBus = None,
-        blackboard: SharedBlackboard = None,
-        erp_adapter=None,
+        llm: LLMProtocol | None = None,
+        session_manager: SessionManagerProtocol | None = None,
+        message_bus: MessageBus | None = None,
+        blackboard: SharedBlackboard | None = None,
+        erp_adapter: ERPProtocol | None = None,
     ):
         self.name = name
         self.role = role
         self.expertise = expertise
-        self.llm = None
-        self.vision_llm = None  # v5.1: Vision LLM（多模态模型）
-        self.session_manager = session_manager or EnhancedSessionManager()
+        self.llm: LLMProtocol | None = llm
+        self.vision_llm: LLMProtocol | None = None
+        self.session_manager: SessionManagerProtocol = session_manager or EnhancedSessionManager()
         self.bus = message_bus
         self.bb = blackboard
-        self.erp = erp_adapter
+        self.erp: ERPProtocol | None = erp_adapter
         self.logger = get_logger(f"agent.{name}")
         # v3.5: RAG 知识库和工具注册（可选，不影响现有 Agent）
-        self.knowledge_base = None
-        self.tool_registry = None
+        self.knowledge_base: KnowledgeBaseProtocol | None = None
+        self.tool_registry: ToolRegistryProtocol | None = None
         # v4.1: A/B 测试管理器（可选）
         self.ab_test_manager = None
         # v4.1: Prompt 变体映射 {variant_name: prompt_text}，子类可覆盖
         self.prompt_variants: dict[str, str] = {}
+        # v5.1: Prompt 版本管理器（可选，从 DB 加载 Prompt）
+        self.prompt_manager = None
 
-    def set_llm(self, llm):
+    def set_llm(self, llm: LLMProtocol):
         self.llm = llm
 
-    def set_vision_llm(self, vision_llm):
+    def set_vision_llm(self, vision_llm: LLMProtocol):
         """v5.1: 注入 Vision LLM 客户端（多模态模型）"""
         self.vision_llm = vision_llm
 
@@ -101,14 +112,14 @@ class BaseAgent(ABC):
     def set_blackboard(self, bb: SharedBlackboard):
         self.bb = bb
 
-    def set_erp(self, erp):
+    def set_erp(self, erp: ERPProtocol):
         self.erp = erp
 
-    def set_knowledge_base(self, kb):
+    def set_knowledge_base(self, kb: KnowledgeBaseProtocol):
         """v3.5: 注入 RAG 知识库"""
         self.knowledge_base = kb
 
-    def set_tool_registry(self, registry):
+    def set_tool_registry(self, registry: ToolRegistryProtocol):
         """v3.5: 注入工具注册中心"""
         self.tool_registry = registry
 
@@ -119,6 +130,10 @@ class BaseAgent(ABC):
     def set_prompt_variants(self, variants: dict[str, str]):
         """v4.1: 设置 Prompt 变体映射 {variant_name: prompt_text}"""
         self.prompt_variants = variants
+
+    def set_prompt_manager(self, prompt_manager):
+        """v5.1: 注入 Prompt 版本管理器"""
+        self.prompt_manager = prompt_manager
 
     def _resolve_prompt_for_variant(
         self,
@@ -216,8 +231,25 @@ class BaseAgent(ABC):
             self.logger.error(f"添加消息出错: {e}")
 
     def _format_system_prompt(self, template: str) -> str:
-        """v3.4: 统一系统提示词格式化（消除 5 个子类的重复代码）"""
-        return template.format(
+        """v5.1: 统一系统提示词格式化。
+
+        优先级：PromptManager（DB 版本） → 传入的 template（模块级常量）
+        PromptManager 中的 prompt 也支持 {self_name} 等模板变量。
+        """
+        # v5.1: 从 PromptManager 获取 DB 版本（如有）
+        effective_template = template
+        if self.prompt_manager:
+            try:
+                db_prompt = self.prompt_manager.get_prompt(
+                    agent_name=self.name.lower().replace(" ", "_"),
+                    default_prompt=template,
+                )
+                if db_prompt:
+                    effective_template = db_prompt
+            except Exception as e:
+                self.logger.debug(f"PromptManager 获取失败，使用默认 prompt: {e}")
+
+        return effective_template.format(
             self_name=self.name, self_role=self.role, self_expertise=", ".join(self.expertise)
         )
 
@@ -310,21 +342,36 @@ class BaseAgent(ABC):
     ) -> str:
         """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
         v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
+        v5.2: 支持 Query Rewriting（LLM 改写查询）和 Reranker（重排序）。
         返回格式化字符串，可直接拼入 extra_context。
         知识库不可用时静默返回空字符串。
         """
         if not self.knowledge_base or not self.knowledge_base.available:
             return ""
         try:
+            # v5.2: Query Rewriting — 用 LLM 改写口语化查询
+            from core.config import RAG_QUERY_REWRITING
+
+            effective_query = query
+            if RAG_QUERY_REWRITING and self.llm:
+                effective_query = await self.knowledge_base.rewrite_query(query, self.llm)
+
             # v5.1: 多模态融合检索
             if image_uri and hasattr(self.knowledge_base, "query_multimodal"):
                 results = await self.knowledge_base.query_multimodal(
-                    query, image_uri=image_uri, collections=collections, n_results=n_results
+                    effective_query, image_uri=image_uri, collections=collections, n_results=n_results
                 )
             elif collections:
-                results = await self.knowledge_base.query_multiple(collections, query, n_results)
+                # v5.2: 多检索一些结果用于重排序
+                fetch_n = n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
+                results = await self.knowledge_base.query_multiple(
+                    collections, effective_query, fetch_n
+                )
+                # v5.2: Reranker — 基于关键词匹配度重排序
+                if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
+                    results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
             else:
-                results = await self.knowledge_base.query("product_knowledge", query, n_results)
+                results = await self.knowledge_base.query("product_knowledge", effective_query, n_results)
             if not results:
                 return ""
             parts = []
@@ -376,6 +423,20 @@ class BaseAgent(ABC):
         messages.append(SystemMessage(content=system_prompt_enhanced))
 
         user_content = f"<user_input>\n{customer_query}\n</user_input>"
+        # v5.2: 读取黑板上的其他 Agent 发现
+        if self.bb:
+            try:
+                bb_findings = []
+                for prefix in ["product.", "tech.", "erp.", "complaint."]:
+                    entries = await self.bb.read_prefix(prefix)
+                    if entries:
+                        for key, val in entries.items():
+                            if isinstance(val, dict):
+                                bb_findings.append(f"[{prefix.rstrip('.')}] {val}")
+                if bb_findings:
+                    user_content += "\n\n[其他 Agent 发现]\n" + "\n".join(bb_findings[-3:])
+            except Exception:
+                pass
         if extra_context:
             user_content += f"\n\n{extra_context}"
         if repair_context:
@@ -481,6 +542,32 @@ class BaseAgent(ABC):
                 response_content = response.content
                 break
 
+        # v5.2: Self-Reflection — 最终回答前自检
+        from core.config import REACT_SELF_REFLECTION
+
+        if REACT_SELF_REFLECTION and response_content and response_content != fallback_response:
+            try:
+                reflection_prompt = [
+                    SystemMessage(
+                        content=(
+                            "你是质量检查员。检查以下回答是否完整、准确、有帮助。"
+                            "如果有明显遗漏或错误，简要指出。如果回答良好，只回复 PASS。"
+                        )
+                    ),
+                    HumanMessage(
+                        content=f"用户问题：{state.get('customer_query', '')}\n\n回答：{response_content}"
+                    ),
+                ]
+                reflection = await effective_llm.async_invoke(reflection_prompt)
+                if reflection.content and "PASS" not in reflection.content.upper():
+                    messages.append(SystemMessage(content=f"[自检反馈] {reflection.content}"))
+                    messages.append(HumanMessage(content="请根据自检反馈改进你的回答。"))
+                    improved = await effective_llm.async_invoke(messages)
+                    if improved.content:
+                        response_content = improved.content
+            except Exception as e:
+                self.logger.debug(f"Self-Reflection 失败，保留原回答: {e}")
+
         if not response_content:
             response_content = fallback_response
 
@@ -517,6 +604,13 @@ class BaseAgent(ABC):
         当 state 包含 stream_callback 时，自动启用真流式逐 token 推送；
         否则使用标准非流式调用。所有子类 Agent 无需修改即可获得流式能力。
         """
+        # v5.1: 运行时依赖检查
+        if self.llm is None:
+            raise RuntimeError(
+                f"Agent '{self.name}' 的 LLM 未注入。"
+                "请通过 set_llm() 或构造函数注入 LLMProtocol 实现。"
+            )
+
         # v4.1: A/B 测试变体 prompt 解析
         user_id = state.get("user_id", state.get("session_id", "default"))
         resolved_prompt, variant, exp_name = self._resolve_prompt_for_variant(
@@ -539,20 +633,30 @@ class BaseAgent(ABC):
                         await stream_callback({"type": "chunk", "content": chunk})
                     except Exception as e:
                         self.logger.debug(f"stream_callback 推送 chunk 失败: {e}")
-            except Exception as e:
-                self.logger.error(f"LLM 流式调用出错 [{get_trace_id()}]: {e}")
+            except LLMServiceError as e:
+                self.logger.error(f"LLM 服务错误 [{get_trace_id()}]: {e}")
                 response_content = fallback_response
                 try:
                     await stream_callback({"type": "chunk", "content": fallback_response})
-                except Exception as e:
-                    self.logger.debug(f"stream_callback 推送 fallback 失败: {e}")
+                except Exception as cb_err:
+                    self.logger.debug(f"stream_callback 推送 fallback 失败: {cb_err}")
+            except Exception as e:
+                self.logger.error(f"LLM 流式调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}")
+                response_content = fallback_response
+                try:
+                    await stream_callback({"type": "chunk", "content": fallback_response})
+                except Exception as cb_err:
+                    self.logger.debug(f"stream_callback 推送 fallback 失败: {cb_err}")
         else:
             # 非流式模式（原有逻辑）
             try:
                 response = await effective_llm.async_invoke(messages)
                 response_content = response.content
+            except LLMServiceError as e:
+                self.logger.error(f"LLM 服务错误 [{get_trace_id()}]: {e}")
+                response_content = fallback_response
             except Exception as e:
-                self.logger.error(f"LLM 调用出错 [{get_trace_id()}]: {e}")
+                self.logger.error(f"LLM 调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}")
                 response_content = fallback_response
 
         await self._add_message_to_session(session_id, response_content, is_user=False)

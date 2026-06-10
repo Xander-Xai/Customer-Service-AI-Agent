@@ -4,8 +4,8 @@
 - PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
-
 import asyncio
+import contextlib
 import hashlib
 import hmac
 import json
@@ -20,7 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from db.database import get_db_session
 from db.models import User
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("auth.service")
 
@@ -28,7 +28,7 @@ logger = get_logger("auth.service")
 _revoked_jtis: set = set()
 
 # JWT 配置（v4.0 安全修复：从 config 读取，不再有硬编码默认值）
-import config as _config
+from core import config as _config  # noqa: E402
 
 _JWT_ALGORITHM = "HS256"
 _JWT_EXPIRE_HOURS = _config.JWT_EXPIRE_HOURS
@@ -319,10 +319,8 @@ def decode_token(token: str) -> dict[str, Any] | None:
         elif jti in _denylist._memory_set:
             return None
     # PyJWT 要求 sub 为字符串，但下游代码期望 int，这里转回
-    try:
+    with contextlib.suppress(ValueError, TypeError, KeyError):
         payload["sub"] = int(payload["sub"])
-    except (ValueError, TypeError, KeyError):
-        pass
     return payload
 
 
@@ -340,10 +338,8 @@ async def decode_token_async(token: str) -> dict[str, Any] | None:
     jti = payload.get("jti")
     if jti and await _denylist.contains(jti):
         return None
-    try:
+    with contextlib.suppress(ValueError, TypeError, KeyError):
         payload["sub"] = int(payload["sub"])
-    except (ValueError, TypeError, KeyError):
-        pass
     return payload
 
 
@@ -418,7 +414,7 @@ def register_user(username: str, password: str, display_name: str = "") -> dict[
         db.close()
 
 
-def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
+async def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
     """验证用户并返回 token"""
     db = get_db_session()
     try:
@@ -431,8 +427,10 @@ def authenticate_user(username: str, password: str) -> dict[str, Any] | None:
         db.commit()
 
         token = create_token(user.id, user.username, user.role)
+        refresh_token = await create_refresh_token(user.id, user.username, user.role)
         return {
             "token": token,
+            "refresh_token": refresh_token,
             "user_id": user.id,
             "username": user.username,
             "role": user.role,

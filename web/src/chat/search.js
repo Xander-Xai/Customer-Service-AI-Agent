@@ -31,12 +31,12 @@ function highlightMatches(query) {
   const bubbles = document.querySelectorAll('.message-bubble');
   let firstMatch = null;
 
-  bubbles.forEach(bubble => {
+  bubbles.forEach((bubble) => {
     const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT, null);
     const textNodes = [];
     while (walker.nextNode()) textNodes.push(walker.currentNode);
 
-    textNodes.forEach(node => {
+    textNodes.forEach((node) => {
       const text = node.textContent;
       const lowerText = text.toLowerCase();
       if (!lowerText.includes(lowerQuery)) return;
@@ -77,12 +77,12 @@ function highlightMatches(query) {
 }
 
 function clearHighlights() {
-  document.querySelectorAll('.search-highlight').forEach(mark => {
+  document.querySelectorAll('.search-highlight').forEach((mark) => {
     const text = document.createTextNode(mark.textContent);
     mark.parentNode.replaceChild(text, mark);
   });
   // 合并相邻文本节点
-  document.querySelectorAll('.message-bubble').forEach(bubble => {
+  document.querySelectorAll('.message-bubble').forEach((bubble) => {
     bubble.normalize();
   });
 }

@@ -11,6 +11,7 @@ RAG 检索质量评估脚本（面试用）
 
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -217,6 +218,27 @@ EVAL_DATASET: list[dict[str, Any]] = [
 ]
 
 
+def compute_faithfulness(answer: str, contexts: list[str]) -> float:
+    """简单的 faithfulness 计算：回答中有多少句子被上下文支持"""
+    sentences = re.split(r'[。！？\n]', answer)
+    sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 5]
+    if not sentences:
+        return 0.0
+
+    supported = 0
+    context_text = " ".join(contexts)
+    for sent in sentences:
+        # 检查句子中的关键词是否在上下文中出现
+        keywords = set(sent.replace("，", " ").replace("、", " ").split())
+        keywords = {k for k in keywords if len(k) >= 2}
+        if keywords:
+            overlap = sum(1 for k in keywords if k in context_text)
+            if overlap / len(keywords) >= 0.3:
+                supported += 1
+
+    return supported / len(sentences) if sentences else 0.0
+
+
 async def evaluate_rag():
     """执行 RAG 检索质量评估"""
 
@@ -252,7 +274,7 @@ async def evaluate_rag():
     results = []
     K = 3  # Top-K
 
-    for i, case in enumerate(EVAL_DATASET, 1):
+    for _i, case in enumerate(EVAL_DATASET, 1):
         query = case["query"]
         expected_kws = case["expected_keywords"]
         expected_col = case["expected_collection"]
@@ -287,6 +309,23 @@ async def evaluate_rag():
         recall_at_k = 1.0 if hit else 0.0
         avg_distance = sum(distances) / len(distances) if distances else 999
 
+        # v5.1: NDCG@K — 排序质量指标
+        import math
+
+        dcg = 0.0
+        for rank, doc in enumerate(retrieved, 1):
+            content = doc["content"].lower()
+            rel = 1.0 if any(kw.lower() in content for kw in expected_kws) else 0.0
+            dcg += rel / math.log2(rank + 1)
+        # IDCG: 如果所有相关文档都排在最前面
+        n_relevant = min(precision_hits, K)
+        idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_relevant + 1)) if n_relevant > 0 else 0
+        ndcg_at_k = dcg / idcg if idcg > 0 else 0.0
+
+        # Faithfulness: 检索结果与查询关键词的匹配质量
+        contexts = [doc["content"] for doc in retrieved]
+        faithfulness = compute_faithfulness(query, contexts)
+
         result = {
             "query": query,
             "category": category,
@@ -295,6 +334,8 @@ async def evaluate_rag():
             "precision_at_k": precision_at_k,
             "recall_at_k": recall_at_k,
             "mrr": mrr,
+            "ndcg_at_k": ndcg_at_k,
+            "faithfulness": faithfulness,
             "avg_distance": avg_distance,
             "first_relevant_rank": first_relevant_rank,
             "retrieved_count": len(retrieved),
@@ -330,11 +371,15 @@ async def evaluate_rag():
     precisions = [r["precision_at_k"] for r in results]
     recalls = [r["recall_at_k"] for r in results]
     mrrs = [r["mrr"] for r in results]
+    ndcgs = [r.get("ndcg_at_k", 0) for r in results]
+    faithfulnesses = [r["faithfulness"] for r in results]
     distances = [r["avg_distance"] for r in results]
 
     avg_precision = sum(precisions) / len(precisions) if precisions else 0
     avg_recall = sum(recalls) / len(recalls) if recalls else 0
     avg_mrr = sum(mrrs) / len(mrrs) if mrrs else 0
+    avg_ndcg = sum(ndcgs) / len(ndcgs) if ndcgs else 0
+    avg_faithfulness = sum(faithfulnesses) / len(faithfulnesses) if faithfulnesses else 0
     avg_distance_all = sum(distances) / len(distances) if distances else 0
 
     # 按类别统计
@@ -358,6 +403,8 @@ async def evaluate_rag():
     print(f"  │  Precision@{K}:          {avg_precision:>6.1%}     │")
     print(f"  │  Recall@{K}:             {avg_recall:>6.1%}     │")
     print(f"  │  MRR:                  {avg_mrr:>6.3f}     │")
+    print(f"  │  NDCG@{K}:              {avg_ndcg:>6.3f}     │")
+    print(f"  │  Faithfulness:         {avg_faithfulness:>6.1%}     │")
     print(f"  │  平均检索距离:         {avg_distance_all:>6.4f}  │")
     print("  └─────────────────────────────────┘")
     print()
@@ -377,7 +424,7 @@ async def evaluate_rag():
     print()
     print(f'  "我的 RAG 系统使用 ChromaDB 向量检索，{pk_count + faq_count + ts_count} 篇文档')
     print("   分 3 个 collection（产品知识/FAQ/技术支持）。")
-    print(f"   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}。")
+    print(f"   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}，Faithfulness {avg_faithfulness:.1%}。")
     print(f'   这意味着 {hit_rate:.0%} 的用户问题能在前 {K} 条检索结果中找到相关答案。"')
     print()
     print("=" * 70)
@@ -390,6 +437,7 @@ async def evaluate_rag():
         "precision_at_k": round(avg_precision, 4),
         "recall_at_k": round(avg_recall, 4),
         "mrr": round(avg_mrr, 4),
+        "faithfulness": round(avg_faithfulness, 4),
         "avg_distance": round(avg_distance_all, 4),
         "k": K,
         "collections": {

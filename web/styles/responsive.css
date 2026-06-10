@@ -5,7 +5,9 @@
   .monitor-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-  .card-full { grid-column: span 2; }
+  .card-full {
+    grid-column: span 2;
+  }
 }
 
 /* 移动端（≤768px）：侧边栏改为抽屉模式 */
@@ -28,7 +30,7 @@
 
   /* 汉堡菜单按钮（仅移动端显示） */
   .nav-menu-btn {
-    display: flex !important;
+    display: flex;
   }
 
   /* 侧边栏遮罩 */
@@ -43,11 +45,22 @@
     display: block;
   }
 
-  .monitor-sidebar { display: none; }
-  .monitor-grid { grid-template-columns: 1fr; }
-  .card-wide, .card-full { grid-column: span 1; }
-  .quick-prompts { grid-template-columns: 1fr; }
-  .message { max-width: 95%; }
+  .monitor-sidebar {
+    display: none;
+  }
+  .monitor-grid {
+    grid-template-columns: 1fr;
+  }
+  .card-wide,
+  .card-full {
+    grid-column: span 1;
+  }
+  .quick-prompts {
+    grid-template-columns: 1fr;
+  }
+  .message {
+    max-width: 95%;
+  }
 
   /* 触摸目标优化：最小 44×44px */
   .btn-feedback,
@@ -67,7 +80,9 @@
   }
 
   /* 隐藏版本号（节省空间） */
-  .nav-logo-version { display: none; }
+  .nav-logo-version {
+    display: none;
+  }
 }
 
 /* 超小屏幕（≤480px） */

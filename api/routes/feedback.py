@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.utils import sanitize_input
-from logger import get_logger
+from core.logger import get_logger
 
 
 class FeedbackRequest(BaseModel):
@@ -72,6 +72,22 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
 
     if metrics:
         await metrics.record_feedback(resolved=bool(resolved))
+
+    # v5.1: 记录反馈到 Prompt 版本评分
+    prompt_manager = getattr(state, "prompt_manager", None)
+    if prompt_manager and session_id:
+        try:
+            # 从 session 中获取使用的 agent
+            if sm:
+                session = await sm.get_session(session_id)
+                agent_name = (session or {}).get("last_agent", "")
+                if agent_name:
+                    prompt_manager.record_feedback(
+                        agent_name=agent_name.lower().replace(" ", "_"),
+                        score=float(rating),
+                    )
+        except Exception as e:
+            logger.debug(f"Prompt 反馈记录失败: {e}")
 
     if bus:
         try:

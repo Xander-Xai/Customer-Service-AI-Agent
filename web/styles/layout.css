@@ -1,7 +1,9 @@
 /* ===== 顶部导航 ===== */
 .nav-header {
   height: var(--header-height);
-  background: var(--bg-surface);
+  background: var(--color-surface-base-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -20,13 +22,12 @@
 .nav-logo-icon {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, var(--primary), #a855f7);
+  background: var(--primary);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
-  box-shadow: var(--shadow-glow);
 }
 
 .nav-logo-text {
@@ -70,14 +71,29 @@
 }
 
 .nav-link.active {
-  color: var(--primary);
-  background: var(--primary-subtle);
+  color: var(--text-primary);
+  font-weight: 600;
+  background: none;
+  border-bottom: 2px solid var(--primary);
+  border-radius: 0;
+  padding-bottom: 6px;
 }
 
 .nav-status {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* 汉堡菜单按钮（默认隐藏，移动端显示） */
+.nav-menu-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 20px;
+  cursor: pointer;
+  padding: 4px 8px;
 }
 
 .status-indicator {
@@ -110,7 +126,9 @@
 /* ===== 侧边栏（会话历史） ===== */
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--bg-surface);
+  background: var(--color-surface-base-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -124,9 +142,9 @@
 }
 
 .sidebar-title {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 12px;
@@ -151,8 +169,11 @@
 
 .btn-new-chat:hover {
   background: var(--primary-hover);
-  box-shadow: var(--shadow-glow);
   transform: translateY(-1px);
+}
+
+.btn-new-chat:active {
+  transform: scale(0.98);
 }
 
 .session-list {
@@ -176,8 +197,9 @@
 }
 
 .session-item.active {
-  background: var(--primary-subtle);
-  border-color: rgba(99, 102, 241, 0.2);
+  background: var(--bg-hover);
+  border-left: 3px solid var(--primary);
+  padding-left: 9px;
 }
 
 .session-item-title {
@@ -198,3 +220,33 @@
   gap: 8px;
 }
 
+/* 导航栏用户信息区域 */
+#userInfo {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 12px;
+}
+
+#adminLink {
+  display: none;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+#logoutBtn {
+  display: none;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  margin-left: 8px;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+#logoutBtn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+}

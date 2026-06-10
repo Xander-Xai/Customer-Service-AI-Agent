@@ -14,7 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from logger import get_logger
+from core.logger import get_logger
 
 from .models import Base
 
@@ -23,7 +23,7 @@ logger = get_logger("db")
 # ===== 数据库 URL 解析 =====
 # 优先使用 config.DATABASE_URL（环境变量 DATABASE_URL），为空则回退 SQLite
 try:
-    from config import DATABASE_URL as _CFG_DATABASE_URL
+    from core.config import DATABASE_URL as _CFG_DATABASE_URL
 except ImportError:
     _CFG_DATABASE_URL = os.getenv("DATABASE_URL", "")
 
@@ -92,7 +92,7 @@ def init_db():
 
         # 优先使用配置的 alembic.ini 路径
         try:
-            from config import ALEMBIC_CONFIG_PATH as _alembic_cfg
+            from core.config import ALEMBIC_CONFIG_PATH as _alembic_cfg
         except ImportError:
             _alembic_cfg = os.getenv("ALEMBIC_CONFIG_PATH", "alembic.ini")
 
@@ -116,10 +116,13 @@ def init_db():
 
 
 def get_db():
-    """FastAPI 依赖注入：获取数据库会话"""
+    """FastAPI 依赖注入：获取数据库会话（v5.1: 异常时自动 rollback）"""
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

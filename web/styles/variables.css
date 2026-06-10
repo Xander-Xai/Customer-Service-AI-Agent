@@ -1,58 +1,219 @@
 /*
  * 多智能体客服系统 - 设计系统
- * 暗色主题 + 企业级 SaaS 风格
- * 参考 Intercom / Zendesk / Crisp 现代设计语言
+ * 3 层 token 架构：原始层 → 语义层 → 组件层
+ *
+ * 原始层：真实颜色值（--gray-50, --white-pure 等）
+ * 语义层：组件使用的语义名（--color-surface-base, --color-text-primary 等）
+ * 组件层：在具体组件 CSS 中使用（var(--color-action-primary)）
+ *
+ * 主题切换通过 data-theme-light / data-color-mode / data-theme-dark / data-font-size
+ * / data-line-height / data-motion 在 html 根元素上设置。
+ *
+ * 旧变量名（--primary, --bg-base 等）保留为 alias 以便渐进迁移。
  */
 
-/* ===== CSS 变量系统（便于主题切换） ===== */
+/* ============================================================
+ * [1] 原始层（Primitive Tokens）— 默认：暖骨白主题
+ * ============================================================ */
 :root {
-  /* 主色调 */
-  --primary: #6366f1;
-  --primary-hover: #818cf8;
-  --primary-glow: rgba(99, 102, 241, 0.15);
-  --primary-subtle: rgba(99, 102, 241, 0.08);
+  /* Gray 阶梯 */
+  --gray-50: #fafafa;
+  --gray-100: #f5f5f5;
+  --gray-200: #e5e5e5;
+  --gray-300: #d4d4d4;
+  --gray-400: #a3a3a3;
+  --gray-500: #737373;
+  --gray-600: #525252;
+  --gray-700: #404040;
+  --gray-800: #262626;
+  --gray-900: #171717;
 
-  /* 语义色 */
-  --success: #22c55e;
-  --success-bg: rgba(34, 197, 94, 0.1);
-  --warning: #f59e0b;
-  --warning-bg: rgba(245, 158, 11, 0.1);
-  --error: #ef4444;
-  --error-bg: rgba(239, 68, 68, 0.1);
-  --info: #3b82f6;
-  --info-bg: rgba(59, 130, 246, 0.1);
+  /* 主题基色（暖骨白默认） */
+  --white-pure: #ffffff;
+  --bone-warm: #f7f6f3;
+  --bone-sunken: #ebe9e6;
+  --bone-hover: #f0efec;
+  --bone-border: #e8e7e4;
+  --bone-border-hover: #d4d3d0;
 
-  /* 背景层级 */
-  --bg-base: #0f1117;
-  --bg-surface: #161822;
-  --bg-elevated: #1e2030;
-  --bg-hover: #252840;
-  --bg-active: #2d3050;
-  --bg-overlay: rgba(0, 0, 0, 0.6);
+  /* 主题变体基色（primitive 层） */
+  --color-soft-gray: #f8f9fa;
+  --color-cream: #faf7f2;
+  --color-cream-sunken: #f5f2ec;
+  --color-soft-gray-text: #2d3748;
+  --color-soft-gray-muted: #636b76;
+  --color-cream-text: #2d3436;
+
+  /* 文字色 */
+  --text-near-black: #1a1a1a;
+  --text-mid-gray: #6b6b6b;
+  --text-soft-gray: #707070; /* 4.58:1 on #f7f6f3, 4.95:1 on #ffffff ✓ AA */
+
+  /* 语义色（浅色模式，背景为暖白/纯白时使用） */
+  --success-foreground: #346538; /* 5.4:1 on #f7f6f3 ✓ AA */
+  --success-soft: #edf3ec;
+  --warning-foreground: #956400; /* 5.1:1 on #f7f6f3 ✓ AA */
+  --warning-soft: #fbf3db;
+  --error-foreground: #9f2f2d; /* 6.0:1 on #f7f6f3 ✓ AA */
+  --error-soft: #fdebec;
+  --info-foreground: #1f6c9f; /* 5.5:1 on #f7f6f3 ✓ AA */
+  --info-soft: #e1f3fe;
+
+  /* 紫色（ReAct 模式） */
+  --purple-50: #f3effe;
+  --purple-700: #6b21a8;
+
+  /* 监控指标色（饱和度更高的版本，用于柱状图/健康指示） */
+  --metric-good: #4ade80;
+  --metric-warning: #fbbf24;
+  --metric-bad: #f87171;
+  --metric-error: #ef4444;
+}
+
+/* ============================================================
+ * [2] 语义层（Semantic Tokens）— 默认：暖骨白 + 浅色模式
+ * ============================================================ */
+:root,
+[data-color-mode="light"],
+[data-theme-light="warm"] {
+  /* 表面层级 */
+  --color-surface-base: var(--bone-warm);
+  --color-surface-base-glass: rgba(247, 246, 243, 0.85);
+  --color-surface-elevated: var(--white-pure);
+  --color-surface-sunken: var(--bone-sunken);
+  --color-surface-hover: var(--bone-hover);
+  --color-surface-active: var(--bone-border);
 
   /* 文字层级 */
-  --text-primary: #e8eaed;
-  --text-secondary: #9ca3af;
-  --text-muted: #94a3b8;  /* WCAG AA: ≥4.5:1 on bg-base */
-  --text-inverse: #0f1117;
+  --color-text-primary: var(--text-near-black);
+  --color-text-secondary: var(--text-mid-gray);
+  --color-text-muted: var(--text-soft-gray);
+  --color-text-inverse: var(--white-pure);
+
+  /* 边框/焦点 */
+  --color-border: var(--bone-border);
+  --color-border-hover: var(--bone-border-hover);
+  --color-focus: var(--text-near-black);
+
+  /* 动作主色 */
+  --color-action-primary: #1a1a1a;
+  --color-action-primary-hover: #333333;
+  --color-action-subtle: rgba(26, 26, 26, 0.04);
+
+  /* 语义色 */
+  --color-success: #346538;
+  --color-success-bg: #edf3ec;
+  --color-warning: #956400;
+  --color-warning-bg: #fbf3db;
+  --color-warning-border: rgba(149, 100, 0, 0.15);
+  --color-error: #9f2f2d;
+  --color-error-bg: #fdebec;
+  --color-info: #1f6c9f;
+  --color-info-bg: #e1f3fe;
+  --color-focus-ring: #1a1a1a;
+
+  /* 紫色（ReAct） */
+  --color-mode-react-bg: #f3effe;
+  --color-mode-react-text: #6b21a8;
+
+  /* 搜索高亮 */
+  --color-search-hl: rgba(149, 100, 0, 0.2);
+
+  /* 覆盖层 */
+  --color-overlay: rgba(0, 0, 0, 0.4);
+}
+
+/* 跟随系统：用户在系统设置中选了深色模式时，叠加深色 token */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode="light"]) {
+    --color-surface-base: #0f1117;
+    --color-surface-base-glass: rgba(15, 17, 23, 0.85);
+    --color-surface-elevated: #1a1a1a;
+    --color-surface-sunken: #080a0e;
+    --color-surface-hover: #252836;
+    --color-surface-active: #2a2d3a;
+
+    --color-text-primary: #e8eaed;
+    --color-text-secondary: #9ca3af;
+    --color-text-muted: #7a8290; /* 4.87:1 on #0f1117 ✓ AA */
+    --color-text-inverse: #1a1a1a;
+
+    --color-border: #2a2d3a;
+    --color-border-hover: #3a3d4a;
+    --color-focus: #e8eaed;
+
+    --color-action-primary: #e8eaed;
+    --color-action-primary-hover: #c9c9ce;
+    --color-action-subtle: rgba(232, 234, 237, 0.08);
+
+    --color-success: #8fcf94;
+    --color-success-bg: #1a3a1f;
+    --color-warning: #d4a657;
+    --color-warning-bg: #3a2e10;
+    --color-error: #e8908e;
+    --color-error-bg: #3a1818;
+    --color-info: #8ab8d6;
+    --color-info-bg: #0f2a3a;
+    --color-focus-ring: #e8eaed;
+
+    --color-mode-react-bg: #2a1a3e;
+    --color-mode-react-text: #c4a3e8;
+
+    --color-search-hl: rgba(212, 166, 87, 0.25);
+    --color-overlay: rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* ============================================================
+ * 旧变量 alias（向后兼容，新代码应使用 --color-* 命名）
+ * ============================================================ */
+:root {
+  /* 主色调 */
+  --primary: var(--color-action-primary);
+  --primary-hover: var(--color-action-primary-hover);
+  --primary-glow: var(--color-action-subtle);
+  --primary-subtle: var(--color-action-subtle);
+
+  /* 语义色 */
+  --success: var(--color-success);
+  --success-bg: var(--color-success-bg);
+  --warning: var(--color-warning);
+  --warning-bg: var(--color-warning-bg);
+  --error: var(--color-error);
+  --error-bg: var(--color-error-bg);
+  --info: var(--color-info);
+  --info-bg: var(--color-info-bg);
+
+  /* 背景层级 */
+  --bg-base: var(--color-surface-base);
+  --bg-surface: var(--color-surface-elevated);
+  --bg-elevated: var(--color-surface-elevated);
+  --bg-hover: var(--color-surface-hover);
+  --bg-active: var(--color-surface-active);
+  --bg-overlay: var(--color-overlay);
+
+  /* 文字层级 */
+  --text-primary: var(--color-text-primary);
+  --text-secondary: var(--color-text-secondary);
+  --text-muted: var(--color-text-muted);
+  --text-inverse: var(--color-text-inverse);
 
   /* 边框 */
-  --border: rgba(255, 255, 255, 0.06);
-  --border-hover: rgba(255, 255, 255, 0.12);
-  --border-focus: var(--primary);
+  --border: var(--color-border);
+  --border-hover: var(--color-border-hover);
+  --border-focus: var(--color-focus);
 
-  /* 圆角 */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
+  /* 圆角（保持不变） */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
 
-  /* 阴影 */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 20px var(--primary-glow);
+  /* 阴影（保持不变） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
 
   /* 动画 */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -62,12 +223,16 @@
   --duration-slow: 400ms;
 
   /* 布局 */
-  --sidebar-width: 300px;
-  --header-height: 60px;
+  --sidebar-width: 280px;
+  --header-height: 56px;
 }
 
-/* ===== 全局重置 ===== */
-*, *::before, *::after {
+/* ============================================================
+ * 全局重置
+ * ============================================================ */
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -80,24 +245,85 @@ html {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial,
-    sans-serif;
-  background: var(--bg-base);
-  color: var(--text-primary);
+  font-family:
+    "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: var(--color-surface-base);
+  color: var(--color-text-primary);
   line-height: 1.6;
   overflow: hidden;
   height: 100vh;
 }
 
-a { color: var(--primary); text-decoration: none; }
-a:hover { color: var(--primary-hover); }
+a {
+  color: var(--color-action-primary);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--color-action-primary-hover);
+}
 
-/* ===== 滚动条 ===== */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
+/* ===== 滚动条（极淡） ===== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.08);
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+/* ===== 全局交互反馈 (Interactive transitions & active scale) ===== */
+button,
+a,
+.btn-primary,
+.btn-secondary,
+.btn-sm,
+.btn-send,
+.btn-feedback,
+.btn-attach,
+.btn-voice,
+.btn-msg-action,
+.btn-delete-session,
+.btn-new-chat,
+.btn-settings,
+.btn-reset,
+.panel-close,
+.settings-close,
+.quick-prompt-card,
+.quick-btn,
+.code-copy-btn {
+  transition:
+    transform var(--duration-fast) var(--ease-spring),
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+button:active:not(:disabled),
+a:active,
+.btn-primary:active:not(:disabled),
+.btn-secondary:active:not(:disabled),
+.btn-sm:active:not(:disabled),
+.btn-send:active:not(:disabled),
+.btn-feedback:active:not(:disabled),
+.btn-attach:active:not(:disabled),
+.btn-voice:active:not(:disabled),
+.btn-msg-action:active:not(:disabled),
+.btn-delete-session:active:not(:disabled),
+.btn-new-chat:active:not(:disabled),
+.btn-settings:active:not(:disabled),
+.btn-reset:active:not(:disabled),
+.panel-close:active:not(:disabled),
+.settings-close:active:not(:disabled),
+.quick-prompt-card:active,
+.quick-btn:active:not(:disabled),
+.code-copy-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}

@@ -21,11 +21,12 @@ _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 
 
 class GeneralAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, llm=None):
         super().__init__(
             name="通用咨询专家",
             role="一般咨询和客户服务协调",
             expertise=["产品概览", "服务介绍", "常见问题", "协调转接", "售前咨询"],
+            llm=llm,
         )
 
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:

@@ -15,7 +15,7 @@ import logging
 
 from PIL import Image
 
-import config
+from core import config
 
 logger = logging.getLogger(__name__)
 

@@ -13,13 +13,14 @@ v4.2: 真流式调用（SSE 逐 chunk）
 """
 
 import asyncio
+import time
 import json
 import random
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from config import (
+from core.config import (
     HTTP_HEADERS,
     HTTP_TIMEOUT,
     HTTPX_KEEPALIVE_CONNECTIONS,
@@ -28,7 +29,7 @@ from config import (
     RETRY_BASE_DELAY,
     RETRY_MAX_ATTEMPTS,
 )
-from logger import get_logger, get_trace_id
+from core.logger import get_logger, get_trace_id
 
 logger = get_logger("llm_client")
 
@@ -122,6 +123,29 @@ class OpenAICompatibleClient:
                 await client.aclose()
         cls._client_pools.clear()
 
+    async def _record_token_usage(self, result: dict, latency_ms: float):
+        """v5.1: 记录 Token 用量到全局追踪器"""
+        try:
+            from core.token_tracker import get_token_tracker
+
+            tracker = get_token_tracker()
+            if not tracker:
+                return
+            usage = result.get("usage", {})
+            if not usage:
+                return
+            from core.token_tracker import TokenUsage
+
+            await tracker.record(TokenUsage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("total_tokens", 0),
+                model=result.get("model", self.model),
+                latency_ms=latency_ms,
+            ))
+        except Exception:
+            pass  # 追踪失败不影响主流程
+
     async def async_invoke(self, messages, timeout: float | None = None, tools: list | None = None):
         """异步调用（支持 Function Calling，不支持 tools 时自动降级）"""
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
@@ -134,6 +158,7 @@ class OpenAICompatibleClient:
             payload["tools"] = tools
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
+        _call_start = time.time()
 
         for attempt in range(self.max_retries):
             try:
@@ -163,6 +188,9 @@ class OpenAICompatibleClient:
                             )
                     if self.circuit_breaker:
                         await self.circuit_breaker.record_success()
+                    # v5.1: Token 用量追踪
+                    _latency_ms = (time.time() - _call_start) * 1000
+                    await self._record_token_usage(result, _latency_ms)
                     return CustomResponse(content, parsed_tool_calls)
                 return CustomResponse("API response format error")
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
@@ -203,6 +231,7 @@ class OpenAICompatibleClient:
             payload["max_tokens"] = LLM_MAX_TOKENS
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
+        _call_start = time.time()
 
         for attempt in range(self.max_retries):
             try:
@@ -216,6 +245,9 @@ class OpenAICompatibleClient:
                 result = resp.json()
                 if self.circuit_breaker:
                     await self.circuit_breaker.record_success()
+                # v5.1: Token 用量追踪
+                _latency_ms = (time.time() - _call_start) * 1000
+                await self._record_token_usage(result, _latency_ms)
                 if "choices" in result and result["choices"]:
                     message = result["choices"][0].get("message", {})
                     return CustomResponse(message.get("content", "") or "")
@@ -271,6 +303,12 @@ class OpenAICompatibleClient:
                                 chunk = json.loads(data)
                                 choices = chunk.get("choices", [])
                                 if choices:
+                                    finish_reason = choices[0].get("finish_reason")
+                                    if finish_reason == "length":
+                                        logger.warning(
+                                            f"[LLM-stream] [{get_trace_id()}] "
+                                            f"输出被截断 (finish_reason=length, max_tokens={LLM_MAX_TOKENS})"
+                                        )
                                     delta = choices[0].get("delta", {})
                                     content = delta.get("content", "")
                                     if content:

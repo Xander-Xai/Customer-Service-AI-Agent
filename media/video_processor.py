@@ -10,7 +10,7 @@ VideoProcessor — 视频抽帧处理（v5.1）
 
 import base64
 
-from logger import get_logger
+from core.logger import get_logger
 
 logger = get_logger("media.video")
 

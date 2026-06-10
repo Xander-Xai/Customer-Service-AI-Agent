@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>药妆智多星 - 主题配色方案对比</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      padding: 40px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 40px;
+      font-size: 14px;
+    }
+
+    .themes-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    @media (max-width: 900px) {
+      .themes-grid { grid-template-columns: 1fr; }
+    }
+
+    .theme-card {
+      background: #222;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 2px solid #333;
+      transition: all 0.3s ease;
+    }
+
+    .theme-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    }
+
+    .theme-card.active {
+      border-color: #6366f1;
+    }
+
+    .theme-preview {
+      padding: 20px;
+      min-height: 380px;
+    }
+
+    .theme-name {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .theme-desc {
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 16px;
+    }
+
+    .mock-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-radius: 10px;
+      margin-bottom: 12px;
+    }
+
+    .mock-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .mock-logo-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+    }
+
+    .mock-nav-links {
+      display: flex;
+      gap: 8px;
+    }
+
+    .mock-nav-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: none;
+      cursor: pointer;
+    }
+
+    .mock-sidebar {
+      width: 180px;
+      padding: 12px;
+      border-radius: 10px;
+      float: left;
+      margin-right: 12px;
+    }
+
+    .mock-sidebar-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+      opacity: 0.6;
+    }
+
+    .mock-session {
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .mock-chat {
+      padding: 16px;
+      border-radius: 10px;
+    }
+
+    .mock-msg {
+      margin-bottom: 12px;
+      display: flex;
+      gap: 10px;
+    }
+
+    .mock-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+
+    .mock-bubble {
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .mock-user-msg {
+      justify-content: flex-end;
+    }
+
+    .mock-input {
+      padding: 12px 16px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .mock-input-field {
+      flex: 1;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      border: 1px solid;
+    }
+
+    .mock-input-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .theme-footer {
+      padding: 16px;
+      background: #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .theme-colors {
+      display: flex;
+      gap: 6px;
+    }
+
+    .color-dot {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.2);
+    }
+
+    .select-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-weight: 500;
+    }
+
+    /* Theme 1: Pure White (current) */
+    .theme-1 .mock-nav { background: #fff; }
+    .theme-1 .mock-logo-icon { background: #1a1a1a; color: #fff; }
+    .theme-1 .mock-nav-btn { background: transparent; }
+    .theme-1 .mock-sidebar { background: #fafafa; }
+    .theme-1 .mock-session:nth-child(2) { background: #f0f0f0; }
+    .theme-1 .mock-chat { background: #fff; }
+    .theme-1 .mock-avatar { background: #e5e5e5; }
+    .theme-1 .mock-bubble { background: #f5f5f5; }
+    .theme-1 .mock-user-msg .mock-bubble { background: #1a1a1a; color: #fff; }
+    .theme-1 .mock-input { background: #fff; }
+    .theme-1 .mock-input-field { background: #f5f5f5; border-color: #e5e5e5; color: #1a1a1a; }
+    .theme-1 .mock-input-btn { background: #1a1a1a; color: #fff; }
+    .theme-1 .mock-session, .theme-1 .mock-sidebar-title { color: #1a1a1a; }
+    .theme-1 .select-btn { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+    /* Theme 2: Warm Bone */
+    .theme-2 .mock-nav { background: #fafaf8; }
+    .theme-2 .mock-logo-icon { background: #1a1a1a; color: #fff; }
+    .theme-2 .mock-nav-btn { background: transparent; }
+    .theme-2 .mock-sidebar { background: #f5f4f2; }
+    .theme-2 .mock-session:nth-child(2) { background: #ebe9e6; }
+    .theme-2 .mock-chat { background: #f7f6f3; }
+    .theme-2 .mock-avatar { background: #e8e7e4; }
+    .theme-2 .mock-bubble { background: #fff; border: 1px solid #e8e7e4; }
+    .theme-2 .mock-user-msg .mock-bubble { background: #1a1a1a; color: #fff; border: none; }
+    .theme-2 .mock-input { background: #f7f6f3; }
+    .theme-2 .mock-input-field { background: #fff; border-color: #e8e7e4; color: #1a1a1a; }
+    .theme-2 .mock-input-btn { background: #1a1a1a; color: #fff; }
+    .theme-2 .mock-session, .theme-2 .mock-sidebar-title { color: #1a1a1a; }
+    .theme-2 .select-btn { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+    /* Theme 3: Soft Gray */
+    .theme-3 .mock-nav { background: #f8f9fa; }
+    .theme-3 .mock-logo-icon { background: #4a5568; color: #fff; }
+    .theme-3 .mock-nav-btn { background: transparent; }
+    .theme-3 .mock-sidebar { background: #f1f3f5; }
+    .theme-3 .mock-session:nth-child(2) { background: #e2e8f0; }
+    .theme-3 .mock-chat { background: #f8f9fa; }
+    .theme-3 .mock-avatar { background: #cbd5e0; }
+    .theme-3 .mock-bubble { background: #fff; border: 1px solid #e2e8f0; }
+    .theme-3 .mock-user-msg .mock-bubble { background: #4a5568; color: #fff; border: none; }
+    .theme-3 .mock-input { background: #f8f9fa; }
+    .theme-3 .mock-input-field { background: #fff; border-color: #e2e8f0; color: #2d3748; }
+    .theme-3 .mock-input-btn { background: #4a5568; color: #fff; }
+    .theme-3 .mock-session, .theme-3 .mock-sidebar-title { color: #2d3748; }
+    .theme-3 .select-btn { background: #4a5568; color: #fff; border-color: #4a5568; }
+
+    /* Theme 4: Balanced Cream */
+    .theme-4 .mock-nav { background: #fdfcfa; }
+    .theme-4 .mock-logo-icon { background: #2d3436; color: #fff; }
+    .theme-4 .mock-nav-btn { background: transparent; }
+    .theme-4 .mock-sidebar { background: #f5f2ec; }
+    .theme-4 .mock-session:nth-child(2) { background: #ebe5db; }
+    .theme-4 .mock-chat { background: #faf7f2; }
+    .theme-4 .mock-avatar { background: #d4cdc3; }
+    .theme-4 .mock-bubble { background: #fff; border: 1px solid #e5dfd5; }
+    .theme-4 .mock-user-msg .mock-bubble { background: #2d3436; color: #fff; border: none; }
+    .theme-4 .mock-input { background: #faf7f2; }
+    .theme-4 .mock-input-field { background: #fff; border-color: #e5dfd5; color: #2d3436; }
+    .theme-4 .mock-input-btn { background: #2d3436; color: #fff; }
+    .theme-4 .mock-session, .theme-4 .mock-sidebar-title { color: #2d3436; }
+    .theme-4 .select-btn { background: #2d3436; color: #fff; border-color: #2d3436; }
+
+    .instructions {
+      text-align: center;
+      margin-top: 32px;
+      color: #666;
+      font-size: 13px;
+    }
+
+    .instructions code {
+      background: #333;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>药妆智多星 - 主题配色方案对比</h1>
+  <p class="subtitle">选择一个你最喜欢的配色方案，点击"应用此方案"确认</p>
+
+  <div class="themes-grid">
+    <!-- Theme 1: Pure White -->
+    <div class="theme-card theme-1 active" id="theme1">
+      <div class="theme-preview">
+        <div class="theme-name">纯白简洁</div>
+        <div class="theme-desc">纯净白色背景，适合追求极简的用户</div>
+
+        <div class="mock-nav">
+          <div class="mock-logo">
+            <div class="mock-logo-icon">☆</div>
+            <span>药妆智多星</span>
+          </div>
+          <div class="mock-nav-links">
+            <button type="button" class="mock-nav-btn">对话</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <div class="mock-sidebar">
+            <div class="mock-sidebar-title">会话历史</div>
+            <div class="mock-session">产品咨询问题</div>
+            <div class="mock-session">订单查询方法</div>
+            <div class="mock-session">退货流程说明</div>
+          </div>
+
+          <div class="mock-chat" style="flex: 1;">
+            <div class="mock-msg">
+              <div class="mock-avatar"></div>
+              <div class="mock-bubble">您好！有什么可以帮助您的吗？</div>
+            </div>
+            <div class="mock-msg mock-user-msg">
+              <div class="mock-bubble">我想查询我的订单状态</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mock-input">
+          <div class="mock-input-field">输入您的问题...</div>
+          <div class="mock-input-btn">→</div>
+        </div>
+      </div>
+
+      <div class="theme-footer">
+        <div class="theme-colors">
+          <div class="color-dot" style="background: #fff;"></div>
+          <div class="color-dot" style="background: #fafafa;"></div>
+          <div class="color-dot" style="background: #f5f5f5;"></div>
+          <div class="color-dot" style="background: #1a1a1a;"></div>
+        </div>
+        <button type="button" class="select-btn" onclick="selectTheme(1)">应用此方案</button>
+      </div>
+    </div>
+
+    <!-- Theme 2: Warm Bone -->
+    <div class="theme-card theme-2" id="theme2">
+      <div class="theme-preview">
+        <div class="theme-name">暖骨白 ✨ 推荐</div>
+        <div class="theme-desc">暖调米白背景，视觉更柔和舒适</div>
+
+        <div class="mock-nav">
+          <div class="mock-logo">
+            <div class="mock-logo-icon">☆</div>
+            <span>药妆智多星</span>
+          </div>
+          <div class="mock-nav-links">
+            <button type="button" class="mock-nav-btn">对话</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <div class="mock-sidebar">
+            <div class="mock-sidebar-title">会话历史</div>
+            <div class="mock-session">产品咨询问题</div>
+            <div class="mock-session">订单查询方法</div>
+            <div class="mock-session">退货流程说明</div>
+          </div>
+
+          <div class="mock-chat" style="flex: 1;">
+            <div class="mock-msg">
+              <div class="mock-avatar"></div>
+              <div class="mock-bubble">您好！有什么可以帮助您的吗？</div>
+            </div>
+            <div class="mock-msg mock-user-msg">
+              <div class="mock-bubble">我想查询我的订单状态</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mock-input">
+          <div class="mock-input-field">输入您的问题...</div>
+          <div class="mock-input-btn">→</div>
+        </div>
+      </div>
+
+      <div class="theme-footer">
+        <div class="theme-colors">
+          <div class="color-dot" style="background: #f7f6f3;"></div>
+          <div class="color-dot" style="background: #fafaf8;"></div>
+          <div class="color-dot" style="background: #fff;"></div>
+          <div class="color-dot" style="background: #1a1a1a;"></div>
+        </div>
+        <button type="button" class="select-btn" onclick="selectTheme(2)">应用此方案</button>
+      </div>
+    </div>
+
+    <!-- Theme 3: Soft Gray -->
+    <div class="theme-card theme-3" id="theme3">
+      <div class="theme-preview">
+        <div class="theme-name">柔和灰</div>
+        <div class="theme-desc">灰蓝色调，专业感更强</div>
+
+        <div class="mock-nav">
+          <div class="mock-logo">
+            <div class="mock-logo-icon">☆</div>
+            <span>药妆智多星</span>
+          </div>
+          <div class="mock-nav-links">
+            <button type="button" class="mock-nav-btn">对话</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <div class="mock-sidebar">
+            <div class="mock-sidebar-title">会话历史</div>
+            <div class="mock-session">产品咨询问题</div>
+            <div class="mock-session">订单查询方法</div>
+            <div class="mock-session">退货流程说明</div>
+          </div>
+
+          <div class="mock-chat" style="flex: 1;">
+            <div class="mock-msg">
+              <div class="mock-avatar"></div>
+              <div class="mock-bubble">您好！有什么可以帮助您的吗？</div>
+            </div>
+            <div class="mock-msg mock-user-msg">
+              <div class="mock-bubble">我想查询我的订单状态</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mock-input">
+          <div class="mock-input-field">输入您的问题...</div>
+          <div class="mock-input-btn">→</div>
+        </div>
+      </div>
+
+      <div class="theme-footer">
+        <div class="theme-colors">
+          <div class="color-dot" style="background: #f8f9fa;"></div>
+          <div class="color-dot" style="background: #f1f3f5;"></div>
+          <div class="color-dot" style="background: #fff;"></div>
+          <div class="color-dot" style="background: #4a5568;"></div>
+        </div>
+        <button type="button" class="select-btn" onclick="selectTheme(3)">应用此方案</button>
+      </div>
+    </div>
+
+    <!-- Theme 4: Balanced Cream -->
+    <div class="theme-card theme-4" id="theme4">
+      <div class="theme-preview">
+        <div class="theme-name">奶油米</div>
+        <div class="theme-desc">暖奶油色调，温馨自然</div>
+
+        <div class="mock-nav">
+          <div class="mock-logo">
+            <div class="mock-logo-icon">☆</div>
+            <span>药妆智多星</span>
+          </div>
+          <div class="mock-nav-links">
+            <button type="button" class="mock-nav-btn">对话</button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 12px;">
+          <div class="mock-sidebar">
+            <div class="mock-sidebar-title">会话历史</div>
+            <div class="mock-session">产品咨询问题</div>
+            <div class="mock-session">订单查询方法</div>
+            <div class="mock-session">退货流程说明</div>
+          </div>
+
+          <div class="mock-chat" style="flex: 1;">
+            <div class="mock-msg">
+              <div class="mock-avatar"></div>
+              <div class="mock-bubble">您好！有什么可以帮助您的吗？</div>
+            </div>
+            <div class="mock-msg mock-user-msg">
+              <div class="mock-bubble">我想查询我的订单状态</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mock-input">
+          <div class="mock-input-field">输入您的问题...</div>
+          <div class="mock-input-btn">→</div>
+        </div>
+      </div>
+
+      <div class="theme-footer">
+        <div class="theme-colors">
+          <div class="color-dot" style="background: #faf7f2;"></div>
+          <div class="color-dot" style="background: #f5f2ec;"></div>
+          <div class="color-dot" style="background: #fff;"></div>
+          <div class="color-dot" style="background: #2d3436;"></div>
+        </div>
+        <button type="button" class="select-btn" onclick="selectTheme(4)">应用此方案</button>
+      </div>
+    </div>
+  </div>
+
+  <p class="instructions">
+    当前选中：<span id="current-theme">纯白简洁</span> &nbsp;|&nbsp;
+    <code>Ctrl+Shift+R</code> 强制刷新浏览器以查看更改
+  </p>
+
+  <script>
+    const themeNames = {
+      1: '纯白简洁',
+      2: '暖骨白',
+      3: '柔和灰',
+      4: '奶油米'
+    };
+
+    function selectTheme(num) {
+      // Remove active from all
+      document.querySelectorAll('.theme-card').forEach(card => {
+        card.classList.remove('active');
+      });
+
+      // Add active to selected
+      document.getElementById(`theme${num}`).classList.add('active');
+
+      // Update text
+      document.getElementById('current-theme').textContent = themeNames[num];
+
+      // Store selection
+      localStorage.setItem('preferred-theme', num);
+
+      // Show confirmation
+      const btn = document.getElementById(`theme${num}`).querySelector('.select-btn');
+      btn.textContent = '✓ 已选中';
+      btn.style.background = '#22c55e';
+      btn.style.borderColor = '#22c55e';
+
+      setTimeout(() => {
+        btn.textContent = '应用此方案';
+        btn.style.background = '';
+        btn.style.borderColor = '';
+      }, 2000);
+    }
+
+    // Load saved preference
+    const saved = localStorage.getItem('preferred-theme');
+    if (saved) {
+      selectTheme(parseInt(saved, 10));
+    }
+  </script>
+</body>
+</html>

@@ -1,8 +1,8 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  root: '.',
-  base: '/static/dist/',
+  root: 'web',
+  base: '/',
   build: {
     outDir: 'static/dist',
     emptyOutDir: true,
@@ -26,5 +26,15 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      '**/__e2e__/**',
+    ],
   },
 });

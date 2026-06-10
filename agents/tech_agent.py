@@ -19,11 +19,12 @@ _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 
 
 class TechAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, llm=None):
         super().__init__(
             name="技术支持专家",
             role="化妆品使用指导和技术问题处理",
             expertise=["使用方法", "过敏处理", "产品搭配", "保质期", "保存方法"],
+            llm=llm,
         )
 
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -32,6 +33,13 @@ class TechAgent(BaseAgent):
         rag_context = await self._retrieve_knowledge(
             customer_query, collections=["tech_support", "product_knowledge"]
         )
+
+        # 写入技术诊断信息到黑板
+        await self._write_blackboard("tech.diagnosis", {
+            "query": customer_query,
+            "has_tech_context": bool(rag_context),
+        }, ttl=300)
+
         return await self._process_with_llm(
             state,
             self._format_system_prompt(_SYSTEM_PROMPT),

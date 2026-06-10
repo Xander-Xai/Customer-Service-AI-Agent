@@ -5,7 +5,7 @@ ERP 工具注册（v3.5）
 
 from typing import Any
 
-from logger import get_logger
+from core.logger import get_logger
 
 from .tool_registry import ToolRegistry
 

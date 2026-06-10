@@ -21,15 +21,19 @@ function _startHeartbeat() {
   _stopHeartbeat();
   _heartbeatTimer = setInterval(() => {
     if (_ws && _ws.readyState === WebSocket.OPEN) {
-      try { _ws.send(JSON.stringify({ type: 'pong' })); }
-      catch (e) { console.error('[WS] 心跳发送失败:', e); }
+      try {
+        _ws.send(JSON.stringify({ type: 'pong' }));
+      } catch (_e) {}
     }
   }, HEARTBEAT_INTERVAL);
 }
 
 /** 停止心跳 */
 function _stopHeartbeat() {
-  if (_heartbeatTimer) { clearInterval(_heartbeatTimer); _heartbeatTimer = null; }
+  if (_heartbeatTimer) {
+    clearInterval(_heartbeatTimer);
+    _heartbeatTimer = null;
+  }
 }
 
 /** 建立 WebSocket 连接 */
@@ -47,7 +51,6 @@ export function connect(sessionId) {
     _ws = new WebSocket(wsUrl);
     console.log('[WS] 连接中...');
   } catch (e) {
-    console.error('[WS] 创建连接失败:', e);
     emit('ws_error', { error: e });
     _scheduleReconnect();
     return null;
@@ -65,8 +68,9 @@ export function connect(sessionId) {
     if (apiKey) authPayload.api_key = apiKey;
     const sessionToken = localStorage.getItem('currentSessionToken');
     if (sessionToken) authPayload.session_token = sessionToken;
-    try { _ws.send(JSON.stringify(authPayload)); }
-    catch (e) { console.error('[WS] 发送认证消息失败:', e); }
+    try {
+      _ws.send(JSON.stringify(authPayload));
+    } catch (_e) {}
 
     emit('connected', { sessionId: _sessionId });
     console.log('[WS] 已连接');
@@ -84,9 +88,7 @@ export function connect(sessionId) {
         return;
       }
       emit(data.type, data);
-    } catch (e) {
-      console.error('[WS] 消息解析失败:', e);
-    }
+    } catch (_e) {}
   };
 
   _ws.onclose = (event) => {
@@ -99,7 +101,6 @@ export function connect(sessionId) {
 
   _ws.onerror = (error) => {
     emit('ws_error', { error });
-    console.error('[WS] 连接错误:', error);
   };
 
   return _ws;
@@ -109,7 +110,7 @@ export function connect(sessionId) {
 function _scheduleReconnect() {
   if (_reconnectTimer) return;
   _reconnectCount++;
-  const delay = Math.min(WS_RECONNECT_BASE * Math.pow(1.5, _reconnectCount - 1), WS_RECONNECT_MAX);
+  const delay = Math.min(WS_RECONNECT_BASE * 1.5 ** (_reconnectCount - 1), WS_RECONNECT_MAX);
   console.log(`[WS] ${Math.round(delay / 1000)}s 后重连 (第${_reconnectCount}次)`);
   _reconnectTimer = setTimeout(() => {
     _reconnectTimer = null;
@@ -124,8 +125,11 @@ function _flushPendingMessages() {
   const messages = [..._pendingMessages];
   _pendingMessages = [];
   for (const msg of messages) {
-    try { _ws.send(JSON.stringify(msg)); }
-    catch (e) { console.error('[WS] 发送暂存消息失败:', e); _pendingMessages.push(msg); }
+    try {
+      _ws.send(JSON.stringify(msg));
+    } catch (_e) {
+      _pendingMessages.push(msg);
+    }
   }
 }
 
@@ -144,9 +148,9 @@ export function send(query, sessionId, sessionToken) {
     return;
   }
 
-  try { _ws.send(JSON.stringify(payload)); }
-  catch (e) {
-    console.error('[WS] 发送失败:', e);
+  try {
+    _ws.send(JSON.stringify(payload));
+  } catch (_e) {
     _pendingMessages.push(payload);
     emit('error', { content: '消息发送失败，已暂存' });
   }
@@ -155,10 +159,16 @@ export function send(query, sessionId, sessionToken) {
 /** 关闭 WebSocket 连接 */
 export function disconnect() {
   _stopHeartbeat();
-  if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null; }
+  if (_reconnectTimer) {
+    clearTimeout(_reconnectTimer);
+    _reconnectTimer = null;
+  }
   _reconnectCount = 999;
   _connectionReady = false;
-  if (_ws) { _ws.close(1000, '用户主动断开'); _ws = null; }
+  if (_ws) {
+    _ws.close(1000, '用户主动断开');
+    _ws = null;
+  }
 }
 
 /** 获取连接状态 */

@@ -6,10 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "lint": "biome check web/ vite.config.js",
+    "format": "biome format --write web/ vite.config.js"
   },
   "devDependencies": {
-    "vite": "^8.0.16"
+    "@biomejs/biome": "^2.4.16",
+    "@playwright/test": "^1.60.0",
+    "jsdom": "^29.1.1",
+    "vite": "^8.0.16",
+    "vitest": "^3.2.1"
   },
   "dependencies": {
     "dompurify": "^3.4.8",

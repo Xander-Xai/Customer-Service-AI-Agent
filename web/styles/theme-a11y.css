@@ -1,0 +1,62 @@
+/*
+ * 无障碍偏好 — 字号 / 行高 / 减少动画
+ * 通过 data-font-size / data-line-height / data-motion 属性在 <html> 上切换
+ */
+
+/* ── 字号（4 档，rem 单位） ── */
+html[data-font-size="small"] {
+  font-size: 0.875rem;
+} /* 14px * 0.875 = 12.25px */
+html[data-font-size="medium"] {
+  font-size: 1rem;
+} /* 14px（默认） */
+html[data-font-size="large"] {
+  font-size: 1.0625rem;
+} /* 14.875px */
+html[data-font-size="xlarge"] {
+  font-size: 1.125rem;
+} /* 15.75px */
+
+/* ── 行高（3 档） ── */
+html[data-line-height="compact"] {
+  line-height: 1.5;
+}
+html[data-line-height="standard"] {
+  line-height: 1.6;
+}
+html[data-line-height="relaxed"] {
+  line-height: 1.8;
+}
+
+/* body 也需要继承，因为 variables.css 中 body 设了 line-height: 1.6 */
+body[data-line-height="compact"] {
+  line-height: 1.5;
+}
+body[data-line-height="standard"] {
+  line-height: 1.6;
+}
+body[data-line-height="relaxed"] {
+  line-height: 1.8;
+}
+
+/* ── 减少动画 ── */
+/* 自动适配操作系统减少动画设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+    transition-duration: 0.01ms;
+    scroll-behavior: auto;
+  }
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation-duration: 0.01ms;
+  animation-iteration-count: 1;
+  transition-duration: 0.01ms;
+  scroll-behavior: auto;
+}

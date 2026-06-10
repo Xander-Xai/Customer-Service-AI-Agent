@@ -6,7 +6,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from logger import get_logger
+from core.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("api.sessions")
@@ -99,6 +99,38 @@ async def delete_session(session_id: str, request: Request):
             return JSONResponse({"error": "会话令牌无效或无权删除"}, status_code=403)
     await sm.delete_session(session_id)
     return {"message": f"会话 {session_id} 已删除"}
+
+
+@router.get("/api/sessions/{session_id}/checkpoint")
+async def get_session_checkpoint(session_id: str, request: Request):
+    """获取会话的 LangGraph checkpoint 状态（断点续传）"""
+    from api.utils import sanitize_input
+
+    clean_id = sanitize_input(session_id)
+    if not clean_id:
+        return JSONResponse({"error": "无效的 session_id"}, status_code=400)
+
+    # v5.1: 从 app.state 获取 graph_app，替代模块级全局变量 import
+    graph_app = getattr(request.app.state, "graph_app", None)
+    if (
+        not graph_app
+        or not hasattr(graph_app, "checkpointer")
+        or not graph_app.checkpointer
+    ):
+        return JSONResponse({"error": "Checkpoint 功能未启用"}, status_code=503)
+
+    try:
+        config = {"configurable": {"thread_id": clean_id}}
+        checkpoint = graph_app.checkpointer.get(config)
+        if checkpoint:
+            return {
+                "session_id": clean_id,
+                "has_checkpoint": True,
+                "checkpoint_id": str(checkpoint.id) if hasattr(checkpoint, "id") else None,
+            }
+        return {"session_id": clean_id, "has_checkpoint": False}
+    except Exception as e:
+        return JSONResponse({"error": f"查询 checkpoint 失败: {e}"}, status_code=500)
 
 
 @router.get("/api/history")

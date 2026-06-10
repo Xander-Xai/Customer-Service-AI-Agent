@@ -11,6 +11,13 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
+
+# ===== v5.1: 自定义配置异常 =====
+class ConfigurationError(Exception):
+    """生产环境配置缺失或无效时抛出，替代 SystemExit。"""
+    pass
+
+
 # ===== v4.1: 环境标识（启动时输出）=====
 _DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
 _ENV_LABEL = "DEV" if _DEV_MODE else "PROD"
@@ -151,10 +158,12 @@ else:
 # ===== v3.5: RAG 配置 =====
 RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
 RAG_N_RESULTS = _int_env("RAG_N_RESULTS", 3)
+RAG_QUERY_REWRITING = os.getenv("RAG_QUERY_REWRITING", "false").lower() == "true"  # v5.2: LLM 改写查询
 
 # ===== v3.5: ReAct 配置 =====
 REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 3)  # v4.3: 从 5 降至 3，控制延迟在 20s 内
 REACT_COMPLEXITY_THRESHOLD = _int_env("REACT_COMPLEXITY_THRESHOLD", 60)
+REACT_SELF_REFLECTION = os.getenv("REACT_SELF_REFLECTION", "false").lower() == "true"
 
 # ===== v3.5: 工具调用配置 =====
 TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
@@ -243,7 +252,7 @@ def validate_required_config():
             or os.getenv("ENVIRONMENT", "").lower() == "production"
         )
         if _is_production:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "🚨 安全错误: 生产环境(APP_MODE=prod/LOG_FORMAT=json/ENVIRONMENT=production)下禁止 DEV_MODE=true！"
                 "请设置 DEV_MODE=false 后重启。"
             )
@@ -298,7 +307,7 @@ def validate_required_config():
     if errors:
         for err in errors:
             print(f"🚨 配置校验失败: {err}", file=sys.stderr)
-        raise SystemExit(f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件")
+        raise ConfigurationError(f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件")
 
     # Non-fatal warnings for missing optional-but-recommended config
     if not _DEV_MODE and not RAG_PERSIST_DIRECTORY:
@@ -311,3 +320,35 @@ def validate_required_config():
 
 
 validate_required_config()
+
+
+# ===== v5.0: FeatureFlags 集中管理 =====
+class FeatureFlags:
+    """功能开关集中管理，所有开关统一从此处读取"""
+
+    # 多模态
+    MULTIMODAL_ENABLED = MULTIMODAL_ENABLED
+    # A/B 测试
+    AB_TEST_ENABLED = AB_TEST_ENABLED
+    # SSE 流式输出
+    SSE_ENABLED = SSE_ENABLED
+    # 自动重试/模式升级
+    EVAL_RETRY_ENABLED = EVAL_RETRY_ENABLED
+    MODE_UPGRADE_ENABLED = MODE_UPGRADE_ENABLED
+    # Function Calling
+    TOOL_MAX_ROUNDS = TOOL_MAX_ROUNDS
+    # ReAct 推理
+    REACT_COMPLEXITY_THRESHOLD = REACT_COMPLEXITY_THRESHOLD
+
+    @classmethod
+    def get_all(cls) -> dict[str, bool | int]:
+        """返回所有功能开关的当前状态（用于健康检查/调试）"""
+        return {
+            "multimodal": cls.MULTIMODAL_ENABLED,
+            "ab_test": cls.AB_TEST_ENABLED,
+            "sse": cls.SSE_ENABLED,
+            "eval_retry": cls.EVAL_RETRY_ENABLED,
+            "mode_upgrade": cls.MODE_UPGRADE_ENABLED,
+            "tool_max_rounds": cls.TOOL_MAX_ROUNDS,
+            "react_complexity_threshold": cls.REACT_COMPLEXITY_THRESHOLD,
+        }

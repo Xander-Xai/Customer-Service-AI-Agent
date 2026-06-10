@@ -16,8 +16,8 @@ import pytest
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from erp.kingdee_adapter import KingdeeMockAdapter
-from erp.kingdee_real_adapter import KingdeeRealAdapter, _exponential_backoff
+from erp.kingdee_adapter import KingdeeMockAdapter  # noqa: E402
+from erp.kingdee_real_adapter import KingdeeRealAdapter, _exponential_backoff  # noqa: E402
 
 # ============================================================================
 # Fixtures

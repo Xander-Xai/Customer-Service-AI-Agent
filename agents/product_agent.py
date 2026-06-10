@@ -15,15 +15,30 @@ _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 - 价格与性价比
 - 库存状态
 
-回答要专业、准确。"""
+回答要专业、准确。
+
+示例对话：
+用户：烟酰胺和玻尿酸可以一起用吗？
+回答：可以的！烟酰胺（维生素B3）和玻尿酸是经典的搭配组合：
+1. **烟酰胺**：提亮肤色、控油、收缩毛孔（建议浓度2-5%）
+2. **玻尿酸**：深层保湿、修复屏障
+搭配建议：先用玻尿酸精华打底，再用烟酰胺产品。注意建立耐受，初期隔天使用。
+
+用户：敏感肌适合用什么防晒？
+回答：敏感肌选择防晒建议关注以下几点：
+1. **优先选择物理防晒**（氧化锌/二氧化钛），刺激性更小
+2. **避免酒精、香精、化学防晒剂**（如阿伏苯宗）
+3. **SPF30+ 即可**，不必追求高倍数
+建议先在耳后试用48小时，无异常再上脸。"""
 
 
 class ProductAgent(BaseAgent):
-    def __init__(self):
+    def __init__(self, llm=None):
         super().__init__(
             name="产品专家",
             role="化妆品产品信息咨询和推荐",
             expertise=["产品成分", "功效分析", "价格比较", "肤质匹配", "库存查询"],
+            llm=llm,
         )
 
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -38,6 +53,13 @@ class ProductAgent(BaseAgent):
         rag_context = await self._retrieve_knowledge(
             customer_query, collections=["product_knowledge", "faq"]
         )
+
+        # 写入产品推荐结论到黑板
+        await self._write_blackboard("product.recommendation", {
+            "query": customer_query,
+            "has_erp_data": bool(erp_data),
+            "has_rag_context": bool(rag_context),
+        }, ttl=300)
 
         # 合并上下文
         context_parts = []

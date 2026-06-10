@@ -12,7 +12,7 @@ from collections import defaultdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from api.utils import sanitize_input, validate_session_id
-from config import (
+from core.config import (
     API_KEY,
     API_KEY_ENABLED,
     DEV_MODE,
@@ -21,7 +21,7 @@ from config import (
     WS_MAX_CONNECTIONS_PER_IP,
     WS_MESSAGE_RATE_LIMIT,
 )
-from logger import get_logger
+from core.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("api.ws")
@@ -199,10 +199,9 @@ async def websocket_chat(ws: WebSocket):
 
             if sid != session_id and session_manager:
                 token = data.get("session_token", "")
-                if not DEV_MODE:
-                    if not session_manager.validate_session_token(sid, token):
-                        await ws.send_json({"type": "error", "content": "会话令牌无效"})
-                        continue
+                if not DEV_MODE and not session_manager.validate_session_token(sid, token):
+                    await ws.send_json({"type": "error", "content": "会话令牌无效"})
+                    continue
             if not query:
                 await ws.send_json({"type": "error", "content": "查询不能为空"})
                 continue
@@ -212,8 +211,8 @@ async def websocket_chat(ws: WebSocket):
 
             async def progressive_notify():
                 delays = [0.3, 0.5, 1.0, 1.5]
-                messages = ["正在识别意图...", "正在分配专家...", "专家处理中...", "即将完成..."]
-                for delay, msg in zip(delays, messages):
+                messages = ["正在为您查询...", "正在处理中...", "请稍候...", "即将完成..."]
+                for delay, msg in zip(delays, messages, strict=False):
                     await asyncio.sleep(delay)
                     try:
                         if status_messages:

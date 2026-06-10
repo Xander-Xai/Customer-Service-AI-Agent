@@ -2,15 +2,21 @@
  * 登录页入口
  */
 import '../styles/variables.css';
+import '../styles/theme-light.css';
+import '../styles/theme-dark.css';
+import '../styles/theme-a11y.css';
+import '../styles/theme-panel.css';
 import '../styles/login.css';
 import '../styles/animations.css';
+import { initSettingsPanel, initTheme } from './utils/theme.js';
 
 let isLogin = true;
 
 function toggleMode() {
   isLogin = !isLogin;
   document.getElementById('formTitle').textContent = isLogin
-    ? '智能客服系统 · 登录' : '智能客服系统 · 注册';
+    ? '智能客服系统 · 登录'
+    : '智能客服系统 · 注册';
   document.getElementById('submitBtn').textContent = isLogin ? '登录' : '注册';
   document.getElementById('displayNameGroup').style.display = isLogin ? 'none' : 'block';
   document.getElementById('switchText').textContent = isLogin ? '没有账号？' : '已有账号？';
@@ -46,13 +52,21 @@ async function handleSubmit(e) {
     if (isLogin) {
       localStorage.setItem('token', data.token);
       if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-      localStorage.setItem('user', JSON.stringify({
-        user_id: data.user_id,
-        username: data.username,
-        role: data.role,
-        display_name: data.display_name,
-      }));
-      const redirectMap = { customer: '/', agent: '/', supervisor: '/admin.html', admin: '/admin.html' };
+      localStorage.setItem(
+        'user',
+        JSON.stringify({
+          user_id: data.user_id,
+          username: data.username,
+          role: data.role,
+          display_name: data.display_name,
+        }),
+      );
+      const redirectMap = {
+        customer: '/',
+        agent: '/',
+        supervisor: '/admin.html',
+        admin: '/admin.html',
+      };
       window.location.href = redirectMap[data.role] || '/';
     } else {
       toggleMode();
@@ -74,13 +88,21 @@ async function handleSubmit(e) {
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+  initSettingsPanel();
+
   // 已登录则跳转
   const token = localStorage.getItem('token');
   const userRaw = localStorage.getItem('user');
   if (token) {
     try {
       const u = userRaw ? JSON.parse(userRaw) : {};
-      const redirectMap = { customer: '/', agent: '/', supervisor: '/admin.html', admin: '/admin.html' };
+      const redirectMap = {
+        customer: '/',
+        agent: '/',
+        supervisor: '/admin.html',
+        admin: '/admin.html',
+      };
       window.location.href = redirectMap[u.role] || '/';
     } catch {
       window.location.href = '/';
@@ -91,8 +113,5 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('authForm').addEventListener('submit', handleSubmit);
   document.getElementById('switchLink').addEventListener('click', toggleMode);
 
-  // 仅开发环境显示演示账号提示
-  fetch('/api/health').then(r => r.json()).then(d => {
-    if (d.mode === 'dev') document.getElementById('demoHint').style.display = 'block';
-  }).catch(() => {});
+  // 测试账号提示始终显示
 });

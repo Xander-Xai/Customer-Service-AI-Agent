@@ -1,11 +1,38 @@
 [run]
-source = .
+source =
+    agents
+    alerts
+    api
+    auth
+    cache
+    collaboration
+    core
+    db
+    erp
+    knowledge
+    llm
+    media
+    rag
+    router
+    tools
+    .
 omit =
     tests/*
     .venv/*
     venv/*
     */__pycache__/*
     */conftest.py
+    web/*
+    docs/*
+    scripts/*
+    deploy/*
+    monitoring/*
+    nginx/*
+    loki/*
+    data/*
+    htmlcov/*
+    node_modules/*
+    alembic/*
 
 [report]
 fail_under = 80

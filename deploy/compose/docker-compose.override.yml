@@ -6,7 +6,7 @@ services:
   # ===== 主应用（开发模式：uvicorn 热重载）=====
   app:
     build:
-      context: .
+      context: ../..
       dockerfile: Dockerfile
       args:
         APP_MODE: dev
@@ -22,7 +22,7 @@ services:
       - ERP_MODE=mock
     volumes:
       # 挂载源码实现热重载
-      - .:/app
+      - ../..:/app
     command: >
       uvicorn api.app_factory:app
       --host 0.0.0.0

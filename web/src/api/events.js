@@ -13,13 +13,15 @@ export function on(event, callback) {
 /** 取消订阅 */
 export function off(event, callback) {
   if (_listeners[event]) {
-    _listeners[event] = _listeners[event].filter(cb => cb !== callback);
+    _listeners[event] = _listeners[event].filter((cb) => cb !== callback);
   }
 }
 
 /** 触发事件 */
 export function emit(event, data) {
-  (_listeners[event] || []).forEach(cb => {
-    try { cb(data); } catch (e) { console.error(`[Event:${event}] 回调异常:`, e); }
+  (_listeners[event] || []).forEach((cb) => {
+    try {
+      cb(data);
+    } catch (_e) {}
   });
 }

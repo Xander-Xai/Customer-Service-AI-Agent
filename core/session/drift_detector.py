@@ -9,17 +9,17 @@
 
 from typing import Any
 
-from config import (
+from core.config import (
     DRIFT_ESCALATION_THRESHOLD as _CFG_ESCALATION_THRESHOLD,
 )
-from config import (
+from core.config import (
     DRIFT_REPETITION_THRESHOLD as _CFG_REP_THRESHOLD,
 )
-from config import (
+from core.config import (
     DRIFT_TOPIC_JACCARD_THRESHOLD as _CFG_TOPIC_THRESHOLD,
 )
-from logger import get_logger
-from token_counter import _tokenize_chinese
+from core.logger import get_logger
+from core.session.token_counter import _tokenize_chinese
 
 logger = get_logger("drift_detector")
 

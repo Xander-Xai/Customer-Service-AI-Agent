@@ -2,7 +2,28 @@
 
 ## 安全架构概述
 
-药妆智多星多智能体客服系统采用**纵深防御**策略，在多层实施安全控制：
+药妆智多星多智能体客服系统采用**纵深防御**策略，在多层实施安全控制。
+
+### 当前实现状态
+
+| 层级 | 安全措施 | 状态 |
+|------|---------|------|
+| **认证** | API Key + JWT 双模式，Admin Token 独立密钥 | ✅ 已实现 |
+| **密码** | PBKDF2-SHA256, 600K 迭代，hmac.compare_digest 常量时间比较 | ✅ 已实现 |
+| **JWT** | PyJWT HS256 + 算法白名单 + jti 吊销 + Redis 黑名单 + Refresh Token | ✅ 已实现 |
+| **CSRF** | 双重 Cookie 提交模式，hmac.compare_digest 比较 | ✅ 已实现 |
+| **限流** | 通用 60/min/IP + 登录 5次/5min + 注册 3次/h + Redis 滑动窗口 | ✅ 已实现 |
+| **输入净化** | 控制字符过滤 + HTML 标签移除 + HTML 实体解码防绕过 | ✅ 已实现 |
+| **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层泄露检测 | ✅ 已实现 |
+| **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 | ✅ 已实现 |
+| **安全头** | HSTS + X-Frame-Options + X-Content-Type-Options + Referrer-Policy + Permissions-Policy | ✅ 已实现 |
+| **CSP** | script-src nonce（无 unsafe-inline），style-src unsafe-inline（已知限制） | ⚠️ 部分 |
+| **前端 XSS** | DOMPurify 净化 LLM 输出 + escapeHtml 净化动态数据 + 53/54 处 innerHTML 已审计安全 | ✅ 已实现 |
+| **WebSocket** | 首条消息 JWT 认证 + 每 IP 连接限制 + 消息限流 + 空闲超时 | ✅ 已实现 |
+| **会话安全** | UUID 格式校验 + HMAC 会话令牌签名 + 用户级会话所有权隔离 | ✅ 已实现 |
+| **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 | ✅ 已实现 |
+| **启动校验** | 生产环境强制校验 JWT_SECRET(≥32字符) / SESSION_TOKEN_SECRET / API_KEY | ✅ 已实现 |
+| **密钥管理** | scripts/generate_prod_env.py 使用 secrets 模块生成密码学安全随机密钥 | ✅ 已实现 |
 
 ### 认证架构
 
@@ -12,13 +33,34 @@
 | JWT Bearer Token | 终端用户 | PyJWT (HS256) + jti 黑名单 |
 | Admin Token (`X-Admin-Token`) | 监控/管理端点 | 独立密钥，DEV_MODE 不跳过 |
 
-### 输入净化
+### CSP 配置详情
 
-- **控制字符过滤**：移除 `\x00-\x08\x0b\x0c\x0e-\x1f\x7f`
-- **HTML 实体解码 + 标签移除**：防止 `&lt;script&gt;` 绕过
-- **Prompt 注入防御**：对话历史包裹「不可信数据边界标记」(`base_agent.py:311`)
-- **ERP 注入防护**：白名单方案 + 单引号转义 (`erp/__init__.py`)
-- **XSS 防护**：CSP nonce + 前端 `escapeHtml()` + `addEventListener`
+```python
+# api/middleware.py:146-153
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' 'nonce-{random}' 'unsafe-hashes';
+  style-src 'self' 'unsafe-inline';    # ← 已知限制
+  connect-src 'self';
+  img-src 'self' data:;
+  frame-ancestors 'none'
+```
+
+**script-src**：使用 nonce，无 `unsafe-inline`，每次请求生成随机 nonce。
+**style-src**：使用 `unsafe-inline`，原因是前端 65 处内联 `style=` 属性和 32 处 `.style.` 赋值。移除非线样式需要大规模重构。
+
+### 前端 innerHTML 安全审计
+
+54 处 innerHTML 使用审计结果（2026-06-10）：
+
+| 分类 | 数量 | 说明 |
+|------|------|------|
+| 纯静态模板（无动态数据） | ~20 | 安全，无需处理 |
+| 动态数据经 escapeHtml 净化 | ~30 | 安全，已有保护 |
+| LLM 输出经 DOMPurify 净化 | 2 | 安全，renderMarkdown → DOMPurify.sanitize() |
+| **已修复** | 1 | main.js voice ID 已添加 escapeHtml |
+
+LLM 输出处理链路：`marked.parse()` → `DOMPurify.sanitize()` → 插入 DOM
 
 ### 速率限制
 
@@ -38,17 +80,6 @@
 - JWT 认证通过首条消息传递（非 URL 参数）
 - 会话所有权令牌（HMAC-SHA256）
 
-### 响应安全头
-
-```
-Content-Security-Policy: script-src 'self' 'nonce-{random}'; ...
-Strict-Transport-Security: max-age=31536000; includeSubDomains
-X-Content-Type-Options: nosniff
-X-Frame-Options: DENY
-X-XSS-Protection: 0 (CSP 取代)
-Permissions-Policy: camera=(), microphone=(), geolocation=()
-```
-
 ### LLM 安全
 
 - **Prompt 注入防护**：用户输入标记为不可信数据，与系统提示隔离
@@ -64,20 +95,19 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 - **审计日志**：认证事件（登录/注册）记录 IP 和时间戳到 `AuditLog` 表
 - **SSRF 防护**：Webhook URL 校验私网/回环/链路本地地址
 
-## 已知限制
+---
 
-1. **密码哈希**：使用 PBKDF2-SHA256（OWASP 最低推荐），生产环境建议升级到 Argon2id
-2. **JWT 实现**：已迁移到 PyJWT 成熟库，算法白名单限制为 HS256
-3. **多 Worker 部署**：JWT 黑名单内存回退不支持跨 Worker 同步，生产环境必须配置 Redis
-4. **前端 Markdown**：使用正则实现，生产环境建议替换为 DOMPurify + marked
+## 已知限制与改进计划
 
-## 报告安全漏洞
+| 限制 | 当前状态 | 改进方案 | 优先级 |
+|------|---------|---------|--------|
+| style-src 使用 unsafe-inline | 前端 65 处内联样式 | 迁移内联样式到 CSS 类或使用 style nonce | P2 |
+| 密码哈希使用 PBKDF2 | OWASP 最低推荐 | 升级到 Argon2id | P2 |
+| 同步 JWT decode 无法检查 Redis 黑名单 | 已文档化 | 迁移到全异步认证路径 | P1 |
+| ERP 集成为 Mock 模式 | 接口抽象已完成 | 真实 ERP 对接需企业配合 | P3 |
+| DEV_MODE 跳过所有认证 | 仅限开发环境 | 生产环境自动禁用（已实现启动校验） | — |
 
-如发现安全漏洞，请通过以下方式报告：
-- 提交 GitHub Issue（标记 `security` 标签）
-- 或发送邮件至项目维护者
-
-请**不要**通过公开 Issue 报告未修复的漏洞。
+---
 
 ## 安全相关配置
 
@@ -88,4 +118,13 @@ Permissions-Policy: camera=(), microphone=(), geolocation=()
 | `API_KEY_ENABLED` | API Key 认证开关 | `true` |
 | `DEV_MODE` | 开发模式 | 生产环境自动禁用 |
 | `MONITORING_ADMIN_TOKEN` | 管理端点令牌 | 随机强密码 |
-| `SESSION_TOKEN_SECRET` | 会话 HMAC 密钥 | 生产必须配置 |
+
+---
+
+## 报告安全漏洞
+
+如发现安全漏洞，请通过以下方式报告：
+- 提交 GitHub Issue（标记 `security` 标签）
+- 或发送邮件至项目维护者
+
+请**不要**通过公开 Issue 报告未修复的漏洞。

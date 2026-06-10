@@ -3,41 +3,41 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>智能客服</title>
+  <title>客服助手</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --primary: #6366f1;
-      --primary-hover: #4f46e5;
-      --primary-light: rgba(99,102,241,0.1);
+      --primary: #1A1A1A;
+      --primary-hover: #333333;
+      --primary-light: rgba(26,26,26,0.04);
       --bg: #ffffff;
-      --bg-secondary: #f9fafb;
-      --bg-bubble: #f3f4f6;
-      --text-primary: #111827;
-      --text-secondary: #6b7280;
-      --text-muted: #9ca3af;
-      --border: #e5e7eb;
-      --border-light: #f3f4f6;
+      --bg-secondary: #FAFAF8;
+      --bg-bubble: #F7F6F3;
+      --text-primary: #1A1A1A;
+      --text-secondary: #6B6B6B;
+      --text-muted: #9B9B9B;
+      --border: #E8E7E4;
+      --border-light: #F0EFEC;
       --radius: 12px;
       --radius-sm: 8px;
-      --shadow: 0 1px 3px rgba(0,0,0,0.06);
-      --shadow-lg: 0 4px 12px rgba(0,0,0,0.08);
-      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans SC", sans-serif;
+      --shadow: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-lg: 0 2px 8px rgba(0,0,0,0.06);
+      --font: 'SF Pro Display', -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
     }
 
     .widget-dark {
-      --bg: #1f2937;
-      --bg-secondary: #111827;
-      --bg-bubble: #374151;
-      --text-primary: #f9fafb;
-      --text-secondary: #d1d5db;
-      --text-muted: #6b7280;
-      --border: #374151;
-      --border-light: #1f2937;
-      --primary-light: rgba(99,102,241,0.15);
-      --shadow: 0 1px 3px rgba(0,0,0,0.2);
-      --shadow-lg: 0 4px 12px rgba(0,0,0,0.3);
+      --bg: #1A1A1A;
+      --bg-secondary: #141414;
+      --bg-bubble: #2A2A2A;
+      --text-primary: #E8E7E4;
+      --text-secondary: #9B9B9B;
+      --text-muted: #6B6B6B;
+      --border: #2A2A2A;
+      --border-light: #222222;
+      --primary-light: rgba(232,231,228,0.08);
+      --shadow: 0 1px 2px rgba(0,0,0,0.2);
+      --shadow-lg: 0 2px 8px rgba(0,0,0,0.3);
     }
 
     html, body {
@@ -280,7 +280,7 @@
     <!-- Header -->
     <div class="widget-header">
       <div class="header-avatar" id="headerAvatar">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
       </div>
@@ -298,16 +298,16 @@
       <!-- Welcome -->
       <div class="welcome-msg">
         <div class="emoji">&#x1F44B;</div>
-        <div id="welcomeText">您好！我是智能客服助手，有什么可以帮您的吗？</div>
+        <div id="welcomeText">您好，有什么可以帮您？</div>
       </div>
     </div>
 
     <!-- Quick questions -->
     <div class="quick-questions" id="quickQuestions">
-      <button class="quick-btn" data-q="产品有哪些功效？">产品有哪些功效？</button>
-      <button class="quick-btn" data-q="如何查询订单物流？">如何查询订单物流？</button>
-      <button class="quick-btn" data-q="退换货政策是什么？">退换货政策是什么？</button>
-      <button class="quick-btn" data-q="敏感肌可以用吗？">敏感肌可以用吗？</button>
+      <button type="button" class="quick-btn" data-q="产品有哪些功效？">产品有哪些功效？</button>
+      <button type="button" class="quick-btn" data-q="如何查询订单物流？">如何查询订单物流？</button>
+      <button type="button" class="quick-btn" data-q="退换货政策是什么？">退换货政策是什么？</button>
+      <button type="button" class="quick-btn" data-q="敏感肌可以用吗？">敏感肌可以用吗？</button>
     </div>
 
     <!-- Input -->
@@ -319,8 +319,8 @@
         rows="1"
         aria-label="输入消息"
       ></textarea>
-      <button class="btn-send" id="btnSend" disabled aria-label="发送消息">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" class="btn-send" id="btnSend" disabled aria-label="发送消息">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true">
           <line x1="22" y1="2" x2="11" y2="13"/>
           <polygon points="22 2 15 22 11 13 2 9 22 2"/>
         </svg>
@@ -329,7 +329,7 @@
   </div>
 
   <script>
-  (function() {
+  (() => {
     "use strict";
 
     // ── URL Params ──
@@ -346,7 +346,7 @@
         noApiKeyDesc: "请在 URL 中提供 api_key 参数，例如：widget.html?api_key=your_key",
         online: "在线",
         placeholder: "输入您的问题...",
-        welcome: "您好！我是智能客服助手，有什么可以帮您的吗？",
+        welcome: "您好，有什么可以帮您？",
         quicks: ["产品有哪些功效？", "如何查询订单物流？", "退换货政策是什么？", "敏感肌可以用吗？"],
         defaultBrand: "在线客服",
         errorPrefix: "抱歉，服务出现异常，请稍后重试。",
@@ -392,8 +392,9 @@
 
     // ── Rebuild quick questions for current lang ──
     quickQuestions.innerHTML = "";
-    t.quicks.forEach(function(q) {
-      var btn = document.createElement("button");
+    t.quicks.forEach((q) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
       btn.className = "quick-btn";
       btn.dataset.q = q;
       btn.textContent = q;
@@ -401,19 +402,19 @@
     });
 
     // ── State ──
-    var sessionId = crypto.randomUUID();
-    var isSending = false;
+    const sessionId = crypto.randomUUID();
+    let isSending = false;
 
     // ── Helpers ──
     function formatTime(d) {
-      var h = d.getHours().toString().padStart(2, "0");
-      var m = d.getMinutes().toString().padStart(2, "0");
-      return h + ":" + m;
+      const h = d.getHours().toString().padStart(2, "0");
+      const m = d.getMinutes().toString().padStart(2, "0");
+      return `${h}:${m}`;
     }
 
     function renderMarkdown(text) {
       // Escape HTML
-      var s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       // Bold
       s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
       // Italic
@@ -433,14 +434,14 @@
     }
 
     function addMessage(role, html, timestamp) {
-      var row = document.createElement("div");
-      row.className = "msg-row " + role;
-      var bubble = document.createElement("div");
+      const row = document.createElement("div");
+      row.className = `msg-row ${role}`;
+      const bubble = document.createElement("div");
       bubble.className = "msg-bubble";
       bubble.innerHTML = html;
       row.appendChild(bubble);
       if (timestamp) {
-        var timeEl = document.createElement("div");
+        const timeEl = document.createElement("div");
         timeEl.className = "msg-time";
         timeEl.textContent = timestamp;
         row.appendChild(timeEl);
@@ -451,14 +452,14 @@
     }
 
     function addTypingIndicator() {
-      var row = document.createElement("div");
+      const row = document.createElement("div");
       row.className = "msg-row ai";
-      var bubble = document.createElement("div");
+      const bubble = document.createElement("div");
       bubble.className = "msg-bubble";
-      var indicator = document.createElement("div");
+      const indicator = document.createElement("div");
       indicator.className = "typing-indicator";
-      for (var i = 0; i < 3; i++) {
-        var dot = document.createElement("div");
+      for (let i = 0; i < 3; i++) {
+        const dot = document.createElement("div");
         dot.className = "typing-dot";
         indicator.appendChild(dot);
       }
@@ -491,16 +492,16 @@
           query: query,
         }),
       })
-        .then(function(r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
         })
-        .then(function(data) {
+        .then((data) => {
           var text = data.response || data.message || data.reply || data.content || JSON.stringify(data);
           callback(text, false);
           callback(null, true);
         })
-        .catch(function() {
+        .catch(() => {
           callback(null, false, "rest_error");
         });
     }
@@ -521,14 +522,14 @@
       var fullText = "";
       var bubbleEl = null;
       var done = false;
-      var startTime = Date.now();
+      var _startTime = Date.now();
 
       function onToken(token, isDone, error) {
         if (done) return;
 
         if (error) {
           // Remove typing indicator
-          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+          if (typingRow?.parentNode) typingRow.parentNode.removeChild(typingRow);
           // Show error
           if (!bubbleEl) {
             bubbleEl = addMessage("ai", renderMarkdown(t.errorPrefix), formatTime(new Date()));
@@ -541,7 +542,7 @@
         if (isDone) {
           done = true;
           // Remove typing indicator if still present
-          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+          if (typingRow?.parentNode) typingRow.parentNode.removeChild(typingRow);
 
           if (!bubbleEl) {
             // No streaming tokens received, fullText was built
@@ -553,7 +554,7 @@
 
         if (token) {
           // Remove typing indicator on first token
-          if (typingRow && typingRow.parentNode) {
+          if (typingRow?.parentNode) {
             typingRow.parentNode.removeChild(typingRow);
             typingRow = null;
           }
@@ -578,15 +579,15 @@
         },
         body: JSON.stringify({ session_id: sessionId, query: query }),
       })
-        .then(function(response) {
-          if (!response.ok) throw new Error("HTTP " + response.status);
+        .then((response) => {
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
           var ct = response.headers.get("content-type") || "";
           if (ct.indexOf("text/event-stream") === -1 && ct.indexOf("application/json") !== -1) {
             // Server returned JSON instead of SSE, treat as REST
-            return response.json().then(function(data) {
+            return response.json().then((data) => {
               var text = data.response || data.message || data.reply || data.content || "";
               if (text) {
-                if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+                if (typingRow?.parentNode) typingRow.parentNode.removeChild(typingRow);
                 bubbleEl = addMessage("ai", renderMarkdown(text), formatTime(new Date()));
               }
               done = true;
@@ -594,26 +595,26 @@
             });
           }
           // Stream SSE
-          var reader = response.body.getReader();
-          var decoder = new TextDecoder();
-          var buffer = "";
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
           function pump() {
-            return reader.read().then(function(result) {
+            return reader.read().then((result) => {
               if (result.done) {
                 onToken(null, true);
                 return;
               }
               buffer += decoder.decode(result.value, { stream: true });
-              var lines = buffer.split("\n");
+              const lines = buffer.split("\n");
               buffer = lines.pop();
-              for (var i = 0; i < lines.length; i++) {
-                var line = lines[i].trim();
-                if (!line || !line.startsWith("data:")) continue;
-                var data = line.slice(5).trim();
+              for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line?.startsWith("data:")) continue;
+                const data = line.slice(5).trim();
                 if (data === "[DONE]") { onToken(null, true); return; }
                 try {
-                  var parsed = JSON.parse(data);
+                  const parsed = JSON.parse(data);
                   onToken(parsed.token || parsed.content || "", false);
                 } catch (e) {
                   if (data) onToken(data, false);
@@ -624,7 +625,7 @@
           }
           return pump();
         })
-        .catch(function() {
+        .catch(() => {
           // Fallback to REST
           if (!done) {
             sendRest(query, onToken);
@@ -633,14 +634,14 @@
     }
 
     // ── Event listeners ──
-    chatInput.addEventListener("input", function() {
+    chatInput.addEventListener("input", () => {
       btnSend.disabled = isSending || !chatInput.value.trim();
       // Auto-resize
       chatInput.style.height = "auto";
-      chatInput.style.height = Math.min(chatInput.scrollHeight, 80) + "px";
+      chatInput.style.height = `${Math.min(chatInput.scrollHeight, 80)}px`;
     });
 
-    chatInput.addEventListener("keydown", function(e) {
+    chatInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         if (!isSending && chatInput.value.trim()) {
@@ -652,7 +653,7 @@
       }
     });
 
-    btnSend.addEventListener("click", function() {
+    btnSend.addEventListener("click", () => {
       if (!isSending && chatInput.value.trim()) {
         sendMessage(chatInput.value);
         chatInput.value = "";
@@ -661,9 +662,9 @@
       }
     });
 
-    quickQuestions.addEventListener("click", function(e) {
+    quickQuestions.addEventListener("click", (e) => {
       var btn = e.target.closest(".quick-btn");
-      if (btn && btn.dataset.q) {
+      if (btn?.dataset.q) {
         sendMessage(btn.dataset.q);
       }
     });

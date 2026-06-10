@@ -1,0 +1,108 @@
+/*
+ * 浅色主题变体 — 4 种浅色主题
+ * 通过 [data-theme-light] 属性切换
+ * 默认暖骨白（warm）已在 variables.css :root 中定义
+ */
+
+/* 显式浅色模式（强制覆盖 @media prefers-color-scheme: dark） */
+[data-color-mode="light"],
+:root[data-color-mode="light"] {
+  --color-surface-base: #f7f6f3;
+  --color-surface-elevated: #ffffff;
+  --color-surface-sunken: #ebe9e6;
+  --color-surface-hover: #f0efec;
+  --color-surface-active: #e8e7e4;
+
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #6b6b6b;
+  --color-text-muted: var(--text-soft-gray);
+  --color-text-inverse: #ffffff;
+
+  --color-border: #e8e7e4;
+  --color-border-hover: #d4d3d0;
+  --color-focus: #1a1a1a;
+
+  --color-action-primary: #1a1a1a;
+  --color-action-primary-hover: #333333;
+  --color-action-subtle: rgba(26, 26, 26, 0.04);
+
+  --color-success: #346538;
+  --color-success-bg: #edf3ec;
+  --color-warning: #956400;
+  --color-warning-bg: #fbf3db;
+  --color-warning-border: rgba(149, 100, 0, 0.15);
+  --color-error: #9f2f2d;
+  --color-error-bg: #fdebec;
+  --color-info: #1f6c9f;
+  --color-info-bg: #e1f3fe;
+  --color-focus-ring: #1a1a1a;
+
+  --color-mode-react-bg: #f3effe;
+  --color-mode-react-text: #6b21a8;
+
+  --color-search-hl: rgba(149, 100, 0, 0.2);
+  --color-overlay: rgba(0, 0, 0, 0.4);
+}
+
+/* ── 纯白简洁 ── */
+:root[data-theme-light="pure"],
+[data-theme-light="pure"] {
+  --color-surface-base: var(--white-pure);
+  --color-surface-elevated: var(--white-pure);
+  --color-surface-sunken: var(--gray-100);
+  --color-surface-hover: var(--gray-100);
+  --color-surface-active: var(--gray-200);
+
+  --color-text-primary: var(--text-near-black);
+  --color-text-secondary: var(--text-mid-gray);
+  --color-text-muted: var(--text-soft-gray);
+
+  --color-border: var(--gray-200);
+  --color-border-hover: var(--gray-300);
+
+  --color-action-primary: var(--text-near-black);
+  --color-action-primary-hover: var(--gray-800);
+  --color-action-subtle: rgba(26, 26, 26, 0.04);
+}
+
+/* ── 柔和灰 ── */
+:root[data-theme-light="soft"],
+[data-theme-light="soft"] {
+  --color-surface-base: var(--color-soft-gray);
+  --color-surface-elevated: var(--white-pure);
+  --color-surface-sunken: #f1f3f5;
+  --color-surface-hover: #f1f3f5;
+  --color-surface-active: #e9ecef;
+
+  --color-text-primary: var(--color-soft-gray-text);
+  --color-text-secondary: #5a6573; /* 5.62:1 on #f8f9fa ✓ AA */
+  --color-text-muted: #636b76; /* 5.11:1 on #f8f9fa ✓ AA */
+
+  --color-border: #e2e8f0;
+  --color-border-hover: #cbd5e0;
+
+  --color-action-primary: #4a5568;
+  --color-action-primary-hover: #2d3748;
+  --color-action-subtle: rgba(74, 85, 104, 0.04);
+}
+
+/* ── 奶油米 ── */
+:root[data-theme-light="cream"],
+[data-theme-light="cream"] {
+  --color-surface-base: var(--color-cream);
+  --color-surface-elevated: var(--white-pure);
+  --color-surface-sunken: var(--color-cream-sunken);
+  --color-surface-hover: var(--color-cream-sunken);
+  --color-surface-active: #ece8df;
+
+  --color-text-primary: var(--color-cream-text);
+  --color-text-secondary: #6c5f4f;
+  --color-text-muted: #756a58; /* 4.96:1 on #faf7f2 ✓ AA */
+
+  --color-border: #e5dfd5;
+  --color-border-hover: #d4ccbc;
+
+  --color-action-primary: var(--color-cream-text);
+  --color-action-primary-hover: #4a4a4a;
+  --color-action-subtle: rgba(45, 52, 54, 0.04);
+}

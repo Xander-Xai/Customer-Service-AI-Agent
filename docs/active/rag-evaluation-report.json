@@ -1,0 +1,560 @@
+{
+  "total_queries": 30,
+  "hit_count": 24,
+  "hit_rate": 0.8,
+  "precision_at_k": 0.5333,
+  "recall_at_k": 0.8,
+  "mrr": 0.7778,
+  "faithfulness": 0.0,
+  "avg_distance": 0.7809,
+  "k": 3,
+  "collections": {
+    "product_knowledge": 50,
+    "faq": 45,
+    "tech_support": 35
+  },
+  "category_breakdown": {
+    "成分咨询": {
+      "total": 5,
+      "hits": 4,
+      "hit_rate": 0.8
+    },
+    "肤质匹配": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "成分交互": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "成分对比": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "产品选择": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "产品查询": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "物流": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "售后": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "会员": {
+      "total": 2,
+      "hits": 1,
+      "hit_rate": 0.5
+    },
+    "支付": {
+      "total": 1,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    "产品信息": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "质量": {
+      "total": 1,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    "安全": {
+      "total": 1,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    "财务": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "企业服务": {
+      "total": 1,
+      "hits": 0,
+      "hit_rate": 0.0
+    },
+    "应急处理": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "使用指导": {
+      "total": 2,
+      "hits": 2,
+      "hit_rate": 1.0
+    },
+    "季节护理": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "问题肌肤": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "特殊护理": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "肤质护理": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "成分安全": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "个性化建议": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    },
+    "生活场景": {
+      "total": 1,
+      "hits": 1,
+      "hit_rate": 1.0
+    }
+  },
+  "per_query_results": [
+    {
+      "query": "烟酰胺有什么功效？",
+      "category": "成分咨询",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8583867947260538,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "敏感肌可以用视黄醇吗？",
+      "category": "成分咨询",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8490228652954102,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "透明质酸是什么？",
+      "category": "成分咨询",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8366191983222961,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "油性皮肤适合用什么面霜？",
+      "category": "肤质匹配",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6192690134048462,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "VC精华不能和什么一起用？",
+      "category": "成分交互",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7750877141952515,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "传明酸能祛斑吗？",
+      "category": "成分咨询",
+      "expected_collection": "product_knowledge",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8178983132044474,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "果酸和水杨酸有什么区别？",
+      "category": "成分对比",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6852841774622599,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "神经酰胺对皮肤屏障有什么作用？",
+      "category": "成分咨询",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.5582137604554495,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "防晒霜物理防晒和化学防晒怎么选？",
+      "category": "产品选择",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8130691051483154,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "维诺雅有哪些美白产品？",
+      "category": "产品查询",
+      "expected_collection": "product_knowledge",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6463093161582947,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "你们发什么快递？多久能到？",
+      "category": "物流",
+      "expected_collection": "faq",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6654243071873983,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "怎么退货？退货流程是什么？",
+      "category": "售后",
+      "expected_collection": "faq",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7612585425376892,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "会员有什么等级？各等级权益？",
+      "category": "会员",
+      "expected_collection": "faq",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6346237063407898,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "支持什么付款方式？",
+      "category": "支付",
+      "expected_collection": "faq",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8158671458562216,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "产品保质期多久？开封后能用多长时间？",
+      "category": "产品信息",
+      "expected_collection": "faq",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.5780322055021921,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "怎么辨别产品是不是正品？",
+      "category": "质量",
+      "expected_collection": "faq",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.9155713319778442,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "孕期可以用你们的产品吗？",
+      "category": "安全",
+      "expected_collection": "faq",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.9449163873990377,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "怎么开发票？",
+      "category": "财务",
+      "expected_collection": "faq",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8484348257382711,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "积分怎么用？怎么兑换？",
+      "category": "会员",
+      "expected_collection": "faq",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8929794232050577,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "企业采购有优惠吗？",
+      "category": "企业服务",
+      "expected_collection": "faq",
+      "hit": false,
+      "precision_at_k": 0.0,
+      "recall_at_k": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_k": 0.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7706153790156046,
+      "first_relevant_rank": 0,
+      "retrieved_count": 3
+    },
+    {
+      "query": "用了产品过敏了怎么办？",
+      "category": "应急处理",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8844015796979269,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "护肤品的正确使用顺序是什么？",
+      "category": "使用指导",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8633451263109843,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "夏天护肤和冬天护肤有什么不同？",
+      "category": "季节护理",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 0.9197207891481876,
+      "faithfulness": 0.0,
+      "avg_distance": 0.896236002445221,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "黑头怎么去除？",
+      "category": "问题肌肤",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg_at_k": 0.5,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7888227105140686,
+      "first_relevant_rank": 3,
+      "retrieved_count": 3
+    },
+    {
+      "query": "医美手术后怎么护理皮肤？",
+      "category": "特殊护理",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7385741472244263,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "敏感肌应该怎么护肤？",
+      "category": "肤质护理",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 0.9197207891481876,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7716850241025289,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "面膜多久敷一次比较好？",
+      "category": "使用指导",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 1.0,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.6173970699310303,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "成分之间有冲突吗？哪些不能一起用？",
+      "category": "成分安全",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8894019524256388,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "不同年龄段应该怎么选择护肤品？",
+      "category": "个性化建议",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.6666666666666666,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 0.9197207891481876,
+      "faithfulness": 0.0,
+      "avg_distance": 0.8941438794136047,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    },
+    {
+      "query": "运动前后需要护肤吗？",
+      "category": "生活场景",
+      "expected_collection": "tech_support",
+      "hit": true,
+      "precision_at_k": 0.3333333333333333,
+      "recall_at_k": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_k": 1.0,
+      "faithfulness": 0.0,
+      "avg_distance": 0.7958146731058756,
+      "first_relevant_rank": 1,
+      "retrieved_count": 3
+    }
+  ]
+}

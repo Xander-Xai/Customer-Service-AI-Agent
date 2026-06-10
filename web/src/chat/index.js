@@ -3,14 +3,22 @@
  */
 import { API } from '../api/index.js';
 import { initAuthState, logout } from '../auth/index.js';
-import { showToast } from '../utils/toast.js';
-import { appendSystemMessage, showProgressStatus, removeProgressStatus, setSessionId, initCodeCopyDelegate, appendAssistantMessage, setFeedbackHandler } from './messages.js';
-import { getCurrentSessionId, getCurrentSessionToken, updateSessionInfo, addToHistory, startNewChat, loadSessionList, selectSession } from './sessions.js';
-import { sendMessage, initInputEvents, initDragAndDrop, updateSendButton, useQuickPrompt } from './input.js';
-import { initShortcuts } from './shortcuts.js';
-import { renderWelcome, bindQuickPrompts } from './welcome.js';
+import { updateSession } from '../state/chatState.js';
+import { initDragAndDrop, initInputEvents, useQuickPrompt } from './input.js';
+import {
+  appendAssistantMessage,
+  appendSystemMessage,
+  initCodeCopyDelegate,
+  removeProgressStatus,
+  setFeedbackHandler,
+  setSessionId,
+  showProgressStatus,
+} from './messages.js';
 import { initSearch } from './search.js';
+import { addToHistory, getCurrentSessionId, loadSessionList, startNewChat } from './sessions.js';
+import { initShortcuts } from './shortcuts.js';
 import { toggleRecording } from './voice.js';
+import { bindQuickPrompts, renderWelcome } from './welcome.js';
 
 export function init() {
   console.log('[Init] DOM loaded, setting up...');
@@ -160,11 +168,16 @@ function handleResponse(data) {
   const agentsUsed = data.agents_used || [];
 
   // 同步 session 信息
-  updateSessionInfo(data.session_id, data.session_token);
+  updateSession(data.session_id, data.session_token);
+  setSessionId(data.session_id);
 
   // 渲染 AI 回复
   appendAssistantMessage(content, {
-    agent: data.agent || '', elapsed, mode, cached, agentsUsed,
+    agent: data.agent || '',
+    elapsed,
+    mode,
+    cached,
+    agentsUsed,
     resolutionStatus: data.resolution_status || '',
   });
 

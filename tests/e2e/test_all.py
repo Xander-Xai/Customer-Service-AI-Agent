@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 @pytest.fixture(scope="function")
 def graph_app():
     from core.container import ServiceContainer
-    from multi_agent_customer_service import build_graph
+    from core.graph_builder import build_graph
 
     container = ServiceContainer()
     return build_graph(container)
@@ -37,7 +37,7 @@ def graph_app():
 def fastapi_app():
     from api.app import create_app
     from core.container import ServiceContainer
-    from multi_agent_customer_service import build_graph
+    from core.graph_builder import build_graph
 
     container = ServiceContainer()
     graph = build_graph(container)
@@ -54,7 +54,7 @@ def fastapi_app():
 def client_with_api_key(fastapi_app):
     from fastapi.testclient import TestClient
 
-    from config import API_KEY
+    from core.config import API_KEY
 
     return TestClient(fastapi_app, headers={"X-API-Key": API_KEY})
 
@@ -63,7 +63,7 @@ def client_with_api_key(fastapi_app):
 def client_with_admin_token(fastapi_app):
     from fastapi.testclient import TestClient
 
-    from config import MONITORING_ADMIN_TOKEN
+    from core.config import MONITORING_ADMIN_TOKEN
 
     return TestClient(fastapi_app, headers={"X-Admin-Token": MONITORING_ADMIN_TOKEN})
 
@@ -82,7 +82,7 @@ def client_no_auth(fastapi_app):
 
 class TestImports:
     def test_import_graph(self):
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         assert callable(build_graph)
 
@@ -119,12 +119,12 @@ class TestImports:
         assert callable(KingdeeMockAdapter)
 
     def test_import_session_manager(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         assert callable(EnhancedSessionManager)
 
     def test_config_loaded(self):
-        from config import CACHE_L1_MAX, VERSION
+        from core.config import CACHE_L1_MAX, VERSION
 
         assert VERSION
         assert CACHE_L1_MAX > 0
@@ -138,7 +138,7 @@ class TestImports:
 class TestGraphBuild:
     def test_graph_build(self):
         from core.container import ServiceContainer
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         container = ServiceContainer()
         app = build_graph(container)
@@ -197,7 +197,7 @@ class TestRouter:
 
         router = QueryRouter()
         result = await router.route("你好")
-        assert result.fast_path == True
+        assert result.fast_path is True
         assert result.complexity < 50
 
     @pytest.mark.asyncio
@@ -311,7 +311,7 @@ class TestCache:
 class TestSessionManager:
     @pytest.mark.asyncio
     async def test_create_session(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         await sm.create_session("test_sid")
@@ -319,7 +319,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_add_message(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         await sm.create_session("test")
@@ -328,7 +328,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_sliding_window(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=3, max_tokens=10000)
         await sm.create_session("test")
@@ -340,7 +340,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_delete_session(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         await sm.create_session("del_test")
@@ -349,7 +349,7 @@ class TestSessionManager:
 
     @pytest.mark.asyncio
     async def test_list_sessions(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         await sm.create_session("s1")
@@ -366,7 +366,7 @@ class TestSessionManager:
 class TestDriftDetection:
     @pytest.mark.asyncio
     async def test_topic_drift(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5)
         await sm.create_session("drift")
@@ -381,7 +381,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_intent_drift(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5)
         await sm.create_session("intent_drift")
@@ -394,7 +394,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_contradiction_detection(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5)
         await sm.create_session("contra")
@@ -407,7 +407,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_repeat_detection(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5)
         await sm.create_session("repeat")
@@ -419,7 +419,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_drift_repair_strategies(self):
-        from session_manager import DriftType
+        from core.session.session_manager import DriftType
 
         assert hasattr(DriftType, "TOPIC")
         assert hasattr(DriftType, "INTENT")
@@ -427,7 +427,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_drift_escalation(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5)
         await sm.create_session("escalate")
@@ -437,7 +437,7 @@ class TestDriftDetection:
 
     @pytest.mark.asyncio
     async def test_no_drift_normal_conversation(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         await sm.create_session("normal")
@@ -618,7 +618,7 @@ class TestAPI:
         assert resp.status_code == 200
 
     def test_metrics_endpoint(self, client_with_api_key):
-        from config import API_KEY_ENABLED
+        from core.config import API_KEY_ENABLED
 
         resp = client_with_api_key.get("/api/metrics")
         # metrics 需要 admin 认证；API_KEY_ENABLED=false 时 API Key 不生效
@@ -628,7 +628,7 @@ class TestAPI:
             assert resp.status_code == 401
 
     def test_kpi_endpoint(self, client_with_api_key):
-        from config import API_KEY_ENABLED
+        from core.config import API_KEY_ENABLED
 
         resp = client_with_api_key.get("/api/kpi")
         if API_KEY_ENABLED:
@@ -637,7 +637,7 @@ class TestAPI:
             assert resp.status_code == 401
 
     def test_cache_stats_endpoint(self, client_with_api_key):
-        from config import API_KEY_ENABLED
+        from core.config import API_KEY_ENABLED
 
         resp = client_with_api_key.get("/api/cache/stats")
         if API_KEY_ENABLED:
@@ -694,7 +694,7 @@ class TestSecurityAuth:
         assert resp.status_code == 200
 
     def test_metrics_with_api_key(self, client_with_api_key):
-        from config import API_KEY_ENABLED
+        from core.config import API_KEY_ENABLED
 
         resp = client_with_api_key.get("/api/metrics")
         # metrics 需要 admin 认证；API_KEY_ENABLED=false 时 API Key 不生效
@@ -709,7 +709,7 @@ class TestSecurityAuth:
 
     def test_sessions_no_auth_returns_401(self, client_no_auth):
         # v4.0: 会话端点需要认证（移除了 localhost 绕过）
-        from config import DEV_MODE
+        from core.config import DEV_MODE
 
         resp = client_no_auth.get("/api/sessions")
         if DEV_MODE:
@@ -771,7 +771,7 @@ class TestInputSanitization:
 class TestSessionTokens:
     @pytest.fixture(autouse=True)
     def set_real_secret(self):
-        import config
+        from core import config
 
         original = config.SESSION_TOKEN_SECRET
         config.SESSION_TOKEN_SECRET = "test-real-secret-for-unit-tests"
@@ -780,7 +780,7 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_token_generation(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         token = sm.generate_session_token("test-session-1")
@@ -788,7 +788,7 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_token_validation_success(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         token = sm.generate_session_token("test-session-1")
@@ -796,7 +796,7 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_token_validation_wrong_token(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         sm.generate_session_token("test-session-1")  # side-effect: creates token
@@ -805,7 +805,7 @@ class TestSessionTokens:
     @pytest.mark.asyncio
     async def test_token_validation_empty_token(self):
         """v4.0 安全修复: 有密钥时无 token 应拒绝（防止会话劫持）"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         sm.generate_session_token("test-session-1")
@@ -814,7 +814,7 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_token_validation_wrong_session(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         token = sm.generate_session_token("session-a")
@@ -822,7 +822,7 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_token_deterministic(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         t1 = sm.generate_session_token("same-session")
@@ -831,8 +831,8 @@ class TestSessionTokens:
 
     @pytest.mark.asyncio
     async def test_no_secret_rejects_validation(self):
-        import config
-        from session_manager import EnhancedSessionManager
+        from core import config
+        from core.session.session_manager import EnhancedSessionManager
 
         original = config.SESSION_TOKEN_SECRET
         try:
@@ -916,30 +916,30 @@ class TestMessageBusConcurrency:
 
 class TestSecurityConfig:
     def test_ws_config_exists(self):
-        from config import WS_IDLE_TIMEOUT, WS_MAX_CONNECTIONS_PER_IP, WS_MESSAGE_RATE_LIMIT
+        from core.config import WS_IDLE_TIMEOUT, WS_MAX_CONNECTIONS_PER_IP, WS_MESSAGE_RATE_LIMIT
 
         assert WS_MAX_CONNECTIONS_PER_IP > 0
         assert WS_MESSAGE_RATE_LIMIT > 0
         assert WS_IDLE_TIMEOUT > 0
 
     def test_monitoring_admin_token_config(self):
-        from config import MONITORING_ADMIN_TOKEN
+        from core.config import MONITORING_ADMIN_TOKEN
 
         assert MONITORING_ADMIN_TOKEN
 
     def test_session_token_secret_config(self):
-        from config import SESSION_TOKEN_SECRET
+        from core.config import SESSION_TOKEN_SECRET
 
         assert SESSION_TOKEN_SECRET
 
     def test_tls_config_exists(self):
-        from config import TLS_CERT_FILE, TLS_KEY_FILE
+        from core.config import TLS_CERT_FILE, TLS_KEY_FILE
 
         assert isinstance(TLS_CERT_FILE, str)
         assert isinstance(TLS_KEY_FILE, str)
 
     def test_cors_not_wildcard(self):
-        from config import CORS_ORIGINS
+        from core.config import CORS_ORIGINS
 
         assert "*" not in CORS_ORIGINS
 
@@ -1229,13 +1229,13 @@ class TestSecurityHardening:
 
     def test_config_security_defaults(self):
         # v4.0: 配置值可通过 .env 覆盖，仅验证配置模块可加载
-        from config import MAX_SESSIONS, SESSION_IDLE_TTL
+        from core.config import MAX_SESSIONS, SESSION_IDLE_TTL
 
         assert SESSION_IDLE_TTL > 0
         assert MAX_SESSIONS > 0
 
     def test_version_updated(self):
-        from config import VERSION
+        from core.config import VERSION
 
         assert VERSION >= "3.8.0"
 
@@ -1247,7 +1247,7 @@ class TestSecurityHardening:
 
 class TestChineseCacheOptimization:
     def test_chinese_tokenization_in_cache(self):
-        from session_manager import _tokenize_chinese
+        from core.session.session_manager import _tokenize_chinese
 
         tokens = _tokenize_chinese("玫瑰精华液成分")
         assert len(tokens) >= 2
@@ -1301,7 +1301,7 @@ class TestLogicFixes:
     @pytest.mark.asyncio
     async def test_session_manager_async_context(self):
         """v4.1: 异步方法在 async 上下文中正确工作"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager()
         # 异步调用 create_session
@@ -1313,8 +1313,8 @@ class TestLogicFixes:
 
     @pytest.mark.asyncio
     async def test_session_eviction(self):
-        import config
-        from session_manager import EnhancedSessionManager
+        from core import config
+        from core.session.session_manager import EnhancedSessionManager
 
         original = config.MAX_SESSIONS
         config.MAX_SESSIONS = 5
@@ -1478,7 +1478,7 @@ class TestReActAgent:
 class TestGraphIntegration:
     def test_graph_has_react_node(self):
         from core.container import ServiceContainer
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         container = ServiceContainer()
         app = build_graph(container)
@@ -1487,7 +1487,7 @@ class TestGraphIntegration:
 
     def test_graph_has_all_modes(self):
         from core.container import ServiceContainer
-        from multi_agent_customer_service import build_graph
+        from core.graph_builder import build_graph
 
         container = ServiceContainer()
         app = build_graph(container)
@@ -1551,7 +1551,7 @@ class TestPerformance:
 
     @pytest.mark.asyncio
     async def test_many_sessions(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5, max_tokens=2000)
         for i in range(100):
@@ -1563,7 +1563,7 @@ class TestPerformance:
 
     @pytest.mark.asyncio
     async def test_drift_detection_performance(self):
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5, max_tokens=2000)
         await sm.create_session("drift_perf")
@@ -1596,7 +1596,7 @@ class TestPerformance:
         from fastapi.testclient import TestClient
 
         from api.app import create_app
-        from config import API_KEY
+        from core.config import API_KEY
         from core.container import ServiceContainer
 
         container = ServiceContainer()
@@ -1655,7 +1655,7 @@ class TestV31Improvements:
     @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_token_counting(self):
-        from session_manager import _count_tokens
+        from core.session.session_manager import _count_tokens
 
         t1 = _count_tokens("Hello world")
         t2 = _count_tokens("这是一段中文测试文本")
@@ -1665,7 +1665,7 @@ class TestV31Improvements:
 
     @pytest.mark.asyncio
     async def test_contradiction_pairs_expanded(self):
-        from session_manager import NEGATION_PAIRS
+        from core.session.session_manager import NEGATION_PAIRS
 
         assert len(NEGATION_PAIRS) >= 40
 
@@ -1684,7 +1684,7 @@ class TestV31Improvements:
     @pytest.mark.asyncio
     async def test_token_level_sliding_window(self):
         """验证 token 级滑动窗口裁剪：上下文应远小于全部消息的 token 总量"""
-        from session_manager import EnhancedSessionManager, _count_tokens
+        from core.session.session_manager import EnhancedSessionManager, _count_tokens
 
         sm = EnhancedSessionManager(window_size=3, max_tokens=50)
         await sm.create_session("token_test")
@@ -1713,7 +1713,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_token_budget_never_exceeded(self):
         """模拟 30 轮对话，验证 context token 始终在窗口内（摘要不计入消息 token 预算）"""
-        from session_manager import EnhancedSessionManager, _count_tokens
+        from core.session.session_manager import EnhancedSessionManager, _count_tokens
 
         # 使用较大 max_tokens，验证滑动窗口正确裁剪消息数
         sm = EnhancedSessionManager(window_size=3, max_tokens=500)
@@ -1742,7 +1742,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_long_message_truncation(self):
         """超长消息触发按 token 裁剪，消息数被压缩到 2 条以下时停止"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=2, max_tokens=50)
         await sm.create_session("long_msg")
@@ -1761,7 +1761,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_window_size_boundary(self):
         """验证滑动窗口精确裁剪：超出 window 的旧消息被移除"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=2, max_tokens=5000)
         await sm.create_session("window_boundary")
@@ -1777,7 +1777,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_summary_generation_under_pressure(self):
         """高频对话下摘要生成不崩溃"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=2, max_tokens=50)
         await sm.create_session("summary_stress")
@@ -1798,7 +1798,7 @@ class TestContextLengthPressure:
     @pytest.mark.asyncio
     async def test_empty_session_safe(self):
         """空会话获取 context 不崩溃"""
-        from session_manager import EnhancedSessionManager
+        from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=5, max_tokens=100)
         await sm.create_session("empty_session")

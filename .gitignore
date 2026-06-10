@@ -9,7 +9,7 @@ build/
 
 # ===== Node.js =====
 node_modules/
-static/dist/
+web/static/dist/
 
 # ===== 虚拟环境 =====
 .venv/
@@ -51,6 +51,7 @@ loki/
 monitoring/
 chroma_db/
 .admin_password
+.certs/
 
 # ===== 临时文件 =====
 *.tmp
@@ -59,6 +60,9 @@ chroma_db/
 *.log
 temp/
 tmp/
+lint_results.txt
+frontend_repair_plan.md
+test-results/
 
 # ===== LangGraph =====
 .langgraph/
@@ -78,3 +82,4 @@ CLAUDE.md
 AI music/
 docs/2026-06-07-v4.3-audit-and-ci-fix-summary.md
 .tmp-skills/
+skills-lock.json
