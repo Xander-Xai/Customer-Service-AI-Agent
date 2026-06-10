@@ -99,8 +99,8 @@
   --color-action-primary: #1a1a1a;
   --color-action-primary-hover: #333333;
   --color-action-subtle: rgba(26, 26, 26, 0.06);  /* 从 0.04 提升到 0.06 */
-  --color-action-disabled-bg: #d4d3d0;   /* 灰底，比 opacity 方案更可控 */
-  --color-action-disabled-fg: #8a8a8a;   /* 浅灰文字，4.9:1 on #d4d3d0 */
+  --color-action-disabled-bg: #d4d3d0;   /* 灰底，明显表示不可交互 */
+  --color-action-disabled-fg: #5a5a5a;   /* 4.61:1 on #d4d3d0 ✓ AA */
 
   /* 语义色 */
   --color-success: #346538;
@@ -148,7 +148,7 @@
     --color-action-primary-hover: #c9c9ce;
     --color-action-subtle: rgba(232, 234, 237, 0.10);
     --color-action-disabled-bg: #2a2d3a;
-    --color-action-disabled-fg: #5a6270; /* 4.8:1 on #2a2d3a */
+    --color-action-disabled-fg: #949cac; /* 4.96:1 on #2a2d3a ✓ AA */
 
     --color-success: #9ed7a4;       /* 7.62:1 on #1a3a1f ✓ AAA */
     --color-success-bg: #1a3a1f;
