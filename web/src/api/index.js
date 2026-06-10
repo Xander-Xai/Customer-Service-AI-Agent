@@ -31,8 +31,6 @@ export const API = {
   submitFeedback: rest.submitFeedback,
   submitRating: rest.submitRating,
   getFeedbackStats: rest.getFeedbackStats,
-  getHistory: rest.getHistory,
-  getHistoryMessages: rest.getHistoryMessages,
   sendChatWithImage: rest.sendChatWithImage,
   sendChatWithFile: rest.sendChatWithFile,
   sendChat: rest.sendChat,

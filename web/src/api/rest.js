@@ -82,19 +82,6 @@ export function submitRating(sessionId, rating, messageIndex = 0, comment = '') 
 export function getFeedbackStats() {
   return _request('GET', '/api/feedback/stats');
 }
-export function getHistory() {
-  return _request('GET', '/api/history');
-}
-
-export function getHistoryMessages(sessionId) {
-  const token = localStorage.getItem('currentSessionToken') || '';
-  return _request(
-    'GET',
-    `/api/history/${sessionId}/messages`,
-    null,
-    token ? { 'X-Session-Token': token } : {},
-  );
-}
 
 /** 多模态对话（图片 + 文字） */
 export function sendChatWithImage(query, imageFile, sessionId) {
