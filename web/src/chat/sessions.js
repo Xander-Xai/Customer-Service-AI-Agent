@@ -124,6 +124,10 @@ export async function selectSession(sessionId) {
   try {
     const data = await API.getSession(sessionId);
     const session = data.session;
+
+    // 激活会话详情侧面板
+    _showSessionDetail(sessionId, session);
+
     const messages = session.messages || [];
 
     const container = document.getElementById('chatMessages');
@@ -160,3 +164,58 @@ async function deleteSessionConfirm(sessionId) {
     appendSystemMessage(`删除失败: ${e.message || '未知错误'}`);
   }
 }
+
+/** 显示会话详情侧面板 */
+function _showSessionDetail(sessionId, session) {
+  const panel = document.getElementById('sessionDetailPanel');
+  const content = document.getElementById('sessionDetailContent');
+  if (!panel || !content) return;
+
+  const msgCount = session.message_count || (session.messages?.length ?? 0);
+  const createdAt = session.created_at ? formatTime(session.created_at) : '--';
+  const lastActivity = session.last_activity ? formatTime(session.last_activity) : '--';
+
+  content.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">会话 ID</div>
+        <div style="font-family:monospace;font-size:12px;word-break:break-all">${escapeHtml(sessionId)}</div>
+      </div>
+      <div style="display:flex;gap:16px">
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">消息数</div>
+          <div style="font-size:14px;font-weight:600">${msgCount}</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">漂移次数</div>
+          <div style="font-size:14px;font-weight:600">${session.drift_count || 0}</div>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">创建时间</div>
+        <div style="font-size:13px">${createdAt}</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">最后活动</div>
+        <div style="font-size:13px">${lastActivity}</div>
+      </div>
+      ${session.summary ? `
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">摘要</div>
+        <div style="font-size:13px">${escapeHtml(session.summary)}</div>
+      </div>
+      ` : ''}
+    </div>
+  `;
+
+  panel.classList.add('open');
+}
+
+// 初始化面板关闭按钮
+(function _initPanelClose() {
+  const btn = document.getElementById('btnClosePanel');
+  const panel = document.getElementById('sessionDetailPanel');
+  if (btn && panel) {
+    btn.addEventListener('click', () => panel.classList.remove('open'));
+  }
+})();
