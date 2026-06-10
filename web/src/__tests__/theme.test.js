@@ -195,5 +195,69 @@ describe('theme manager', () => {
       btn.click();
       expect(panel.getAttribute('aria-hidden')).toBe('false');
     });
+
+    it('seg-control button click updates aria-pressed and dataset', () => {
+      document.body.innerHTML = `
+        <button id="btnSettings"></button>
+        <div id="settingsPanel" aria-hidden="true">
+          <div id="settingsBackdrop"></div>
+          <aside class="settings-drawer">
+            <button id="btnSettingsClose"></button>
+            <div class="seg-control" data-key="colorMode">
+              <button data-value="light" aria-pressed="false">浅色</button>
+              <button data-value="dark" aria-pressed="false">深色</button>
+              <button data-value="system" aria-pressed="true">跟随系统</button>
+            </div>
+            <div class="seg-control" data-key="fontSize">
+              <button data-value="small" aria-pressed="false">小</button>
+              <button data-value="medium" aria-pressed="true">中</button>
+              <button data-value="large" aria-pressed="false">大</button>
+              <button data-value="xlarge" aria-pressed="false">超大</button>
+            </div>
+            <div class="seg-control" data-key="lineHeight">
+              <button data-value="compact" aria-pressed="false">紧凑</button>
+              <button data-value="standard" aria-pressed="true">标准</button>
+              <button data-value="relaxed" aria-pressed="false">宽松</button>
+            </div>
+          </aside>
+        </div>
+      `;
+
+      initSettingsPanel();
+
+      // Click "深色" in color mode
+      const darkBtn = document.querySelector('.seg-control[data-key="colorMode"] button[data-value="dark"]');
+      darkBtn.click();
+      expect(document.documentElement.dataset.colorMode).toBe('dark');
+      expect(darkBtn.getAttribute('aria-pressed')).toBe('true');
+      // 其他按钮应为 false
+      document
+        .querySelectorAll('.seg-control[data-key="colorMode"] button')
+        .forEach((b) => {
+          if (b !== darkBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+        });
+
+      // Click "大" in font size
+      const largeBtn = document.querySelector('.seg-control[data-key="fontSize"] button[data-value="large"]');
+      largeBtn.click();
+      expect(document.documentElement.dataset.fontSize).toBe('large');
+      expect(largeBtn.getAttribute('aria-pressed')).toBe('true');
+      document
+        .querySelectorAll('.seg-control[data-key="fontSize"] button')
+        .forEach((b) => {
+          if (b !== largeBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+        });
+
+      // Click "宽松" in line height
+      const relaxedBtn = document.querySelector('.seg-control[data-key="lineHeight"] button[data-value="relaxed"]');
+      relaxedBtn.click();
+      expect(document.documentElement.dataset.lineHeight).toBe('relaxed');
+      expect(relaxedBtn.getAttribute('aria-pressed')).toBe('true');
+      document
+        .querySelectorAll('.seg-control[data-key="lineHeight"] button')
+        .forEach((b) => {
+          if (b !== relaxedBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+        });
+    });
   });
 });
