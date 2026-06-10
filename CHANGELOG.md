@@ -4,6 +4,17 @@
 
 ---
 
+## v5.2.1 (2026-06-11) — 混合主题特异性修复 + 面板状态同步
+
+### 对比度修复补充
+- **OS 深色模式污染修复**：将 `@media (prefers-color-scheme: dark)` 媒体查询从 `variables.css` 移至 `theme-dark.css` 末尾，彻底解决深色系统模式下切换浅色主题时出现深色侧边栏+浅色主区+深色字体的混合主题 Bug
+- **浅色主题侧边栏补全**：`pure`/`soft`/`cream` 主题补齐缺失的 `--color-surface-base-glass` Token，防止错误继承系统深色玻璃态
+
+### 交互修复
+- **面板状态同步**：修改 `theme.js` 中的 `_bindControls()` 函数，在切换配色模式/字号/行高时调用 `_syncPanelState()` 确保面板 UI 与设置状态同步
+
+---
+
 ## v5.2 (2026-06-10) — 无障碍合规 + 交互增强 + 对比度全量修复 + CI 升级
 
 ### 无障碍合规（WCAG AA/AAA）
@@ -13,6 +24,10 @@
 - **Disabled token 统一修正**：所有 disabled 状态色彩通过语义 token 控制
 
 ### 对比度全量修复（8+ 处）
+- **混合主题对比度灾难修复 (Root Cause)**：修复了由于 CSS `@media (prefers-color-scheme: dark)` 特异性污染导致的“深色系统模式下切换浅色主题会产生深色侧边栏+浅色主区+深色字体”的 Bug。现已将 OS 深色媒体查询抽离并置于 `theme-dark.css` 末尾，确保不同颜色模式的变量隔离。
+- **浅色主题侧边栏一致性**：在 `theme-light.css` 中的 `pure`/`soft`/`cream` 主题补齐了缺失的 `--color-surface-base-glass`，防止其错误继承默认的暖色玻璃态或系统的深色玻璃态。
+- **侧边栏文本对比度**：`layout.css` 中将会话标题强制绑定至高对比语义 Token `--color-text-primary` 和 `--color-text-secondary`，解决背景深色覆盖浅色文本的不可读问题。
+- **消息气泡对比度**：`components.css` 中为用户消息气泡和 AI 气泡显式提供具有高对比度保证的 `background` 与 `color` Token 对（如 `--color-action-primary` 配合 `--color-surface-base`），避免出现深背景+深字体或无法看清内容的问题。
 - **btn-send:disabled**：opacity 方案→专用 disabled token（2.07→4.61:1）
 - **btn-primary:disabled**：bg-hover→disabled token（3.9→4.61:1）
 - **btn-secondary**：补全缺失的样式定义（4.61:1 AA）

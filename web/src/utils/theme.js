@@ -285,6 +285,7 @@ function _bindControls() {
     colorModeSeg.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
         setPref('colorMode', btn.dataset.value);
+        _syncPanelState();
       });
     });
   }
@@ -298,7 +299,10 @@ function _bindControls() {
   const fontSizeSeg = document.querySelector('.seg-control[data-key="fontSize"]');
   if (fontSizeSeg) {
     fontSizeSeg.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', () => setPref('fontSize', btn.dataset.value));
+      btn.addEventListener('click', () => {
+        setPref('fontSize', btn.dataset.value);
+        _syncPanelState();
+      });
     });
   }
 
@@ -306,7 +310,10 @@ function _bindControls() {
   const lineHeightSeg = document.querySelector('.seg-control[data-key="lineHeight"]');
   if (lineHeightSeg) {
     lineHeightSeg.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', () => setPref('lineHeight', btn.dataset.value));
+      btn.addEventListener('click', () => {
+        setPref('lineHeight', btn.dataset.value);
+        _syncPanelState();
+      });
     });
   }
 

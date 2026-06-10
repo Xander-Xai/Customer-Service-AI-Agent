@@ -48,6 +48,7 @@
 :root[data-theme-light="pure"],
 [data-theme-light="pure"] {
   --color-surface-base: var(--white-pure);
+  --color-surface-base-glass: rgba(255, 255, 255, 0.85);
   --color-surface-elevated: var(--white-pure);
   --color-surface-sunken: var(--gray-100);
   --color-surface-hover: var(--gray-100);
@@ -69,6 +70,7 @@
 :root[data-theme-light="soft"],
 [data-theme-light="soft"] {
   --color-surface-base: var(--color-soft-gray);
+  --color-surface-base-glass: rgba(248, 249, 250, 0.85);
   --color-surface-elevated: var(--white-pure);
   --color-surface-sunken: #f1f3f5;
   --color-surface-hover: #f1f3f5;
@@ -90,6 +92,7 @@
 :root[data-theme-light="cream"],
 [data-theme-light="cream"] {
   --color-surface-base: var(--color-cream);
+  --color-surface-base-glass: rgba(250, 247, 242, 0.85);
   --color-surface-elevated: var(--white-pure);
   --color-surface-sunken: var(--color-cream-sunken);
   --color-surface-hover: var(--color-cream-sunken);
