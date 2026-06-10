@@ -143,6 +143,33 @@
   color: var(--text-inverse);
 }
 
+.btn-sm.danger:hover {
+  background: var(--color-action-primary-hover);
+}
+
+/* ===== v5.4: 二级按钮 — 在 variables.css 中被引用但缺失定义 ===== */
+.btn-secondary {
+  padding: 6px 14px;
+  font-size: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-hover);
+  background: var(--color-surface-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.btn-secondary:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-focus);
+}
+
+.btn-secondary:disabled {
+  background: var(--color-action-disabled-bg);
+  color: var(--color-action-disabled-fg);
+  cursor: not-allowed;
+}
+
 .tag {
   display: inline-block;
   padding: 2px 8px;

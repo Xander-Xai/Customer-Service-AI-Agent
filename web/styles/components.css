@@ -426,8 +426,10 @@
 }
 
 .btn-send:disabled {
-  opacity: 0.3;
+  background: var(--color-action-disabled-bg);
+  color: var(--color-action-disabled-fg);
   cursor: not-allowed;
+  /* 删除 opacity: 0.3 — 改用专用 disabled token 保证对比度 */
 }
 
 .input-hint {

@@ -238,7 +238,7 @@
   font-size: 11px;
   color: var(--text-secondary);
   background: none;
-  border: 1px solid var(--border);
+  border: 1px solid var(--color-border-hover);
   border-radius: var(--radius-sm);
   padding: 2px 8px;
   margin-left: 8px;
@@ -247,6 +247,7 @@
 }
 
 #logoutBtn:hover {
-  border-color: var(--border-hover);
+  border-color: var(--color-focus);
   color: var(--text-primary);
+  background: var(--color-surface-hover);
 }
