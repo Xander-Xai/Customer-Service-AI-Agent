@@ -85,3 +85,7 @@ AI music/
 docs/2026-06-07-v4.3-audit-and-ci-fix-summary.md
 .tmp-skills/
 skills-lock.json
+
+# SQLite WAL files (change during test runs)
+*.db-shm
+*.db-wal
