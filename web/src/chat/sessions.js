@@ -90,7 +90,7 @@ export async function loadSessionList() {
         return `
         <div class="session-item ${isActive ? 'active' : ''}"
              data-session-id="${escapeHtml(s.session_id)}">
-          <div class="session-item-title">${escapeHtml(s.summary || `对话 ${s.session_id.slice(0, 8)}`)}</div>
+          <div class="session-item-title">${escapeHtml(s.title || `对话 ${s.session_id.slice(0, 8)}`)}</div>
           <div class="session-item-meta">
             <span>💬 ${s.message_count || 0}条</span>
             <span>${timeStr}</span>

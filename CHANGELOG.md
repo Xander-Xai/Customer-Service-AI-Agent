@@ -4,6 +4,13 @@
 
 ---
 
+## v5.2.2 (2026-06-11) — 会话列表标题字段修正
+
+### 修复
+- **会话列表标题字段错位**：`web/src/chat/sessions.js` 的 `loadSessionList()` 渲染时会话项标题从 `s.summary` 改为 `s.title`。后端 `list_sessions_brief` 接口（`/api/sessions` 与 `/api/history`）返回的字段是 `title`（取自首条消息内容前 50 字符），`summary` 字段只存在于详细会话接口 `getSession`（`/api/sessions/{id}`）中。此前列表请求读取 `summary` 始终为 `undefined`，导致所有会话项均回退到“对话 {session_id 前 8 位}”占位符，用户无法看到真实标题。修正后会话列表正确显示首条消息截取的可读标题，详情面板仍保留 `session.summary` 长摘要的展示。
+
+---
+
 ## v5.2.1 (2026-06-11) — 混合主题特异性修复 + 面板状态同步
 
 ### 对比度修复补充
