@@ -49,16 +49,18 @@ class TestBM25Reranker:
     def test_tokenize_chinese(self):
         """中文分词"""
         tokens = BM25Reranker._tokenize("烟酰胺精华好用吗")
-        assert "烟" in tokens
-        assert "酰" in tokens
-        assert "胺" in tokens
+        # jieba 正确将"烟酰胺"作为整体词汇（niacinamide），不会拆成单字
+        assert "烟酰胺" in tokens
+        assert "精华" in tokens
+        assert "好用" in tokens
 
     def test_tokenize_mixed(self):
         """中英文混合分词"""
         tokens = BM25Reranker._tokenize("VC精华 vitamin c")
         assert "vc" in tokens
         assert "vitamin" in tokens
-        assert "精" in tokens
+        # jieba 将"精华"作为整体词汇
+        assert "精华" in tokens
 
 
 class TestCrossEncoderReranker:

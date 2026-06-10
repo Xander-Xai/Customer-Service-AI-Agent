@@ -1598,11 +1598,12 @@ class TestMetricsCollectorSLAWindow:
         from core.monitoring import MetricsCollector
 
         mc = MetricsCollector()
-        # Add some slow responses (above max threshold)
-        for _ in range(30):
-            await mc.record_request(elapsed=50.0)  # well above threshold
+        # Add fast responses first, then slow ones (so slow ones stay in window)
+        # SLA_ALERT_WINDOW=10 in DEV, so only last 10 entries matter
         for _ in range(20):
             await mc.record_request(elapsed=1.0)
+        for _ in range(30):
+            await mc.record_request(elapsed=100.0)  # well above threshold
 
         rate = await mc.get_sla_window_violation_rate()
         assert rate > 0
@@ -1639,7 +1640,7 @@ class TestMetricsCollectorSLAWindow:
 
         mc = MetricsCollector()
         await mc.record_request(
-            elapsed=50.0,  # above max threshold (30.0)
+            elapsed=100.0,  # above max threshold (60.0 in DEV)
             agent="ProductAgent",
             mode="parallel",
             cached=False,
@@ -1686,8 +1687,9 @@ class TestSLAAlertManagerCoverage:
 
         mc = MetricsCollector()
         # Fill window with slow responses to exceed 30% threshold
+        # NOTE: RESPONSE_TIME_TARGET_MAX=60.0 in DEV, use 100.0 to guarantee violations
         for _ in range(40):
-            await mc.record_request(elapsed=50.0)  # well above max threshold
+            await mc.record_request(elapsed=100.0)
 
         manager = SLAAlertManager()
         with patch("core.monitoring.alert_notifier", create=True) as _:
@@ -1717,7 +1719,7 @@ class TestSLAAlertManagerCoverage:
 
         mc = MetricsCollector()
         for _ in range(40):
-            await mc.record_request(elapsed=50.0)
+            await mc.record_request(elapsed=100.0)
 
         manager = SLAAlertManager()
         alert1 = await manager.check_and_alert(mc)
@@ -1735,10 +1737,13 @@ class TestSLAAlertManagerCoverage:
         mc = MetricsCollector()
         # 100% violation rate
         for _ in range(50):
-            await mc.record_request(elapsed=50.0)
+            await mc.record_request(elapsed=100.0)
 
         manager = SLAAlertManager()
-        alert = await manager.check_and_alert(mc)
+        # NOTE: SLA_ALERT_THRESHOLD=50.0 in DEV → critical requires >100%, impossible
+        # Patch threshold to 30.0 so 100% > 60% triggers critical
+        with patch("core.monitoring.SLA_ALERT_THRESHOLD", 30.0):
+            alert = await manager.check_and_alert(mc)
         assert alert is not None
         # With 100% violation rate (> 60%), severity should be critical
         assert alert["severity"] == "critical"
@@ -1759,7 +1764,7 @@ class TestSLAAlertManagerCoverage:
 
         mc = MetricsCollector()
         for _ in range(50):
-            await mc.record_request(elapsed=50.0)
+            await mc.record_request(elapsed=100.0)
 
         mock_bus = AsyncMock()
         mock_bus.publish = AsyncMock()
@@ -1779,7 +1784,7 @@ class TestSLAAlertManagerCoverage:
 
         mc = MetricsCollector()
         for _ in range(50):
-            await mc.record_request(elapsed=50.0)
+            await mc.record_request(elapsed=100.0)
 
         # Reset cooldown
         manager.last_alert_time.clear()

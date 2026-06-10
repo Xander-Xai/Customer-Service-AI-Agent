@@ -15,6 +15,8 @@
 | audit-cleanup-design.md | ⚡ 临时产物 | 代码审查 + 冗余清理设计（已执行） |
 | comprehensive-optimization.md | ⚡ 临时产物 | v4.4 全面优化设计（15 项，已执行） |
 | full-code-quality-improvement.md | ⚡ 临时产物 | 代码质量改进设计（5 阶段，已执行） |
+| 2026-06-10-frontend-backend-alignment-fix.md | ⚡ 临时产物 | v5.2 前后端对齐修复计划（5 项，已执行） |
+| 2026-06-10-frontend-contrast-fix.md | ⚡ 临时产物 | v5.2 无障碍对比度修复计划（WCAG AA/AAA，已执行） |
 
 > 已清理文档（2026-06-09 治理）：issue-fix-plan, production-checklist, production-improvement-plan,
 > production-readiness-checklist, production-readiness-issues, v4.1-development-plan,

@@ -40,6 +40,8 @@ htmlcov/
 
 # ===== 运行时数据 =====
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 chat_sessions/

@@ -38,23 +38,23 @@ _has_real_key = bool(_api_key) and not any(
     )
 )
 
-skip_reason = "无真实 OPENAI_API_KEY，跳过真实 LLM 测试"
+# v5.3: 额外检查 — 如果 key 格式与 provider 不匹配，也跳过
+# （避免 siliconflow + sk-openai-key 导致熔断器触发后全部失败）
+_llm_provider_for_skip = os.environ.get("LLM_PROVIDER", "siliconflow")
+if _has_real_key and _api_key.startswith("sk-") and _llm_provider_for_skip not in ("openai", "custom"):
+    _has_real_key = False
+    skip_reason = f"OPENAI_API_KEY 格式与 LLM_PROVIDER={_llm_provider_for_skip!r} 不匹配，跳过"
+elif not _has_real_key:
+    skip_reason = "无真实 OPENAI_API_KEY，跳过真实 LLM 测试"
+else:
+    skip_reason = ""
+
 requires_real_llm = pytest.mark.skipif(not _has_real_key, reason=skip_reason)
 
 # v5.3: 检测 LLM 配置一致性（避免模型名与 provider 不匹配导致全部失败）
 _llm_provider = os.environ.get("LLM_PROVIDER", "siliconflow")
 _llm_base_url = os.environ.get("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 _llm_model = os.environ.get("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
-
-if _has_real_key:
-    # 如果使用默认 siliconflow 但 key 看起来像 OpenAI key，发出警告
-    if _llm_provider == "siliconflow" and _api_key.startswith("sk-") and not _api_key.startswith("sk-siliconflow"):
-        import warnings
-        warnings.warn(
-            f"OPENAI_API_KEY 以 'sk-' 开头但 LLM_PROVIDER={_llm_provider!r}。"
-            f"请设置 LLM_PROVIDER=openai 和 OPENAI_MODEL 以匹配您的 API Key。",
-            stacklevel=1,
-        )
 
 
 @pytest.fixture(scope="module")

@@ -1040,7 +1040,6 @@ class TestSLAAlertManager:
         return metrics, alert_mgr
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_no_alert_when_violation_rate_low(self):
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
         for _ in range(10):
@@ -1049,25 +1048,23 @@ class TestSLAAlertManager:
         assert alert is None
 
     @pytest.mark.asyncio
-    @pytest.mark.asyncio
     async def test_alert_when_violation_rate_high(self):
+        from core.config import RESPONSE_TIME_TARGET_MAX, SLA_ALERT_THRESHOLD
         from core.monitoring import MetricsCollector, SLAAlertManager
 
         metrics = MetricsCollector()
         alert_mgr = SLAAlertManager()
+        # 使用远超阈值的 elapsed 确保触发违约（DEV 环境 RESPONSE_TIME_TARGET_MAX=60.0）
         for i in range(50):
-            await metrics.record_request(elapsed=25.0, session_id=f"s{i}")
-        # v4.0: 检查 SLA 窗口是否已填充
+            await metrics.record_request(elapsed=RESPONSE_TIME_TARGET_MAX * 2, session_id=f"s{i}")
         window_rate = await metrics.get_sla_window_violation_rate()
-        if window_rate > 30.0:
+        if window_rate > SLA_ALERT_THRESHOLD:
             alert = await alert_mgr.check_and_alert(metrics)
             assert alert is not None
             assert alert["type"] == "sla_violation_high"
         else:
-            # 如果窗口未填充（并发锁问题），跳过断言
-            pytest.xfail("SLA window not populated - likely concurrency issue")
+            pytest.xfail(f"SLA window rate {window_rate}% below threshold {SLA_ALERT_THRESHOLD}%")
 
-    @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_cooldown_prevents_alert_storm(self):
         metrics, alert_mgr = self._make_metrics_and_alert_mgr()
