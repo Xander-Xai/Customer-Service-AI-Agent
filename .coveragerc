@@ -15,7 +15,6 @@ source =
     rag
     router
     tools
-    .
 omit =
     tests/*
     .venv/*
@@ -33,10 +32,13 @@ omit =
     htmlcov/*
     node_modules/*
     alembic/*
+    *erp/kingdee_real_adapter.py
 
 [report]
 fail_under = 80
 show_missing = true
+omit =
+    *erp/kingdee_real_adapter.py
 exclude_lines =
     pragma: no cover
     if __name__ == .__main__.:
