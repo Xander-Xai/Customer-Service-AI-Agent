@@ -240,8 +240,8 @@ class PromptManager:
                 current_count: int = int(pv.feedback_count)
                 current_avg: float = float(pv.score_avg)
                 total_score = current_avg * current_count + score
-                pv.feedback_count = current_count + 1  # type: ignore[assignment]
-                pv.score_avg = total_score / (current_count + 1)  # type: ignore[assignment]
+                pv.feedback_count = current_count + 1
+                pv.score_avg = total_score / (current_count + 1)
                 db.commit()
                 logger.debug(
                     f"更新 Prompt 评分: {agent_name} v{version} "

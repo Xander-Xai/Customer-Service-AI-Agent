@@ -116,7 +116,7 @@ async def activate_version(request: Request, agent_name: str, body: PromptActiva
                 {"error": f"版本 {body.version} 不存在"}, status_code=404
             )
 
-        target.is_active = 1  # type: ignore[assignment]
+        target.is_active = 1
         db.commit()
 
         # 清除缓存
