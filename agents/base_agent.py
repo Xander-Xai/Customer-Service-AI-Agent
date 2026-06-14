@@ -17,7 +17,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from core.config import AB_TEST_ENABLED, TOOL_MAX_ROUNDS
-from llm.client import LLMServiceError
+from core.logger import get_logger, get_trace_id
 from core.message_bus import Message, MessageBus, MessageType
 from core.protocols import (
     ERPProtocol,
@@ -26,9 +26,9 @@ from core.protocols import (
     SessionManagerProtocol,
     ToolRegistryProtocol,
 )
-from core.shared_blackboard import SharedBlackboard
-from core.logger import get_logger, get_trace_id
 from core.session.session_manager import DRIFT_REPAIR_STRATEGIES, DriftType, EnhancedSessionManager
+from core.shared_blackboard import SharedBlackboard
+from llm.client import LLMServiceError
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3  # 最大重试次数

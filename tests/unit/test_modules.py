@@ -954,8 +954,8 @@ class TestAPIModule:
         assert "Content-Security-Policy" in resp.headers
 
     def test_feedback_endpoint_validation(self):
-        from core import config
         from api.app import create_app
+        from core import config
         from core.container import ServiceContainer
         from core.graph_builder import build_graph
 
@@ -1791,10 +1791,10 @@ class TestSelfReflection:
     @pytest.mark.asyncio
     async def test_self_reflection_disabled_by_default(self):
         """REACT_SELF_REFLECTION=false 时不执行 reflection"""
-        from core import config as _cfg
         from unittest.mock import AsyncMock, MagicMock
 
         from agents.base_agent import BaseAgent
+        from core import config as _cfg
 
         class DummyAgent(BaseAgent):
             async def process(self, state):
@@ -2156,6 +2156,7 @@ class TestERPFactory:
     def test_create_real_mode_with_valid_config(self):
         """ERP_MODE=real 且配置完整时返回 KingdeeRealAdapter"""
         import types
+
         import erp.factory as ef
 
         mock_adapter_cls = MagicMock()

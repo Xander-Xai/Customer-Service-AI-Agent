@@ -2,10 +2,9 @@
 RAG Reranker + Query Rewriter 测试（v5.1）
 """
 
-import pytest
 
-from rag.reranker import BM25Reranker, CrossEncoderReranker, create_reranker
 from rag.query_rewriter import QueryRewriter, create_query_rewriter
+from rag.reranker import BM25Reranker, CrossEncoderReranker, create_reranker
 
 
 class TestBM25Reranker:

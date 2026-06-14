@@ -3,11 +3,9 @@
 """
 import asyncio
 import hashlib
-import hmac
-import json
 import os
 import time
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -72,8 +70,9 @@ class TestTokenCreation:
     def test_create_token_has_required_claims(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
-        from auth.service import create_token
         import jwt as pyjwt
+
+        from auth.service import create_token
 
         token = create_token(1, "testuser", "customer")
         payload = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])
@@ -87,8 +86,9 @@ class TestTokenCreation:
     def test_create_access_token_type(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_ACCESS_EXPIRE_HOURS = 2
-        from auth.service import create_access_token
         import jwt as pyjwt
+
+        from auth.service import create_access_token
 
         token = create_access_token(1, "user", "admin")
         payload = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])
@@ -121,8 +121,9 @@ class TestTokenDecode:
     @patch("auth.service._config")
     def test_decode_expired_token(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
-        from auth.service import decode_token
         import jwt as pyjwt
+
+        from auth.service import decode_token
 
         token = pyjwt.encode(
             {"sub": "1", "exp": int(time.time()) - 10},
@@ -142,7 +143,7 @@ class TestTokenDecode:
     def test_decode_revoked_jti(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
-        from auth.service import create_token, decode_token, _revoked_jtis
+        from auth.service import _revoked_jtis, create_token, decode_token
 
         token = create_token(1, "u", "r")
         # Manually decode to get jti
@@ -187,7 +188,7 @@ class TestTokenRevocation:
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
         mock_config.REDIS_JWT_PREFIX = "csai:jwt:blacklist:"
-        from auth.service import create_token, revoke_token, _revoked_jtis, decode_token
+        from auth.service import _revoked_jtis, create_token, decode_token, revoke_token
 
         token = create_token(1, "u", "r")
         import jwt as pyjwt
@@ -271,8 +272,9 @@ class TestUserFunctions:
     @patch("auth.service._config")
     def test_register_user_db_error(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
-        from auth.service import register_user
         from sqlalchemy.exc import SQLAlchemyError
+
+        from auth.service import register_user
 
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = None
@@ -410,7 +412,7 @@ class TestRevokeUserTokens:
     def test_revoke_without_redis(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.REDIS_JWT_PREFIX = "csai:jwt:blacklist:"
-        from auth.service import _TokenDenylist, revoke_user_tokens
+        from auth.service import revoke_user_tokens
 
         # Patch _denylist to not use redis
         with patch("auth.service._denylist") as mock_dl:

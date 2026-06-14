@@ -1314,7 +1314,7 @@ class TestAlertsRouter:
     @pytest.mark.asyncio
     async def test_test_alert_sends_notification(self):
         """POST /api/alerts/test — 管理员可发送测试告警"""
-        from alerts.router import test_alert, TestAlertRequest
+        from alerts.router import TestAlertRequest, test_alert
 
         mock_user = MagicMock()
         mock_request = MagicMock()
@@ -1332,7 +1332,7 @@ class TestAlertsRouter:
     @pytest.mark.asyncio
     async def test_test_alert_no_channels(self):
         """POST /api/alerts/test — 无 webhook 且邮件关闭时 channels=0"""
-        from alerts.router import test_alert, TestAlertRequest
+        from alerts.router import TestAlertRequest, test_alert
 
         mock_user = MagicMock()
         mock_request = MagicMock()

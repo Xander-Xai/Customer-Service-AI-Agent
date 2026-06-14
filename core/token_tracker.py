@@ -5,7 +5,6 @@ Token 用量追踪器（v5.1）
 集成方式：在 LLM client 的 async_invoke 返回后调用 record()。
 """
 
-import time
 import threading
 from collections import defaultdict
 from typing import Any

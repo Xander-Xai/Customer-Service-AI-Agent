@@ -14,9 +14,9 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from core.config import SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX, SLA_PARALLEL_MAX
+from core.logger import get_logger
 from core.message_bus import Message, MessageBus, MessageType
 from core.shared_blackboard import SharedBlackboard
-from core.logger import get_logger
 
 logger = get_logger("collaboration.modes")
 

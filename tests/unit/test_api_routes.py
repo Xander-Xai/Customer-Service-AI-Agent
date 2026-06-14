@@ -1395,8 +1395,8 @@ class TestMonitoringRoutes:
     """api/routes/monitoring.py 路由覆盖"""
 
     def _build_monitoring_app(self):
-        from api.routes.monitoring import router as monitoring_router
         import api.routes.monitoring as monitoring_mod
+        from api.routes.monitoring import router as monitoring_router
 
         app = FastAPI()
         app.include_router(monitoring_router)
@@ -1925,6 +1925,7 @@ class TestDependencies:
 
         with patch("core.token_tracker.get_token_tracker", return_value=mock_tracker):
             import importlib
+
             import api.dependencies as dep_mod
             importlib.reload(dep_mod)
             result = dep_mod.get_token_tracker(mock_request)
@@ -1936,6 +1937,7 @@ class TestDependencies:
 
         with patch("core.token_tracker.get_token_tracker", return_value=None):
             import importlib
+
             import api.dependencies as dep_mod
             importlib.reload(dep_mod)
             with pytest.raises(RuntimeError, match="TokenTracker 未初始化"):

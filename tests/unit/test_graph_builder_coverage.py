@@ -2,8 +2,7 @@
 测试 core/graph_builder.py — 覆盖 _format_duration 和 make_graph 向后兼容包装器
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from core.graph_builder import _format_duration
 
@@ -27,10 +26,9 @@ class TestFormatDuration:
 class TestMakeGraph:
 
     def test_make_graph_creates_container_and_builds(self):
-        from core.graph_builder import make_graph, _default_container
-
         # Reset singleton
         import core.graph_builder as gb
+        from core.graph_builder import make_graph
         gb._default_container = None
 
         with patch("core.graph_builder.build_graph") as mock_build:

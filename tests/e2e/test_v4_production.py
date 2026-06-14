@@ -242,8 +242,8 @@ class TestAPIIntegration:
         from api.app import create_app
         from auth.router import router as auth_router
         from core.container import ServiceContainer
-        from knowledge.router import router as knowledge_router
         from core.graph_builder import build_graph
+        from knowledge.router import router as knowledge_router
 
         container = ServiceContainer()
         graph_app = build_graph(container)

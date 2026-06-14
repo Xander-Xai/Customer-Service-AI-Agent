@@ -5,8 +5,6 @@
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from collaboration.orchestrator import CollaborationOrchestrator, _has_keywords
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard

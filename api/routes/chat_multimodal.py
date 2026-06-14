@@ -3,7 +3,6 @@
 从 api/routes/chat.py 拆分，共享认证和会话验证逻辑。
 """
 
-import os
 import time
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -114,7 +113,7 @@ async def stream_multimodal_chat(
 
     query = sanitize_input(query[:MAX_QUERY_LENGTH]) or "请分析这张图片"
 
-    from .chat import _build_sse_stream_context, _sse_stream_generator, SSEStreamContext
+    from .chat import SSEStreamContext, _build_sse_stream_context, _sse_stream_generator
 
     graph_task, chunk_queue = _build_sse_stream_context(
         request, auth.sid, query, auth.session_manager, auth.client_provided_sid, multimodal_content

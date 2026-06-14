@@ -184,8 +184,8 @@ class TestAgentProcess:
     @pytest.fixture(autouse=True)
     def setup(self):
         from core.message_bus import MessageBus
-        from core.shared_blackboard import SharedBlackboard
         from core.session.session_manager import EnhancedSessionManager
+        from core.shared_blackboard import SharedBlackboard
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -305,9 +305,9 @@ class TestAgentSessionContext:
     def setup(self):
         from agents import ProductAgent
         from core.message_bus import MessageBus
+        from core.session.session_manager import EnhancedSessionManager
         from core.shared_blackboard import SharedBlackboard
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -412,9 +412,9 @@ class TestCollaborationModes:
         )
         from collaboration.orchestrator import CollaborationOrchestrator
         from core.message_bus import MessageBus
+        from core.session.session_manager import EnhancedSessionManager
         from core.shared_blackboard import SharedBlackboard
         from erp.kingdee_adapter import KingdeeMockAdapter
-        from core.session.session_manager import EnhancedSessionManager
 
         self.sm = EnhancedSessionManager()
         self.bus = MessageBus()
@@ -547,8 +547,8 @@ class TestErrorHandling:
     async def test_llm_timeout_graceful_degradation(self):
         """LLM 超时 → 降级到 fallback 响应"""
         from agents import ProductAgent
-        from erp.kingdee_adapter import KingdeeMockAdapter
         from core.session.session_manager import EnhancedSessionManager
+        from erp.kingdee_adapter import KingdeeMockAdapter
 
         sm = EnhancedSessionManager()
         agent = ProductAgent()

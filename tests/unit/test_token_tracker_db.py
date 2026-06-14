@@ -2,12 +2,10 @@
 Token 追踪器 + 依赖注入 + 数据库改进 测试（v5.1）
 """
 
-import asyncio
-import time
 
 import pytest
 
-from core.token_tracker import TokenTracker, TokenUsage, init_token_tracker, get_token_tracker
+from core.token_tracker import TokenTracker, TokenUsage, get_token_tracker, init_token_tracker
 
 
 class TestTokenTracker:

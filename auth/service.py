@@ -18,9 +18,9 @@ import jwt
 import redis as _redis_mod
 from sqlalchemy.exc import SQLAlchemyError
 
+from core.logger import get_logger
 from db.database import get_db_session
 from db.models import User
-from core.logger import get_logger
 
 logger = get_logger("auth.service")
 

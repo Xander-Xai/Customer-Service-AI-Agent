@@ -3,11 +3,9 @@
 补齐覆盖率至 80%+ 门槛
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ── BaseAgent._resolve_prompt_for_variant ─────────────────────────
 
