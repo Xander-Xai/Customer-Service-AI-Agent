@@ -13,9 +13,9 @@ v4.2: 真流式调用（SSE 逐 chunk）
 """
 
 import asyncio
-import time
 import json
 import random
+import time
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage

@@ -4,12 +4,8 @@
 """
 
 import asyncio
-import json
 import os
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 
 class TestAlertNotifierLoadConfig:

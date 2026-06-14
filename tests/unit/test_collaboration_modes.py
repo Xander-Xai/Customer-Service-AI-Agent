@@ -4,7 +4,7 @@
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -17,7 +17,6 @@ from collaboration.modes import (
 )
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
-
 
 # ── 辅助工具 ──────────────────────────────────────────────────────
 

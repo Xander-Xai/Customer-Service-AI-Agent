@@ -87,8 +87,12 @@ class TestAgentConstructorInjection:
     def test_all_agents_accept_llm_constructor(self):
         """所有 Agent 子类都支持 llm 构造参数"""
         from agents import (
-            ProductAgent, TechAgent, BillingAgent,
-            ComplaintAgent, GeneralAgent, ReActAgent,
+            BillingAgent,
+            ComplaintAgent,
+            GeneralAgent,
+            ProductAgent,
+            ReActAgent,
+            TechAgent,
         )
 
         for cls in [ProductAgent, TechAgent, BillingAgent, ComplaintAgent, GeneralAgent]:
@@ -113,6 +117,7 @@ class TestDependencyInjection:
     def test_get_container_from_app_state(self):
         """get_container 从 app.state 获取容器"""
         from unittest.mock import MagicMock
+
         from fastapi import Request
 
         mock_container = MagicMock()
@@ -126,6 +131,7 @@ class TestDependencyInjection:
     def test_get_container_raises_when_missing(self):
         """app.state 无 container 时抛出 RuntimeError"""
         from unittest.mock import MagicMock
+
         from fastapi import Request
 
         mock_request = MagicMock(spec=Request)

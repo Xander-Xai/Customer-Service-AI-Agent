@@ -22,8 +22,8 @@ from core.config import (
     RETRY_BASE_DELAY,
     RETRY_MAX_ATTEMPTS,
 )
-from erp import KingdeeAdapterBase, sanitize_erp_input
 from core.logger import get_logger
+from erp import KingdeeAdapterBase, sanitize_erp_input
 
 logger = get_logger("erp.kingdee_real")
 

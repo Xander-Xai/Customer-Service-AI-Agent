@@ -4,18 +4,16 @@
 """
 
 import asyncio
-import io
 import json
-import os
 import time
 from dataclasses import dataclass
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from api.utils import extract_user_id, sanitize_input, validate_session_id
-from core.config import MAX_QUERY_LENGTH, MULTIMODAL_ENABLED
+from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger
 
 router = APIRouter()

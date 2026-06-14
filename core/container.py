@@ -19,15 +19,13 @@ Usage:
 import asyncio
 from typing import Any
 
+from core.logger import get_logger
 from core.protocols import (
     ERPProtocol,
     KnowledgeBaseProtocol,
     LLMProtocol,
-    SessionManagerProtocol,
     ToolRegistryProtocol,
 )
-
-from core.logger import get_logger
 
 logger = get_logger("core.container")
 

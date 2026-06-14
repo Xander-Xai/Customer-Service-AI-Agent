@@ -8,9 +8,9 @@ from typing import Any
 
 from agents.base_agent import BaseAgent
 from agents.evaluator import ResponseEvaluator
+from core.logger import get_logger
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
-from core.logger import get_logger
 
 logger = get_logger("agent.response_agent")
 from cache.response_cache import ResponseCache  # noqa: E402

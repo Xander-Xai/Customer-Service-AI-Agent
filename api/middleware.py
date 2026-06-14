@@ -3,12 +3,12 @@ API 中间件栈：限流、安全头、认证、分布式追踪
 从 api/app.py create_app() 提取。
 """
 
+import asyncio
 import hmac
 import os
 import secrets
 import time
 import uuid
-import asyncio
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Request
