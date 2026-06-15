@@ -188,8 +188,44 @@ export function guardPage(requiredCapability) {
 
   const caps = getCapabilities();
   if (!caps.includes(requiredCapability)) {
-    document.body.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:var(--bg-base,#F7F6F3);color:var(--text-secondary,#6B6B6B);font-size:16px;font-family:SF Pro Display,-apple-system,BlinkMacSystemFont,sans-serif"><div style="text-align:center"><div style="font-size:48px;margin-bottom:16px;opacity:0.3">&#9670;</div>您没有权限访问此页面<br><a href="/" style="color:var(--primary,#1A1A1A);margin-top:12px;display:inline-block;text-decoration:underline">返回首页</a></div></div>';
+    // 安全构建无权限提示（不使用 innerHTML）
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.height = '100vh';
+    wrap.style.background = 'var(--bg-base,#F7F6F3)';
+    wrap.style.color = 'var(--text-secondary,#6B6B6B)';
+    wrap.style.fontSize = '16px';
+    wrap.style.fontFamily = 'SF Pro Display,-apple-system,BlinkMacSystemFont,sans-serif';
+
+    const inner = document.createElement('div');
+    inner.style.textAlign = 'center';
+
+    const icon = document.createElement('div');
+    icon.style.fontSize = '48px';
+    icon.style.marginBottom = '16px';
+    icon.style.opacity = '0.3';
+    icon.textContent = '◆';
+    inner.appendChild(icon);
+
+    const msg = document.createElement('div');
+    msg.textContent = '您没有权限访问此页面';
+    inner.appendChild(msg);
+
+    const link = document.createElement('a');
+    link.href = '/';
+    link.style.color = 'var(--primary,#1A1A1A)';
+    link.style.marginTop = '12px';
+    link.style.display = 'inline-block';
+    link.style.textDecoration = 'underline';
+    link.textContent = '返回首页';
+    inner.appendChild(link);
+
+    wrap.appendChild(inner);
+
+    // 替换 body 内容
+    document.body.replaceChildren(wrap);
     return false;
   }
   return true;

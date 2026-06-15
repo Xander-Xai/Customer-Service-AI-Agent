@@ -46,7 +46,7 @@
 
   /* 文字色 */
   --text-near-black: #1a1a1a;
-  --text-mid-gray: #4a4a4a;  /* 8.20:1 on #f7f6f3, 8.86:1 on #ffffff ✓ AA+ */
+  --text-mid-gray: #4a4a4a; /* 8.20:1 on #f7f6f3, 8.86:1 on #ffffff ✓ AA+ */
   --text-soft-gray: #4a4a4a; /* 7.71:1 on #f0efec, 8.20:1 on #f7f6f3 ✓ AA+ */
 
   /* 语义色（浅色模式，背景为暖白/纯白时使用） */
@@ -98,9 +98,9 @@
   /* 动作主色 */
   --color-action-primary: #1a1a1a;
   --color-action-primary-hover: #333333;
-  --color-action-subtle: rgba(26, 26, 26, 0.06);  /* 从 0.04 提升到 0.06 */
-  --color-action-disabled-bg: #d4d3d0;   /* 灰底，明显表示不可交互 */
-  --color-action-disabled-fg: #5a5a5a;   /* 4.61:1 on #d4d3d0 ✓ AA */
+  --color-action-subtle: rgba(26, 26, 26, 0.06); /* 从 0.04 提升到 0.06 */
+  --color-action-disabled-bg: #d4d3d0; /* 灰底，明显表示不可交互 */
+  --color-action-disabled-fg: #5a5a5a; /* 4.61:1 on #d4d3d0 ✓ AA */
 
   /* 语义色 */
   --color-success: #346538;
@@ -108,7 +108,7 @@
   --color-warning: #956400;
   --color-warning-bg: #fbf3db;
   --color-warning-border: rgba(149, 100, 0, 0.15);
-  --color-error: #8a2424;       /* 7.75:1 on #fdebec ✓ AAA */
+  --color-error: #8a2424; /* 7.75:1 on #fdebec ✓ AAA */
   --color-error-bg: #fdebec;
   --color-info: #1f6c9f;
   --color-info-bg: #e1f3fe;
@@ -124,7 +124,6 @@
   /* 覆盖层 */
   --color-overlay: rgba(0, 0, 0, 0.4);
 }
-
 
 /* ============================================================
  * 旧变量 alias（向后兼容，新代码应使用 --color-* 命名）
@@ -172,10 +171,12 @@
   --radius-xl: 16px;
   --radius-full: 9999px;
 
-  /* 阴影（保持不变） */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.08);
+  /* 阴影（Premium UX） */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.04);
+  --shadow-hover: 0 20px 48px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.04);
+  --shadow-glass: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
 
   /* 动画 */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);

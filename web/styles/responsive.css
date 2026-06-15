@@ -1,12 +1,43 @@
 /* ===== 响应式 ===== */
 
-/* 平板（≤1200px） */
+/* 大屏桌面（≤1440px） */
+@media (max-width: 1440px) {
+  .monitor-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .card-wide {
+    grid-column: span 1;
+  }
+  .card-full {
+    grid-column: span 3;
+  }
+  .chat-messages {
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+  }
+}
+
+/* 桌面/平板横屏（≤1200px） */
 @media (max-width: 1200px) {
   .monitor-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .card-full {
     grid-column: span 2;
+  }
+}
+
+/* 平板（≤1024px） */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 240px;
+  }
+  .monitor-sidebar {
+    width: 260px;
+  }
+  .quick-prompts {
+    gap: 8px;
   }
 }
 

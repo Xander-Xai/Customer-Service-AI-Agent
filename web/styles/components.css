@@ -63,19 +63,23 @@
 }
 
 .quick-prompt-card {
-  background: var(--bg-surface);
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   padding: 16px;
   cursor: pointer;
   text-align: left;
-  transition: all var(--duration-fast) var(--ease-out);
+  transition: all var(--duration-normal) var(--ease-spring);
+  box-shadow: var(--shadow-sm);
 }
 
 .quick-prompt-card:hover {
+  background: var(--bg-surface);
   border-color: var(--border-hover);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-hover);
 }
 
 .quick-prompt-icon {
@@ -343,7 +347,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: #e8e7e4; /* bone-border，6.10:1 与 #1a1a1a ✓ AA+ */
+  background: var(--color-border); /* bone-border，6.10:1 与 var(--color-action-primary) ✓ AA+ */
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   margin-bottom: 12px;
@@ -372,15 +376,21 @@
   display: flex;
   align-items: flex-end;
   gap: 12px;
-  background: var(--bg-surface);
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   padding: 8px 8px 8px 16px;
-  transition: border-color var(--duration-fast) var(--ease-out);
+  box-shadow: var(--shadow-sm);
+  transition: all var(--duration-normal) var(--ease-out);
 }
 
 .chat-input-wrapper:focus-within {
   border-color: var(--border-focus);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
 }
 
 .chat-input {

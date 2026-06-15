@@ -3,6 +3,7 @@
  * 面向客户的服务入口，文案来自 copy.js
  */
 import { CHAT, QUICK_PROMPTS } from '../utils/copy.js';
+import { setSafeHtml } from '../utils/dom.js';
 
 const WELCOME_HTML = `
   <div class="welcome-screen" id="welcomeScreen">
@@ -25,7 +26,7 @@ const WELCOME_HTML = `
 
 /** 渲染欢迎页到容器 */
 export function renderWelcome(container) {
-  container.innerHTML = WELCOME_HTML;
+  setSafeHtml(container, WELCOME_HTML);
 }
 
 /** 绑定快捷提问卡片事件（由外部调用，避免循环依赖） */

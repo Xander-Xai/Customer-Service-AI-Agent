@@ -1,156 +1,19 @@
+/**
+ * 管理后台设置模块（核心）
+ * 已提取子模块：admin-knowledge.js, admin-alerts.js, admin-tokens.js
+ */
 import {
   activatePromptVersion,
-  addKnowledgeDocs,
   createPromptVersion,
   getActivePrompt,
-  getAlertConfig,
-  getAlertHistory,
   getAuditLog,
   getFeedbackStats,
   getHealth,
-  getKnowledgeStats,
   getMetrics,
   getPromptAgents,
   getPromptVersions,
-  getTokenUsage,
-  seedKnowledge,
-  syncKnowledge,
-  testAlert as testAlertAPI,
 } from './api/rest.js';
 import { showToast } from './utils/toast.js';
-
-// ── 知识库 ──
-export async function loadKnowledgeStats() {
-  const data = await getKnowledgeStats();
-  if (!data) return;
-  const el = document.getElementById('knowledgeStats');
-  if (!el) return;
-  if (!data.available) {
-    el.innerHTML = '';
-    const statEl = document.createElement('div');
-    statEl.className = 'admin-stat';
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'label';
-    labelSpan.textContent = '状态';
-    const valSpan = document.createElement('span');
-    valSpan.className = 'value';
-    valSpan.style.color = '#ef4444';
-    valSpan.textContent = '不可用';
-    statEl.appendChild(labelSpan);
-    statEl.appendChild(valSpan);
-    el.appendChild(statEl);
-    return;
-  }
-  const cols = data.collections || {};
-
-  el.innerHTML = '';
-
-  const collections = [
-    { label: '产品知识', val: `${cols.product_knowledge || 0} 条`, color: '' },
-    { label: 'FAQ', val: `${cols.faq || 0} 条`, color: '' },
-    { label: '技术支持', val: `${cols.tech_support || 0} 条`, color: '' },
-    { label: '投诉知识', val: `${cols.complaint_knowledge || 0} 条`, color: '' },
-    { label: '总计', val: `${data.total || 0} 条`, color: 'var(--primary)' },
-  ];
-
-  collections.forEach((col) => {
-    const statEl = document.createElement('div');
-    statEl.className = 'admin-stat';
-
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'label';
-    labelSpan.textContent = col.label;
-    statEl.appendChild(labelSpan);
-
-    const valSpan = document.createElement('span');
-    valSpan.className = 'value';
-    valSpan.textContent = col.val;
-    if (col.color) valSpan.style.color = col.color;
-    statEl.appendChild(valSpan);
-
-    el.appendChild(statEl);
-  });
-}
-
-export async function reseedKnowledge() {
-  if (!confirm('确定重新种子？这会覆盖现有数据。')) return;
-  const data = await seedKnowledge();
-  showToast(data?.message || '操作完成');
-  loadKnowledgeStats();
-}
-
-export async function syncFromErp() {
-  showToast('正在从 ERP 同步...', 'success');
-  const data = await syncKnowledge();
-  showToast(data?.message || '同步完成');
-  loadKnowledgeStats();
-}
-
-export async function handleAddDocs() {
-  const collection = document.getElementById('addDocCollection').value;
-  const text = document.getElementById('addDocText').value.trim();
-  if (!text) {
-    showToast('请输入文档内容', 'error');
-    return;
-  }
-  const documents = text
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (!documents.length) {
-    showToast('文档内容不能为空', 'error');
-    return;
-  }
-  try {
-    const result = await addKnowledgeDocs(collection, documents);
-    showToast(result?.message || '添加完成', 'success');
-    document.getElementById('addDocText').value = '';
-    loadKnowledgeStats();
-  } catch (e) {
-    showToast(`添加失败: ${e.message}`, 'error');
-  }
-}
-
-// ── 告警配置 ──
-export async function loadAlertConfig() {
-  const data = await getAlertConfig();
-  if (!data) return;
-  const el = document.getElementById('alertConfig');
-  if (!el) return;
-
-  el.innerHTML = '';
-
-  const items = [
-    { label: 'Webhook 数量', val: `${data.webhooks.length} 个` },
-    { label: '邮件通知', val: data.email_enabled ? '✅ 已配置' : '❌ 未配置' },
-  ];
-
-  if (data.email_to?.length) {
-    items.push({ label: '通知邮箱', val: data.email_to.join(', ') });
-  }
-
-  items.forEach((item) => {
-    const statEl = document.createElement('div');
-    statEl.className = 'admin-stat';
-
-    const labelSpan = document.createElement('span');
-    labelSpan.className = 'label';
-    labelSpan.textContent = item.label;
-    statEl.appendChild(labelSpan);
-
-    const valSpan = document.createElement('span');
-    valSpan.className = 'value';
-    valSpan.textContent = item.val;
-    statEl.appendChild(valSpan);
-
-    el.appendChild(statEl);
-  });
-}
-
-export async function testAlert() {
-  const data = await testAlertAPI('测试告警', '这是来自管理后台的测试告警', 'info');
-  showToast(data?.message || '测试告警已发送');
-}
 
 // ── 审计日志 ──
 export async function loadAuditLog() {
@@ -159,7 +22,7 @@ export async function loadAuditLog() {
   const el = document.getElementById('auditTableBody');
   if (!el) return;
 
-  el.innerHTML = '';
+  el.replaceChildren();
 
   data.logs.forEach((l) => {
     const tr = document.createElement('tr');
@@ -198,7 +61,7 @@ export async function loadSystemHealth() {
     const redisInfo = data.components?.redis;
     const dbInfo = data.components?.database;
 
-    el.innerHTML = '';
+    el.replaceChildren();
 
     const stats = [
       { label: '状态', val: s, color },
@@ -238,146 +101,6 @@ export async function loadSystemHealth() {
   }
 }
 
-// ── 告警历史 ──
-export async function loadAlertHistory() {
-  try {
-    const data = await getAlertHistory(20);
-    const el = document.getElementById('alertHistoryList');
-    if (!el) return;
-
-    el.innerHTML = '';
-
-    const alerts = data?.alerts || [];
-    if (!alerts.length) {
-      const emptyEl = document.createElement('div');
-      emptyEl.style.textAlign = 'center';
-      emptyEl.style.padding = '20px';
-      emptyEl.style.color = 'var(--text-muted)';
-      emptyEl.textContent = '暂无告警历史';
-      el.appendChild(emptyEl);
-      return;
-    }
-
-    alerts.forEach((a) => {
-      const alertEl = document.createElement('div');
-      alertEl.style.display = 'flex';
-      alertEl.style.gap = '8px';
-      alertEl.style.alignItems = 'flex-start';
-      alertEl.style.padding = '8px 0';
-      alertEl.style.borderBottom = '1px solid var(--border)';
-
-      const dotEl = document.createElement('span');
-      dotEl.style.fontSize = '16px';
-      dotEl.textContent = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟡' : '🔵';
-      alertEl.appendChild(dotEl);
-
-      const contentEl = document.createElement('div');
-      contentEl.style.flex = '1';
-
-      const titleEl = document.createElement('div');
-      titleEl.style.fontSize = '13px';
-      titleEl.style.fontWeight = '500';
-      titleEl.textContent = a.title || a.message || '';
-      contentEl.appendChild(titleEl);
-
-      const descEl = document.createElement('div');
-      descEl.style.fontSize = '12px';
-      descEl.style.color = 'var(--text-muted)';
-      descEl.style.marginTop = '2px';
-      descEl.textContent = a.content || '';
-      contentEl.appendChild(descEl);
-
-      const timeEl = document.createElement('div');
-      timeEl.style.fontSize = '11px';
-      timeEl.style.color = 'var(--text-muted)';
-      timeEl.style.marginTop = '2px';
-      timeEl.textContent = a.timestamp ? new Date(a.timestamp * 1000).toLocaleString('zh-CN') : '';
-      contentEl.appendChild(timeEl);
-
-      alertEl.appendChild(contentEl);
-      el.appendChild(alertEl);
-    });
-  } catch (_e) {
-    // 忽略加载异常
-  }
-}
-
-// ── Token 用量 ──
-export async function loadTokenUsage() {
-  try {
-    const data = await getTokenUsage();
-    const el = document.getElementById('tokenUsageStats');
-    if (!el) return;
-    if (data?.error) {
-      el.innerHTML = '';
-      const errEl = document.createElement('div');
-      errEl.style.color = 'var(--text-muted)';
-      errEl.style.textAlign = 'center';
-      errEl.style.padding = '20px';
-      errEl.textContent = data.error;
-      el.appendChild(errEl);
-      return;
-    }
-    const g = data?.global || {};
-
-    el.innerHTML = '';
-
-    const stats = [
-      { label: '总请求数', val: String(g.total_requests || 0) },
-      { label: '总 Token', val: (g.total_tokens || 0).toLocaleString() },
-      { label: 'Prompt Token', val: (g.total_prompt_tokens || 0).toLocaleString() },
-      { label: 'Completion Token', val: (g.total_completion_tokens || 0).toLocaleString() },
-      { label: '平均延迟', val: `${(g.avg_latency || 0).toFixed(2)}s` },
-    ];
-
-    stats.forEach((stat) => {
-      const statEl = document.createElement('div');
-      statEl.className = 'admin-stat';
-
-      const labelSpan = document.createElement('span');
-      labelSpan.className = 'label';
-      labelSpan.textContent = stat.label;
-      statEl.appendChild(labelSpan);
-
-      const valSpan = document.createElement('span');
-      valSpan.className = 'value';
-      valSpan.textContent = stat.val;
-      statEl.appendChild(valSpan);
-
-      el.appendChild(statEl);
-    });
-
-    const byAgent = data?.by_agent || {};
-    if (Object.keys(byAgent).length > 0) {
-      const header = document.createElement('div');
-      header.style.marginTop = '12px';
-      header.style.fontSize = '13px';
-      header.style.fontWeight = '600';
-      header.textContent = '按 Agent 分布';
-      el.appendChild(header);
-
-      Object.entries(byAgent).forEach(([name, info]) => {
-        const statEl = document.createElement('div');
-        statEl.className = 'admin-stat';
-
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'label';
-        labelSpan.textContent = name;
-        statEl.appendChild(labelSpan);
-
-        const valSpan = document.createElement('span');
-        valSpan.className = 'value';
-        valSpan.textContent = `${(info.total_tokens || 0).toLocaleString()} (${info.requests || 0}次)`;
-        statEl.appendChild(valSpan);
-
-        el.appendChild(statEl);
-      });
-    }
-  } catch (_e) {
-    // 忽略加载异常
-  }
-}
-
 // ── Prompt 管理 ──
 export async function loadPromptAgents() {
   try {
@@ -385,7 +108,7 @@ export async function loadPromptAgents() {
     const select = document.getElementById('promptAgentSelect');
     if (!select || !data?.agents) return;
 
-    select.innerHTML = '';
+    select.replaceChildren();
 
     if (!data.agents.length) {
       const option = document.createElement('option');
@@ -421,7 +144,7 @@ export async function loadPromptVersions() {
     const versions = versionsData?.versions || [];
     const activeVersion = activeData?.version || '';
 
-    el.innerHTML = '';
+    el.replaceChildren();
 
     if (!versions.length) {
       const emptyEl = document.createElement('div');
@@ -537,7 +260,7 @@ export async function loadMetricsStats() {
     const el = document.getElementById('metricsStats');
     if (!el) return;
 
-    el.innerHTML = '';
+    el.replaceChildren();
 
     const stats = [
       { label: '总请求', val: String(m.total_requests || 0) },
@@ -576,7 +299,7 @@ export async function loadFeedbackStats() {
     const el = document.getElementById('feedbackStats');
     if (!el) return;
 
-    el.innerHTML = '';
+    el.replaceChildren();
 
     const stats = [
       { label: '总反馈', val: String(resp.total || 0), color: '' },

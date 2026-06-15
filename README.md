@@ -10,7 +10,7 @@
 >
 > **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
 >
-> **v5.0** 前端 Vite 8 重构 + 1151 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
+> **v5.0** 前端 Vite 8 重构 + 1191+ 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
 > 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理
 
@@ -83,7 +83,7 @@ graph TB
         REACT["ReAct — RAG + FC 推理链"]
     end
 
-    subgraph Expert["7 个专家 Agent"]
+    subgraph Expert["8 个 Agent"]
         PA["ProductAgent — 产品 + RAG + ERP"]
         TA["TechAgent — 技术支持 + RAG"]
         BA["BillingAgent — 账单 + ERP"]
@@ -91,6 +91,7 @@ graph TB
         GA["GeneralAgent — 通用 + 黑板桥接"]
         RA["ReActAgent — 多步推理 + FC"]
         RPA["ResponseAgent — 后处理 + 评估"]
+        EV["ResponseEvaluator — 5 维质量评估"]
     end
 
     subgraph Infra["基础设施"]

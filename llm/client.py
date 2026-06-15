@@ -151,6 +151,25 @@ class OpenAICompatibleClient:
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
             raise LLMServiceError("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
 
+        # v5.3: Token Quota 检查
+        try:
+            from core.token_quota import get_quota_manager
+            quota_mgr = get_quota_manager()
+            # 尝试从消息中提取 user_id（如果有的话）
+            user_id = None
+            for msg in messages:
+                if hasattr(msg, 'metadata') and msg.metadata:
+                    user_id = msg.metadata.get('user_id')
+                    break
+            if user_id:
+                quota_check = quota_mgr.check_quota(str(user_id))
+                if not quota_check["allowed"]:
+                    raise LLMServiceError(f"Token Quota 超限: {quota_check['reason']}")
+        except LLMServiceError:
+            raise
+        except Exception:
+            pass  # Quota 检查失败不影响主流程
+
         payload = {"model": self.model, "messages": self._format_messages(messages)}
         if "max_tokens" not in payload:
             payload["max_tokens"] = LLM_MAX_TOKENS
@@ -191,6 +210,16 @@ class OpenAICompatibleClient:
                     # v5.1: Token 用量追踪
                     _latency_ms = (time.time() - _call_start) * 1000
                     await self._record_token_usage(result, _latency_ms)
+                    # v5.3: Token Quota 消耗
+                    try:
+                        from core.token_quota import get_quota_manager
+                        quota_mgr = get_quota_manager()
+                        usage = result.get("usage", {})
+                        total_tokens = usage.get("total_tokens", 0)
+                        if total_tokens > 0 and user_id:
+                            quota_mgr.consume_tokens(str(user_id), total_tokens)
+                    except Exception:
+                        pass
                     return CustomResponse(content, parsed_tool_calls)
                 return CustomResponse("API response format error")
             except (httpx.HTTPStatusError, httpx.RequestError) as e:

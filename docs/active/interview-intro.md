@@ -10,7 +10,7 @@
 >
 > 这是一个面向化妆品企业的 AI 客服系统，核心目标是：**让多个 AI Agent 协同工作，处理从简单问候到复杂投诉的各种客户问题**。
 >
-> 项目基于 **LangGraph** 构建，用了 8 个 AI Agent、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。整体大约 **31,000 行 Python**，配备了 **1,100+ 个测试用例**和完整的 Docker 生产部署方案。
+> 项目基于 **LangGraph** 构建，用了 8 个 AI Agent、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。整体大约 **30,000+ 行 Python + 8,000+ 行 JavaScript**，配备了 **1,191+ 个测试用例**和完整的 Docker 生产部署方案。
 
 ---
 
@@ -43,7 +43,9 @@
 >
 > **第三个是 Circuit Breaker 熔断器**。LLM API 可能持续故障，没有熔断器的话每个请求都会等 30 秒超时。我在连续 5 次失败后跳闸，后续请求直接降级到零延迟的规则分类器，60 秒后自动尝试恢复。状态转换用了 asyncio.Lock 保证并发安全。
 >
-> **第四个是生产级部署**。Nginx TLS 终止 + Gunicorn 多 Worker + Prometheus 指标采集 + Grafana 可视化仪表盘，Docker Compose 一键部署 5 个服务。
+> **第四个是生产级部署**。Nginx TLS 终止 + Gunicorn 多 Worker + Prometheus 指标采集 + Grafana 可视化仪表盘，Docker Compose 一键部署 6 个服务。
+
+> **第五个是前端工程化**。虽然主要后端，但我也实现了完整的原生 JavaScript 前端——37 个 ES Module 模块、8 种主题（亮色 4 种 + 暗色 2 种 + 无障碍 + 面板）、WCAG AA/AAA 无障碍合规。SSE 真流式打字效果、WebSocket 实时通信、管理后台（用户/知识库/告警/监控）。
 
 ---
 
@@ -81,4 +83,7 @@
 > ERP 真实对接。当前 ERP 层用了适配器工厂模式（`erp/factory.py`），Mock 和 Real 适配器实现同一接口，切换只需改环境变量 `ERP_MODE=real`。但真实 API 对接需要企业配合提供测试环境和 API 文档，这是项目推进中最难的部分——技术架构准备好了，但外部依赖不可控。
 
 ### Q6: "真实 LLM 测试中遇到过什么问题？"
-> 两个 Mock 测试无法覆盖的 Bug。第一个是路由优先级——"面霜过敏想退货"被路由到产品 Agent 而非投诉 Agent，因为规则分类器在意图得分相同时按字典顺序取了第一个。我加了意图优先级权重（complaint > billing > product）解决。第二个是注入防御——Qwen2.5-7B 会在回复中讨论自己的系统提示词，[untrusted data] 隔离标签对小模型不够。我在输出层加了正则检测，命中泄露模式后替换为安全回复。这说明 E2E 真实测试是不可替代的。
+> 两个 Mock 测试无法覆盖的 Bug。第一个是路由优先级——"面霜过敏想退货"被路由到产品 Agent 而非投诉 Agent，因为规则分类器在意图得分相同时按字典顺序取了第一个。我加了意图优先级权重（complaint > billing > product）解决。第二个是注入防御——Qwen2.5-7B 会在回复中讨论自己的系统提示词，`[untrusted data]` 隔离标签对小模型不够。我在输出层加了正则检测，命中泄露模式后替换为安全回复。这说明 E2E 真实测试是不可替代的。
+
+### Q7: "前端是怎么实现的？"
+> 原生 JavaScript（ES Module），没用 React/Vue。技术选型理由：1) 可嵌入性——`widget.html` 可直接嵌入任意网页；2) 体积小——无框架运行时；3) 构建用 Vite 8。实现了完整的聊天界面、主题切换（8 种）、无障碍支持（WCAG AA/AAA）、SSE 流式、WebSocket 实时通信、管理后台（用户/知识库/告警/监控）。
