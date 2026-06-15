@@ -73,7 +73,7 @@ OPENAI_MODEL=deepseek-chat
 
 ```bash
 # 运行真实 LLM 端到端测试
-python3 -m pytest tests/test_e2e_real_llm.py -v -s
+python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -s
 ```
 
 预期输出（5 个测试全部 PASS）：

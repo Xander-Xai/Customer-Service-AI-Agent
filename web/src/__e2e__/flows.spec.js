@@ -292,4 +292,220 @@ test.describe('药妆智多星 E2E 完整业务链路测试', () => {
     await expect(page.locator('#resolutionValue')).toContainText('85.2%');
     await expect(page.locator('#aiValue')).toContainText('78.1%');
   });
+
+  // ── 链路 4: 注册流程测试 ──
+  test('用户注册与表单验证', async ({ page }) => {
+    await page.route('**/api/auth/register', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          message: '注册成功',
+          user_id: 2,
+          username: 'newuser',
+        }),
+      });
+    });
+
+    await page.goto('/login.html');
+
+    // 切换到注册模式
+    await page.click('#switchMode');
+    await expect(page.locator('#formTitle')).toContainText('注册');
+
+    // 验证表单元素
+    await expect(page.locator('#username')).toBeVisible();
+    await expect(page.locator('#password')).toBeVisible();
+    await expect(page.locator('#confirmPassword')).toBeVisible();
+
+    // 模拟注册
+    await page.fill('#username', 'newuser');
+    await page.fill('#password', 'password123');
+    await page.fill('#confirmPassword', 'password123');
+    await page.click('#submitBtn');
+
+    // 验证跳转
+    await page.waitForTimeout(500);
+    await expect(page.locator('#formTitle')).toContainText('登录');
+  });
+
+  // ── 链路 5: Token 刷新降级测试 ──
+  test('Token 过期后自动刷新与降级', async ({ page }) => {
+    let refreshCalled = false;
+
+    await page.route('**/api/auth/refresh', async (route) => {
+      refreshCalled = true;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          access_token: 'new-mock-jwt-token',
+          refresh_token: 'new-mock-refresh-token',
+        }),
+      });
+    });
+
+    await page.goto('/login.html');
+    await page.evaluate(() => {
+      localStorage.setItem('token', 'expired-jwt-token');
+      localStorage.setItem('refresh_token', 'mock-refresh-token');
+    });
+
+    // 触发需要认证的请求
+    await page.route('**/api/auth/me', async (route) => {
+      const authHeader = route.request().headerValue('Authorization');
+      if (authHeader === 'Bearer expired-jwt-token') {
+        await route.fulfill({ status: 401, body: '{}' });
+      } else {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            user_id: 1,
+            username: 'admin',
+            role: 'admin',
+          }),
+        });
+      }
+    });
+
+    await page.goto('/admin.html');
+    await page.waitForTimeout(1000);
+
+    // 验证 refresh 被调用
+    expect(refreshCalled).toBe(true);
+  });
+
+  // ── 链路 6: 管理后台导航与权限测试 ──
+  test('管理后台导航切换与权限控制', async ({ page }) => {
+    // 初始化 localStorage 预置 Token
+    await page.goto('/login.html');
+    await page.evaluate(() => {
+      localStorage.setItem('token', 'mock-jwt-token');
+      localStorage.setItem('user', JSON.stringify({ username: 'admin', role: 'admin' }));
+    });
+
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_id: 1,
+          username: 'admin',
+          display_name: '管理员',
+          role: 'admin',
+        }),
+      });
+    });
+
+    await page.goto('/admin.html');
+
+    // 等待页面加载
+    await page.waitForTimeout(500);
+
+    // 验证导航按钮存在
+    const navButtons = page.locator('.admin-nav-btn');
+    await expect(navButtons).toHaveCount(6); // monitor, users, knowledge, prompts, alerts, system
+
+    // 点击各导航按钮，验证 section 切换
+    const sections = ['monitor', 'users', 'knowledge', 'prompts', 'alerts', 'system'];
+    for (const section of sections) {
+      await page.click(`.admin-nav-btn[data-section="${section}"]`);
+      await page.waitForTimeout(200);
+      // 验证对应 section 显示
+      const sectionMap = {
+        monitor: 'sectionMonitor',
+        users: 'sectionUsers',
+        knowledge: 'sectionKnowledge',
+        prompts: 'sectionPrompts',
+        alerts: 'sectionAlerts',
+        system: 'sectionSystem',
+      };
+      const sectionEl = page.locator(`#${sectionMap[section]}`);
+      await expect(sectionEl).toBeVisible();
+    }
+  });
+
+  // ── 链路 7: 会话持久化与恢复测试 ──
+  test('会话创建、切换与持久化', async ({ page }) => {
+    await page.goto('/login.html');
+    await page.evaluate(() => {
+      localStorage.setItem('token', 'mock-jwt-token');
+      localStorage.setItem('user', JSON.stringify({ username: 'admin', role: 'admin' }));
+    });
+
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_id: 1,
+          username: 'admin',
+          display_name: '管理员',
+          role: 'admin',
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          sessions: [
+            { session_id: 'sess-001', title: '产品咨询', message_count: 5, last_activity: '2026-06-10T18:00:00Z' },
+            { session_id: 'sess-002', title: '订单查询', message_count: 3, last_activity: '2026-06-10T17:00:00Z' },
+          ],
+        }),
+      });
+    });
+
+    await page.goto('/');
+
+    // 验证会话列表加载
+    await page.waitForTimeout(500);
+    const sessionItems = page.locator('.session-item');
+    await expect(sessionItems).toHaveCount(2);
+
+    // 验证会话标题
+    await expect(page.locator('.session-item').first()).toContainText('产品咨询');
+  });
+
+  // ── 链路 8: 状态管理测试（加载中、空数据、错误） ──
+  test('状态管理：加载中、空数据、错误提示', async ({ page }) => {
+    await page.goto('/login.html');
+    await page.evaluate(() => {
+      localStorage.setItem('token', 'mock-jwt-token');
+      localStorage.setItem('user', JSON.stringify({ username: 'admin', role: 'admin' }));
+    });
+
+    await page.route('**/api/auth/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          user_id: 1,
+          username: 'admin',
+          display_name: '管理员',
+          role: 'admin',
+        }),
+      });
+    });
+
+    await page.route('**/api/sessions', async (route) => {
+      // 返回空会话列表
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ sessions: [] }),
+      });
+    });
+
+    await page.goto('/');
+    await page.waitForTimeout(500);
+
+    // 验证空会话列表的友好提示
+    const emptyHint = page.locator('.sessions-empty');
+    await expect(emptyHint).toBeVisible();
+  });
 });

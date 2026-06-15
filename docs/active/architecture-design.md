@@ -98,7 +98,7 @@ class BaseAgent(ABC):
         # 6. 发布事件
 ```
 
-7 个 Agent 子类（Product/Tech/Billing/Complaint/General/Response/ReAct）共享相同的 LLM 交互流程，差异仅在 `system_prompt` 和 `extra_context` 的构建方式。模板方法消除了 ~200 行重复代码。
+8 个 Agent：6 个领域专家（Product/Tech/Billing/Complaint/General + ResponseAgent）+ ReAct 推理 Agent + ResponseEvaluator 质量评估器。共享相同的 LLM 交互流程，差异仅在 `system_prompt` 和 `extra_context` 的构建方式。模板方法消除了 ~200 行重复代码。
 
 ---
 
@@ -186,7 +186,50 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 ---
 
-## 5. 生产部署架构
+## 5. 前端架构
+
+### 技术选型
+
+| 考量 | 决策 | 理由 |
+|------|------|------|
+| **可嵌入性** | 原生 JS | `widget.html` 可直接嵌入任意网页，无框架运行时 |
+| **构建工具** | Vite 8 | 模块化 + Tree-shaking + Hashed 产物 |
+| **安全** | DOMPurify + marked.js | Markdown 渲染 + XSS 防护 |
+| **体积** | 无框架运行时 | 首屏 JS 体积更小 |
+| **测试** | Vitest + jsdom | 单元测试能力 |
+
+### 功能实现
+
+- **聊天界面**：`web/index.html` + `chat/` 模块（消息渲染/输入/会话管理/语音/TTS）
+- **SSE 流式**：`api/sse.js` — 逐 token 推送 + Agent 流转轨迹 + 进度条
+- **WebSocket**：`api/websocket.js` — 指数退避重连（2s~30s）+ 心跳 + 消息队列
+- **文件上传**：支持图片/视频/PDF/DOCX/文本，`/api/chat/file`
+- **语音输入**：Web Speech API + 🎤 按钮
+- **TTS 语音**：`/api/tts` — Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器
+- **会话侧面板**：点击会话项弹出侧面板（Agent/模式/时间），Esc 关闭
+- **主题系统**：8 种主题（亮色 pure/warm/soft/cream + 暗色 classic/warm + 无障碍 + 面板）+ 字号/行高/动画控制
+- **无障碍**：ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA）
+- **移动端**：响应式布局 + 抽屉式导航
+- **管理后台**：`admin.html` + `admin.js` — 用户管理/知识库统计/告警配置/ChromDB+DB 健康状态
+- **可嵌入 Widget**：`widget.html` — 轻量聊天组件
+
+### 模块结构
+
+```
+web/src/
+├── api/          # REST/SSE/WebSocket 客户端 + 事件系统
+├── auth/        # JWT 认证 + Token 自动刷新（过期前 5 分钟）
+├── chat/        # 聊天模块（消息/输入/会话/语音/欢迎/搜索/快捷键）
+├── state/       # 集中状态管理（chatState.js 单一数据源）
+├── utils/       # 工具函数（主题/Toast/DOM/Markdown/格式化/监控图表）
+├── admin-*.js   # 管理后台（分析/设置/用户）
+├── main.js      # 主聊天页入口
+└── login.js    # 登录页入口
+```
+
+---
+
+## 7. 生产部署架构
 
 ```
                          ┌──────────────┐
@@ -221,7 +264,7 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 ---
 
-## 6. 技术选型与权衡
+## 8. 技术选型与权衡
 
 | 选型 | 选择 | 备选 | 权衡 |
 |------|------|------|------|
@@ -250,11 +293,11 @@ E2E 集成测试（硅基流动 Qwen2.5-7B-Instruct）暴露了两个 Mock 测�
 
 | 层级 | 覆盖范围 | 数量 |
 |------|---------|------|
-| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 等 13 个文件 | ~812 |
-| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 | ~86 |
-| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key） | ~208 |
+| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 等 20 个文件 | ~1,032 |
+| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 | ~89 |
+| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key） | ~213 |
 | 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 | ~12 |
-| 前端测试 | Agent 映射 / 状态管理 / 主题 / i18n | ~35 |
-| **总计** | | **~1,150** |
+| 前端测试 | Agent 映射 / 状态管理 / 主题 / 无障碍 / 对比度 | ~5 Vitest |
+| **总计** | | **~1,338** |
 
 所有核心测试 **无需 LLM API Key 或网络**，Mock 适配器 + 内存 ChromaDB + Mock LLM 实现 100% 离线测试。

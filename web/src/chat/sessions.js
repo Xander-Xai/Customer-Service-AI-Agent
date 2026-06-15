@@ -13,7 +13,7 @@ import {
   updateSession,
 } from '../state/chatState.js';
 import { CHAT } from '../utils/copy.js';
-import { escapeHtml } from '../utils/dom.js';
+import { createElement } from '../utils/dom.js';
 import { formatTime } from '../utils/format.js';
 import { useQuickPrompt } from './input.js';
 import {
@@ -78,44 +78,55 @@ export async function loadSessionList() {
     const sid = getSessionId();
 
     if (sessions.length === 0) {
-      list.innerHTML = `<div style="padding:32px 20px;text-align:center;color:var(--text-muted);font-size:13px"><div style="font-size:32px;margin-bottom:12px">💬</div>${CHAT.emptySessionList}</div>`;
+      list.replaceChildren(
+        createElement('div', { style: 'padding:32px 20px;text-align:center;color:var(--text-muted);font-size:13px' }, [
+          createElement('div', { style: 'font-size:32px;margin-bottom:12px' }, ['💬']),
+          CHAT.emptySessionList
+        ])
+      );
       return;
     }
 
-    list.innerHTML = sessions
-      .map((s) => {
-        const isActive = s.session_id === sid;
-        const timeStr = s.last_activity ? formatTime(s.last_activity) : '';
-        const driftWarn = s.drift_count > 0 ? `⚠️ ${s.drift_count}次漂移` : '';
-        return `
-        <div class="session-item ${isActive ? 'active' : ''}"
-             data-session-id="${escapeHtml(s.session_id)}">
-          <div class="session-item-title">${escapeHtml(s.title || `对话 ${s.session_id.slice(0, 8)}`)}</div>
-          <div class="session-item-meta">
-            <span>💬 ${s.message_count || 0}条</span>
-            <span>${timeStr}</span>
-            ${driftWarn ? `<span style="color:var(--warning)">${driftWarn}</span>` : ''}
-          </div>
-          <button class="btn-delete-session" title="删除会话">🗑</button>
-        </div>
-      `;
-      })
-      .join('');
+    const items = sessions.map((s) => {
+      const isActive = s.session_id === sid;
+      const timeStr = s.last_activity ? formatTime(s.last_activity) : '';
+      const driftWarn = s.drift_count > 0 ? `⚠️ ${s.drift_count}次漂移` : '';
 
-    list.querySelectorAll('.session-item').forEach((item) => {
-      item.addEventListener('click', (e) => {
+      const metaChildren = [
+        createElement('span', {}, [`💬 ${s.message_count || 0}条`]),
+        createElement('span', {}, [timeStr])
+      ];
+      if (driftWarn) {
+        metaChildren.push(createElement('span', { style: 'color:var(--warning)' }, [driftWarn]));
+      }
+
+      const sessionItem = createElement('div', { 
+        className: `session-item ${isActive ? 'active' : ''}`, 
+        dataset: { sessionId: s.session_id }
+      }, [
+        createElement('div', { className: 'session-item-title' }, [s.title || `对话 ${s.session_id.slice(0, 8)}`]),
+        createElement('div', { className: 'session-item-meta' }, metaChildren),
+        createElement('button', { className: 'btn-delete-session', title: '删除会话' }, ['🗑'])
+      ]);
+
+      sessionItem.addEventListener('click', (e) => {
         if (e.target.closest('.btn-delete-session')) return;
-        selectSession(item.dataset.sessionId);
+        selectSession(s.session_id);
       });
+
+      const deleteBtn = sessionItem.querySelector('.btn-delete-session');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteSessionConfirm(s.session_id);
+        });
+      }
+
+      return sessionItem;
     });
 
-    list.querySelectorAll('.btn-delete-session').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const sessionItem = btn.closest('.session-item');
-        deleteSessionConfirm(sessionItem.dataset.sessionId);
-      });
-    });
+    list.replaceChildren(...items);
+
   } catch (_e) {}
 }
 
@@ -134,10 +145,15 @@ export async function selectSession(sessionId) {
     const messages = session.messages || [];
 
     const container = document.getElementById('chatMessages');
-    container.innerHTML = '';
+    container.replaceChildren();
 
     if (messages.length === 0) {
-      container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-muted)"><div style="font-size:32px;margin-bottom:12px">📭</div>${CHAT.emptySession}</div>`;
+      container.replaceChildren(
+        createElement('div', { style: 'padding:40px;text-align:center;color:var(--text-muted)' }, [
+          createElement('div', { style: 'font-size:32px;margin-bottom:12px' }, ['📭']),
+          CHAT.emptySession
+        ])
+      );
     } else {
       messages.forEach((msg) => {
         if (msg.role === 'user') {
@@ -178,38 +194,38 @@ function _showSessionDetail(sessionId, session) {
   const createdAt = session.created_at ? formatTime(session.created_at) : '--';
   const lastActivity = session.last_activity ? formatTime(session.last_activity) : '--';
 
-  content.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">会话 ID</div>
-        <div style="font-family:monospace;font-size:12px;word-break:break-all">${escapeHtml(sessionId)}</div>
-      </div>
-      <div style="display:flex;gap:16px">
-        <div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">消息数</div>
-          <div style="font-size:14px;font-weight:600">${msgCount}</div>
-        </div>
-        <div>
-          <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">漂移次数</div>
-          <div style="font-size:14px;font-weight:600">${session.drift_count || 0}</div>
-        </div>
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">创建时间</div>
-        <div style="font-size:13px">${createdAt}</div>
-      </div>
-      <div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">最后活动</div>
-        <div style="font-size:13px">${lastActivity}</div>
-      </div>
-      ${session.summary ? `
-      <div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px">摘要</div>
-        <div style="font-size:13px">${escapeHtml(session.summary)}</div>
-      </div>
-      ` : ''}
-    </div>
-  `;
+  const summaryChild = session.summary ? createElement('div', {}, [
+    createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['摘要']),
+    createElement('div', { style: 'font-size:13px' }, [session.summary])
+  ]) : null;
+
+  content.replaceChildren(
+    createElement('div', { style: 'display:flex;flex-direction:column;gap:12px' }, [
+      createElement('div', {}, [
+        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['会话 ID']),
+        createElement('div', { style: 'font-family:monospace;font-size:12px;word-break:break-all' }, [sessionId])
+      ]),
+      createElement('div', { style: 'display:flex;gap:16px' }, [
+        createElement('div', {}, [
+          createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['消息数']),
+          createElement('div', { style: 'font-size:14px;font-weight:600' }, [msgCount])
+        ]),
+        createElement('div', {}, [
+          createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['漂移次数']),
+          createElement('div', { style: 'font-size:14px;font-weight:600' }, [session.drift_count || 0])
+        ])
+      ]),
+      createElement('div', {}, [
+        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['创建时间']),
+        createElement('div', { style: 'font-size:13px' }, [createdAt])
+      ]),
+      createElement('div', {}, [
+        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['最后活动']),
+        createElement('div', { style: 'font-size:13px' }, [lastActivity])
+      ]),
+      summaryChild
+    ].filter(Boolean))
+  );
 
   panel.classList.add('open');
 }

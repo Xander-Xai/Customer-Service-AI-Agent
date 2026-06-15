@@ -165,7 +165,7 @@ def setup_middleware(app: FastAPI):
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes'; "
-            "style-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'nonce-{nonce}'; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
             "frame-ancestors 'none'"
