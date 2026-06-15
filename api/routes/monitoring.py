@@ -297,6 +297,32 @@ async def satisfaction(request: Request):
     return stats
 
 
+@router.get("/api/monitoring/token-quota")
+async def token_quota_status(request: Request):
+    """获取当前用户的 Token Quota 状态（v5.3）"""
+    user_id = _get_current_user_id(request)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未认证")
+
+    from core.token_quota import get_quota_manager
+
+    quota_mgr = get_quota_manager()
+    return quota_mgr.get_quota_status(str(user_id))
+
+
+def _get_current_user_id(request: Request) -> str | None:
+    """从请求中获取当前用户 ID"""
+    # 优先从 JWT payload 获取
+    jwt_payload = getattr(request.state, "jwt_payload", None)
+    if jwt_payload:
+        return str(jwt_payload.get("user_id", jwt_payload.get("sub", "")))
+    # 尝试从 header 获取
+    user_id = request.headers.get("X-User-ID")
+    if user_id:
+        return user_id
+    return None
+
+
 @router.get("/api/monitoring/tokens")
 async def token_usage(request: Request):
     """LLM Token 用量与延迟统计（v5.1）"""

@@ -1,4 +1,4 @@
-import { escapeHtml } from './dom.js';
+import { createElement } from './dom.js';
 
 /**
  * 渲染 Agent 负载分布图表
@@ -13,22 +13,20 @@ export function renderAgentChart(data, containerId = 'agentChart') {
   const colors = ['primary', 'success', 'warning', 'info', 'error'];
   const entries = Object.entries(counts);
   if (entries.length === 0) {
-    container.innerHTML =
-      '<div style="text-align:center;padding:40px;color:var(--text-muted);width:100%">暂无数据</div>';
+    container.replaceChildren(
+      createElement('div', { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' }, ['暂无数据'])
+    );
     return;
   }
   const maxVal = Math.max(...entries.map((e) => e[1]), 1);
-  container.innerHTML = entries
-    .map(
-      ([name, count], i) => `
-    <div class="bar-item">
-      <div class="bar-value">${count}</div>
-      <div class="bar-fill ${colors[i % colors.length]}" style="height:${(count / maxVal) * 100}%"></div>
-      <div class="bar-label">${escapeHtml(name)}</div>
-    </div>
-  `,
-    )
-    .join('');
+  const items = entries.map(([name, count], i) => {
+    return createElement('div', { className: 'bar-item' }, [
+      createElement('div', { className: 'bar-value' }, [count]),
+      createElement('div', { className: `bar-fill ${colors[i % colors.length]}`, style: `height:${(count / maxVal) * 100}%` }),
+      createElement('div', { className: 'bar-label' }, [name])
+    ]);
+  });
+  container.replaceChildren(...items);
 }
 
 /**
@@ -57,20 +55,18 @@ export function renderModeChart(data, containerId = 'modeChart') {
   };
   const entries = Object.entries(counts);
   if (entries.length === 0) {
-    container.innerHTML =
-      '<div style="text-align:center;padding:40px;color:var(--text-muted);width:100%">暂无数据</div>';
+    container.replaceChildren(
+      createElement('div', { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' }, ['暂无数据'])
+    );
     return;
   }
   const maxVal = Math.max(...entries.map((e) => e[1]), 1);
-  container.innerHTML = entries
-    .map(
-      ([name, count]) => `
-    <div class="bar-item">
-      <div class="bar-value">${count}</div>
-      <div class="bar-fill ${modeColors[name] || 'primary'}" style="height:${(count / maxVal) * 100}%"></div>
-      <div class="bar-label">${escapeHtml(modeLabels[name] || name)}</div>
-    </div>
-  `,
-    )
-    .join('');
+  const items = entries.map(([name, count]) => {
+    return createElement('div', { className: 'bar-item' }, [
+      createElement('div', { className: 'bar-value' }, [count]),
+      createElement('div', { className: `bar-fill ${modeColors[name] || 'primary'}`, style: `height:${(count / maxVal) * 100}%` }),
+      createElement('div', { className: 'bar-label' }, [modeLabels[name] || name])
+    ]);
+  });
+  container.replaceChildren(...items);
 }

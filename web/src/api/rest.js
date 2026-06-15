@@ -255,6 +255,13 @@ export function getTokenUsage() {
   return _request('GET', '/api/monitoring/tokens');
 }
 
+// ===== 用户认证 API =====
+
+/** 获取当前用户信息 */
+export function getUserMe() {
+  return _request('GET', '/api/auth/me');
+}
+
 // ===== TTS 语音列表 API =====
 
 /** 获取可用 TTS 语音列表 */

@@ -18,22 +18,23 @@ import {
   loadSatisfaction,
   refreshMonitorData,
 } from './admin-analytics.js';
+import { getUserMe } from './api/rest.js';
 import {
   handleAddDocs,
+  loadKnowledgeStats,
+  reseedKnowledge,
+  syncFromErp,
+} from './admin-knowledge.js';
+import { loadAlertConfig, loadAlertHistory, testAlert } from './admin-alerts.js';
+import { loadTokenUsage } from './admin-tokens.js';
+import {
   handleCreatePrompt,
-  loadAlertConfig,
-  loadAlertHistory,
   loadAuditLog,
   loadFeedbackStats,
-  loadKnowledgeStats,
   loadMetricsStats,
   loadPromptAgents,
   loadPromptVersions,
   loadSystemHealth,
-  loadTokenUsage,
-  reseedKnowledge,
-  syncFromErp,
-  testAlert,
 } from './admin-settings.js';
 // 导入子模块功能
 import { loadUsers } from './admin-users.js';
@@ -50,38 +51,11 @@ let _currentUserRole = null;
 let _monitorRefreshTimer = null;
 
 /**
- * 获取认证 Headers
- */
-function getHeaders() {
-  const token = localStorage.getItem('token') || '';
-  const headers = {};
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-  return headers;
-}
-
-/**
- * 退出登录
- */
-function logout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('user');
-  window.location.href = '/login.html';
-}
-
-/**
  * 加载用户信息并根据角色配置界面
  */
 async function loadUserInfo() {
-  const headers = getHeaders();
   try {
-    const resp = await fetch('/api/auth/me', { headers });
-    if (resp.status === 401) {
-      logout();
-      return null;
-    }
-    const data = await resp.json();
+    const data = await getUserMe();
     const role = data?.role || 'customer';
     _currentUserRole = role;
 

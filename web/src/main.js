@@ -14,7 +14,6 @@ import '../styles/responsive.css';
 
 import { init } from './chat/index.js';
 import { getAvailableVoices, getSelectedVoice, setVoice } from './chat/voice.js';
-import { escapeHtml } from './utils/dom.js';
 import { initSettingsPanel, initTheme } from './utils/theme.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -38,12 +37,14 @@ document.addEventListener('DOMContentLoaded', () => {
       const voices = getAvailableVoices();
       const entries = Object.entries(voices);
       if (!entries.length) return;
-      voiceSelect.innerHTML = entries
-        .map(
-          ([, id]) =>
-            `<option value="${escapeHtml(id)}" ${id === getSelectedVoice() ? 'selected' : ''}>${escapeHtml(VOICE_LABELS[id] || id)}</option>`,
-        )
-        .join('');
+      voiceSelect.replaceChildren();
+      entries.forEach(([, id]) => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        if (id === getSelectedVoice()) opt.selected = true;
+        opt.textContent = VOICE_LABELS[id] || id;
+        voiceSelect.appendChild(opt);
+      });
     }
 
     // 轮询等待语音列表加载（voice.js 模块级异步请求）

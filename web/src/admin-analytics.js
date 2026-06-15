@@ -46,7 +46,7 @@ function renderMetricCards(data) {
   const container = document.getElementById('metricCards');
   if (!container) return;
 
-  container.innerHTML = '';
+  container.replaceChildren();
 
   const cards = [
     {
@@ -189,7 +189,7 @@ function renderSessionsTable(sessions) {
   const tbody = document.getElementById('sessionsTableBody');
   if (!tbody) return;
 
-  tbody.innerHTML = '';
+  tbody.replaceChildren();
 
   if (!sessions.length) {
     const tr = document.createElement('tr');
@@ -243,7 +243,7 @@ function renderAlerts(alerts) {
   const container = document.getElementById('alertsList');
   if (!container) return;
 
-  container.innerHTML = '';
+  container.replaceChildren();
 
   if (!alerts.length) {
     const emptyEl = document.createElement('div');
@@ -289,7 +289,7 @@ function renderQualityTrends(data) {
   const el = document.getElementById('qualityTrendsChart');
   if (!el || !data?.trends?.length) return;
 
-  el.innerHTML = '';
+  el.replaceChildren();
 
   const maxQueries = Math.max(...data.trends.map((t) => t.total_queries), 1);
 
@@ -350,7 +350,7 @@ function renderHotQuestions(data) {
   const el = document.getElementById('hotQuestionsList');
   if (!el || !data?.questions?.length) return;
 
-  el.innerHTML = '';
+  el.replaceChildren();
 
   const maxCount = Math.max(...data.questions.map((q) => q.count), 1);
 
@@ -414,7 +414,7 @@ function renderSatisfaction(data) {
   const el = document.getElementById('satisfactionStats');
   if (!el || !data) return;
 
-  el.innerHTML = '';
+  el.replaceChildren();
 
   const rate = ((data.overall_rate || 0) * 100).toFixed(1);
   const rateColor =

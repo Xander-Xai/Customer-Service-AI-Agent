@@ -13,7 +13,7 @@ export async function loadUsers() {
   if (!tbody) return;
 
   // 清空表格内容
-  tbody.innerHTML = '';
+  tbody.replaceChildren();
 
   data.users.forEach((u) => {
     const tr = document.createElement('tr');
