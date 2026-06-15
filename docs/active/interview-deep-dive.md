@@ -30,13 +30,13 @@ graph.add_conditional_edges(
 ### 加分点
 
 - 提到 "状态机比对话驱动更适合客服场景——客服不是自由聊天，是有明确流程的"
-- 提到 "LangGraph 支持 checkpoint，未来可以做对话回溯和调试"
+- 提到 "LangGraph 支持 checkpointer，未来可以做对话回溯和调试"
 - 提到 "2024-2025 年 LangGraph 已经成为多 Agent 编排的事实标准"
 
 ### 代码引用
 
-- [multi_agent_customer_service.py](multi_agent_customer_service.py) — 图构建主文件
-- [core/container.py](core/container.py) — ServiceContainer 中的 `_build_graph()` 方法
+- [core/graph_builder.py](core/graph_builder.py) — 图构建主文件（`build_graph()` 唯一入口）
+- [core/container.py](core/container.py) — ServiceContainer 中的图构建
 
 ---
 
@@ -99,7 +99,7 @@ for round_num in range(max_rounds):
 ### 代码引用
 
 - [collaboration/orchestrator.py](collaboration/orchestrator.py) — 模式选择逻辑
-- [collaboration/modes.py](collaboration/modes.py) — 5 种模式实现（392 行）
+- [collaboration/modes.py](collaboration/modes.py) — 5 种模式实现
 - [agents/react_agent.py](agents/react_agent.py) — ReAct 推理引擎
 
 ---
@@ -176,10 +176,10 @@ if "tools" in kwargs and response.status_code in (400, 422):
 |---------|---------|---------|
 | CircuitBreaker 状态 | `asyncio.Lock` | [core/monitoring.py](core/monitoring.py) |
 | MetricsCollector 计数器 | `asyncio.Lock` | [core/monitoring.py](core/monitoring.py) |
-| SessionManager 消息列表 | `asyncio.Lock` | [session_manager.py](session_manager.py) |
+| SessionManager 消息列表 | `asyncio.Lock` | [core/session/session_manager.py](core/session/session_manager.py) |
 | SharedBlackboard 键值对 | `asyncio.Lock` per key | [core/shared_blackboard.py](core/shared_blackboard.py) |
 | MessageBus 订阅 | `asyncio.Queue`（天然线程安全） | [core/message_bus.py](core/message_bus.py) |
-| LLM 客户端连接池 | `httpx.AsyncClient`（内置连接池） | [core/monitoring.py](core/monitoring.py) |
+| LLM 客户端连接池 | `httpx.AsyncClient`（内置连接池） | [llm/client.py](llm/client.py) |
 
 **关键设计决策**：
 
@@ -208,7 +208,7 @@ async def test_blackboard_concurrent_writes():
 
 ### 代码引用
 
-- [tests/test_stress.py](tests/test_stress.py) — 并发压力测试
+- [tests/stress/test_stress.py](tests/stress/test_stress.py) — 并发压力测试
 - [core/shared_blackboard.py](core/shared_blackboard.py) — 黑板锁实现
 
 ---
@@ -341,17 +341,17 @@ evict_count = max(1, len(cache) * 5 // 100)
 
 ---
 
-## Q8: "测试策略是什么？1,100+ 个测试怎么分类的？"
+## Q8: "测试策略是什么？1,191+ 个测试怎么分类的？"
 
 ### 核心回答
 
-> "四层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。"
+> "五层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。"
 
 | 层级 | 文件 | 测试数 | 覆盖范围 | 依赖 |
 |------|------|--------|---------|------|
-| 单元测试 | 13 个文件（test_api_routes/test_middleware/test_core_modules 等） | ~812 | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具 | 无外部依赖 |
-| 集成测试 | test_integration + test_erp_integration + test_multimodal | ~86 | 图调用/ERP 适配器/多模态 | Mock LLM |
-| E2E 测试 | test_all + test_production_features + test_v4_production + test_e2e_real_llm | ~208 | 全图执行/生产特性/真实 LLM | Mock/Real LLM |
+| 单元测试 | 20 个文件（test_api_routes/test_middleware/test_core_modules 等） | ~1032 | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具 | 无外部依赖 |
+| 集成测试 | test_integration + test_erp_integration + test_multimodal | ~89 | 图调用/ERP 适配器/多模态 | Mock LLM |
+| E2E 测试 | test_all + test_production_features + test_v4_production + test_e2e_real_llm | ~213 | 全图执行/生产特性/真实 LLM | Mock/Real LLM |
 | 压力测试 | test_stress | ~12 | 并发/吞吐 | 无外部依赖 |
 
 **设计决策**：

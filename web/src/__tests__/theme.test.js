@@ -226,38 +226,38 @@ describe('theme manager', () => {
       initSettingsPanel();
 
       // Click "深色" in color mode
-      const darkBtn = document.querySelector('.seg-control[data-key="colorMode"] button[data-value="dark"]');
+      const darkBtn = document.querySelector(
+        '.seg-control[data-key="colorMode"] button[data-value="dark"]',
+      );
       darkBtn.click();
       expect(document.documentElement.dataset.colorMode).toBe('dark');
       expect(darkBtn.getAttribute('aria-pressed')).toBe('true');
       // 其他按钮应为 false
-      document
-        .querySelectorAll('.seg-control[data-key="colorMode"] button')
-        .forEach((b) => {
-          if (b !== darkBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
-        });
+      document.querySelectorAll('.seg-control[data-key="colorMode"] button').forEach((b) => {
+        if (b !== darkBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+      });
 
       // Click "大" in font size
-      const largeBtn = document.querySelector('.seg-control[data-key="fontSize"] button[data-value="large"]');
+      const largeBtn = document.querySelector(
+        '.seg-control[data-key="fontSize"] button[data-value="large"]',
+      );
       largeBtn.click();
       expect(document.documentElement.dataset.fontSize).toBe('large');
       expect(largeBtn.getAttribute('aria-pressed')).toBe('true');
-      document
-        .querySelectorAll('.seg-control[data-key="fontSize"] button')
-        .forEach((b) => {
-          if (b !== largeBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
-        });
+      document.querySelectorAll('.seg-control[data-key="fontSize"] button').forEach((b) => {
+        if (b !== largeBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+      });
 
       // Click "宽松" in line height
-      const relaxedBtn = document.querySelector('.seg-control[data-key="lineHeight"] button[data-value="relaxed"]');
+      const relaxedBtn = document.querySelector(
+        '.seg-control[data-key="lineHeight"] button[data-value="relaxed"]',
+      );
       relaxedBtn.click();
       expect(document.documentElement.dataset.lineHeight).toBe('relaxed');
       expect(relaxedBtn.getAttribute('aria-pressed')).toBe('true');
-      document
-        .querySelectorAll('.seg-control[data-key="lineHeight"] button')
-        .forEach((b) => {
-          if (b !== relaxedBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
-        });
+      document.querySelectorAll('.seg-control[data-key="lineHeight"] button').forEach((b) => {
+        if (b !== relaxedBtn) expect(b.getAttribute('aria-pressed')).toBe('false');
+      });
     });
   });
 });

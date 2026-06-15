@@ -117,6 +117,11 @@ SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")  # TLS 证书文件路径
 TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")  # TLS 私钥文件路径
 
+# ===== v3.8: Token Quota 配置 =====
+TOKEN_QUOTA_DAILY = _int_env("TOKEN_QUOTA_DAILY", 100000)  # 每日 Token 上限
+TOKEN_QUOTA_MONTHLY = _int_env("TOKEN_QUOTA_MONTHLY", 2000000)  # 每月 Token 上限
+TOKEN_QUOTA_ENABLED = os.getenv("TOKEN_QUOTA_ENABLED", "true").lower() == "true"  # 是否启用 Quota
+
 
 # ===== 日志配置 =====
 LOG_CONFIG = {

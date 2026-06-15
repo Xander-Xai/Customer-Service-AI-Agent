@@ -100,7 +100,7 @@
 
   --color-text-primary: var(--color-cream-text);
   --color-text-secondary: #5d5240; /* 6.0:1 on #faf7f2 ✓ AA+ */
-  --color-text-muted: #645840;     /* 5.5:1 on #faf7f2 ✓ AA */
+  --color-text-muted: #645840; /* 5.5:1 on #faf7f2 ✓ AA */
 
   --color-border: #e5dfd5;
   --color-border-hover: #d4ccbc;

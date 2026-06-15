@@ -15,11 +15,7 @@ function srgbToLinear(c) {
 }
 
 function luminance(r, g, b) {
-  return (
-    0.2126 * srgbToLinear(r) +
-    0.7152 * srgbToLinear(g) +
-    0.0722 * srgbToLinear(b)
-  );
+  return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
 }
 
 function hexToRGB(hex) {

@@ -5,7 +5,7 @@
 
 import { getSessionId } from '../state/chatState.js';
 import { getAgentDisplayName, getAgentIcon } from '../utils/agents.js';
-import { copyToClipboard, escapeHtml, scrollToBottom } from '../utils/dom.js';
+import { copyToClipboard, escapeHtml, scrollToBottom, createElement, setSafeHtml } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 let progressStatusEl = null;
@@ -30,21 +30,26 @@ export function setSessionId(id) {
 /** 追加用户消息 */
 export function appendUserMessage(content, imageFile) {
   const container = document.getElementById('chatMessages');
-  let imageHtml = '';
+  
+  const contentChildren = [];
   if (imageFile) {
     const objectUrl = URL.createObjectURL(imageFile);
-    imageHtml = `<div class="message-image-preview"><img src="${objectUrl}" alt="用户图片"></div>`;
+    contentChildren.push(
+      createElement('div', { className: 'message-image-preview' }, [
+        createElement('img', { src: objectUrl, alt: '用户图片' })
+      ])
+    );
   }
-  const html = `
-    <div class="message user">
-      <div class="message-avatar">👤</div>
-      <div class="message-content">
-        ${imageHtml}
-        ${content ? `<div class="message-bubble">${escapeHtml(content)}</div>` : ''}
-      </div>
-    </div>
-  `;
-  container.insertAdjacentHTML('beforeend', html);
+  if (content) {
+    contentChildren.push(createElement('div', { className: 'message-bubble' }, [content]));
+  }
+  
+  const msgEl = createElement('div', { className: 'message user' }, [
+    createElement('div', { className: 'message-avatar' }, ['👤']),
+    createElement('div', { className: 'message-content' }, contentChildren)
+  ]);
+  
+  container.appendChild(msgEl);
   scrollToBottom(container);
 }
 
@@ -55,45 +60,46 @@ export function appendAssistantMessage(content, meta = {}) {
 
   const agentIcon = getAgentIcon(meta.agent);
 
-  // Agent 流转轨迹（客户端不展示）
-  const agentFlowHtml = '';
+  const metaParts = [];
+  if (meta.elapsed) {
+    metaParts.push(createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`]));
+  }
 
-  const html = `
-    <div class="message assistant">
-      <div class="message-avatar">${agentIcon}</div>
-      <div class="message-content">
-        <div class="message-bubble">${renderMarkdown(content)}</div>
-        ${agentFlowHtml}
-        <div class="message-agent-tag">
-          <span class="agent-icon">${agentIcon}</span>
-          ${escapeHtml(getAgentDisplayName(meta.agent))}
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <span class="message-meta">
-            ${meta.elapsed ? `<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>` : ''}
-          </span>
-        </div>
-        <div class="feedback-bar">
-          <button class="btn-msg-action btn-copy" title="复制回复内容">📋 复制</button>
-          <button class="btn-feedback positive" title="有帮助">👍 有帮助</button>
-          <button class="btn-feedback negative" title="没帮助">👎 没帮助</button>
-        </div>
-      </div>
-    </div>
-  `;
-  container.insertAdjacentHTML('beforeend', html);
+  const contentChildren = [
+    createElement('div', { className: 'message-bubble' }), // Will setSafeHtml
+    // Agent 流转轨迹（客户端不展示）
+    createElement('div', { className: 'message-agent-tag' }, [
+      createElement('span', { className: 'agent-icon' }, [agentIcon]),
+      ` ${getAgentDisplayName(meta.agent)}`
+    ]),
+    createElement('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
+      createElement('span', { className: 'message-meta' }, metaParts)
+    ]),
+    createElement('div', { className: 'feedback-bar' }, [
+      createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, ['📋 复制']),
+      createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, ['👍 有帮助']),
+      createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, ['👎 没帮助'])
+    ])
+  ];
+
+  const msgEl = createElement('div', { className: 'message assistant' }, [
+    createElement('div', { className: 'message-avatar' }, [agentIcon]),
+    createElement('div', { className: 'message-content' }, contentChildren)
+  ]);
+  
+  const bubble = msgEl.querySelector('.message-bubble');
+  setSafeHtml(bubble, renderMarkdown(content));
+  
+  container.appendChild(msgEl);
 
   // 绑定反馈和复制按钮事件
-  const lastMsg = container.lastElementChild;
-  if (lastMsg) {
-    lastMsg.dataset.messageIndex = messageIndex++;
-    const positiveBtn = lastMsg.querySelector('.btn-feedback.positive');
-    const negativeBtn = lastMsg.querySelector('.btn-feedback.negative');
-    const copyBtn = lastMsg.querySelector('.btn-copy');
-    if (positiveBtn) positiveBtn.addEventListener('click', () => sendFeedback(positiveBtn, true));
-    if (negativeBtn) negativeBtn.addEventListener('click', () => sendFeedback(negativeBtn, false));
-    if (copyBtn) copyBtn.addEventListener('click', () => copyMessageText(copyBtn, content));
-  }
+  msgEl.dataset.messageIndex = messageIndex++;
+  const positiveBtn = msgEl.querySelector('.btn-feedback.positive');
+  const negativeBtn = msgEl.querySelector('.btn-feedback.negative');
+  const copyBtn = msgEl.querySelector('.btn-copy');
+  if (positiveBtn) positiveBtn.addEventListener('click', () => sendFeedback(positiveBtn, true));
+  if (negativeBtn) negativeBtn.addEventListener('click', () => sendFeedback(negativeBtn, false));
+  if (copyBtn) copyBtn.addEventListener('click', () => copyMessageText(copyBtn, content));
 
   scrollToBottom(container);
 }
@@ -101,15 +107,13 @@ export function appendAssistantMessage(content, meta = {}) {
 /** 追加系统消息 */
 export function appendSystemMessage(content) {
   const container = document.getElementById('chatMessages');
-  const html = `
-    <div class="message system">
-      <div class="message-avatar">ℹ️</div>
-      <div class="message-content">
-        <div class="message-bubble">${escapeHtml(content)}</div>
-      </div>
-    </div>
-  `;
-  container.insertAdjacentHTML('beforeend', html);
+  const msgEl = createElement('div', { className: 'message system' }, [
+    createElement('div', { className: 'message-avatar' }, ['ℹ️']),
+    createElement('div', { className: 'message-content' }, [
+      createElement('div', { className: 'message-bubble' }, [content])
+    ])
+  ]);
+  container.appendChild(msgEl);
   scrollToBottom(container);
 }
 
@@ -118,17 +122,15 @@ export function appendSystemMessage(content) {
 export function showTypingIndicator() {
   removeTypingIndicator();
   const container = document.getElementById('chatMessages');
-  const html = `
-    <div class="typing-indicator" id="typingIndicator">
-      <div class="message-avatar" style="background:var(--bg-hover)">···</div>
-      <div class="typing-dots">
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-      </div>
-    </div>
-  `;
-  container.insertAdjacentHTML('beforeend', html);
+  const typingEl = createElement('div', { className: 'typing-indicator', id: 'typingIndicator' }, [
+    createElement('div', { className: 'message-avatar', style: 'background:var(--bg-hover)' }, ['···']),
+    createElement('div', { className: 'typing-dots' }, [
+      createElement('div', { className: 'typing-dot' }),
+      createElement('div', { className: 'typing-dot' }),
+      createElement('div', { className: 'typing-dot' })
+    ])
+  ]);
+  container.appendChild(typingEl);
   scrollToBottom(container);
 }
 
@@ -143,11 +145,11 @@ export function showProgressStatus(text) {
   removeTypingIndicator();
   if (!progressStatusEl) {
     const container = document.getElementById('chatMessages');
-    const div = document.createElement('div');
-    div.className = 'progress-status';
-    div.innerHTML = `<div class="progress-spinner"></div><span id="progressText">${escapeHtml(text)}</span>`;
-    container.appendChild(div);
-    progressStatusEl = div;
+    progressStatusEl = createElement('div', { className: 'progress-status' }, [
+      createElement('div', { className: 'progress-spinner' }),
+      createElement('span', { id: 'progressText' }, [text])
+    ]);
+    container.appendChild(progressStatusEl);
     scrollToBottom(container);
   } else {
     const textEl = progressStatusEl.querySelector('#progressText');
@@ -173,23 +175,28 @@ export function createStreamingMessage() {
   removeTypingIndicator();
 
   const agentIcon = '🤖';
-  const wrapper = document.createElement('div');
-  wrapper.className = 'message assistant';
-  wrapper.innerHTML = `
-    <div class="message-avatar">${agentIcon}</div>
-    <div class="message-content">
-      <div class="message-bubble"><span class="streaming-text"></span><span class="streaming-cursor">▊</span></div>
-      <div class="message-agent-tag"><span class="agent-icon">${agentIcon}</span> 客服助手</div>
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="message-meta"></span>
-      </div>
-      <div class="feedback-bar">
-        <button class="btn-msg-action btn-copy" title="复制回复内容">📋 复制</button>
-        <button class="btn-feedback positive" title="有帮助">👍 有帮助</button>
-        <button class="btn-feedback negative" title="没帮助">👎 没帮助</button>
-      </div>
-    </div>
-  `;
+  const wrapper = createElement('div', { className: 'message assistant' }, [
+    createElement('div', { className: 'message-avatar' }, [agentIcon]),
+    createElement('div', { className: 'message-content' }, [
+      createElement('div', { className: 'message-bubble' }, [
+        createElement('span', { className: 'streaming-text' }),
+        createElement('span', { className: 'streaming-cursor' }, ['▊'])
+      ]),
+      createElement('div', { className: 'message-agent-tag' }, [
+        createElement('span', { className: 'agent-icon' }, [agentIcon]),
+        ' 客服助手'
+      ]),
+      createElement('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
+        createElement('span', { className: 'message-meta' })
+      ]),
+      createElement('div', { className: 'feedback-bar' }, [
+        createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, ['📋 复制']),
+        createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, ['👍 有帮助']),
+        createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, ['👎 没帮助'])
+      ])
+    ])
+  ]);
+  
   container.appendChild(wrapper);
   scrollToBottom(container);
 
@@ -211,29 +218,29 @@ export function createStreamingMessage() {
     },
     finalize(meta = {}) {
       // 移除光标，渲染完整 Markdown
-      cursorSpan.remove();
-      bubble.innerHTML = renderMarkdown(rawText);
+      if (cursorSpan.parentNode) cursorSpan.remove();
+      setSafeHtml(bubble, renderMarkdown(rawText));
 
       // 更新元数据
       const agentTag = wrapper.querySelector('.message-agent-tag');
       if (meta.agent) {
         const icon = getAgentIcon(meta.agent);
-        agentTag.innerHTML = `<span class="agent-icon">${icon}</span> ${escapeHtml(getAgentDisplayName(meta.agent))}`;
+        agentTag.replaceChildren(
+          createElement('span', { className: 'agent-icon' }, [icon]),
+          ` ${getAgentDisplayName(meta.agent)}`
+        );
       }
-
-      // mode badge 不在客户端展示
-
-      // Agent 流转轨迹不在客户端展示
 
       // 更新 meta 行：耗时 + 缓存 + 解决状态
       const metaContainer =
         wrapper.querySelector('.mode-badge')?.parentElement ||
         wrapper.querySelector('.message-content');
       const metaSpan = metaContainer.querySelector('.message-meta');
-      const metaParts = [];
-      if (meta.elapsed)
-        metaParts.push(`<span class="meta-item">⏱ ${(meta.elapsed).toFixed(1)}s</span>`);
-      if (metaSpan) metaSpan.innerHTML = metaParts.join('');
+      if (meta.elapsed && metaSpan) {
+        metaSpan.replaceChildren(
+          createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`])
+        );
+      }
 
       // 追踪 messageIndex
       wrapper.dataset.messageIndex = messageIndex++;
@@ -268,7 +275,7 @@ function sendFeedback(btn, resolved) {
   _feedbackSubmitter(sid, rating, idx)
     .then(() => {
       const bar = btn.parentElement;
-      bar.innerHTML = '<span style="font-size:11px;color:var(--text-muted)">✅ 感谢反馈</span>';
+      bar.replaceChildren(createElement('span', { style: 'font-size:11px;color:var(--text-muted)' }, ['✅ 感谢反馈']));
     })
     .catch(() => {});
 }

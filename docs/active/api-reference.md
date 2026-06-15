@@ -93,10 +93,11 @@ ws.onmessage = (event) => {
 | `GET` | `/api/kpi` | 业务 KPI | Admin Token |
 | `GET` | `/api/cache/stats` | 缓存统计 | Admin Token |
 | `GET` | `/api/sessions` | 会话列表 | JWT |
-| `GET` | `/api/sessions/{id}` | 会话详情 | JWT |
-| `DELETE` | `/api/sessions/{id}` | 删除会话 | JWT |
+| `GET` | `/api/sessions/{session_id}` | 会话详情 | JWT |
+| `DELETE` | `/api/sessions/{session_id}` | 删除会话 | JWT |
+| `GET` | `/api/sessions/{session_id}/checkpoint` | LangGraph 检查点 | JWT |
 | `GET` | `/api/history` | 历史会话列表 | JWT |
-| `GET` | `/api/history/{id}/messages` | 会话消息历史 | JWT |
+| `GET` | `/api/history/{session_id}/messages` | 会话消息历史 | JWT |
 | `POST` | `/api/feedback` | 客户满意度反馈 | JWT |
 | `GET` | `/api/feedback/stats` | 反馈统计 | Admin Token |
 | `GET` | `/api/alerts` | SLA 告警记录 | Admin Token |
@@ -106,7 +107,6 @@ ws.onmessage = (event) => {
 | `GET` | `/api/monitoring/hot-questions` | 高频问题 | Admin Token |
 | `GET` | `/api/monitoring/satisfaction` | 满意度统计 | Admin Token |
 | `GET` | `/api/monitoring/tokens` | Token 用量 | Admin Token |
-| `GET` | `/api/sessions/{id}/checkpoint` | LangGraph 检查点 | JWT |
 | `POST` | `/api/prompts` | Prompt 版本管理 | JWT (admin) |
 
 ### Prompt 版本管理
