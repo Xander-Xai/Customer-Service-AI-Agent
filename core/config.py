@@ -15,6 +15,7 @@ load_dotenv(override=True)
 # ===== v5.1: 自定义配置异常 =====
 class ConfigurationError(Exception):
     """生产环境配置缺失或无效时抛出，替代 SystemExit。"""
+
     pass
 
 
@@ -97,7 +98,7 @@ RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "5.2.0"
+VERSION = "5.2.2"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
@@ -113,6 +114,8 @@ WS_MESSAGE_RATE_LIMIT = _int_env("WS_MESSAGE_RATE_LIMIT", 10)
 WS_IDLE_TIMEOUT = _int_env("WS_IDLE_TIMEOUT", 300)
 # 会话令牌签名密钥（用于防会话劫持）
 SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
+# 会话数据加密密钥（用于文件/Redis 后端存储加密；为空则明文存储，向后兼容）
+SESSION_ENCRYPTION_KEY = os.getenv("SESSION_ENCRYPTION_KEY", "")
 # TLS 配置
 TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")  # TLS 证书文件路径
 TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")  # TLS 私钥文件路径
@@ -121,6 +124,7 @@ TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")  # TLS 私钥文件路径
 TOKEN_QUOTA_DAILY = _int_env("TOKEN_QUOTA_DAILY", 100000)  # 每日 Token 上限
 TOKEN_QUOTA_MONTHLY = _int_env("TOKEN_QUOTA_MONTHLY", 2000000)  # 每月 Token 上限
 TOKEN_QUOTA_ENABLED = os.getenv("TOKEN_QUOTA_ENABLED", "true").lower() == "true"  # 是否启用 Quota
+TOKEN_QUOTA_REDIS_PREFIX = os.getenv("TOKEN_QUOTA_REDIS_PREFIX", "csai:quota:")  # Redis key 前缀
 
 
 # ===== 日志配置 =====
@@ -163,7 +167,9 @@ else:
 # ===== v3.5: RAG 配置 =====
 RAG_PERSIST_DIRECTORY = os.getenv("RAG_PERSIST_DIRECTORY", "")  # 空则内存模式
 RAG_N_RESULTS = _int_env("RAG_N_RESULTS", 3)
-RAG_QUERY_REWRITING = os.getenv("RAG_QUERY_REWRITING", "false").lower() == "true"  # v5.2: LLM 改写查询
+RAG_QUERY_REWRITING = (
+    os.getenv("RAG_QUERY_REWRITING", "false").lower() == "true"
+)  # v5.2: LLM 改写查询
 
 # ===== v3.5: ReAct 配置 =====
 REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 3)  # v4.3: 从 5 降至 3，控制延迟在 20s 内
@@ -312,7 +318,9 @@ def validate_required_config():
     if errors:
         for err in errors:
             print(f"🚨 配置校验失败: {err}", file=sys.stderr)
-        raise ConfigurationError(f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件")
+        raise ConfigurationError(
+            f"生产环境启动失败：{len(errors)} 项关键配置缺失，请检查 .env 文件"
+        )
 
     # Non-fatal warnings for missing optional-but-recommended config
     if not _DEV_MODE and not RAG_PERSIST_DIRECTORY:

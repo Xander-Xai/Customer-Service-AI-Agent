@@ -4,7 +4,28 @@
 
 ---
 
-## v5.2.2 (2026-06-11) — 会话列表标题字段修正 + CI 覆盖率修复
+## v5.2.3 (2026-06-16) — 版本对齐 + 文档同步
+
+### 修复
+- **版本号不一致**：`core/config.py` 的 `VERSION` 从 `"5.2.0"` 更新为 `"5.2.2"`（实际代码行为与 README 声明一致，仅版本字符串未随 v5.2.2 同步）
+- **管理后台版本号**：`web/admin.html` 标题栏显示从 `v5.0` 更新为 `v5.2.2`（之前与主聊天页 `index.html` 的 `v5.2.2` 不一致）
+
+### 文档同步
+- **README.md 全量更新**：
+  - 测试用例数 1191 → 1341（对齐代码实际计数，含 v5.2.2 新增的 151 个 + 增量覆盖）
+  - 前端功能表新增 6 项：键盘快捷键、主题预览页、拖拽上传、Widget URL 参数说明、移动端抽屉导航详情、Admin Prompt 版本管理
+  - BaseAgent 核心能力新增 3 项：Token 配额检查、黑板跨 Agent 数据桥接、安全 ERP 查询包装器
+  - 核心能力栏新增：Token 配额、FeatureFlags、OpenTelemetry、会话数据加密
+  - 项目结构目录更新：新增 `core/session/`、`api/routes/`、`rag/seed_data.py` 等，JS 模块 22→38、CSS 12→13
+  - 最近版本表维护：v5.2.2 更新日期 2026-06-16，v5.0 测试数 1151→1341
+- **docs/active/ 更新**：
+  - `architecture-design.md`：测试数 1338→1341，新增协作模式/路由测试文件，新增 Playwright E2E
+  - `api-reference.md`：Token 端点说明从"Token 用量"→"Token 用量统计"
+- **CONVENTIONS.md**：与当前代码一致，无变更需要
+
+### 影响范围
+- 配置文件：`core/config.py`（1 行）、`web/admin.html`（1 行）
+- 文档文件：`README.md`、`CHANGELOG.md`、`docs/active/architecture-design.md`、`docs/active/api-reference.md`
 
 ### 修复
 - **会话列表标题字段错位**：`web/src/chat/sessions.js` 的 `loadSessionList()` 渲染时会话项标题从 `s.summary` 改为 `s.title`。后端 `list_sessions_brief` 接口（`/api/sessions` 与 `/api/history`）返回的字段是 `title`（取自首条消息内容前 50 字符），`summary` 字段只存在于详细会话接口 `getSession`（`/api/sessions/{id}`）中。此前列表请求读取 `summary` 始终为 `undefined`，导致所有会话项均回退到”对话 {session_id 前 8 位}”占位符，用户无法看到真实标题。修正后会话列表正确显示首条消息截取的可读标题，详情面板仍保留 `session.summary` 长摘要的展示。

@@ -106,7 +106,7 @@ ws.onmessage = (event) => {
 | `GET` | `/api/monitoring/quality-trends` | 质量评分趋势 | Admin Token |
 | `GET` | `/api/monitoring/hot-questions` | 高频问题 | Admin Token |
 | `GET` | `/api/monitoring/satisfaction` | 满意度统计 | Admin Token |
-| `GET` | `/api/monitoring/tokens` | Token 用量 | Admin Token |
+| `GET` | `/api/monitoring/tokens` | Token 用量统计 | Admin Token |
 | `POST` | `/api/prompts` | Prompt 版本管理 | JWT (admin) |
 
 ### Prompt 版本管理
