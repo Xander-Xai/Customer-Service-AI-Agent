@@ -2,7 +2,7 @@
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini addopts 移除 `--cov` + 新增 151 测试用例覆盖率 75.8% → 80.09%）
+> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini addopts 移除 `--cov` + 新增 151 测试用例覆盖率 75.8% → 80.09%）+ 配置版本对齐 + 文档同步（1341+ 测试用例）
 >
 > **v5.2.1** 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复
 >
@@ -10,9 +10,9 @@
 >
 > **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
 >
-> **v5.0** 前端 Vite 8 重构 + 1191+ 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
+> **v5.0** 前端 Vite 8 重构 + 1341+ 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
-> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理
+> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密
 
 ---
 
@@ -23,7 +23,7 @@
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **测试能过** | `make test` | 1191 passed, 覆盖率 ≥80% |
+| **测试能过** | `make test` | 1341 passed, 覆盖率 ≥80% |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
 | **CI 能过** | `.github/workflows/ci.yml` | 4 Job 流水线（测试→安全→构建→部署） |
 
@@ -255,17 +255,20 @@ sequenceDiagram
 | **ReActAgent** | 多步推理：Thought → Action → Observation → Answer | RAG（3 个 collection） + FC（4 个 ERP 工具） | ReAct |
 | **ResponseAgent** | 响应消毒 + 注入防护 + 解决状态评估 + 质量评分 + 模式升级重试 + 缓存写入 + SLA + 事件广播 | Cache + Evaluator + Bus | 最终环节 |
 
-**BaseAgent 核心能力（681 行）：**
+**BaseAgent 核心能力（724 行）：**
 - 会话上下文检索（滑动窗口最近 6 条）
-- 漂移检测（话题/意图/矛盾/重复 4 种类型）+ 自动注入修复提示
+- 漂移检测（话题/意图/矛盾/重复 4 种类型）+ 自动注入修复提示（Agent 特化修复策略）
 - RAG 知识库检索（按 Agent 分配 collection）+ 查询改写（同义词扩展）+ 多 collection RRF 融合 + BM25/CrossEncoder 重排
-- Function Calling 多轮工具调用循环（`_process_with_tools`，最多 `TOOL_MAX_ROUNDS` 轮）+ 自反思质量检查（v5.2）
-- A/B 测试 prompt 变体分配（SHA-256 确定性分流）+ Prompt 版本管理（DB 持久化）
+- Function Calling 多轮工具调用循环（`_process_with_tools`，最多 `TOOL_MAX_ROUNDS` 轮）+ 自反思质量检查（v5.2：工具调用后 LLM 自检，未通过则重试）
+- A/B 测试 prompt 变体分配（SHA-256 确定性分流）+ Prompt 版本管理（DB 持久化 + 60s TTL 缓存）
 - SSE 真流式输出（检测 `stream_callback` 自动切换）
 - 指数退避重试（仅瞬态错误：`ConnectionError`/`TimeoutError`/`OSError`）
-- 对话历史 `<untrusted-data>` 标签隔离（防 prompt 注入）
+- 对话历史 `<untrusted-data>` 标签隔离（防 prompt 注入）+ 输出层注入泄露正则检测（12 条）
 - 协议化依赖注入（`core/protocols.py`：LLMProtocol、ERPProtocol、KnowledgeBaseProtocol 等）
 - 多模态 Vision LLM 自动选择（`_get_effective_llm` 根据 state.has_multimodal 切换）
+- Token 配额检查（`token_quota.py`：每日/每月用户级 Token 限额 + Redis 持久化）
+- 黑板跨 Agent 数据桥接（`shared_blackboard.py`：TTL KV + 前缀隔离 product./tech./erp./complaint.）
+- 安全 ERP 查询包装器 `_safe_erp_query()`（白名单消毒 + LIKE 转义）
 
 ### 5 种协作模式
 
@@ -459,21 +462,23 @@ Thought（推理当前需要什么信息）
 | 功能 | 实现 | 说明 |
 |------|------|------|
 | **聊天界面** | `web/index.html` + `chat/` 模块 | 消息渲染（marked.js Markdown）+ 历史会话侧栏 + 快捷短语 |
-| **SSE 流式** | `api/sse.js` | 逐 token 推送 + Agent 流转轨迹 + 进度条 |
+| **SSE 流式** | `api/sse.js` | 逐 token 推送 + Agent 流转轨迹 + 进度条 + 打字机效果 |
 | **WebSocket** | `api/websocket.js` | 指数退避重连（2s~30s）+ 心跳 + 消息队列 |
-| **文件上传** | `chat/input.js` | 支持图片/视频/PDF/DOCX/文本，REST `/api/chat/file` |
+| **文件上传** | `chat/input.js` | 支持图片/视频/PDF/DOCX/文本，REST `/api/chat/file`，支持拖拽上传 |
 | **语音输入** | `chat/voice.js` | Web Speech API + 🎤 按钮 |
 | **TTS 语音** | `chat/voice.js` | Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器 `<select>` |
 | **会话侧面板** | `chat/sessions.js` | 点击会话项弹出侧面板（Agent/模式/时间），Esc 关闭 |
+| **消息搜索** | `chat/search.js` | 会话内消息关键词搜索（TreeWalker 高亮 + 平滑滚动） |
+| **键盘快捷键** | `chat/shortcuts.js` | `/` 聚焦输入、`?` 帮助弹窗、`Ctrl+N` 新会话、`Esc` 关闭面板 |
 | **主题系统** | `utils/theme.js` + 8 个 CSS | 亮色 4 种 + 暗色 2 种 + 字号/行高/减弱动效/系统偏好 |
-| **认证** | `auth/index.js` + `login.js` | JWT 登录/注册 + Token 自动刷新（过期前 5 分钟） |
-| **管理后台** | `admin.html` + `admin.js` | 用户管理 / 知识库统计 / 告警配置 / ChromaDB+DB 健康状态 |
-| **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页 |
-| **消息搜索** | `chat/search.js` | 会话内消息关键词搜索 |
+| **主题预览** | `theme-comparison.html` | 4 种亮色主题并排对比预览选择 |
+| **认证** | `auth/index.js` + `login.js` | JWT 登录/注册 + Token 自动刷新（过期前 5 分钟）+ 角色路由 |
+| **管理后台** | `admin.html` + 8 个 `admin-*.js` 模块 | 监控仪表盘（指标卡片/环形图/趋势图）+ 用户管理 + 知识库管理（统计/种子/添加文档/ERP 同步）+ 告警配置 + Prompt 版本 CRUD + Token 用量统计 + 审计日志 + 系统健康 |
+| **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页，支持 `api_key`/`theme`/`lang` URL 参数，中英双语，SSE+REST 双保险 |
 | **反馈** | `chat/messages.js` | 👍/👎 反馈 + message_index 精确定位 |
-| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键 |
+| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA） |
 | **移动端** | 响应式布局 + 抽屉式导航（`responsive.css`） |
-| **Toast 通知** | `utils/toast.js` | 操作反馈通知 |
+| **Toast 通知** | `utils/toast.js` | 操作反馈通知（成功/错误/警告/信息） |
 | **剪贴板** | `utils/copy.js` | 一键复制消息内容 |
 
 > 如需组件化开发，可渐进迁移到 Web Components 或轻量框架（Lit/Preact），当前架构已为迁移预留了模块边界。
@@ -596,23 +601,28 @@ make env-check   # 查看当前环境配置摘要
 ```
 customer-service-ai-agent/
 ├── agents/            # 8 个 AI Agent（BaseAgent + 5 领域 + ReAct + Response + Evaluator）
-├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试）
+├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试/Token追踪/Token配额/黑板）
+│   └── session/       # 会话管理器 + 漂移检测器 + Token 计数器
 ├── api/               # FastAPI 服务层（工厂/中间件/路由/SSE/WebSocket/依赖注入）
+│   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts）
 ├── auth/              # JWT 认证（PBKDF2 + Redis 黑名单 + Refresh Token + RBAC）
 ├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
 ├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
-├── rag/               # RAG 知识库（ChromaDB + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合）
+├── rag/               # RAG 知识库（ChromaDB + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合 + 种子数据）
 ├── cache/             # 双层缓存（L1 MD5 + L2 Jaccard + Redis 持久化）
 ├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
 ├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
 ├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具）
-├── llm/               # LLM 客户端（重试 + 熔断 + FC + SSE 流式 + 连接池）+ 规则兜底 LLM
+├── llm/               # LLM 客户端（重试 + 熔断 + FC + SSE 流式 + 连接池 + Token 配额）+ 规则兜底 LLM
 ├── media/             # 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
 ├── alerts/            # 告警通知（Webhook 钉钉/企微/飞书 + SMTP）
 ├── knowledge/         # 知识库管理路由
-├── web/               # 前端（原生 JS + Vite 8 构建 + 22 模块 + 12 CSS + 5 页面）
+├── web/               # 前端（原生 JS + Vite 8 构建 + 38 模块 + 13 CSS + 5 页面）
+│   ├── src/           # 38 JS 模块（聊天/API/Auth/工具/管理后台/测试）
+│   ├── styles/        # 13 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
+│   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
-├── tests/             # 测试套件（1191 Python + 5 Vitest：unit/integration/e2e/stress/performance）
+├── tests/             # 测试套件（1341 Python + 5 Vitest：unit/integration/e2e/stress/performance）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
@@ -642,6 +652,12 @@ customer-service-ai-agent/
 | `test_protocols_di.py` | `unit/` | 15 | 协议接口 + 依赖注入：Protocol conformance / Agent 构造注入 / FastAPI DI |
 | `test_rag_reranker.py` | `unit/` | 18 | RAG 重排：BM25 / CrossEncoder / 工厂 / QueryRewriter / 知识库集成 |
 | `test_token_tracker_db.py` | `unit/` | 13 | Token 追踪：记录 / 汇总 / 分位数 / DB 回滚保护 |
+| `test_collaboration_modes.py` | `unit/` | 35 | 5 种协作模式全分支覆盖（22% → 97%——v5.2.2 新增） |
+| `test_collaboration_orchestrator.py` | `unit/` | 25 | 模式选择 + 运行时模式升级全分支（48% → 99%——v5.2.2 新增） |
+| `test_query_router_coverage.py` | `unit/` | 34 | 规则分类 + LLM 分类 + 双层路由（0% → 100%——v5.2.2 新增） |
+| `test_alert_notifier_coverage.py` | `unit/` | 20 | Webhook + 邮件 + SSRF 防护（v5.2.2 新增） |
+| `test_base_agent_billing_coverage.py` | `unit/` | 32 | A/B 变体 + 漂移修复 + 账单 Agent（v5.2.2 新增） |
+| `test_graph_builder_coverage.py` | `unit/` | 5 | 工具函数 + 向后兼容包装器（v5.2.2 新增） |
 | `test_integration.py` | `integration/` | 28 | Mock LLM 集成：图调用 / 缓存命中 / 5 种协作模式 / Agent process() / 漂移 / 错误降级 |
 | `test_erp_integration.py` | `integration/` | 40 | ERP 集成：Mock/Real 格式兼容 / Token 刷新 / 重试 / 分页 / 查询流程 |
 | `test_multimodal.py` | `integration/` | 21 | 多模态集成：图片处理 / AgentState 字段 / BaseAgent 消息构建 / Vision LLM 选择 |
@@ -661,7 +677,7 @@ customer-service-ai-agent/
 | `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
 | `contrast.test.js` | `web/src/__tests__/` | WCAG AA 对比度回归（18 个 token 对） |
 
-**总计：1191 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
+**总计：1341 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
@@ -814,11 +830,11 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
-| **v5.2.2** | 2026-06-11 | 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%） |
+| **v5.2.2** | 2026-06-16 | 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1341 测试用例 + 文档同步 |
 | **v5.2.1** | 2026-06-11 | 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复 |
 | **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73 |
 | **v5.1** | 2026-06-10 | 全量清理 320 临时文件 + 文档同步 + 隐私检查通过 |
-| **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1151 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
+| **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1341 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
 | **v4.6** | 2026-06-08 | 文档扫描 20/20 项完成 + pre-commit + 覆盖率 80% + api/app.py 路由拆分 7 模块 |
 | **v4.5** | 2026-06-08 | 图构建统一 + 测试断言加固 49 项 + mypy CI + 净减 317 行 |
 | **v4.4** | 2026-06-08 | 安全加固（PyJWT/CSP/WS）+ 代码重构（状态拆分/DI）+ 测试覆盖率门槛 |
