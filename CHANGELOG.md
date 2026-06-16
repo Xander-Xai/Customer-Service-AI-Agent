@@ -4,6 +4,75 @@
 
 ---
 
+## v5.3 (2026-06-16) — 安全审计修复 + Token Quota 持久化 + 黑板 Session 隔离 + 依赖升级
+
+### 安全修复（审计 v2）
+- **WebSocket 认证修复（P0 H-1）**：移除 `DEV_MODE` 短路逻辑，所有连接强制认证。API Key（query/header/message）优先；否则要求 `msg.token` (JWT) + `msg.session_token`。修复 WS 路径未注入 `user_id` 导致钱包枯竭攻击防护失效的问题
+- **WebSocket 会话令牌校验**：移除 `DEV_MODE` 短路，`session_manager.validate_session_token()` 对所有环境生效
+- **语音服务认证统一（审计 v2 Task 2.3）**：`voice.js` 改用 `rest.js` 的 `fetchWithAuth` 中央拦截器，消除直接 `fetch` 调用中手动拼接 `Authorization` header 的代码路径
+- **REST 错误消息字段优先级**：`rest.js` 中错误消息提取优先级从 `detail → error` 调整为 `error → detail → message`，兼容不同后端错误格式
+- **ChromaDB 初始化安全**：使用 `EphemeralClient` 避免持久化污染；显式禁用 telemetry (`anonymized_telemetry=False`) 并允许 reset
+- **RAG 查询日志增强**：所有异常日志添加 `exc_info=True`，包含完整堆栈信息
+- **Graph 节点错误日志**：`graph_builder.py` 中所有 `logger.error()` 调用添加 `exc_info=True`
+
+### Token Quota 持久化（v5.3）
+- **存储后端抽象**：新增 `_QuotaBackend` 抽象接口，支持内存和 Redis 两种后端
+- **Redis 后端**：生产环境使用 Redis Hash 存储用户配额（TTL 90 天覆盖月重置周期），失败自动降级到内存
+- **内存后端**：开发/测试环境使用 `threading.Lock` 保护的 `dict`
+- **向后兼容**：未配置 Redis 时自动使用内存后端，无 Redis 依赖
+- **配置项**：新增 `TOKEN_QUOTA_REDIS_PREFIX`（默认 `csai:quota:`）
+
+### 共享黑板 Session 隔离（v5.3）
+- **ContextVar 隔离**：新增 `_blackboard_session_id` ContextVar，按 session 隔离黑板数据
+- **API 扩展**：`write()`/`read()`/`read_prefix()` 新增可选 `session_id` 参数
+- **默认 session**：未提供 `session_id` 时从 ContextVar 获取，否则回退到 `"default"`
+- **BaseAgent 集成**：`process_with_retry()` 中自动设置黑板 session_id，确保 Agent 间数据隔离
+- **测试覆盖**：新增 `test_blackboard_session_isolation` 测试验证多 session 隔离
+
+### 依赖安全升级
+- **ChromaDB**：`>=0.4.22` → `>=0.5.0`
+- **langchain-community**：`>=0.3.0` → `>=0.3.27`
+- **Pillow**：`>=10.0.0` → `>=11.1.0`（修复 PYSEC-2026-165 buffer overflow）
+- **新增安全依赖**：`python-jose>=3.4.0`、`Jinja2>=3.1.6`、`MarkupSafe>=2.1.5`、`starlette>=0.47.2`、`pillow>=11.0.0`
+- **说明**：修复 python-jose CVE (key verification bypass)、Jinja2 CVE (HTML sanitization bypass)、MarkupSafe ReDoS、starlette path traversal 等漏洞
+
+### 会话数据加密（H-2）
+- **AES-256-Fernet 加密**：`session_manager.py` 新增会话数据加密功能
+- **配置项**：`SESSION_ENCRYPTION_KEY` 环境变量（未配置时向后兼容明文存储）
+- **自动加解密**：文件后端 `_save_to_file`/`_load_from_file` 自动处理
+- **依赖**：`cryptography` 库（可选，未安装时回退明文）
+
+### 前端改进
+- **主题对比页 CSS 重构**：`theme-comparison.css` 从 `<style>` 标签内嵌样式重构为标准 CSS 文件（297→451 行）
+- **代码格式化**：`biome.json` 配置更新，`web/src/` 大量文件应用统一格式化（trailing comma、多行参数等）
+- **会话列表空状态**：`sessions.js` 空会话列表提示文案国际化
+- **监控渲染组件**：`monitor-render.js` 代码格式化，提升可读性
+- **admin.js 导入排序**：按模块路径字母顺序重新排列 import
+- **认证过期处理**：`auth/index.js` 新增 `_isLoggingOut` 防递归标志，避免 logout → redirect 触发再次进入过期处理
+- **错误消息字段兼容**：`rest.js` 错误提取支持 `error → detail → message` 多字段回退
+
+### 后端改进
+- **监控端点增强**：`monitoring.py` 新增 `csai_error_rate_percent` Prometheus 指标
+- **ChromaDB 健康检查**：使用容器内 `knowledge_base._client` 优先，避免重复创建 Client
+- **LLM 客户端 Token Quota**：`async_invoke` 和 `async_invoke_stream` 中集成配额检查和消耗
+- **app_factory.py 格式化**：生产环境安全检查代码格式化（indent 修复）
+- **graph_builder.py 向后兼容**：`make_graph()` 单例包装器保留
+
+### 测试改进
+- **会话管理器 async 修复**：`test_modules.py` 中 `create_session`/`add_message` 添加 `await`
+- **黑板隔离测试**：新增 `test_blackboard_session_isolation`（ContextVar + 显式参数双模式）
+- **多模态路由格式化**：`chat_multimodal.py` 代码格式化
+- **E2E 测试调整**：`test_e2e_real_llm.py` 适配新认证逻辑
+
+### 影响范围
+- **配置文件**：`requirements.txt`（新增 5 个安全依赖 + 3 个版本升级）、`requirements-dev.txt`
+- **核心模块**：`core/token_quota.py`（Redis 后端）、`core/shared_blackboard.py`（Session 隔离）、`core/session/session_manager.py`（加密）、`core/graph_builder.py`（日志）
+- **API 路由**：`api/routes/ws.py`（认证修复）、`api/routes/chat.py`（user_id 注入）、`api/routes/monitoring.py`（指标增强）、`api/routes/chat_multimodal.py`（格式化）
+- **前端**：`web/src/` 12 个文件（格式化 + 认证统一 + 国际化）
+- **测试**：22 个测试文件（async 修复 + 新增隔离测试）
+
+---
+
 ## v5.2.3 (2026-06-16) — 版本对齐 + 文档同步
 
 ### 修复

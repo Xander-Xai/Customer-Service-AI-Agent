@@ -206,7 +206,7 @@ class TestAgentProcess:
         agent.set_erp(KingdeeMockAdapter())
 
         state = _make_state("玻尿酸精华液的成分是什么？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -227,7 +227,7 @@ class TestAgentProcess:
         agent.set_blackboard(self.bb)
 
         state = _make_state("敏感肌可以用这款产品吗？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -249,7 +249,7 @@ class TestAgentProcess:
         agent.set_erp(KingdeeMockAdapter())
 
         state = _make_state("我想查询我的订单状态")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -269,7 +269,7 @@ class TestAgentProcess:
         agent.set_blackboard(self.bb)
 
         state = _make_state("我对你们的服务非常不满意！")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -289,7 +289,7 @@ class TestAgentProcess:
         agent.set_blackboard(self.bb)
 
         state = _make_state("你们有什么产品推荐？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -302,7 +302,7 @@ class TestAgentSessionContext:
     """Agent 会话上下文保持测试"""
 
     @pytest.fixture(autouse=True)
-    def setup(self):
+    async def setup(self):
         from agents import ProductAgent
         from core.message_bus import MessageBus
         from core.session.session_manager import EnhancedSessionManager
@@ -320,7 +320,7 @@ class TestAgentSessionContext:
         self.agent.set_erp(KingdeeMockAdapter())
 
         self.session_id = "context-test-session"
-        self.sm.create_session(self.session_id)
+        await self.sm.create_session(self.session_id)
 
     @pytest.mark.asyncio
     async def test_multi_turn_context_preserved(self):
@@ -448,7 +448,7 @@ class TestCollaborationModes:
 
         mode = SequentialMode(bus=self.bus, bb=self.bb)
         state = _make_state("精华液多少钱？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await mode.execute(self.agents_dict, state, {"primary_agent": "product_agent"})
 
@@ -463,7 +463,7 @@ class TestCollaborationModes:
 
         mode = ParallelMode(bus=self.bus, bb=self.bb)
         state = _make_state("精华液成分和物流状态？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
             self.agents_dict, state, {"agent_list": ["product_agent", "billing_agent"]}
@@ -480,7 +480,7 @@ class TestCollaborationModes:
 
         mode = ConsultationMode(bus=self.bus, bb=self.bb)
         state = _make_state("精华液适合敏感肌吗？成分安全吗？")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
             self.agents_dict,
@@ -498,7 +498,7 @@ class TestCollaborationModes:
 
         mode = HierarchicalMode(bus=self.bus, bb=self.bb)
         state = _make_state("我要投诉产品导致过敏！")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await mode.execute(
             self.agents_dict,
@@ -516,7 +516,7 @@ class TestCollaborationModes:
 
         mode = ReActMode(bus=self.bus, bb=self.bb)
         state = _make_state("帮我查一下订单 1001 的物流状态，并推荐相关产品")
-        self.sm.create_session(state["session_id"])
+        await self.sm.create_session(state["session_id"])
 
         result = await mode.execute(self.agents_dict, state, {"primary_agent": "react_agent"})
 
@@ -561,7 +561,7 @@ class TestErrorHandling:
         agent.set_llm(mock_llm)
 
         state = _make_state("产品信息")
-        sm.create_session(state["session_id"])
+        await sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -588,7 +588,7 @@ class TestErrorHandling:
         agent.set_llm(mock_llm)
 
         state = _make_state("使用方法")
-        sm.create_session(state["session_id"])
+        await sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 
@@ -619,7 +619,7 @@ class TestErrorHandling:
         agent.set_erp(mock_erp)
 
         state = _make_state("我的订单在哪里？")
-        sm.create_session(state["session_id"])
+        await sm.create_session(state["session_id"])
 
         result = await agent.process(state)
 

@@ -8,7 +8,6 @@ DocumentProcessor — 文档内容提取（v5.1）
 - 大小限制 + 内容截断
 """
 
-
 from core.logger import get_logger
 
 logger = get_logger("media.document")
@@ -99,7 +98,7 @@ class DocumentProcessor:
         except ImportError as e:
             raise ImportError("pdfplumber 未安装，请运行: pip install pdfplumber") from e
         except Exception as e:
-            logger.error(f"PDF 提取失败: {e}")
+            logger.error(f"PDF 提取失败: {e}", exc_info=True)
             return f"[PDF 提取失败: {e}]"
 
     def _extract_docx(self, data: bytes) -> str:
@@ -115,7 +114,7 @@ class DocumentProcessor:
         except ImportError as e:
             raise ImportError("python-docx 未安装，请运行: pip install python-docx") from e
         except Exception as e:
-            logger.error(f"DOCX 提取失败: {e}")
+            logger.error(f"DOCX 提取失败: {e}", exc_info=True)
             return f"[DOCX 提取失败: {e}]"
 
     def _extract_text(self, data: bytes) -> str:

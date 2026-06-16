@@ -7,7 +7,6 @@
 - POST   /api/knowledge/sync — 从 ERP 同步产品数据
 """
 
-
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -47,7 +46,7 @@ async def knowledge_stats(request: Request):
             stats[name] = knowledge_base.get_collection_count(name)
         return {"available": True, "collections": stats, "total": sum(stats.values())}
     except Exception as e:
-        logger.error(f"知识库统计查询失败: {e}")
+        logger.error(f"知识库统计查询失败: {e}", exc_info=True)
         return {"available": False, "message": "获取统计信息失败"}
 
 

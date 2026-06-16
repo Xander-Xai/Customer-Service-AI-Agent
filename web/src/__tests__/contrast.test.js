@@ -6,12 +6,12 @@
  * 所以改为纯 token 值静态校验 —— 避免依赖浏览器环境。
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 // ── WCAG 2.1 对比度计算 ──────────────────────────────────────────────
 function srgbToLinear(c) {
   c /= 255;
-  return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 }
 
 function luminance(r, g, b) {

@@ -453,8 +453,18 @@ test.describe('药妆智多星 E2E 完整业务链路测试', () => {
         contentType: 'application/json',
         body: JSON.stringify({
           sessions: [
-            { session_id: 'sess-001', title: '产品咨询', message_count: 5, last_activity: '2026-06-10T18:00:00Z' },
-            { session_id: 'sess-002', title: '订单查询', message_count: 3, last_activity: '2026-06-10T17:00:00Z' },
+            {
+              session_id: 'sess-001',
+              title: '产品咨询',
+              message_count: 5,
+              last_activity: '2026-06-10T18:00:00Z',
+            },
+            {
+              session_id: 'sess-002',
+              title: '订单查询',
+              message_count: 3,
+              last_activity: '2026-06-10T17:00:00Z',
+            },
           ],
         }),
       });

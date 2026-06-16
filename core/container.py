@@ -187,6 +187,7 @@ class ServiceContainer:
         if self.checkpointer is None:
             try:
                 from langgraph.checkpoint.memory import MemorySaver
+
                 self.checkpointer = MemorySaver()
             except ImportError:
                 pass
@@ -216,7 +217,7 @@ class ServiceContainer:
                 logger.warning("💡 配置真实的 API Key：编辑 .env.dev 文件第 7 行")
                 self.llm = RuleBasedLLM()
             except ImportError:
-                logger.error("❌ 规则引擎模块不可用，请配置 API Key")
+                logger.error("❌ 规则引擎模块不可用，请配置 API Key", exc_info=True)
                 self.llm = OpenAICompatibleClient(
                     api_key=OPENAI_API_KEY or "invalid",
                     base_url=OPENAI_BASE_URL,

@@ -50,11 +50,47 @@ class TestCreateApp:
         assert app.state.sla_alert_mgr is sla
 
     def test_create_app_includes_routes(self):
-        """create_app 注册了所有路由"""
+        """create_app 注册了所有路由。
+
+        Starlette ≥1.x 使用 _IncludedRouter 封装 include_router 的路由，
+        这些对象不直接在 app.routes 暴露子路由的 path 属性。
+        改用 app.url_path_for(name) 验证路由存在性（兼容所有版本）。
+        """
         app = self._make_app()
-        route_paths = {r.path for r in app.routes if hasattr(r, "path")}
-        # 应包含核心路由
-        assert "/ws/chat" in route_paths or any("/ws" in p for p in route_paths)
+        # 核心路由：通过路由名称验证存在性（兼容 Starlette 0.x 和 1.x）
+        core_routes = [
+            ("websocket_chat", "/ws/chat"),
+            ("serve_index", "/"),
+            ("serve_login", "/login.html"),
+        ]
+        for name, expected_path in core_routes:
+            try:
+                path = app.url_path_for(name)
+                assert expected_path in path, f"路由 {name} 路径不匹配: {path}"
+            except Exception:
+                # Fallback: 扫描 app.routes 直接查找（兼容旧版 Starlette）
+
+                found = False
+                for r in app.routes:
+                    if hasattr(r, "path") and r.path == expected_path:
+                        found = True
+                        break
+                    if hasattr(r, "routes") and any(
+                        getattr(sr, "path", "") == expected_path for sr in r.routes
+                    ):
+                        found = True
+                        break
+                    if isinstance(r, type("_IncludedRoute", (), {})):
+                        pass
+                    # Try original_router for Starlette 1.x
+                    if hasattr(r, "original_router"):
+                        for sr in r.original_router.routes:
+                            if getattr(sr, "path", "") == expected_path:
+                                found = True
+                                break
+                    if found:
+                        break
+                assert found, f"路由 {expected_path} 未注册"
 
     def test_create_app_dev_mode(self):
         """create_app 在 DEV_MODE 下设置 dev_mode"""
@@ -96,7 +132,6 @@ class TestCreateApp:
         """lifespan 设置 run_graph 到 app.state"""
         app = self._make_app()
         assert hasattr(app.state, "run_graph")
-
 
     def test_app_lifespan_sets_module_load_time(self):
         """lifespan 设置 module_load_time"""
@@ -173,23 +208,27 @@ class TestRunGraph:
         from api.app import _run_graph
 
         mock_graph = AsyncMock()
-        mock_graph.ainvoke = AsyncMock(return_value={
-            "response": "你好！有什么可以帮助你的？",
-            "current_agent": "ProductAgent",
-            "collaboration_mode": "sequential",
-            "cached": False,
-            "agents_used": ["ProductAgent"],
-            "resolution_status": "resolved",
-        })
+        mock_graph.ainvoke = AsyncMock(
+            return_value={
+                "response": "你好！有什么可以帮助你的？",
+                "current_agent": "ProductAgent",
+                "collaboration_mode": "sequential",
+                "cached": False,
+                "agents_used": ["ProductAgent"],
+                "resolution_status": "resolved",
+            }
+        )
 
         mock_metrics = AsyncMock()
         mock_sla = AsyncMock()
 
-        with patch("api.app._graph_app", mock_graph), \
-             patch("api.app._session_manager", MagicMock()), \
-             patch("api.app._response_cache", MagicMock()), \
-             patch("api.app._metrics", mock_metrics), \
-             patch("api.app._sla_alert_mgr", mock_sla):
+        with (
+            patch("api.app._graph_app", mock_graph),
+            patch("api.app._session_manager", MagicMock()),
+            patch("api.app._response_cache", MagicMock()),
+            patch("api.app._metrics", mock_metrics),
+            patch("api.app._sla_alert_mgr", mock_sla),
+        ):
             result = await _run_graph("test-session", "你好")
             assert result["response"] == "你好！有什么可以帮助你的？"
             assert result["current_agent"] == "ProductAgent"
@@ -204,9 +243,12 @@ class TestRunGraph:
         mock_graph.ainvoke = AsyncMock(side_effect=RuntimeError("graph error"))
         mock_graph.invoke = MagicMock(side_effect=RuntimeError("graph error"))
 
-        with patch("api.app._graph_app", mock_graph), \
-             patch("api.app._session_manager", MagicMock()), \
-             patch("api.app._response_cache", MagicMock()), pytest.raises(RuntimeError):
+        with (
+            patch("api.app._graph_app", mock_graph),
+            patch("api.app._session_manager", MagicMock()),
+            patch("api.app._response_cache", MagicMock()),
+            pytest.raises(RuntimeError),
+        ):
             await _run_graph("test-session", "你好")
 
 

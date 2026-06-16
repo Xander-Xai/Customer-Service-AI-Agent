@@ -293,7 +293,10 @@ class TestAudioProcessor:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("media.audio_processor.httpx.AsyncClient", return_value=mock_client), pytest.raises(httpx.HTTPStatusError):
+        with (
+            patch("media.audio_processor.httpx.AsyncClient", return_value=mock_client),
+            pytest.raises(httpx.HTTPStatusError),
+        ):
             await proc.transcribe(b"\x00" * 100, "audio/wav")
 
     @pytest.mark.asyncio
@@ -395,7 +398,10 @@ class TestVideoProcessor:
         proc = VideoProcessor()
         fake_video = b"\x00" * 100
 
-        with patch.dict("sys.modules", {"cv2": None, "numpy": None}), pytest.raises(ImportError, match="opencv-python-headless 未安装"):
+        with (
+            patch.dict("sys.modules", {"cv2": None, "numpy": None}),
+            pytest.raises(ImportError, match="opencv-python-headless 未安装"),
+        ):
             proc.extract_frames(fake_video, "video/mp4")
 
     def test_extract_frames_with_mock_cv2(self):
@@ -636,7 +642,10 @@ class TestDocumentProcessor:
 
         proc = DocumentProcessor()
 
-        with patch.dict("sys.modules", {"pdfplumber": None}), pytest.raises(ImportError, match="pdfplumber 未安装"):
+        with (
+            patch.dict("sys.modules", {"pdfplumber": None}),
+            pytest.raises(ImportError, match="pdfplumber 未安装"),
+        ):
             proc.extract(b"%PDF-1.4 fake", "application/pdf")
 
     def test_extract_pdf_empty_pages(self):
@@ -784,7 +793,10 @@ class TestTTSProcessor:
 
         proc = TTSProcessor()
 
-        with patch.dict("sys.modules", {"edge_tts": None}), pytest.raises(ImportError, match="edge_tts 未安装"):
+        with (
+            patch.dict("sys.modules", {"edge_tts": None}),
+            pytest.raises(ImportError, match="edge_tts 未安装"),
+        ):
             await proc.synthesize("测试文字")
 
     @pytest.mark.asyncio

@@ -67,9 +67,7 @@ class ChatHistory(Base):
     user = relationship("User", back_populates="chat_histories")
 
     # v5.1: 复合索引，加速按 session 查询历史（按时间排序）
-    __table_args__ = (
-        Index("ix_chat_session_created", "session_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_chat_session_created", "session_id", "created_at"),)
 
 
 class AuditLog(Base):

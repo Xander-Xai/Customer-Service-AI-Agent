@@ -30,6 +30,6 @@
     }
   },
   "files": {
-    "includes": ["web/**", "!web/node_modules", "!web/static/dist"]
+    "includes": ["web/**", "!web/node_modules", "!web/static/dist", "!web/dist"]
   }
 }

@@ -88,7 +88,9 @@ async def chat_with_image(
         "mode": result.get("collaboration_mode", "sequential"),
         "elapsed": elapsed,
         "session_id": auth.sid,
-        "session_token": auth.session_manager.generate_session_token(auth.sid) if auth.session_manager else "",
+        "session_token": auth.session_manager.generate_session_token(auth.sid)
+        if auth.session_manager
+        else "",
         "agents_used": result.get("agents_used", []),
     }
 
@@ -121,9 +123,13 @@ async def stream_multimodal_chat(
 
     token = auth.session_manager.generate_session_token(auth.sid) if auth.session_manager else ""
     ctx = SSEStreamContext(
-        graph_task=graph_task, chunk_queue=chunk_queue, sid=auth.sid,
-        session_manager=auth.session_manager, client_provided_sid=auth.client_provided_sid,
-        status_msg="正在分析图片...", progress_msg="正在识别图片内容...",
+        graph_task=graph_task,
+        chunk_queue=chunk_queue,
+        sid=auth.sid,
+        session_manager=auth.session_manager,
+        client_provided_sid=auth.client_provided_sid,
+        status_msg="正在分析图片...",
+        progress_msg="正在识别图片内容...",
     )
 
     from fastapi.responses import StreamingResponse
@@ -175,7 +181,9 @@ async def chat_with_voice(
         "agent": result.get("current_agent", ""),
         "elapsed": elapsed,
         "session_id": auth.sid,
-        "session_token": auth.session_manager.generate_session_token(auth.sid) if auth.session_manager else "",
+        "session_token": auth.session_manager.generate_session_token(auth.sid)
+        if auth.session_manager
+        else "",
         "transcription": text,
     }
 
@@ -275,14 +283,18 @@ async def chat_with_file(
         result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
     elif content_type.startswith("video/"):
         video_desc = await _handle_video_upload(file, query, request)
-        combined_query = f"{query}\n\n视频分析结果：{video_desc}" if query else f"视频分析结果：{video_desc}"
+        combined_query = (
+            f"{query}\n\n视频分析结果：{video_desc}" if query else f"视频分析结果：{video_desc}"
+        )
         combined_query = sanitize_input(combined_query[:MAX_QUERY_LENGTH])
         run_graph = request.app.state.run_graph
         start = time.time()
         result = await run_graph(auth.sid, combined_query)
-    elif any(filename.lower().endswith(ext) for ext in ('.pdf', '.docx', '.doc', '.txt', '.md')):
+    elif any(filename.lower().endswith(ext) for ext in (".pdf", ".docx", ".doc", ".txt", ".md")):
         doc_text = await _handle_document_upload(file, query, request)
-        combined_query = f"{query}\n\n文档内容：{doc_text}" if query else f"请分析以下文档内容：\n{doc_text}"
+        combined_query = (
+            f"{query}\n\n文档内容：{doc_text}" if query else f"请分析以下文档内容：\n{doc_text}"
+        )
         combined_query = sanitize_input(combined_query[:MAX_QUERY_LENGTH])
         run_graph = request.app.state.run_graph
         start = time.time()
@@ -301,6 +313,8 @@ async def chat_with_file(
         "mode": result.get("collaboration_mode", "sequential"),
         "elapsed": elapsed,
         "session_id": auth.sid,
-        "session_token": auth.session_manager.generate_session_token(auth.sid) if auth.session_manager else "",
+        "session_token": auth.session_manager.generate_session_token(auth.sid)
+        if auth.session_manager
+        else "",
         "agents_used": result.get("agents_used", []),
     }

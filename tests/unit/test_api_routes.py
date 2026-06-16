@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from contextlib import ExitStack, contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -320,10 +321,10 @@ class TestSessionsRoutes:
         assert data["has_checkpoint"] is True
         assert data["checkpoint_id"] == "cp-001"
         # 清理
-        try:
+        from contextlib import suppress
+
+        with suppress(AttributeError):
             del self.client.app.state.graph_app
-        except AttributeError:
-            pass
 
     def test_checkpoint_disabled(self):
         """GET /api/sessions/{session_id}/checkpoint -- 无 checkpointer 时返回 503"""
@@ -532,9 +533,7 @@ class TestChatRoutes:
 
     def test_rest_chat_with_session_id(self):
         """POST /api/chat -- 指定 session_id"""
-        resp = self.client.post(
-            "/api/chat", json={"query": "你好", "session_id": "my-session-1"}
-        )
+        resp = self.client.post("/api/chat", json={"query": "你好", "session_id": "my-session-1"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["session_id"] == "my-session-1"
@@ -547,9 +546,7 @@ class TestChatRoutes:
 
     def test_rest_chat_sanitize_strips_html(self):
         """POST /api/chat -- HTML 标签被净化"""
-        resp = self.client.post(
-            "/api/chat", json={"query": "<b>你好</b>"}
-        )
+        resp = self.client.post("/api/chat", json={"query": "<b>你好</b>"})
         assert resp.status_code == 200
         # run_graph 被调用时 query 应已被净化
         call_args = self.run_graph.call_args
@@ -617,7 +614,9 @@ class TestChatRoutes:
 
     def test_file_upload_empty_file(self):
         """POST /api/chat/file -- 空文件"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = ""
             resp = self.client.post(
                 "/api/chat/file",
@@ -638,8 +637,13 @@ class TestChatRoutes:
     @patch("api.routes.chat_multimodal.MULTIMODAL_ENABLED", True)
     def test_file_upload_image_success(self):
         """POST /api/chat/file -- 图片上传成功 (多模态启用)"""
-        with patch("api.routes.chat_multimodal._handle_image_upload", new_callable=AsyncMock) as mock_img:
-            mock_img.return_value = ([{"type": "image_url", "image_url": {"url": "data:..."}}], "描述图片")
+        with patch(
+            "api.routes.chat_multimodal._handle_image_upload", new_callable=AsyncMock
+        ) as mock_img:
+            mock_img.return_value = (
+                [{"type": "image_url", "image_url": {"url": "data:..."}}],
+                "描述图片",
+            )
             resp = self.client.post(
                 "/api/chat/file",
                 files={"file": ("pic.jpg", b"\xff\xd8\xff\xe0", "image/jpeg")},
@@ -650,7 +654,9 @@ class TestChatRoutes:
 
     def test_file_upload_document_text(self):
         """POST /api/chat/file -- 文档上传 (text/plain)"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = (None, "文档内容摘要")
             resp = self.client.post(
                 "/api/chat/file",
@@ -765,11 +771,14 @@ class TestChatRoutes:
     def test_file_upload_graph_error(self):
         """POST /api/chat/file -- 图执行异常时异常传播（chat_with_file 无 try/except）"""
         self.run_graph.side_effect = Exception("Boom")
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = "文档内容"
             # chat_with_file 没有 try/except 包裹 run_graph，异常会传播
             # 使用 raise_server_exceptions=False 让 TestClient 返回 500
             from starlette.testclient import TestClient as _TC
+
             client = _TC(self.app, raise_server_exceptions=False)
             resp = client.post(
                 "/api/chat/file",
@@ -798,6 +807,7 @@ class TestChatRoutes:
         """POST /api/chat/voice -- 语音格式不支持时返回 500 (ValueError 未捕获)"""
         # chat_with_voice 没有 try/except 包裹 _handle_audio_upload，异常传播
         from starlette.testclient import TestClient as _TC
+
         client = _TC(self.app, raise_server_exceptions=False)
         resp = client.post(
             "/api/chat/voice",
@@ -807,7 +817,10 @@ class TestChatRoutes:
 
     # -- TTS voices list --
 
-    @patch("api.routes.chat.os.getenv", lambda key, default="": "true" if key == "VOICE_ENABLED" else default)
+    @patch(
+        "api.routes.chat.os.getenv",
+        lambda key, default="": "true" if key == "VOICE_ENABLED" else default,
+    )
     def test_tts_voices_list(self):
         """GET /api/tts/voices -- 语音列表"""
         with patch("media.tts_processor.TTSProcessor") as MockTTS:
@@ -823,10 +836,16 @@ class TestChatRoutes:
 
 
 class TestWebSocketRoutes:
-    """api/routes/ws.py 路由覆盖"""
+    """api/routes/ws.py 路由覆盖
+
+    v5.3 审计 v2 P0 A-1: 移除 DEV_MODE 短路，所有 WS 连接强制认证。
+    测试策略: 使用 context-manager helper `_ws_session` 统一管理 patch + connect，
+    默认注入 `?api_key=test-api-key` + patch API_KEY_ENABLED/API_KEY。
+    需要强制认证（无 key）的测试使用 `dev_mode=False` 或自行 patch。
+    """
 
     def _build_ws_app(self, dev_mode=True):
-        """构建带 WebSocket 路由的 app"""
+        """构建带 WebSocket 路由的 app（不突变模块状态）"""
         from api.routes.ws import router as ws_router
 
         app = FastAPI()
@@ -837,6 +856,37 @@ class TestWebSocketRoutes:
         app.state.message_bus = _make_mock_bus()
         app.state.dev_mode = dev_mode
         return app, sm
+
+    @contextmanager
+    def _ws_session(self, app, dev_mode=True, **kwargs):
+        """统一 WS 测试上下文管理器：patch + connect + 自动清理
+
+        默认注入测试 api_key 凭证，让 auth 流程通过。
+        设置 dev_mode=False 则不注入 key（用于测试强制认证路径）。
+        """
+        patches = []
+        if dev_mode:
+            patches.extend(
+                [
+                    patch("api.routes.ws.API_KEY_ENABLED", True),
+                    patch("api.routes.ws.API_KEY", "test-api-key"),
+                ]
+            )
+        url = "/ws/chat"
+        if dev_mode:
+            url += "?api_key=test-api-key"
+        if kwargs:
+            from urllib.parse import urlencode
+
+            sep = "&" if "?" in url else "?"
+            url += sep + urlencode(kwargs)
+
+        with ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
+            client = stack.enter_context(TestClient(app))
+            ws = stack.enter_context(client.websocket_connect(url))
+            yield ws
 
     def _drain_messages(self, ws, max_msgs=50):
         """从 WS 读取所有可用消息，返回列表"""
@@ -855,7 +905,7 @@ class TestWebSocketRoutes:
     def test_ws_connection_and_chat(self):
         """WebSocket -- 连接成功、发送消息、接收回复"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
@@ -868,7 +918,7 @@ class TestWebSocketRoutes:
     def test_ws_empty_query(self):
         """WebSocket -- 空查询返回错误"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": ""})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
@@ -879,7 +929,7 @@ class TestWebSocketRoutes:
     def test_ws_auth_message_skipped(self):
         """WebSocket -- auth 类型消息被跳过"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"type": "auth", "token": "some-token"})
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
@@ -889,26 +939,32 @@ class TestWebSocketRoutes:
     def test_ws_pong_handling(self):
         """WebSocket -- pong 消息被跳过"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"type": "pong"})
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
             assert "response" in types, f"缺少 response, got: {types}"
 
-    def test_ws_invalid_session_token(self):
-        """WebSocket -- 无效 session token 返回错误 (非 DEV_MODE)"""
+    def test_ws_unauthenticated_rejected(self):
+        """v5.3: 无凭证的连接被强制拒绝（审计 v2 P0 A-1 修复）
+
+        移除 DEV_MODE 短路后，所有 WS 连接必须先通过认证。
+        未传 api_key / token 的连接应在认证阶段被关闭，不会收到 response。
+        """
         app, sm = self._build_ws_app(dev_mode=False)
-        sm.validate_session_token = MagicMock(return_value=False)
-        with patch("api.routes.ws.DEV_MODE", False), TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
-            ws.send_json(
-                {"query": "你好", "session_id": "other-sid", "session_token": "bad"}
-            )
+        # API_KEY_ENABLED=False 且无 token → 认证拒绝
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", False),
+            self._ws_session(app, dev_mode=False) as ws,
+        ):
+            # 立即发消息，不传任何凭证
+            ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
-            assert "error" in types, f"缺少 error 消息, got: {types}"
-            error_msg = [m for m in messages if m["type"] == "error"][0]
-            assert "令牌" in error_msg["content"]
+            # 无 response（认证没通过），应有 error
+            assert "error" in types, f"未授权连接应返回 error, got: {types}"
+            assert "response" not in types, f"未授权连接不应有 response, got: {types}"
 
     def test_ws_graph_error_returns_error(self):
         """WebSocket -- 图执行异常返回错误消息"""
@@ -918,7 +974,7 @@ class TestWebSocketRoutes:
             raise RuntimeError("Graph exploded")
 
         app.state.run_graph = AsyncMock(side_effect=_failing_graph)
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
@@ -927,7 +983,7 @@ class TestWebSocketRoutes:
     def test_ws_session_token_generated(self):
         """WebSocket -- 新连接生成 session_token"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             response_msg = [m for m in messages if m.get("type") == "response"]
@@ -954,18 +1010,33 @@ class TestWebSocketRoutes:
             _ws_connections.update(saved)
 
     def test_ws_user_id_set_from_jwt(self):
-        """WebSocket -- JWT payload 设置 user_id"""
+        """v5.3: JWT payload 的 sub 字段被正确提取为 user_id
+
+        认证阶段从 msg.token 解码 JWT → 提取 sub → 调用 session_manager.set_user_id。
+        """
         app, sm = self._build_ws_app(dev_mode=False)
-        with patch("api.routes.ws.API_KEY_ENABLED", False), patch("api.routes.ws.DEV_MODE", True), TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        ws_uid = "test-user-123"
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", False),
+            patch("auth.service.decode_token", return_value={"sub": ws_uid}),
+            self._ws_session(app, dev_mode=False) as ws,
+        ):
+            # 第一条消息被 _ws_authenticate 消费（作为认证消息），第二条是查询
+            ws.send_json({"token": "mock-jwt", "session_token": "sess"})
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
+            # 应拿到 response（认证通过后正常处理查询）
             types = [m.get("type") for m in messages]
-            assert "response" in types or "error" in types
+            assert "response" in types, f"缺少 response 消息, got: {types}"
+            # 验证 user_id 被设置
+            assert sm.set_user_id.called, "set_user_id 未被调用"
+            call_args = sm.set_user_id.call_args
+            assert call_args[0][1] == ws_uid, f"user_id 不匹配: {call_args[0][1]}"
 
     def test_ws_sanitize_input(self):
         """WebSocket -- 输入净化（HTML 标签被移除）"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "<script>alert('xss')</script>你好"})
             messages = self._drain_messages(ws)
             response_msg = [m for m in messages if m.get("type") == "response"]
@@ -977,7 +1048,7 @@ class TestWebSocketRoutes:
     def test_ws_rate_limit(self):
         """WebSocket -- 消息频率限制"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             # 发送超过 rate limit 的消息数（WS_MESSAGE_RATE_LIMIT 默认 10）
             for i in range(12):
                 ws.send_json({"query": f"msg_{i}"})
@@ -989,7 +1060,7 @@ class TestWebSocketRoutes:
         """WebSocket -- 连接时订阅 bus 事件，断开时取消订阅"""
         app, sm = self._build_ws_app()
         bus = app.state.message_bus
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "你好"})
             self._drain_messages(ws)
         # 验证 subscribe 和 unsubscribe 被调用
@@ -999,7 +1070,7 @@ class TestWebSocketRoutes:
     def test_ws_validate_session_id_sanitization(self):
         """WebSocket -- session_id 被 validate_session_id 清理"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             # 非法 session_id 会被替换为 UUID
             ws.send_json({"query": "你好", "session_id": "../../etc/passwd"})
             messages = self._drain_messages(ws)
@@ -1011,11 +1082,16 @@ class TestWebSocketRoutes:
     def test_ws_connection_with_api_key_query(self):
         """WebSocket -- 通过 query param 传递 api_key"""
         app, sm = self._build_ws_app()
-        with TestClient(app) as client, client.websocket_connect("/ws/chat?api_key=test-key") as ws:
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "test-key"),
+            TestClient(app) as client,
+            client.websocket_connect("/ws/chat?api_key=test-key") as ws,
+        ):
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
             types = [m.get("type") for m in messages]
-            assert "response" in types or "error" in types
+            assert "response" in types, f"缺少 response, got: {types}"
 
     def test_ws_on_agent_event_handler(self):
         """WebSocket -- agent 事件处理器正常工作"""
@@ -1031,7 +1107,7 @@ class TestWebSocketRoutes:
 
         bus.subscribe = AsyncMock(side_effect=_capture_subscribe)
 
-        with TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
+        with self._ws_session(app) as ws:
             ws.send_json({"query": "你好"})
             self._drain_messages(ws)
 
@@ -1040,15 +1116,23 @@ class TestWebSocketRoutes:
         assert "agent.completed" in subscribed_handlers
 
     def test_ws_session_id_same_as_server_no_token_check(self):
-        """WebSocket -- session_id 与服务器生成的一致时跳过 token 检查"""
+        """v5.3: 移除 DEV_MODE 短路后，新连接必须带 token 才会被接受
+
+        历史行为: 服务器生成 sid 时跳过 token 检查（dev_mode=False）。
+        当前行为（审计 v2 P0 A-1）: 无论 sid 来源，所有连接必须先认证。
+        """
         app, sm = self._build_ws_app(dev_mode=False)
-        with patch("api.routes.ws.DEV_MODE", False), TestClient(app) as client, client.websocket_connect("/ws/chat") as ws:
-            # 不指定 session_id，让服务器生成
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", False),
+            self._ws_session(app, dev_mode=False) as ws,
+        ):
+            # 不传 token / api_key → 认证阶段就关闭连接
             ws.send_json({"query": "你好"})
             messages = self._drain_messages(ws)
-            # 应该正常获得 response（因为 sid 是服务器生成的，不需要 token）
             types = [m.get("type") for m in messages]
-            assert "response" in types, f"缺少 response, got: {types}"
+            # 没有 response，只能拿到 error
+            assert "response" not in types, f"未授权连接不应获得 response, got: {types}"
+            assert "error" in types, f"应返回 error, got: {types}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1169,8 +1253,10 @@ class TestSSEHelpers:
         mock_file.read = AsyncMock(return_value=b"\xff\xd8" + b"\x00" * (10 * 1024 * 1024))
         mock_request = MagicMock()
 
-        with patch("api.routes.chat_multimodal.MULTIMODAL_ENABLED", True), \
-             patch("core.config.MAX_IMAGE_SIZE_MB", 1):
+        with (
+            patch("api.routes.chat_multimodal.MULTIMODAL_ENABLED", True),
+            patch("core.config.MAX_IMAGE_SIZE_MB", 1),
+        ):
             result = asyncio.run(_handle_image_upload(mock_file, "描述", mock_request))
         assert hasattr(result, "status_code")
         assert result.status_code == 400
@@ -1185,9 +1271,11 @@ class TestSSEHelpers:
         mock_file.read = AsyncMock(return_value=b"pdf content")
         mock_request = MagicMock()
 
-        with patch("media.document_processor.DocumentProcessor", side_effect=ImportError("no mod")):
-            with pytest.raises(ImportError):
-                asyncio.run(_handle_document_upload(mock_file, "总结", mock_request))
+        with (
+            patch("media.document_processor.DocumentProcessor", side_effect=ImportError("no mod")),
+            pytest.raises(ImportError),
+        ):
+            asyncio.run(_handle_document_upload(mock_file, "总结", mock_request))
 
     def test_handle_audio_upload_empty_result(self):
         """_handle_audio_upload -- 转写结果为空时返回原始文本"""
@@ -1263,9 +1351,11 @@ class TestSSEHelpers:
         mock_file.read = AsyncMock(return_value=b"video data")
         mock_request = MagicMock()
 
-        with patch("media.video_processor.VideoProcessor", side_effect=ImportError("no cv2")):
-            with pytest.raises(ImportError):
-                asyncio.run(_handle_video_upload(mock_file, "", mock_request))
+        with (
+            patch("media.video_processor.VideoProcessor", side_effect=ImportError("no cv2")),
+            pytest.raises(ImportError),
+        ):
+            asyncio.run(_handle_video_upload(mock_file, "", mock_request))
 
     def test_handle_video_upload_value_error(self):
         """_handle_video_upload -- 视频格式无效"""
@@ -1431,9 +1521,7 @@ class TestMonitoringRoutes:
             ]
         )
         metrics.get_hot_questions = AsyncMock(
-            return_value=[
-                {"query": f"问题{i}", "count": 100 - i * 5} for i in range(10)
-            ]
+            return_value=[{"query": f"问题{i}", "count": 100 - i * 5} for i in range(10)]
         )
         metrics.get_satisfaction_stats = AsyncMock(
             return_value={
@@ -1707,6 +1795,7 @@ class TestChatRoutesExtra:
         self.run_graph.side_effect = Exception("Graph boom")
         # chat_with_image 没有 try/except 包裹 run_graph，异常传播
         from starlette.testclient import TestClient as _TC
+
         client = _TC(self.app, raise_server_exceptions=False)
         resp = client.post(
             "/api/chat/image",
@@ -1732,6 +1821,7 @@ class TestChatRoutesExtra:
         """POST /api/chat/image -- run_graph 异常时返回 500"""
         self.run_graph.side_effect = RuntimeError("OOM")
         from starlette.testclient import TestClient as _TC
+
         client = _TC(self.app, raise_server_exceptions=False)
         resp = client.post(
             "/api/chat/image",
@@ -1780,7 +1870,9 @@ class TestChatRoutesExtra:
 
     def test_file_upload_pdf(self):
         """POST /api/chat/file -- PDF 文档上传"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = (None, "PDF 内容摘要")
             resp = self.client.post(
                 "/api/chat/file",
@@ -1793,7 +1885,9 @@ class TestChatRoutesExtra:
         """POST /api/chat/file -- 视频上传时 _handle_video_upload 被调用"""
         # chat_with_file 不检查 MULTIMODAL_ENABLED 就直接处理视频
         # 需要 mock _handle_video_upload 避免真实视频处理
-        with patch("api.routes.chat_multimodal._handle_video_upload", new_callable=AsyncMock) as mock_vid:
+        with patch(
+            "api.routes.chat_multimodal._handle_video_upload", new_callable=AsyncMock
+        ) as mock_vid:
             mock_vid.return_value = "视频分析完成，提取了 3 个关键帧"
             resp = self.client.post(
                 "/api/chat/file",
@@ -1804,7 +1898,9 @@ class TestChatRoutesExtra:
     @patch("api.routes.chat_multimodal.MULTIMODAL_ENABLED", True)
     def test_file_upload_video_success(self):
         """POST /api/chat/file -- 视频上传成功"""
-        with patch("api.routes.chat_multimodal._handle_video_upload", new_callable=AsyncMock) as mock_vid:
+        with patch(
+            "api.routes.chat_multimodal._handle_video_upload", new_callable=AsyncMock
+        ) as mock_vid:
             mock_vid.return_value = (
                 [{"type": "image_url", "image_url": {"url": "data:..."}}],
                 "视频分析",
@@ -1817,10 +1913,13 @@ class TestChatRoutesExtra:
 
     def test_file_upload_session_error(self):
         """POST /api/chat/file -- 文档处理器 ValueError 导致 500"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.side_effect = ValueError("文档解析失败")
             # chat_with_file 没有 try/except 包裹 _handle_document_upload
             from starlette.testclient import TestClient as _TC
+
             client = _TC(self.app, raise_server_exceptions=False)
             resp = client.post(
                 "/api/chat/file",
@@ -1830,7 +1929,9 @@ class TestChatRoutesExtra:
 
     def test_file_upload_with_query(self):
         """POST /api/chat/file -- 带 query 的文件上传"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = "文档内容"
             resp = self.client.post(
                 "/api/chat/file",
@@ -1867,11 +1968,19 @@ class TestChatRoutesExtra:
 
     def test_file_upload_docx(self):
         """POST /api/chat/file -- DOCX 文档上传"""
-        with patch("api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock) as mock_doc:
+        with patch(
+            "api.routes.chat_multimodal._handle_document_upload", new_callable=AsyncMock
+        ) as mock_doc:
             mock_doc.return_value = (None, "DOCX 内容")
             resp = self.client.post(
                 "/api/chat/file",
-                files={"file": ("report.docx", b"PK\x03\x04", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+                files={
+                    "file": (
+                        "report.docx",
+                        b"PK\x03\x04",
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                },
             )
         assert resp.status_code == 200
 
@@ -1927,6 +2036,7 @@ class TestDependencies:
             import importlib
 
             import api.dependencies as dep_mod
+
             importlib.reload(dep_mod)
             result = dep_mod.get_token_tracker(mock_request)
             assert result is mock_tracker
@@ -1939,6 +2049,7 @@ class TestDependencies:
             import importlib
 
             import api.dependencies as dep_mod
+
             importlib.reload(dep_mod)
             with pytest.raises(RuntimeError, match="TokenTracker 未初始化"):
                 dep_mod.get_token_tracker(mock_request)

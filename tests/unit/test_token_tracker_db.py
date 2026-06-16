@@ -2,7 +2,6 @@
 Token 追踪器 + 依赖注入 + 数据库改进 测试（v5.1）
 """
 
-
 import pytest
 
 from core.token_tracker import TokenTracker, TokenUsage, get_token_tracker, init_token_tracker
@@ -15,10 +14,16 @@ class TestTokenTracker:
     async def test_record_single_usage(self):
         """记录单次 token 用量"""
         tracker = TokenTracker()
-        await tracker.record(TokenUsage(
-            prompt_tokens=100, completion_tokens=50, total_tokens=150,
-            agent="product_agent", model="qwen2.5-7b", latency_ms=200.0,
-        ))
+        await tracker.record(
+            TokenUsage(
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                agent="product_agent",
+                model="qwen2.5-7b",
+                latency_ms=200.0,
+            )
+        )
         assert tracker.total_calls == 1
         assert tracker.total_prompt_tokens == 100
         assert tracker.total_completion_tokens == 50
@@ -30,10 +35,16 @@ class TestTokenTracker:
         """多次记录累加"""
         tracker = TokenTracker()
         for _ in range(5):
-            await tracker.record(TokenUsage(
-                prompt_tokens=100, completion_tokens=50, total_tokens=150,
-                agent="tech_agent", model="qwen2.5-7b", latency_ms=100.0,
-            ))
+            await tracker.record(
+                TokenUsage(
+                    prompt_tokens=100,
+                    completion_tokens=50,
+                    total_tokens=150,
+                    agent="tech_agent",
+                    model="qwen2.5-7b",
+                    latency_ms=100.0,
+                )
+            )
         assert tracker.total_calls == 5
         assert tracker.total_prompt_tokens == 500
         assert tracker.agent_tokens["tech_agent"] == 750
@@ -42,9 +53,14 @@ class TestTokenTracker:
     async def test_get_summary(self):
         """get_summary 返回正确摘要"""
         tracker = TokenTracker()
-        await tracker.record(TokenUsage(
-            prompt_tokens=100, completion_tokens=50, total_tokens=150, latency_ms=200.0,
-        ))
+        await tracker.record(
+            TokenUsage(
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                latency_ms=200.0,
+            )
+        )
         summary = tracker.get_summary()
         assert summary["total_calls"] == 1
         assert summary["total_tokens"] == 150
@@ -130,14 +146,14 @@ class TestDatabaseRollbackProtection:
 
         mock_session = MagicMock()
         with patch("db.database.SessionLocal", return_value=mock_session):
+            from contextlib import suppress
+
             from db.database import get_db
 
             gen = get_db()
             next(gen)
-            try:
+            with suppress(StopIteration):
                 gen.send(None)
-            except StopIteration:
-                pass
 
             mock_session.rollback.assert_not_called()
             mock_session.close.assert_called_once()

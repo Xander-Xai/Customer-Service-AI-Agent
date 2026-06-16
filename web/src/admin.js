@@ -12,21 +12,19 @@ import '../styles/monitor.css';
 import '../styles/admin.css';
 import '../styles/animations.css';
 
+import { loadAlertConfig, loadAlertHistory, testAlert } from './admin-alerts.js';
 import {
   loadHotQuestions,
   loadQualityTrends,
   loadSatisfaction,
   refreshMonitorData,
 } from './admin-analytics.js';
-import { getUserMe } from './api/rest.js';
 import {
   handleAddDocs,
   loadKnowledgeStats,
   reseedKnowledge,
   syncFromErp,
 } from './admin-knowledge.js';
-import { loadAlertConfig, loadAlertHistory, testAlert } from './admin-alerts.js';
-import { loadTokenUsage } from './admin-tokens.js';
 import {
   handleCreatePrompt,
   loadAuditLog,
@@ -36,8 +34,10 @@ import {
   loadPromptVersions,
   loadSystemHealth,
 } from './admin-settings.js';
+import { loadTokenUsage } from './admin-tokens.js';
 // 导入子模块功能
 import { loadUsers } from './admin-users.js';
+import { getUserMe } from './api/rest.js';
 import { guardPage } from './auth/index.js';
 import { initSettingsPanel, initTheme } from './utils/theme.js';
 import { showToast } from './utils/toast.js';

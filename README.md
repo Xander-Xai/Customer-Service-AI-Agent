@@ -1,18 +1,28 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.2.2)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.3)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
+> **v5.3** 安全审计修复（WebSocket 认证强化 + Token Quota Redis 持久化 + 黑板 Session 隔离 + 依赖安全升级）+ 会话数据加密（AES-256-Fernet）+ 74 文件变更（2616 插入 / 1281 删除）
+>
 > **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini addopts 移除 `--cov` + 新增 151 测试用例覆盖率 75.8% → 80.09%）+ 配置版本对齐 + 文档同步（1341+ 测试用例）
 >
 > **v5.2.1** 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复
 >
 > **v5.2** 无障碍 WCAG AA/AAA 全量达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话详情侧面板 + CI v6 升级 + 死代码清理 + Ruff lint 346→73
 >
+> **v5.3** 安全审计修复（WebSocket 认证强化 + Token Quota Redis 持久化 + 黑板 Session 隔离 + 依赖安全升级）+ 会话数据加密（AES-256-Fernet）+ 74 文件变更
+>
+> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1341 测试用例 + 文档同步
+>
+> **v5.2.1** 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复
+>
+> **v5.2** 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73
+>
 > **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
 >
 > **v5.0** 前端 Vite 8 重构 + 1341+ 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
-> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密
+> 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离
 
 ---
 
@@ -266,9 +276,10 @@ sequenceDiagram
 - 对话历史 `<untrusted-data>` 标签隔离（防 prompt 注入）+ 输出层注入泄露正则检测（12 条）
 - 协议化依赖注入（`core/protocols.py`：LLMProtocol、ERPProtocol、KnowledgeBaseProtocol 等）
 - 多模态 Vision LLM 自动选择（`_get_effective_llm` 根据 state.has_multimodal 切换）
-- Token 配额检查（`token_quota.py`：每日/每月用户级 Token 限额 + Redis 持久化）
-- 黑板跨 Agent 数据桥接（`shared_blackboard.py`：TTL KV + 前缀隔离 product./tech./erp./complaint.）
+- Token 配额检查（`token_quota.py`：每日/每月用户级 Token 限额 + Redis 持久化 + 内存回退）
+- 黑板跨 Agent 数据桥接（`shared_blackboard.py`：TTL KV + 前缀隔离 product./tech./erp./complaint. + **ContextVar Session 隔离** v5.3）
 - 安全 ERP 查询包装器 `_safe_erp_query()`（白名单消毒 + LIKE 转义）
+- **v5.3: Session 隔离自动注入**：`process_with_retry()` 中自动设置黑板 ContextVar session_id，确保多用户并发时数据隔离
 
 ### 5 种协作模式
 
@@ -430,6 +441,13 @@ Thought（推理当前需要什么信息）
 | **CORS** | 环境变量配置，默认 `http://localhost:8000`，生产必须配置真实域名 |
 | **监控保护** | `/metrics/prometheus` + `/api/metrics` 等 Admin Token 认证 |
 | **启动校验** | 生产环境强制校验 `JWT_SECRET`(≥32字符) / `SESSION_TOKEN_SECRET` / `API_KEY`，缺失则抛出 `ConfigurationError` |
+| **密钥管理** | `scripts/generate_prod_env.py` 使用 `secrets` 模块生成密码学安全随机密钥 |
+| **ERP 安全** | `sanitize_erp_input()` 白名单消毒 + 订单查询拒绝空过滤条件（防全量泄露） |
+| **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 |
+| **Token Quota** | 用户级 Token 消耗限额（每日/每月），Redis 持久化 + 内存回退 |
+| **会话加密** | AES-256-Fernet 会话数据加密（可选，未配置时向后兼容明文） |
+| **黑板隔离** | ContextVar 按 session 隔离 Agent 间共享数据，防止跨会话数据泄露 |
+| **依赖安全** | 定期升级依赖版本，修复已知 CVE（python-jose/Jinja2/MarkupSafe/starlette/pillow） |
 | **密钥管理** | `scripts/generate_prod_env.py` 使用 `secrets` 模块生成密码学安全随机密钥 |
 | **ERP 安全** | `sanitize_erp_input()` 白名单消毒 + 订单查询拒绝空过滤条件（防全量泄露） |
 | **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 |
@@ -781,6 +799,13 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `JWT_EXPIRE_HOURS` | 72 | JWT token 有效期（小时） |
 | `JWT_ACCESS_EXPIRE_HOURS` | 2 | access_token 有效期（小时） |
 | `JWT_REFRESH_EXPIRE_HOURS` | 168 | refresh_token 有效期（小时，默认 7 天） |
+| **Token Quota** | | |
+| `TOKEN_QUOTA_ENABLED` | false | Token 配额检查开关 |
+| `TOKEN_QUOTA_DAILY` | 100000 | 每日 Token 配额上限 |
+| `TOKEN_QUOTA_MONTHLY` | 2000000 | 每月 Token 配额上限 |
+| `TOKEN_QUOTA_REDIS_PREFIX` | csai:quota: | Token Quota Redis 键前缀 |
+| **会话加密** | | |
+| `SESSION_ENCRYPTION_KEY` | - | 会话数据加密密钥（留空则明文存储） |
 | **评估** | | |
 | `EVAL_RETRY_THRESHOLD` | 30 | 低分重试触发阈值 |
 | `EVAL_LOW_SCORE_THRESHOLD` | 40 | 低分告警触发阈值 |
@@ -830,6 +855,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
+| **v5.3** | 2026-06-16 | 安全审计修复（WS 认证 + Token Quota Redis + 黑板隔离 + 依赖升级）+ 会话加密 + 74 文件变更 |
 | **v5.2.2** | 2026-06-16 | 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1341 测试用例 + 文档同步 |
 | **v5.2.1** | 2026-06-11 | 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复 |
 | **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73 |

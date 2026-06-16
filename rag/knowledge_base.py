@@ -41,7 +41,16 @@ class CosmeticsKnowledgeBase:
             if persist_directory:
                 self._client = chromadb.PersistentClient(path=persist_directory)
             else:
-                self._client = chromadb.Client()
+                # v5.3: 使用 EphemeralClient 避免持久化污染；显式禁用 telemetry 并允许 reset
+                from chromadb.config import Settings
+
+                self._client = chromadb.EphemeralClient(
+                    settings=Settings(
+                        anonymized_telemetry=False,
+                        allow_reset=True,
+                        migrations="apply",
+                    )
+                )
             self._collections: dict[str, Any] = {}
             self._available = True
             clip_info = (
@@ -55,7 +64,7 @@ class CosmeticsKnowledgeBase:
             logger.warning("chromadb 未安装，RAG 功能不可用")
         except Exception as e:
             self._available = False
-            logger.error(f"ChromaDB 初始化失败: {e}")
+            logger.error(f"ChromaDB 初始化失败: {e}", exc_info=True)
 
     @staticmethod
     def _create_embedding_function():
@@ -194,7 +203,7 @@ class CosmeticsKnowledgeBase:
             )
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error(f"RAG 查询失败 [{collection_name}]: {e}")
+            logger.error(f"RAG 查询失败 [{collection_name}]: {e}", exc_info=True)
             return []
 
     async def query_multiple(
@@ -355,7 +364,7 @@ class CosmeticsKnowledgeBase:
             )
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error(f"CLIP 图片查询失败 [{collection_name}]: {e}")
+            logger.error(f"CLIP 图片查询失败 [{collection_name}]: {e}", exc_info=True)
             return []
 
     async def query_image_by_uri(
@@ -382,7 +391,7 @@ class CosmeticsKnowledgeBase:
             )
             return self._parse_query_result(result)
         except Exception as e:
-            logger.error(f"CLIP 图片-图片查询失败 [{collection_name}]: {e}")
+            logger.error(f"CLIP 图片-图片查询失败 [{collection_name}]: {e}", exc_info=True)
             return []
 
     async def query_multimodal(
@@ -529,9 +538,13 @@ class CosmeticsKnowledgeBase:
         # v5.3: jieba 可用性只检查一次，失败后用 regex 分词兜底
         try:
             import jieba
-            _tokenize = lambda text: set(jieba.cut(text))
+
+            def _tokenize(text: str) -> set[str]:
+                """jieba 中文分词"""
+                return set(jieba.cut(text))
         except ImportError:
             import re as _re
+
             def _tokenize(text: str) -> set[str]:
                 """regex 兜底分词：英文单词 + 单个中文字符"""
                 tokens = set(_re.findall(r"[a-z0-9]+", text.lower()))

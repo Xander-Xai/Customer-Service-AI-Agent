@@ -91,11 +91,11 @@ def setup_middleware(app: FastAPI):
         while True:
             await asyncio.sleep(600)  # 每 10 分钟清理一次
             expiry = max(_RATE_LIMIT_WINDOW * 2, 300)  # 过期阈值 ≥ 300s
-            cleaned = await loop.run_in_executor(
-                None, _sync_cleanup, _rate_limit_store, expiry
-            )
+            cleaned = await loop.run_in_executor(None, _sync_cleanup, _rate_limit_store, expiry)
             if cleaned:
-                logger.debug(f"[RateLimit] 清理 {cleaned} 个过期条目，剩余 {len(_rate_limit_store)}")
+                logger.debug(
+                    f"[RateLimit] 清理 {cleaned} 个过期条目，剩余 {len(_rate_limit_store)}"
+                )
 
     @app.on_event("startup")
     async def _start_periodic_cleanup():
@@ -165,7 +165,7 @@ def setup_middleware(app: FastAPI):
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes'; "
-            "style-src 'self' 'nonce-{nonce}'; "
+            f"style-src 'self' 'nonce-{nonce}'; "
             "connect-src 'self'; "
             "img-src 'self' data:; "
             "frame-ancestors 'none'"
@@ -217,6 +217,7 @@ def setup_middleware(app: FastAPI):
             path.startswith("/api/auth/users")
             or path.startswith("/api/auth/audit")
             or path.startswith("/api/knowledge")
+            or path.startswith("/api/admin/prompts")
         ):
             required_auth = "admin"
 
@@ -346,11 +347,12 @@ def setup_middleware(app: FastAPI):
     # ── 分布式追踪中间件 ──
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next):
-        trace_id = str(uuid.uuid4())[:12]
+        trace_id = uuid.uuid4().hex
         set_trace_id(trace_id)
         response = await call_next(request)
         response.headers["X-Trace-ID"] = trace_id
         return response
+
 
 
 # ── 角色权限映射 ──

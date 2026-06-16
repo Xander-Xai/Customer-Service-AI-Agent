@@ -3,7 +3,7 @@ uvicorn[standard]>=0.27.0
 gunicorn>=22.0.0
 sqlalchemy>=2.0.25
 openai>=1.12.0
-chromadb>=0.4.22
+chromadb>=0.5.0
 python-multipart>=0.0.6
 websockets>=12.0
 python-dotenv>=1.0.0
@@ -14,7 +14,7 @@ PyJWT>=2.8.0
 # ===== LangGraph / LangChain =====
 langgraph>=0.2.0
 langchain-core>=0.3.0
-langchain-community>=0.3.0
+langchain-community>=0.3.27
 
 # ===== 会话管理（滑动窗口 + 历史摘要）=====
 tiktoken>=0.7.0
@@ -33,7 +33,7 @@ alembic>=1.13.0
 aiofiles>=23.2.1
 
 # ===== v5.1: 多模态媒体处理 =====
-Pillow>=10.0.0
+Pillow>=11.1.0  # v5.3 security: PYSEC-2026-165 buffer overflow fix
 edge-tts>=6.1.0
 opencv-python-headless>=4.8.0  # Heavy dependency - consider making optional
 pdfplumber>=0.10.0
@@ -41,6 +41,18 @@ python-docx>=1.0.0
 
 # ===== v4.1: PostgreSQL 支持 =====
 psycopg2-binary>=2.9.9
+
+# ===== 安全依赖升级（防止传递依赖漏洞）=====
+# python-jose CVE: key verification bypass (PYSEC-2024-232/233)
+# Jinja2 CVE: HTML sanitization bypass (CVE-2024-22195)
+# MarkupSafe CVE: ReDoS
+# starlette CVE: path traversal + multiple (PYSEC-2026-161, CVE-2024-47874, CVE-2025-54121)
+# pillow CVE: multiple (CVE-2026-25990/40192/42310/42311)
+python-jose>=3.4.0
+Jinja2>=3.1.6
+MarkupSafe>=2.1.5
+starlette>=0.47.2
+pillow>=11.0.0
 
 # ===== 可选: OpenTelemetry 分布式追踪 =====
 # 取消注释以启用 OpenTelemetry（需设置 OPENTELEMETRY_ENABLED=true）

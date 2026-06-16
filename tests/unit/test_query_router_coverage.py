@@ -11,7 +11,6 @@ from router.query_router import INTENT_AGENT_MAP, QueryRouter, RoutingResult
 
 
 class TestRoutingResult:
-
     def test_default_values(self):
         r = RoutingResult()
         assert r.query_type == "general_inquiry"
@@ -33,7 +32,6 @@ class TestRoutingResult:
 
 
 class TestIntentAgentMap:
-
     def test_all_intents_mapped(self):
         for intent in [
             "product_info",
@@ -54,7 +52,6 @@ class TestIntentAgentMap:
 
 
 class TestRuleClassifyAndScore:
-
     def setup_method(self):
         self.router = QueryRouter()
 
@@ -91,7 +88,9 @@ class TestRuleClassifyAndScore:
     def test_complexity_long_query(self):
         """长查询增加复杂度"""
         _, _, short_c = self.router._rule_classify_and_score("短问")
-        _, _, long_c = self.router._rule_classify_and_score("这是一个" + "很长" * 100 + "的查询问题")
+        _, _, long_c = self.router._rule_classify_and_score(
+            "这是一个" + "很长" * 100 + "的查询问题"
+        )
         assert long_c > short_c
 
     def test_complexity_multi_intent(self):
@@ -140,7 +139,6 @@ class TestRuleClassifyAndScore:
 
 
 class TestLlmClassify:
-
     def setup_method(self):
         self.router = QueryRouter()
 
@@ -153,7 +151,9 @@ class TestLlmClassify:
     @pytest.mark.asyncio
     async def test_llm_valid_json_response(self):
         mock_response = MagicMock()
-        mock_response.content = '{"query_type": "product_info", "confidence": 0.9, "reason": "产品咨询"}'
+        mock_response.content = (
+            '{"query_type": "product_info", "confidence": 0.9, "reason": "产品咨询"}'
+        )
         mock_llm = AsyncMock()
         mock_llm.async_invoke = AsyncMock(return_value=mock_response)
         self.router.llm = mock_llm
@@ -203,12 +203,11 @@ class TestLlmClassify:
         mock_llm.async_invoke = AsyncMock(return_value=mock_response)
         self.router.llm = mock_llm
 
-        result = await self.router._llm_classify("产品", context="之前的对话")
+        await self.router._llm_classify("产品", context="之前的对话")
         mock_llm.async_invoke.assert_called_once()
 
 
 class TestRoute:
-
     def setup_method(self):
         self.router = QueryRouter()
 

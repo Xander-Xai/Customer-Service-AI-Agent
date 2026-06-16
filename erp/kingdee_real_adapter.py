@@ -209,11 +209,11 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
                 )
                 resp2.raise_for_status()
                 return resp2.json()
-            logger.error(f"金蝶 API 调用失败 ({form_id}/{method}): {e}")
+            logger.error(f"金蝶 API 调用失败 ({form_id}/{method}): {e}", exc_info=True)
             raise
         except httpx.RequestError as e:
             # 网络异常（连接超时、DNS 解析失败等）
-            logger.error(f"金蝶 API 网络异常 ({form_id}/{method}): {e}")
+            logger.error(f"金蝶 API 网络异常 ({form_id}/{method}): {e}", exc_info=True)
             raise
 
     # -------------------------------------------------------------------

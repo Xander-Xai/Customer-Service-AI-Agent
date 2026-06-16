@@ -43,6 +43,8 @@ async function refreshToken() {
 
 /** 安排 Token 自动刷新（过期前 5 分钟） */
 let refreshTimer = null;
+let _isLoggingOut = false; // 防递归：防止 logout → redirect 触发再次进入过期处理
+
 function scheduleTokenRefresh() {
   if (refreshTimer) clearTimeout(refreshTimer);
 
@@ -84,6 +86,12 @@ export async function fetchWithAuth(url, options = {}) {
       options.headers = { ...options.headers, Authorization: `Bearer ${newToken}` };
       resp = await fetch(url, options);
     }
+  }
+
+  if (resp.status === 401 && !_isLoggingOut) {
+    _isLoggingOut = true;
+    window.dispatchEvent(new CustomEvent('auth:expired', { detail: '登录已过期，请重新登录' }));
+    logout();
   }
 
   return resp;

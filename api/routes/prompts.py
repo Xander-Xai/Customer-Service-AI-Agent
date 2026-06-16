@@ -32,6 +32,7 @@ def _get_prompt_manager(request: Request):
 
 class PromptCreateRequest(BaseModel):
     """创建 Prompt 版本请求"""
+
     prompt_text: str = Field(..., min_length=10, max_length=10000)
     version: str = Field(..., min_length=1, max_length=20)
     activate: bool = Field(default=True)
@@ -39,6 +40,7 @@ class PromptCreateRequest(BaseModel):
 
 class PromptActivateRequest(BaseModel):
     """激活 Prompt 版本请求"""
+
     version: str = Field(..., min_length=1, max_length=20)
 
 
@@ -80,7 +82,7 @@ async def create_version(request: Request, agent_name: str, body: PromptCreateRe
         )
         return {"status": "ok", "prompt": result}
     except Exception as e:
-        logger.error(f"创建 Prompt 版本失败: {e}")
+        logger.error(f"创建 Prompt 版本失败: {e}", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
@@ -112,9 +114,7 @@ async def activate_version(request: Request, agent_name: str, body: PromptActiva
         )
         if not target:
             db.rollback()
-            return JSONResponse(
-                {"error": f"版本 {body.version} 不存在"}, status_code=404
-            )
+            return JSONResponse({"error": f"版本 {body.version} 不存在"}, status_code=404)
 
         target.is_active = 1
         db.commit()
@@ -129,7 +129,7 @@ async def activate_version(request: Request, agent_name: str, body: PromptActiva
         }
     except Exception as e:
         db.rollback()
-        logger.error(f"激活 Prompt 版本失败: {e}")
+        logger.error(f"激活 Prompt 版本失败: {e}", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
     finally:
         db.close()

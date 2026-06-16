@@ -15,7 +15,6 @@ from api.utils import sanitize_input, validate_session_id
 from core.config import (
     API_KEY,
     API_KEY_ENABLED,
-    DEV_MODE,
     MAX_QUERY_LENGTH,
     WS_IDLE_TIMEOUT,
     WS_MAX_CONNECTIONS_PER_IP,
@@ -59,14 +58,25 @@ async def periodic_ws_cleanup():
 
 
 async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
-    """WebSocket 首条消息认证。返回 (ws_api_key, session_token, ws_jwt_payload) 或抛出异常。"""
-    if not (API_KEY_ENABLED and not DEV_MODE and not ws_api_key):
-        return ws_api_key, "", None
+    """WebSocket 首条消息认证。
+
+    修复历史:
+    - v5.3: 移除 DEV_MODE 短路（原审计 v2 P0 A-1 违规要求），所有连接强制认证。
+      API Key（query/header/message）优先；否则要求 msg.token (JWT) + msg.session_token。
+      返回 (ws_api_key, session_token, ws_jwt_payload) 或抛出异常。
+    """
+    # 检查 query param / header 提供的 API Key
+    if ws_api_key and API_KEY_ENABLED:
+        if hmac.compare_digest(ws_api_key, API_KEY):
+            return ws_api_key, "", None
+        await ws.send_json({"type": "error", "message": "认证失败: 无效的 api_key"})
+        await ws.close(code=4001, reason="Invalid API key")
+        raise ValueError("Invalid API key")
 
     try:
         auth_msg = await asyncio.wait_for(ws.receive_json(), timeout=10)
         msg_api_key = auth_msg.get("api_key", "")
-        if msg_api_key and hmac.compare_digest(msg_api_key, API_KEY):
+        if msg_api_key and API_KEY_ENABLED and hmac.compare_digest(msg_api_key, API_KEY):
             return msg_api_key, "", None
 
         ws_jwt = auth_msg.get("token", "")
@@ -135,6 +145,9 @@ async def websocket_chat(ws: WebSocket):
         session_token = session_manager.generate_session_token(session_id)
     logger.info(f"[WS] 新连接: {session_id} ip={client_ip}")
 
+    # v5.3: H-1 修复 — 把 JWT 里的 user_id 提到外层，确保 run_graph() 与 quota 检查能拿到
+    # （审计 v2 P0 H-1：WS 路径未注入 user_id 导致钱包枯竭攻击防护失效）
+    ws_uid = ""
     if session_manager and ws_jwt_payload:
         ws_uid = ws_jwt_payload.get("sub", "")
         if ws_uid:
@@ -199,7 +212,7 @@ async def websocket_chat(ws: WebSocket):
 
             if sid != session_id and session_manager:
                 token = data.get("session_token", "")
-                if not DEV_MODE and not session_manager.validate_session_token(sid, token):
+                if not session_manager.validate_session_token(sid, token):
                     await ws.send_json({"type": "error", "content": "会话令牌无效"})
                     continue
             if not query:
@@ -226,7 +239,7 @@ async def websocket_chat(ws: WebSocket):
             notify_task = asyncio.create_task(progressive_notify())
 
             try:
-                result = await run_graph(sid, query)
+                result = await run_graph(sid, query, user_id=ws_uid)
                 notify_task.cancel()
 
                 await ws.send_json(
@@ -246,7 +259,7 @@ async def websocket_chat(ws: WebSocket):
                 )
             except Exception as e:
                 notify_task.cancel()
-                logger.error(f"WS 处理失败: {e}", exc_info=True)
+                logger.error(f"WS 处理失败: {e}", exc_info=False)
                 await ws.send_json({"type": "error", "content": "处理失败，请稍后重试"})
 
     except WebSocketDisconnect:

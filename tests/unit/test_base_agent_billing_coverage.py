@@ -11,7 +11,6 @@ import pytest
 
 
 class TestResolvePromptVariant:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -127,7 +126,6 @@ class TestResolvePromptVariant:
 
 
 class TestHandleDrift:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -146,47 +144,62 @@ class TestHandleDrift:
 
     def test_drift_with_escalation(self):
         agent = self._make_agent()
-        result = agent._handle_drift("query", {
-            "has_drift": True,
-            "escalation": {"escalate": True, "reason": "频繁漂移"},
-            "drifts": [],
-        })
+        result = agent._handle_drift(
+            "query",
+            {
+                "has_drift": True,
+                "escalation": {"escalate": True, "reason": "频繁漂移"},
+                "drifts": [],
+            },
+        )
         assert "漂移升级提示" in result
 
     def test_drift_with_repair_strategy(self):
         agent = self._make_agent()
-        result = agent._handle_drift("query", {
-            "has_drift": True,
-            "escalation": None,
-            "drifts": [{"type": "topic_shift"}],
-        })
+        result = agent._handle_drift(
+            "query",
+            {
+                "has_drift": True,
+                "escalation": None,
+                "drifts": [{"type": "topic_shift"}],
+            },
+        )
         assert isinstance(result, str)
 
     def test_drift_with_no_matching_strategy(self):
         agent = self._make_agent()
-        result = agent._handle_drift("query", {
-            "has_drift": True,
-            "escalation": None,
-            "drifts": [{"type": "unknown_drift_type"}],
-        })
+        result = agent._handle_drift(
+            "query",
+            {
+                "has_drift": True,
+                "escalation": None,
+                "drifts": [{"type": "unknown_drift_type"}],
+            },
+        )
         assert isinstance(result, str)
 
     def test_drift_escalation_no_reason(self):
         agent = self._make_agent()
-        result = agent._handle_drift("query", {
-            "has_drift": True,
-            "escalation": {"escalate": True},
-            "drifts": [],
-        })
+        result = agent._handle_drift(
+            "query",
+            {
+                "has_drift": True,
+                "escalation": {"escalate": True},
+                "drifts": [],
+            },
+        )
         assert "漂移升级提示" in result
 
     def test_drift_no_repairs_returns_empty(self):
         agent = self._make_agent()
-        result = agent._handle_drift("query", {
-            "has_drift": True,
-            "escalation": None,
-            "drifts": [],
-        })
+        result = agent._handle_drift(
+            "query",
+            {
+                "has_drift": True,
+                "escalation": None,
+                "drifts": [],
+            },
+        )
         assert result == ""
 
 
@@ -194,7 +207,6 @@ class TestHandleDrift:
 
 
 class TestGetConversationContext:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -210,10 +222,12 @@ class TestGetConversationContext:
     @pytest.mark.asyncio
     async def test_returns_context_text(self):
         agent = self._make_agent()
-        agent.session_manager.get_conversation_context = AsyncMock(return_value=[
-            {"is_user": True, "content": "你好"},
-            {"is_user": False, "content": "你好！"},
-        ])
+        agent.session_manager.get_conversation_context = AsyncMock(
+            return_value=[
+                {"is_user": True, "content": "你好"},
+                {"is_user": False, "content": "你好！"},
+            ]
+        )
         result = await agent._get_conversation_context("sid1")
         assert "用户: 你好" in result
         assert "AI: 你好！" in result
@@ -237,7 +251,6 @@ class TestGetConversationContext:
 
 
 class TestAddMessageToSession:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -267,7 +280,6 @@ class TestAddMessageToSession:
 
 
 class TestGetEffectiveLlm:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -304,7 +316,6 @@ class TestGetEffectiveLlm:
 
 
 class TestSafeHelpers:
-
     def _make_agent(self):
         from agents.base_agent import BaseAgent
 
@@ -349,7 +360,6 @@ class TestSafeHelpers:
 
 
 class TestBillingAgent:
-
     def _make_agent(self):
         from agents.billing_agent import BillingAgent
 
@@ -365,9 +375,11 @@ class TestBillingAgent:
     @pytest.mark.asyncio
     async def test_query_erp_with_order_id(self):
         agent = self._make_agent()
-        agent.erp.query_order = AsyncMock(return_value=[
-            {"order_id": "ORD001", "status": "已发货", "total": 199, "tracking": "SF123"}
-        ])
+        agent.erp.query_order = AsyncMock(
+            return_value=[
+                {"order_id": "ORD001", "status": "已发货", "total": 199, "tracking": "SF123"}
+            ]
+        )
 
         result = await agent._query_erp("查询订单ORD001")
         assert "ORD001" in result
@@ -376,12 +388,19 @@ class TestBillingAgent:
     @pytest.mark.asyncio
     async def test_query_erp_with_customer_id(self):
         agent = self._make_agent()
-        agent.erp.query_order = AsyncMock(return_value=[
-            {"order_id": "ORD002", "status": "待付款", "total": 99, "customer_id": "C001"}
-        ])
-        agent.erp.query_customer = AsyncMock(return_value={
-            "name": "张三", "phone": "13800138000", "level": "VIP", "total_spent": 5000
-        })
+        agent.erp.query_order = AsyncMock(
+            return_value=[
+                {"order_id": "ORD002", "status": "待付款", "total": 99, "customer_id": "C001"}
+            ]
+        )
+        agent.erp.query_customer = AsyncMock(
+            return_value={
+                "name": "张三",
+                "phone": "13800138000",
+                "level": "VIP",
+                "total_spent": 5000,
+            }
+        )
 
         result = await agent._query_erp("客户C001的订单")
         assert "张三" in result or "C001" in result
@@ -397,9 +416,9 @@ class TestBillingAgent:
     @pytest.mark.asyncio
     async def test_query_erp_with_customer_no_data(self):
         agent = self._make_agent()
-        agent.erp.query_order = AsyncMock(return_value=[
-            {"order_id": "ORD003", "status": "已完成", "total": 299}
-        ])
+        agent.erp.query_order = AsyncMock(
+            return_value=[{"order_id": "ORD003", "status": "已完成", "total": 299}]
+        )
         agent.erp.query_customer = AsyncMock(return_value=None)
 
         result = await agent._query_erp("订单号ORD003")
@@ -410,11 +429,13 @@ class TestBillingAgent:
         agent = self._make_agent()
         agent._safe_erp_query = AsyncMock(return_value="订单数据")
         agent._write_blackboard = AsyncMock()
-        agent._process_with_llm = AsyncMock(return_value={
-            "response": "订单已发货",
-            "mode": "billing",
-            "agents_used": ["billing_agent"],
-        })
+        agent._process_with_llm = AsyncMock(
+            return_value={
+                "response": "订单已发货",
+                "mode": "billing",
+                "agents_used": ["billing_agent"],
+            }
+        )
 
         result = await agent.process({"customer_query": "查询订单"})
         assert result["response"] == "订单已发货"
@@ -423,9 +444,11 @@ class TestBillingAgent:
     async def test_process_without_erp_data(self):
         agent = self._make_agent()
         agent._safe_erp_query = AsyncMock(return_value="")
-        agent._process_with_llm = AsyncMock(return_value={
-            "response": "无法查询",
-        })
+        agent._process_with_llm = AsyncMock(
+            return_value={
+                "response": "无法查询",
+            }
+        )
 
         result = await agent.process({"customer_query": "查询"})
         assert "response" in result

@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestAlertNotifierLoadConfig:
-
     @patch.dict(os.environ, {}, clear=False)
     def test_default_config_no_webhooks(self):
         from alerts.notifier import AlertNotifier
@@ -19,7 +18,11 @@ class TestAlertNotifierLoadConfig:
             assert notifier.webhooks == []
             assert notifier.email_enabled is False
 
-    @patch.dict(os.environ, {"ALERT_WEBHOOKS": '[{"name":"test","url":"https://example.com","type":"dingtalk"}]'}, clear=False)
+    @patch.dict(
+        os.environ,
+        {"ALERT_WEBHOOKS": '[{"name":"test","url":"https://example.com","type":"dingtalk"}]'},
+        clear=False,
+    )
     def test_webhook_config_loaded(self):
         from alerts.notifier import AlertNotifier
 
@@ -27,21 +30,25 @@ class TestAlertNotifierLoadConfig:
         assert len(notifier.webhooks) == 1
         assert notifier.webhooks[0]["name"] == "test"
 
-    @patch.dict(os.environ, {"ALERT_WEBHOOKS": 'invalid json'}, clear=False)
+    @patch.dict(os.environ, {"ALERT_WEBHOOKS": "invalid json"}, clear=False)
     def test_webhook_config_invalid_json(self):
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
         assert notifier.webhooks == []
 
-    @patch.dict(os.environ, {
-        "SMTP_HOST": "smtp.test.com",
-        "SMTP_PORT": "465",
-        "SMTP_USER": "user@test.com",
-        "SMTP_PASSWORD": "pass123",
-        "ALERT_EMAIL_FROM": "alert@test.com",
-        "ALERT_EMAIL_TO": "admin@test.com,ops@test.com",
-    }, clear=False)
+    @patch.dict(
+        os.environ,
+        {
+            "SMTP_HOST": "smtp.test.com",
+            "SMTP_PORT": "465",
+            "SMTP_USER": "user@test.com",
+            "SMTP_PASSWORD": "pass123",
+            "ALERT_EMAIL_FROM": "alert@test.com",
+            "ALERT_EMAIL_TO": "admin@test.com,ops@test.com",
+        },
+        clear=False,
+    )
     def test_email_config_loaded(self):
         from alerts.notifier import AlertNotifier
 
@@ -60,7 +67,6 @@ class TestAlertNotifierLoadConfig:
 
 
 class TestSendAlert:
-
     @patch.dict(os.environ, {"ALERT_WEBHOOKS": ""}, clear=False)
     def test_alert_recorded_in_history(self):
         from alerts.notifier import AlertNotifier
@@ -78,14 +84,11 @@ class TestSendAlert:
 
         notifier = AlertNotifier()
         notifier.alert_history = [{"title": f"old{j}"} for j in range(205)]
-        asyncio.get_event_loop().run_until_complete(
-            notifier.send_alert("new", "content")
-        )
+        asyncio.get_event_loop().run_until_complete(notifier.send_alert("new", "content"))
         assert len(notifier.alert_history) <= 200
 
 
 class TestGetHistory:
-
     @patch.dict(os.environ, {"ALERT_WEBHOOKS": ""}, clear=False)
     def test_returns_limited_history(self):
         from alerts.notifier import AlertNotifier
@@ -98,7 +101,6 @@ class TestGetHistory:
 
 
 class TestGetConfig:
-
     @patch.dict(os.environ, {"ALERT_WEBHOOKS": ""}, clear=False)
     def test_returns_sanitized_config(self):
         from alerts.notifier import AlertNotifier
@@ -110,14 +112,16 @@ class TestGetConfig:
 
 
 class TestSendWebhook:
-
     @patch.dict(os.environ, {"ALERT_WEBHOOKS": ""}, clear=False)
     def test_empty_url_returns(self):
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
         asyncio.get_event_loop().run_until_complete(
-            notifier._send_webhook({"url": "", "type": "dingtalk"}, {"severity": "warning", "title": "t", "content": "c"})
+            notifier._send_webhook(
+                {"url": "", "type": "dingtalk"},
+                {"severity": "warning", "title": "t", "content": "c"},
+            )
         )
 
     @patch.dict(os.environ, {"ALERT_WEBHOOKS": ""}, clear=False)
