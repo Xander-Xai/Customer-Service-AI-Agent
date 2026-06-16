@@ -16,6 +16,17 @@ import pytest
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+
+# v5.4: 清理 ChromaDB 全局单例缓存，防止测试间租户冲突
+def _reset_chromadb_global_state():
+    """清理 ChromaDB 全局单例缓存，防止测试间泄漏。"""
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+        SharedSystemClient.clear_system_cache()
+    except Exception:
+        pass
+
+
 # ============================================================================
 # Fixtures
 # ============================================================================
@@ -1410,14 +1421,17 @@ class TestERPTools:
 # ============================================================================
 
 
+@pytest.mark.xdist_group("chromadb")
 class TestKnowledgeBase:
     def test_init_available(self):
+        _reset_chromadb_global_state()
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase()
         assert kb.available
 
     def test_add_and_query(self):
+        _reset_chromadb_global_state()
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase()
@@ -1429,6 +1443,7 @@ class TestKnowledgeBase:
     @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_query_async(self):
+        _reset_chromadb_global_state()
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase()
@@ -1439,6 +1454,7 @@ class TestKnowledgeBase:
     @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_query_empty_collection(self):
+        _reset_chromadb_global_state()
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase()

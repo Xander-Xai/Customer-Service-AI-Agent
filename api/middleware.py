@@ -97,8 +97,11 @@ def setup_middleware(app: FastAPI):
                     f"[RateLimit] 清理 {cleaned} 个过期条目，剩余 {len(_rate_limit_store)}"
                 )
 
-    @app.on_event("startup")
+    # v5.4: 添加弃用警告抑制注释，待后续版本迁移到lifespan
+    @app.on_event("startup")  # noqa: B018 - on_event已废弃但保持兼容，计划v6.0迁移到lifespan
     async def _start_periodic_cleanup():
+        """启动时注册周期性清理任务"""
+        logger.info("[Middleware] 启动周期性清理任务")
         asyncio.create_task(_periodic_cleanup())
 
     @app.middleware("http")

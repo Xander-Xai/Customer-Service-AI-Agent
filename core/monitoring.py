@@ -9,6 +9,9 @@ LLM 客户端已迁移到 llm/client.py
 v3.4 优化：
 - MetricsCollector: asyncio.Lock 保护并发写入
 - CircuitBreaker: 状态转换原子化，防止多协程同时探测
+
+v5.4 新增：
+- 业务指标监控（用户满意度、Agent使用分布、意图分布）
 """
 
 import asyncio
@@ -29,6 +32,74 @@ from core.config import (
 from core.logger import get_logger
 
 logger = get_logger("monitoring")
+
+# v5.4: 业务指标 Prometheus 监控
+try:
+    from prometheus_client import Counter, Histogram, Gauge
+    
+    # 用户满意度评分分布
+    user_satisfaction_score = Histogram(
+        'user_satisfaction_score',
+        'User satisfaction score distribution (1-5)',
+        buckets=[1, 2, 3, 4, 5],
+    )
+    
+    # Agent 使用次数统计
+    agent_usage_total = Counter(
+        'agent_usage_total',
+        'Agent usage count by type',
+        ['agent_type'],
+    )
+    
+    # 查询意图分布
+    intent_distribution_total = Counter(
+        'intent_distribution_total',
+        'Query intent distribution',
+        ['intent_type'],
+    )
+    
+    # 协作模式使用统计
+    collaboration_mode_total = Counter(
+        'collaboration_mode_total',
+        'Collaboration mode usage count',
+        ['mode_name'],
+    )
+    
+    # 会话解决率
+    session_resolution_rate = Gauge(
+        'session_resolution_rate',
+        'Session resolution rate (resolved / total)',
+    )
+    
+    # 人工升级率
+    escalation_rate = Gauge(
+        'escalation_rate',
+        'Human escalation rate (escalated / total)',
+    )
+    
+    # 缓存命中率（业务维度）
+    business_cache_hit_rate = Gauge(
+        'business_cache_hit_rate',
+        'Business-level cache hit rate',
+    )
+    
+    PROMETHEUS_BUSINESS_ENABLED = True
+except ImportError:
+    # Prometheus 未安装，降级为无操作
+    class _NoopMetric:
+        def inc(self, *args, **kwargs): pass
+        def set(self, *args, **kwargs): pass
+        def observe(self, *args, **kwargs): pass
+        def labels(self, *args, **kwargs): return self
+    
+    user_satisfaction_score = _NoopMetric()
+    agent_usage_total = _NoopMetric()
+    intent_distribution_total = _NoopMetric()
+    collaboration_mode_total = _NoopMetric()
+    session_resolution_rate = _NoopMetric()
+    escalation_rate = _NoopMetric()
+    business_cache_hit_rate = _NoopMetric()
+    PROMETHEUS_BUSINESS_ENABLED = False
 
 # ===== 性能指标常量 =====
 RESPONSE_TIMES_MAXLEN = 200  # 响应时间 deque 最大长度
@@ -99,8 +170,25 @@ class MetricsCollector:
         session_id: str = None,
         escalated: bool = False,
         resolution_status: str = "",
+        query_type: str = "",  # v5.4: 查询类型（product/billing/complaint等）
+        satisfaction_score: int = 0,  # v5.4: 用户满意度评分（1-5）
     ):
-        """v3.4: 改为 async，使用 asyncio.Lock 保护并发写入"""
+        """
+        v3.4: 改为 async，使用 asyncio.Lock 保护并发写入
+        v5.4: 新增业务指标记录（query_type, satisfaction_score）
+        
+        Args:
+            elapsed: 请求耗时（秒）
+            agent: 处理的Agent名称
+            mode: 协作模式名称
+            cached: 是否命中缓存
+            error: 是否发生错误
+            session_id: 会话ID
+            escalated: 是否人工升级
+            resolution_status: 解决状态 (resolved/uncertain/failed/escalated)
+            query_type: 查询类型 (product_info/billing/tech_support等)
+            satisfaction_score: 用户满意度评分（1-5）
+        """
         async with self._ensure_lock():
             self.total_requests += 1
             if error:
@@ -116,10 +204,24 @@ class MetricsCollector:
             if elapsed < RESPONSE_TIME_TARGET_MIN:
                 self.sla_too_fast += 1
             self._sla_window.append(elapsed)
+            
+            # v5.4: 记录Agent使用统计
             if agent:
                 self.agent_call_counts[agent] = self.agent_call_counts.get(agent, 0) + 1
+                agent_usage_total.labels(agent_type=agent).inc()  # Prometheus指标
+            
+            # v5.4: 记录协作模式统计
             if mode:
                 self.mode_counts[mode] = self.mode_counts.get(mode, 0) + 1
+                collaboration_mode_total.labels(mode_name=mode).inc()  # Prometheus指标
+            
+            # v5.4: 记录查询意图分布
+            if query_type:
+                intent_distribution_total.labels(intent_type=query_type).inc()
+            
+            # v5.4: 记录用户满意度
+            if satisfaction_score and 1 <= satisfaction_score <= 5:
+                user_satisfaction_score.observe(satisfaction_score)
 
             # Business KPI tracking（v3.2: 细粒度解决率）
             now = time.time()
@@ -177,6 +279,31 @@ class MetricsCollector:
             logger.debug(f"[Metrics] 清理 {len(expired)} 个过期会话统计")
 
     # --- Section: Metric Queries (read path) ---
+    async def update_business_metrics(self):
+        """
+        v5.4: 更新业务指标Gauge（解决率、升级率等）
+        
+        建议每60秒调用一次，或在关键事件后调用
+        """
+        async with self._ensure_lock():
+            # 计算会话解决率
+            total_sessions = len(self.session_turn_counts)
+            if total_sessions > 0:
+                resolved_count = self.resolution_counts.get("resolved", 0)
+                resolution_rate = resolved_count / max(total_sessions, 1)
+                session_resolution_rate.set(resolution_rate)
+            
+            # 计算人工升级率
+            if self.total_requests > 0:
+                esc_rate = self.total_escalated / self.total_requests
+                escalation_rate.set(esc_rate)
+            
+            # 计算缓存命中率
+            total_cache_ops = self.cache_hits + self.cache_misses
+            if total_cache_ops > 0:
+                cache_hit_rate = self.cache_hits / total_cache_ops
+                business_cache_hit_rate.set(cache_hit_rate)
+    
     async def get_stats(self) -> dict[str, Any]:
         async with self._ensure_lock():
             times = list(self.response_times)[-STATS_RECENT_COUNT:]  # 最近 N 次
@@ -466,8 +593,24 @@ class CircuitBreaker:
 # ===== SLA 告警管理器 =====
 class SLAAlertManager:
     """
-    SLA 告警管理器：基于滑动窗口检测违约率，
-    超过阈值时通过 MessageBus 发布告警，并支持冷却机制避免告警风暴。
+    SLA 告警管理器（v5.4 - 分级告警 + 升级机制）
+    
+    核心功能：
+    1. 基于滑动窗口检测SLA违约率
+    2. 超过阈值时发布分级告警（warning/critical/emergency）
+    3. 支持冷却机制避免告警风暴
+    4. v5.4新增：告警升级检查（无人响应时自动升级）
+    
+    告警分级策略：
+    - warning: 违约率 > 30%
+    - critical: 违约率 > 60%
+    - emergency: 违约率 > 90% 或 critical持续30分钟
+    
+    使用示例：
+        >>> manager = SLAAlertManager(bus=message_bus)
+        >>> alert = await manager.check_and_alert(metrics_collector)
+        >>> if alert:
+        ...     print(f"告警: {alert['message']}")
     """
 
     ALERT_HISTORY_MAX = 100  # 告警历史保留上限
@@ -476,8 +619,20 @@ class SLAAlertManager:
         self.bus = bus
         self.alerts: list[dict[str, Any]] = []
         self.last_alert_time: dict[str, float] = {}
+        
+        # v5.4: 活动告警跟踪（用于升级检查）
+        self.active_alerts: dict[str, dict[str, Any]] = {}
 
     async def check_and_alert(self, metrics: MetricsCollector) -> dict[str, Any] | None:
+        """
+        检查SLA违约率并发布告警
+        
+        Args:
+            metrics: 指标收集器实例
+            
+        Returns:
+            dict | None: 如果触发告警返回告警信息，否则返回None
+        """
         window_rate = await metrics.get_sla_window_violation_rate()
         alert_key = "sla_violation_high"
 
@@ -486,7 +641,14 @@ class SLAAlertManager:
             if time.time() - last_time < SLA_ALERT_COOLDOWN:
                 return None
 
-            severity = "critical" if window_rate > SLA_ALERT_THRESHOLD * 2 else "warning"
+            # v5.4: 更精细的分级策略
+            if window_rate > SLA_ALERT_THRESHOLD * 3:
+                severity = "emergency"
+            elif window_rate > SLA_ALERT_THRESHOLD * 2:
+                severity = "critical"
+            else:
+                severity = "warning"
+                
             alert = {
                 "type": alert_key,
                 "severity": severity,
@@ -501,6 +663,13 @@ class SLAAlertManager:
             if len(self.alerts) > self.ALERT_HISTORY_MAX:
                 self.alerts = self.alerts[-self.ALERT_HISTORY_MAX :]
             self.last_alert_time[alert_key] = time.time()
+            
+            # v5.4: 记录活动告警
+            self.active_alerts[alert_key] = {
+                "severity": severity,
+                "timestamp": time.time(),
+                "escalated": False,
+            }
 
             logger.warning(f"[SLA-Alert] {alert['message']} (severity={severity})")
 
@@ -533,6 +702,51 @@ class SLAAlertManager:
 
             return alert
         return None
+    
+    async def check_and_upgrade(self):
+        """
+        v5.4: 检查并升级活动告警
+        
+        调用此方法定期检查是否有告警需要升级
+        建议在后台任务中每5分钟调用一次
+        
+        Returns:
+            list: 已升级的告警列表
+        """
+        upgraded = []
+        now = time.time()
+        
+        for alert_key, alert_info in list(self.active_alerts.items()):
+            elapsed = now - alert_info["timestamp"]
+            severity = alert_info["severity"]
+            
+            # critical → emergency 升级（30分钟未解决）
+            if severity == "critical" and elapsed > 1800:
+                if not alert_info["escalated"]:
+                    logger.warning(f"[SLA-Alert] 告警升级: {alert_key} critical → emergency")
+                    
+                    # 发送升级通知
+                    try:
+                        from alerts.notifier import alert_notifier
+                        
+                        await alert_notifier.send_alert(
+                            title=f"[升级] SLA 告警",
+                            content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
+                            severity="emergency"
+                        )
+                        
+                        alert_info["escalated"] = True
+                        alert_info["severity"] = "emergency"
+                        upgraded.append(alert_key)
+                    except Exception as e:
+                        logger.error(f"[SLA-Alert] 升级通知失败: {e}")
+        
+        return upgraded
 
     def get_alerts(self, limit: int = 20) -> list[dict[str, Any]]:
+        """获取最近的告警历史"""
         return self.alerts[-limit:]
+    
+    def get_active_alerts(self) -> dict[str, dict[str, Any]]:
+        """v5.4: 获取当前活动告警状态"""
+        return self.active_alerts.copy()

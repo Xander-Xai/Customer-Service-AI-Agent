@@ -98,7 +98,9 @@ RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "5.2.2"
+VERSION = "5.4"
+APP_NAME = "药妆智多星 - Customer Service AI Agent"
+DESCRIPTION = "面向化妆品企业的多智能体客服系统（企业级增强版）"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)

@@ -149,10 +149,16 @@ async def health(request: Request):
 
 @router.get("/api/metrics")
 async def metrics_endpoint(request: Request):
+    """获取系统性能指标（v5.4: 自动更新业务指标）"""
     _require_monitoring_auth(request)
     state = request.app.state
     metrics = getattr(state, "metrics", None)
     cache = getattr(state, "response_cache", None)
+    
+    # v5.4: 更新业务指标Gauge
+    if metrics:
+        await metrics.update_business_metrics()
+    
     stats = await metrics.get_stats() if metrics else {"error": "metrics not initialized"}
     cache_stats = cache.get_stats() if cache else {}
 
