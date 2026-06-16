@@ -230,9 +230,7 @@ class TestSummaryGeneration:
     async def test_generate_summary_no_llm(self):
         """无 LLM 时返回已有摘要"""
         sm = _make_sm()
-        result = await sm._generate_summary_async(
-            [{"role": "user", "content": "test"}], "existing"
-        )
+        result = await sm._generate_summary_async([{"role": "user", "content": "test"}], "existing")
         assert result == "existing"
 
     @pytest.mark.asyncio
@@ -245,9 +243,7 @@ class TestSummaryGeneration:
         mock_llm.async_invoke = AsyncMock(return_value=mock_resp)
         sm.llm = mock_llm
 
-        result = await sm._generate_summary_async(
-            [{"role": "user", "content": "我想查订单"}], ""
-        )
+        result = await sm._generate_summary_async([{"role": "user", "content": "我想查订单"}], "")
         assert "摘要" in result
 
     @pytest.mark.asyncio
@@ -270,7 +266,10 @@ class TestSessionToken:
     def test_generate_session_token_returns_string(self):
         """generate_session_token 返回字符串"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             token = sm.generate_session_token("session-1")
             assert isinstance(token, str)
             assert len(token) == 32
@@ -278,47 +277,71 @@ class TestSessionToken:
     def test_generate_session_token_empty_secret(self):
         """无密钥时返回空字符串"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value=""):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value=""
+        ):
             token = sm.generate_session_token("session-1")
             assert token == ""
 
     def test_validate_session_token_valid(self):
         """有效令牌验证通过"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             token = sm.generate_session_token("session-1")
             assert sm.validate_session_token("session-1", token) is True
 
     def test_validate_session_token_invalid(self):
         """无效令牌验证失败"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             assert sm.validate_session_token("session-1", "wrong-token") is False
 
     def test_validate_session_token_empty_token(self):
         """空令牌验证失败"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             assert sm.validate_session_token("session-1", "") is False
 
     def test_validate_session_token_no_secret_dev_mode(self):
         """无密钥 + DEV_MODE 放行"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value=""), \
-             patch("core.config.DEV_MODE", True):
+        with (
+            patch(
+                "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+                return_value="",
+            ),
+            patch("core.config.DEV_MODE", True),
+        ):
             assert sm.validate_session_token("session-1", "") is True
 
     def test_validate_session_token_no_secret_non_dev(self):
         """无密钥 + 非 DEV_MODE 拒绝"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value=""), \
-             patch("core.config.DEV_MODE", False):
+        with (
+            patch(
+                "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+                return_value="",
+            ),
+            patch("core.config.DEV_MODE", False),
+        ):
             assert sm.validate_session_token("session-1", "") is False
 
     def test_validate_session_token_with_fingerprint(self):
         """带客户端指纹的令牌验证"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             token = sm.generate_session_token("session-1", "fp-123")
             assert sm.validate_session_token("session-1", token, "fp-123") is True
             # 无指纹生成的 token 应该不同
@@ -460,9 +483,14 @@ class TestSyncWrappers:
         # 但 _run_async_compat 期望协程而非值，这是已知的兼容性问题
         # 直接验证会话管理器的核心功能
         sm.sessions["sync-test"] = {
-            "messages": [], "created_at": 0, "last_activity": 0,
-            "message_count": 0, "summary": "", "user_id": "",
-            "drift_log": [], "topic_history": __import__("collections").deque(maxlen=50),
+            "messages": [],
+            "created_at": 0,
+            "last_activity": 0,
+            "message_count": 0,
+            "summary": "",
+            "user_id": "",
+            "drift_log": [],
+            "topic_history": __import__("collections").deque(maxlen=50),
         }
         assert "sync-test" in sm.sessions
 
@@ -470,9 +498,14 @@ class TestSyncWrappers:
         """get_session_sync 同步获取会话"""
         sm = _make_sm()
         sm.sessions["sync-test"] = {
-            "messages": [], "created_at": 0, "last_activity": 0,
-            "message_count": 0, "summary": "", "user_id": "",
-            "drift_log": [], "topic_history": [],
+            "messages": [],
+            "created_at": 0,
+            "last_activity": 0,
+            "message_count": 0,
+            "summary": "",
+            "user_id": "",
+            "drift_log": [],
+            "topic_history": [],
         }
         session = sm.sessions.get("sync-test")
         assert session is not None
@@ -481,9 +514,14 @@ class TestSyncWrappers:
         """add_message_sync 同步添加消息"""
         sm = _make_sm()
         sm.sessions["sync-test"] = {
-            "messages": [], "created_at": 0, "last_activity": 0,
-            "message_count": 0, "summary": "", "user_id": "",
-            "drift_log": [], "topic_history": __import__("collections").deque(maxlen=50),
+            "messages": [],
+            "created_at": 0,
+            "last_activity": 0,
+            "message_count": 0,
+            "summary": "",
+            "user_id": "",
+            "drift_log": [],
+            "topic_history": __import__("collections").deque(maxlen=50),
         }
         sm.sessions["sync-test"]["messages"].append({"role": "user", "content": "hello"})
         assert len(sm.sessions["sync-test"]["messages"]) == 1
@@ -499,23 +537,34 @@ class TestSyncWrappers:
         """list_sessions_sync 同步列出会话"""
         sm = _make_sm()
         sm.sessions["s1"] = {
-            "messages": [], "created_at": 0, "last_activity": 0,
-            "message_count": 0, "summary": "", "user_id": "",
-            "drift_log": [], "topic_history": [],
+            "messages": [],
+            "created_at": 0,
+            "last_activity": 0,
+            "message_count": 0,
+            "summary": "",
+            "user_id": "",
+            "drift_log": [],
+            "topic_history": [],
         }
         assert len(sm.sessions) == 1
 
     def test_generate_session_token_sync(self):
         """generate_session_token_sync 同步生成令牌"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             token = sm.generate_session_token("session-1")
             assert isinstance(token, str)
 
     def test_validate_session_token_sync(self):
         """validate_session_token_sync 同步验证令牌"""
         sm = _make_sm()
-        with patch("core.session.session_manager.EnhancedSessionManager._get_token_secret", return_value="test-secret"):
+        with patch(
+            "core.session.session_manager.EnhancedSessionManager._get_token_secret",
+            return_value="test-secret",
+        ):
             token = sm.generate_session_token("session-1")
             assert sm.validate_session_token("session-1", token) is True
 
@@ -582,8 +631,7 @@ class TestEviction:
             "message_count": 0,
             "created_at": time.time() - 999999,
         }
-        with patch("core.config.MAX_SESSIONS", 100), \
-             patch("core.config.SESSION_IDLE_TTL", 60):
+        with patch("core.config.MAX_SESSIONS", 100), patch("core.config.SESSION_IDLE_TTL", 60):
             sm._evict_idle_sessions()
         assert "old" not in sm.sessions
 

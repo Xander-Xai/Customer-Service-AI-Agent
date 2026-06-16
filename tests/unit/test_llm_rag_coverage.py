@@ -75,7 +75,10 @@ class TestFormatMessages:
 
         from llm.client import OpenAICompatibleClient
 
-        content = [{"type": "text", "text": "描述图片"}, {"type": "image_url", "image_url": {"url": "data:..."}}]
+        content = [
+            {"type": "text", "text": "描述图片"},
+            {"type": "image_url", "image_url": {"url": "data:..."}},
+        ]
         msgs = [HumanMessage(content=content)]
         result = OpenAICompatibleClient._format_messages(msgs)
         assert result[0]["role"] == "user"
@@ -163,9 +166,7 @@ class TestOpenAICompatibleClient:
         client = self._make_client()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "你好！"}}]
-        }
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "你好！"}}]}
         mock_resp.raise_for_status = MagicMock()
 
         mock_http = AsyncMock()
@@ -184,12 +185,16 @@ class TestOpenAICompatibleClient:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{"id": "c1", "function": {"name": "query_order", "arguments": "{}"}}]
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {"id": "c1", "function": {"name": "query_order", "arguments": "{}"}}
+                        ],
+                    }
                 }
-            }]
+            ]
         }
         mock_resp.raise_for_status = MagicMock()
 
@@ -247,8 +252,11 @@ class TestOpenAICompatibleClient:
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=error_resp)
 
-        with patch.object(client, "_get_async_client", return_value=mock_http), pytest.raises(LLMServiceError):
-                await client.async_invoke([HumanMessage(content="hi")])
+        with (
+            patch.object(client, "_get_async_client", return_value=mock_http),
+            pytest.raises(LLMServiceError),
+        ):
+            await client.async_invoke([HumanMessage(content="hi")])
 
     @pytest.mark.asyncio
     async def test_async_invoke_request_error_retry(self):
@@ -265,10 +273,12 @@ class TestOpenAICompatibleClient:
         success_resp.raise_for_status = MagicMock()
 
         mock_http = AsyncMock()
-        mock_http.post = AsyncMock(side_effect=[
-            httpx.ConnectError("connection refused"),
-            success_resp,
-        ])
+        mock_http.post = AsyncMock(
+            side_effect=[
+                httpx.ConnectError("connection refused"),
+                success_resp,
+            ]
+        )
 
         with patch.object(client, "_get_async_client", return_value=mock_http):
             result = await client.async_invoke([HumanMessage(content="hi")])
@@ -415,8 +425,11 @@ class TestOpenAICompatibleClient:
         mock_http = AsyncMock()
         mock_http.post = AsyncMock(return_value=error_resp)
 
-        with patch.object(client, "_get_async_client", return_value=mock_http), pytest.raises(LLMServiceError):
-                await client.async_invoke_raw([{"role": "user", "content": "hi"}])
+        with (
+            patch.object(client, "_get_async_client", return_value=mock_http),
+            pytest.raises(LLMServiceError),
+        ):
+            await client.async_invoke_raw([{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio
     async def test_async_invoke_stream_circuit_breaker(self):
@@ -443,7 +456,7 @@ class TestOpenAICompatibleClient:
         async def mock_aiter_lines():
             yield 'data: {"choices":[{"delta":{"content":"你"}}]}'
             yield 'data: {"choices":[{"delta":{"content":"好"}}]}'
-            yield 'data: [DONE]'
+            yield "data: [DONE]"
 
         mock_resp = AsyncMock()
         mock_resp.raise_for_status = MagicMock()
@@ -472,7 +485,7 @@ class TestOpenAICompatibleClient:
         # First call fails, second succeeds
         async def mock_aiter_lines_ok():
             yield 'data: {"choices":[{"delta":{"content":"ok"}}]}'
-            yield 'data: [DONE]'
+            yield "data: [DONE]"
 
         mock_resp_ok = AsyncMock()
         mock_resp_ok.raise_for_status = MagicMock()
@@ -700,9 +713,9 @@ class TestCosmeticsKnowledgeBase:
     async def test_query_multiple_mock(self):
         """多 collection 查询（mock 版本）"""
         kb, mock_col = self._make_mock_kb()
-        kb.query_multiple = AsyncMock(return_value=[
-            {"content": "口红", "metadata": {}, "distance": 0.1}
-        ])
+        kb.query_multiple = AsyncMock(
+            return_value=[{"content": "口红", "metadata": {}, "distance": 0.1}]
+        )
         results = await kb.query_multiple(["product_knowledge", "faq"], "口红", n_results=5)
         assert isinstance(results, list)
 
@@ -886,10 +899,7 @@ class TestReranker:
         from rag.reranker import BM25Reranker
 
         reranker = BM25Reranker()
-        results = [
-            {"content": f"文档{i} 烟酰胺", "distance": 0.1 * i}
-            for i in range(10)
-        ]
+        results = [{"content": f"文档{i} 烟酰胺", "distance": 0.1 * i} for i in range(10)]
         reranked = reranker.rerank("烟酰胺", results, top_k=3)
         assert len(reranked) == 3
 
@@ -996,7 +1006,6 @@ class TestReranker:
         assert scores == sorted(scores, reverse=True)
 
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # RAG Knowledge Base — Additional Coverage (v5.1 CLIP / delete / seed / rewrite)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1016,13 +1025,18 @@ class TestCosmeticsKBClipAndMultimodal:
         mock_ef_mod = MagicMock()
         mock_chromadb.utils.embedding_functions = mock_ef_mod
 
-        with patch.dict("sys.modules", {
-            "chromadb": mock_chromadb,
-            "chromadb.utils": mock_chromadb.utils,
-            "chromadb.utils.embedding_functions": mock_ef_mod,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "chromadb": mock_chromadb,
+                "chromadb.utils": mock_chromadb.utils,
+                "chromadb.utils.embedding_functions": mock_ef_mod,
+            },
+        ):
             mock_ef = MagicMock()
-            with patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef):
+            with patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ):
                 kb = CosmeticsKnowledgeBase(clip_enabled=False)
                 kb._client = mock_client
                 return kb, mock_client
@@ -1037,15 +1051,26 @@ class TestCosmeticsKBClipAndMultimodal:
         mock_ef_mod = MagicMock()
         mock_chromadb.utils.embedding_functions = mock_ef_mod
 
-        with patch.dict("sys.modules", {
-            "chromadb": mock_chromadb,
-            "chromadb.utils": mock_chromadb.utils,
-            "chromadb.utils.embedding_functions": mock_ef_mod,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "chromadb": mock_chromadb,
+                "chromadb.utils": mock_chromadb.utils,
+                "chromadb.utils.embedding_functions": mock_ef_mod,
+            },
+        ):
             mock_ef = MagicMock()
             mock_clip_ef = MagicMock()
-            with patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef), \
-                 patch.object(CosmeticsKnowledgeBase, "_create_clip_embedding_function", return_value=mock_clip_ef):
+            with (
+                patch.object(
+                    CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+                ),
+                patch.object(
+                    CosmeticsKnowledgeBase,
+                    "_create_clip_embedding_function",
+                    return_value=mock_clip_ef,
+                ),
+            ):
                 kb = CosmeticsKnowledgeBase(clip_enabled=True)
                 kb._client = mock_client
                 return kb, mock_client
@@ -1442,13 +1467,18 @@ class TestCosmeticsKBClipAndMultimodal:
         mock_ef_mod = MagicMock()
         mock_chromadb.utils.embedding_functions = mock_ef_mod
 
-        with patch.dict("sys.modules", {
-            "chromadb": mock_chromadb,
-            "chromadb.utils": mock_chromadb.utils,
-            "chromadb.utils.embedding_functions": mock_ef_mod,
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "chromadb": mock_chromadb,
+                "chromadb.utils": mock_chromadb.utils,
+                "chromadb.utils.embedding_functions": mock_ef_mod,
+            },
+        ):
             mock_ef = MagicMock()
-            with patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef):
+            with patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ):
                 kb = CosmeticsKnowledgeBase(persist_directory="/tmp/test_chroma")
                 assert kb._available is True
                 mock_chromadb.PersistentClient.assert_called_once_with(path="/tmp/test_chroma")

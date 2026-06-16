@@ -45,9 +45,7 @@ class ERPProtocol(Protocol):
         """查询库存信息。"""
         ...
 
-    async def query_order(
-        self, order_id: str = "", customer_id: str = ""
-    ) -> list[dict[str, Any]]:
+    async def query_order(self, order_id: str = "", customer_id: str = "") -> list[dict[str, Any]]:
         """查询订单信息。"""
         ...
 
@@ -102,9 +100,7 @@ class SessionManagerProtocol(Protocol):
         """获取会话。"""
         ...
 
-    async def add_message(
-        self, session_id: str, message: str, role: str = "user"
-    ) -> None:
+    async def add_message(self, session_id: str, message: str, role: str = "user") -> None:
         """添加消息到会话。"""
         ...
 

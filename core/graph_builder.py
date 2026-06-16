@@ -182,7 +182,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                 mode_name = "sequential"
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
-            logger.error(f"[{mode_name}] error: {e}")
+            logger.error(f"[{mode_name}] error: {e}", exc_info=True)
             result = {
                 "response": "处理出错，请重试",
                 "mode": mode_name,
@@ -217,7 +217,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             try:
                 state = await c.response_agent.process(dict(state))
             except Exception as e:
-                logger.error(f"[ResponseAgent] error: {e}, 降级到基础处理")
+                logger.error(f"[ResponseAgent] error: {e}, 降级到基础处理", exc_info=True)
                 _fallback_post_process(state)
 
             # v4.3: 质量评估触发模式升级重试
@@ -240,7 +240,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                                 c.cache.put(state["customer_query"], state["response"])
                             logger.info(f"[ModeUpgrade] 升级重试完成: mode={new_mode}")
                     except Exception as e:
-                        logger.error(f"[ModeUpgrade] 升级重试失败: {e}，保留原响应")
+                        logger.error(f"[ModeUpgrade] 升级重试失败: {e}，保留原响应", exc_info=True)
         else:
             logger.warning("[ResponseAgent] 未初始化，使用基础后处理")
             _fallback_post_process(state)
@@ -327,6 +327,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
 _default_container = None
 
+
 def make_graph():
     """向后兼容包装器：内部使用单例 ServiceContainer 并调用 build_graph()。
 
@@ -337,7 +338,9 @@ def make_graph():
     global _default_container
     if _default_container is None:
         _default_container = ServiceContainer()
-    return build_graph(_default_container, checkpointer=getattr(_default_container, "checkpointer", None))
+    return build_graph(
+        _default_container, checkpointer=getattr(_default_container, "checkpointer", None)
+    )
 
 
 if __name__ == "__main__":

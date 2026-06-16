@@ -214,13 +214,18 @@ class ResponseAgent(BaseAgent):
             )
 
             # v4.3: 低分自动重试/升级 — 评估分极低时标记需要升级
-            if EVAL_RETRY_ENABLED and eval_result["score"] < EVAL_RETRY_THRESHOLD and mode == "sequential" and not state.get("_retried"):
-                    state["_retried"] = True
-                    state["_needs_upgrade"] = True
-                    self.logger.warning(
-                        f"[EVAL] 低分触发模式升级: score={eval_result['score']} "
-                        f"< threshold={EVAL_RETRY_THRESHOLD}, mode={mode}"
-                    )
+            if (
+                EVAL_RETRY_ENABLED
+                and eval_result["score"] < EVAL_RETRY_THRESHOLD
+                and mode == "sequential"
+                and not state.get("_retried")
+            ):
+                state["_retried"] = True
+                state["_needs_upgrade"] = True
+                self.logger.warning(
+                    f"[EVAL] 低分触发模式升级: score={eval_result['score']} "
+                    f"< threshold={EVAL_RETRY_THRESHOLD}, mode={mode}"
+                )
 
             # 低分告警
             if eval_result["score"] < EVAL_LOW_SCORE_THRESHOLD:

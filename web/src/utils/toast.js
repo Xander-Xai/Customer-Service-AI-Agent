@@ -9,8 +9,9 @@ function getOrCreateContainer() {
   if (_container && document.body.contains(_container)) return _container;
   _container = createElement('div', {
     id: 'toastContainer',
-    style: 'position:fixed;top:70px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:380px',
-    'aria-live': 'polite'
+    style:
+      'position:fixed;top:70px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:380px',
+    'aria-live': 'polite',
   });
   document.body.appendChild(_container);
   return _container;
@@ -45,24 +46,33 @@ function removeToast(toast) {
  */
 export function showToast(message, type = 'info', duration = 3000) {
   const container = getOrCreateContainer();
-  
-  const closeBtn = createElement('button', {
-    style: 'background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:14px;padding:0 2px',
-    'aria-label': '关闭'
-  }, ['✕']);
-  
+
+  const closeBtn = createElement(
+    'button',
+    {
+      style:
+        'background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:14px;padding:0 2px',
+      'aria-label': '关闭',
+    },
+    ['✕'],
+  );
+
   closeBtn.addEventListener('click', () => removeToast(toast));
 
-  const toast = createElement('div', {
-    className: 'toast-item',
-    role: 'alert',
-    'aria-live': 'assertive',
-    style: `padding:12px 16px;border-radius:10px;color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:all 250ms cubic-bezier(0.16,1,0.3,1);background:${typeBg(type)}`
-  }, [
-    createElement('span', {}, [typeIcon(type)]),
-    createElement('span', { style: 'flex:1' }, [message]),
-    closeBtn
-  ]);
+  const toast = createElement(
+    'div',
+    {
+      className: 'toast-item',
+      role: 'alert',
+      'aria-live': 'assertive',
+      style: `padding:12px 16px;border-radius:10px;color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:all 250ms cubic-bezier(0.16,1,0.3,1);background:${typeBg(type)}`,
+    },
+    [
+      createElement('span', {}, [typeIcon(type)]),
+      createElement('span', { style: 'flex:1' }, [message]),
+      closeBtn,
+    ],
+  );
 
   container.appendChild(toast);
   if (duration > 0) setTimeout(() => removeToast(toast), duration);

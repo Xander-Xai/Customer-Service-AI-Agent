@@ -17,7 +17,14 @@ logger = get_logger("core.token_tracker")
 class TokenUsage:
     """单次 LLM 调用的 token 用量记录"""
 
-    __slots__ = ("prompt_tokens", "completion_tokens", "total_tokens", "agent", "model", "latency_ms")
+    __slots__ = (
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "agent",
+        "model",
+        "latency_ms",
+    )
 
     def __init__(
         self,
@@ -81,9 +88,7 @@ class TokenTracker:
 
     def get_summary(self) -> dict[str, Any]:
         """获取全局 token 用量摘要"""
-        avg_latency = (
-            self.total_latency_ms / self.total_calls if self.total_calls > 0 else 0.0
-        )
+        avg_latency = self.total_latency_ms / self.total_calls if self.total_calls > 0 else 0.0
         p95_latency = self._percentile(95) if self._recent_latencies else 0.0
         p50_latency = self._percentile(50) if self._recent_latencies else 0.0
 

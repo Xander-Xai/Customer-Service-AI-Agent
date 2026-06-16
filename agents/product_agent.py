@@ -55,11 +55,15 @@ class ProductAgent(BaseAgent):
         )
 
         # 写入产品推荐结论到黑板
-        await self._write_blackboard("product.recommendation", {
-            "query": customer_query,
-            "has_erp_data": bool(erp_data),
-            "has_rag_context": bool(rag_context),
-        }, ttl=300)
+        await self._write_blackboard(
+            "product.recommendation",
+            {
+                "query": customer_query,
+                "has_erp_data": bool(erp_data),
+                "has_rag_context": bool(rag_context),
+            },
+            ttl=300,
+        )
 
         # 合并上下文
         context_parts = []

@@ -33,7 +33,6 @@ def _state(query=""):
 
 
 class TestHasKeywords:
-
     def test_match_found(self):
         assert _has_keywords("这个产品效果怎么样", {"产品", "效果"}) is True
 
@@ -45,7 +44,6 @@ class TestHasKeywords:
 
 
 class TestSelectMode:
-
     def setup_method(self):
         self.orch = CollaborationOrchestrator(_mock_bus(), _mock_bb())
 
@@ -79,17 +77,13 @@ class TestSelectMode:
     def test_high_complexity_multi_domain_returns_react(self):
         """高复杂度(≥60) + 多领域关键词 → ReAct 模式"""
         routing = _routing(complexity=80, agent_name="general_agent")
-        mode, ctx = self.orch._select_mode(
-            routing, _state("产品过敏退款怎么办")
-        )
+        mode, ctx = self.orch._select_mode(routing, _state("产品过敏退款怎么办"))
         assert mode == "react"
 
     def test_multi_domain_returns_parallel(self):
         """中等复杂度 + 2+领域关键词 → parallel"""
         routing = _routing(complexity=30, agent_name="product_agent")
-        mode, ctx = self.orch._select_mode(
-            routing, _state("产品和退款问题")
-        )
+        mode, ctx = self.orch._select_mode(routing, _state("产品和退款问题"))
         assert mode == "parallel"
 
     def test_consultation_for_product_agent(self):
@@ -128,7 +122,6 @@ class TestSelectMode:
 
 
 class TestSelectModeName:
-
     def setup_method(self):
         self.orch = CollaborationOrchestrator(_mock_bus(), _mock_bb())
 
@@ -139,7 +132,6 @@ class TestSelectModeName:
 
 
 class TestBuildContext:
-
     def setup_method(self):
         self.orch = CollaborationOrchestrator(_mock_bus(), _mock_bb())
 
@@ -151,79 +143,60 @@ class TestBuildContext:
 
 
 class TestUpgradeMode:
-
     def setup_method(self):
         self.orch = CollaborationOrchestrator(_mock_bus(), _mock_bb())
 
     def test_sequential_to_consultation(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "sequential", {"current_agent": "product_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("sequential", {"current_agent": "product_agent"})
         assert mode == "consultation"
         assert "consult_agents" in ctx
 
     def test_consultation_to_parallel(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "consultation", {"current_agent": "tech_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("consultation", {"current_agent": "tech_agent"})
         assert mode == "parallel"
         assert "agent_list" in ctx
 
     def test_parallel_to_react(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "parallel", {"current_agent": "billing_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("parallel", {"current_agent": "billing_agent"})
         assert mode == "react"
         assert ctx["primary_agent"] == "billing_agent"
 
     def test_react_is_terminal_returns_same(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "react", {"current_agent": "general_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("react", {"current_agent": "general_agent"})
         assert mode == "react"
 
     def test_disabled_returns_same_mode(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", False):
-            mode, ctx = self.orch.upgrade_mode(
-                "sequential", {"current_agent": "product_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("sequential", {"current_agent": "product_agent"})
         assert mode == "sequential"
         assert ctx == {}
 
     def test_parallel_agent_list_capped_at_3(self):
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "consultation", {"current_agent": "product_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("consultation", {"current_agent": "product_agent"})
         assert mode == "parallel"
         assert len(ctx["agent_list"]) <= 3
 
     def test_upgrade_consultation_default_agent(self):
         """当前 agent 不在 consult_map 时，回退到 product_agent"""
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "sequential", {"current_agent": "unknown_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("sequential", {"current_agent": "unknown_agent"})
         assert mode == "consultation"
         assert "product_agent" in ctx["consult_agents"]
 
     def test_upgrade_parallel_excludes_self(self):
         """并行升级时，agent_list 包含自身（第一个）"""
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "consultation", {"current_agent": "product_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("consultation", {"current_agent": "product_agent"})
         assert mode == "parallel"
         assert "product_agent" in ctx["agent_list"]
 
     def test_upgrade_from_unknown_mode_returns_same(self):
         """未知模式 → 无升级路径"""
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
-            mode, ctx = self.orch.upgrade_mode(
-                "unknown_mode", {"current_agent": "general_agent"}
-            )
+            mode, ctx = self.orch.upgrade_mode("unknown_mode", {"current_agent": "general_agent"})
         assert mode == "unknown_mode"

@@ -378,7 +378,10 @@ class TestAlertNotifierSend:
             notifier = AlertNotifier()
             assert notifier.email_enabled is True
 
-        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email, patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
+        with (
+            patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email,
+            patch.object(notifier, "_send_webhook", new_callable=AsyncMock),
+        ):
             await notifier.send_alert("严重故障", "系统宕机", severity="critical")
             mock_email.assert_called_once()
 
@@ -398,7 +401,10 @@ class TestAlertNotifierSend:
         with patch.dict(os.environ, env):
             notifier = AlertNotifier()
 
-        with patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email, patch.object(notifier, "_send_webhook", new_callable=AsyncMock):
+        with (
+            patch.object(notifier, "_send_email", new_callable=AsyncMock) as mock_email,
+            patch.object(notifier, "_send_webhook", new_callable=AsyncMock),
+        ):
             await notifier.send_alert("警告", "延迟偏高", severity="warning")
             mock_email.assert_not_called()
 
@@ -423,7 +429,11 @@ class TestAlertNotifierSend:
         with patch.dict(os.environ, {}, clear=False):
             notifier = AlertNotifier()
 
-        webhook = {"name": "evil", "url": "http://169.254.169.254/latest/meta-data", "type": "wecom"}
+        webhook = {
+            "name": "evil",
+            "url": "http://169.254.169.254/latest/meta-data",
+            "type": "wecom",
+        }
         alert = {"title": "t", "content": "c", "severity": "info", "timestamp": time.time()}
         await notifier._send_webhook(webhook, alert)
 
@@ -470,7 +480,12 @@ class TestAlertNotifierSend:
             mock_client_cls.return_value = mock_client
 
             webhook = {"name": "dt", "url": "https://open.dingtalk.com/hook", "type": "dingtalk"}
-            alert = {"title": "测试", "content": "内容", "severity": "warning", "timestamp": time.time()}
+            alert = {
+                "title": "测试",
+                "content": "内容",
+                "severity": "warning",
+                "timestamp": time.time(),
+            }
             await notifier._send_webhook(webhook, alert)
 
             mock_client.post.assert_called_once()
@@ -497,7 +512,12 @@ class TestAlertNotifierSend:
             mock_client_cls.return_value = mock_client
 
             webhook = {"name": "wecom", "url": "https://qyapi.weixin.qq.com/hook", "type": "wecom"}
-            alert = {"title": "测试", "content": "内容", "severity": "warning", "timestamp": time.time()}
+            alert = {
+                "title": "测试",
+                "content": "内容",
+                "severity": "warning",
+                "timestamp": time.time(),
+            }
             await notifier._send_webhook(webhook, alert)
 
             call_args = mock_client.post.call_args
@@ -524,7 +544,12 @@ class TestAlertNotifierSend:
             mock_client_cls.return_value = mock_client
 
             webhook = {"name": "feishu", "url": "https://open.feishu.cn/hook", "type": "feishu"}
-            alert = {"title": "测试", "content": "内容", "severity": "info", "timestamp": time.time()}
+            alert = {
+                "title": "测试",
+                "content": "内容",
+                "severity": "info",
+                "timestamp": time.time(),
+            }
             await notifier._send_webhook(webhook, alert)
 
             call_args = mock_client.post.call_args
@@ -550,7 +575,12 @@ class TestAlertNotifierSend:
             mock_client_cls.return_value = mock_client
 
             webhook = {"name": "custom", "url": "https://custom.example.com/hook", "type": "custom"}
-            alert = {"title": "测试", "content": "内容", "severity": "info", "timestamp": time.time()}
+            alert = {
+                "title": "测试",
+                "content": "内容",
+                "severity": "info",
+                "timestamp": time.time(),
+            }
             await notifier._send_webhook(webhook, alert)
 
             call_args = mock_client.post.call_args
@@ -869,9 +899,11 @@ class TestKnowledgeAddDocuments:
         data = AddDocRequest(documents=["test"])
         req = _make_request_with_container(kb=kb)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with pytest.raises(HTTPException):
-                await add_documents("invalid_collection", data, req)
+        with (
+            patch("knowledge.router.require_admin", return_value=MagicMock()),
+            pytest.raises(HTTPException),
+        ):
+            await add_documents("invalid_collection", data, req)
 
     @pytest.mark.asyncio
     async def test_add_documents_unavailable(self):
@@ -881,9 +913,11 @@ class TestKnowledgeAddDocuments:
         data = AddDocRequest(documents=["test"])
         req = _make_request_with_container(kb=kb)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with pytest.raises(HTTPException):
-                await add_documents("product_knowledge", data, req)
+        with (
+            patch("knowledge.router.require_admin", return_value=MagicMock()),
+            pytest.raises(HTTPException),
+        ):
+            await add_documents("product_knowledge", data, req)
 
 
 class TestKnowledgeSync:
@@ -942,9 +976,11 @@ class TestKnowledgeSync:
         kb = _make_mock_knowledge_base(available=True)
         req = _make_request_with_container(kb=kb, erp=None)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()):
-            with pytest.raises(HTTPException):
-                await sync_from_erp(req)
+        with (
+            patch("knowledge.router.require_admin", return_value=MagicMock()),
+            pytest.raises(HTTPException),
+        ):
+            await sync_from_erp(req)
 
 
 class TestKnowledgeReseed:
@@ -966,8 +1002,10 @@ class TestKnowledgeReseed:
 
         req = _make_request_with_container(kb=kb)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()), \
-             patch.dict("sys.modules", {"rag.seed_data": MagicMock(**seed_patches)}):
+        with (
+            patch("knowledge.router.require_admin", return_value=MagicMock()),
+            patch.dict("sys.modules", {"rag.seed_data": MagicMock(**seed_patches)}),
+        ):
             result = await reseed_knowledge(req)
             assert "种子数据已更新" in result["message"]
 
@@ -979,10 +1017,12 @@ class TestKnowledgeReseed:
 
         req = _make_request_with_container(kb=kb)
 
-        with patch("knowledge.router.require_admin", return_value=MagicMock()), \
-             patch.dict("sys.modules", {"rag.seed_data": MagicMock()}):
-            with pytest.raises(HTTPException):
-                await reseed_knowledge(req)
+        with (
+            patch("knowledge.router.require_admin", return_value=MagicMock()),
+            patch.dict("sys.modules", {"rag.seed_data": MagicMock()}),
+            pytest.raises(HTTPException),
+        ):
+            await reseed_knowledge(req)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1236,26 +1276,26 @@ class TestExceptions:
         except LLMTimeoutError:
             pass  # 正确
         else:
-            assert False, "LLMTimeoutError not caught"
+            pytest.fail("LLMTimeoutError not caught")
 
         try:
             raise LLMTimeoutError("timeout")
         except LLMError:
             pass  # 父类捕获
         else:
-            assert False, "LLMTimeoutError not caught by LLMError"
+            pytest.fail("LLMTimeoutError not caught by LLMError")
 
         try:
             raise LLMTimeoutError("timeout")
         except AppError:
             pass  # 基类捕获
         else:
-            assert False, "LLMTimeoutError not caught by AppError"
+            pytest.fail("LLMTimeoutError not caught by AppError")
 
         try:
             raise AuthError("denied")
         except LLMError:
-            assert False, "AuthError should not be caught by LLMError"
+            pytest.fail("AuthError should not be caught by LLMError")
         except AppError:
             pass  # 正确
 
@@ -1277,8 +1317,10 @@ class TestAlertsRouter:
         mock_user.role = "admin"
         mock_request = MagicMock()
 
-        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_supervisor_or_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.get_config.return_value = {"webhooks": [], "email": False}
             result = await get_alert_config(mock_request)
             assert "webhooks" in result
@@ -1292,8 +1334,10 @@ class TestAlertsRouter:
         mock_user.role = "supervisor"
         mock_request = MagicMock()
 
-        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_supervisor_or_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.get_config.return_value = {"webhooks": ["http://hook"]}
             result = await get_alert_config(mock_request)
             assert "webhooks" in result
@@ -1305,8 +1349,9 @@ class TestAlertsRouter:
 
         mock_request = MagicMock()
 
-        with patch("alerts.router.require_supervisor_or_admin",
-                    side_effect=HTTPException(status_code=403)):
+        with patch(
+            "alerts.router.require_supervisor_or_admin", side_effect=HTTPException(status_code=403)
+        ):
             with pytest.raises(HTTPException) as exc_info:
                 await get_alert_config(mock_request)
             assert exc_info.value.status_code == 403
@@ -1320,8 +1365,10 @@ class TestAlertsRouter:
         mock_request = MagicMock()
         data = TestAlertRequest(title="测试", content="测试内容", severity="info")
 
-        with patch("alerts.router.require_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.send_alert = AsyncMock()
             mock_notifier.webhooks = ["http://hook1", "http://hook2"]
             mock_notifier.email_enabled = True
@@ -1338,8 +1385,10 @@ class TestAlertsRouter:
         mock_request = MagicMock()
         data = TestAlertRequest()
 
-        with patch("alerts.router.require_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.send_alert = AsyncMock()
             mock_notifier.webhooks = []
             mock_notifier.email_enabled = False
@@ -1355,8 +1404,10 @@ class TestAlertsRouter:
         mock_user.role = "admin"
         mock_request = MagicMock()
 
-        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_supervisor_or_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.get_history.return_value = [
                 {"id": 1, "title": "CPU过高", "severity": "critical"},
                 {"id": 2, "title": "内存告警", "severity": "warning"},
@@ -1374,10 +1425,12 @@ class TestAlertsRouter:
         mock_user.role = "supervisor"
         mock_request = MagicMock()
 
-        with patch("alerts.router.require_supervisor_or_admin", return_value=mock_user), \
-             patch("alerts.router.alert_notifier") as mock_notifier:
+        with (
+            patch("alerts.router.require_supervisor_or_admin", return_value=mock_user),
+            patch("alerts.router.alert_notifier") as mock_notifier,
+        ):
             mock_notifier.get_history.return_value = []
-            result = await alert_history(mock_request)
+            await alert_history(mock_request)
             mock_notifier.get_history.assert_called_once_with(20)
 
     def test_require_supervisor_or_admin_role_check(self):
@@ -1398,7 +1451,6 @@ class TestAlertsRouter:
             with pytest.raises(HTTPException) as exc_info:
                 require_supervisor_or_admin(MagicMock())
             assert exc_info.value.status_code == 403
-
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

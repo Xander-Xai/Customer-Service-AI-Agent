@@ -8,7 +8,7 @@ import re
 import sys
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
 from core.logger import get_logger
@@ -34,6 +34,7 @@ def _require_monitoring_auth(request: Request):
     if user.role not in ("admin", "supervisor"):
         raise HTTPException(status_code=403, detail="需要管理员或主管权限")
     return user
+
 
 # Prometheus label 安全正则
 _PROM_LABEL_RE = re.compile(r"[^a-zA-Z0-9_]")
@@ -75,11 +76,23 @@ async def health(request: Request):
     # ChromaDB
     chromadb_ok = False
     try:
-        import chromadb
-
-        client = chromadb.Client()
-        client.heartbeat()
-        chromadb_ok = True
+        container = getattr(state, "container", None)
+        if container and getattr(container, "knowledge_base", None) and getattr(container.knowledge_base, "_client", None):
+            client = container.knowledge_base._client
+            client.heartbeat()
+            chromadb_ok = True
+        else:
+            import chromadb
+            from chromadb.config import Settings
+            client = chromadb.EphemeralClient(
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True,
+                    migrations="apply",
+                )
+            )
+            client.heartbeat()
+            chromadb_ok = True
     except Exception as e:
         logger.debug(f"[Health] ChromaDB 连接检查失败: {e}")
 
@@ -229,6 +242,10 @@ async def prometheus_metrics(request: Request):
         "# TYPE csai_errors_total counter",
         f"csai_errors_total {stats.get('total_errors', 0)}",
         "",
+        "# HELP csai_error_rate_percent Error rate percentage",
+        "# TYPE csai_error_rate_percent gauge",
+        f"csai_error_rate_percent {stats.get('error_rate', 0)}",
+        "",
         "# HELP csai_avg_response_time_seconds Average response time",
         "# TYPE csai_avg_response_time_seconds gauge",
         f"csai_avg_response_time_seconds {stats.get('avg_response_time', 0)}",
@@ -251,6 +268,13 @@ async def prometheus_metrics(request: Request):
         lines.append("# HELP csai_sla_violation_rate SLA violation rate")
         lines.append("# TYPE csai_sla_violation_rate gauge")
         lines.append(f"csai_sla_violation_rate {sla.get('violation_rate', 0)}")
+        lines.append(
+            "# HELP csai_sla_window_violation_rate_percent SLA window violation rate percentage"
+        )
+        lines.append("# TYPE csai_sla_window_violation_rate_percent gauge")
+        lines.append(
+            f"csai_sla_window_violation_rate_percent {sla.get('window_violation_rate', 0)}"
+        )
 
     # 熔断器
     cb = getattr(state, "circuit_breaker", None)
@@ -260,6 +284,11 @@ async def prometheus_metrics(request: Request):
         lines.append("# HELP csai_circuit_breaker_state Circuit breaker state")
         lines.append("# TYPE csai_circuit_breaker_state gauge")
         lines.append(f"csai_circuit_breaker_state {state_map.get(cb_status.get('state', ''), -1)}")
+        lines.append("# HELP csai_circuit_breaker_consecutive_failures Consecutive failures count")
+        lines.append("# TYPE csai_circuit_breaker_consecutive_failures gauge")
+        lines.append(
+            f"csai_circuit_breaker_consecutive_failures {cb_status.get('consecutive_failures', 0)}"
+        )
 
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain")
 

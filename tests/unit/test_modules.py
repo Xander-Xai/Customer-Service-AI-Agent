@@ -84,9 +84,9 @@ class TestSessionManagerModule:
         from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=10, max_tokens=50)
-        sm.create_session("tok_test")
+        await sm.create_session("tok_test")
         for i in range(20):
-            sm.add_message(
+            await sm.add_message(
                 "tok_test", f"这是一条较长的消息用于测试token裁剪功能_{i:02d}", is_user=(i % 2 == 0)
             )
         ctx = await sm.get_conversation_context("tok_test")
@@ -99,9 +99,9 @@ class TestSessionManagerModule:
         from core.session.session_manager import EnhancedSessionManager
 
         sm = EnhancedSessionManager(window_size=3)
-        sm.create_session("win_test")
+        await sm.create_session("win_test")
         for i in range(10):
-            sm.add_message("win_test", f"消息{i}")
+            await sm.add_message("win_test", f"消息{i}")
         ctx = await sm.get_conversation_context("win_test")
         non_summary = [m for m in ctx if "[历史摘要]" not in m.get("content", "")]
         assert len(non_summary) <= sm.window_size * 2 + 1
@@ -697,6 +697,35 @@ class TestCoreModule:
         assert await bb.read("ttl_key") is None
 
     @pytest.mark.asyncio
+    async def test_blackboard_session_isolation(self):
+        from core.shared_blackboard import SharedBlackboard, set_blackboard_session_id
+
+        bb = SharedBlackboard()
+
+        # Test isolation via ContextVar
+        set_blackboard_session_id("session_1")
+        await bb.write("user_data", "alice")
+
+        set_blackboard_session_id("session_2")
+        await bb.write("user_data", "bob")
+
+        # Verify read separation via ContextVar
+        set_blackboard_session_id("session_1")
+        assert await bb.read("user_data") == "alice"
+
+        set_blackboard_session_id("session_2")
+        assert await bb.read("user_data") == "bob"
+
+        # Test isolation via explicit parameter
+        await bb.write("user_data", "charlie", session_id="session_3")
+        assert await bb.read("user_data", session_id="session_3") == "charlie"
+        assert await bb.read("user_data", session_id="session_1") == "alice"
+
+        # Reset context var
+        set_blackboard_session_id(None)
+
+
+    @pytest.mark.asyncio
     async def test_monitoring_record_request(self):
         from core.monitoring import MetricsCollector
 
@@ -719,6 +748,21 @@ class TestCoreModule:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8. RAG 知识库模块
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _reset_chromadb_global_state():
+    """清理 ChromaDB 全局单例缓存，防止测试间泄漏。
+
+    ChromaDB 的 SharedSystemClient 使用进程级类变量 _identifier_to_system
+    缓存所有 Client/EphemeralClient 实例。当一个测试创建了 ChromaDB 实例后，
+    其他测试在相同进程中创建实例时会复用同一个 System 对象。
+    如果 Settings 不同，则会抛出 ValueError。
+    """
+    from chromadb.api.shared_system_client import SharedSystemClient
+
+    SharedSystemClient.clear_system_cache()
+    yield
 
 
 class TestRAGModule:
@@ -1056,8 +1100,19 @@ class TestSecurityAudit:
         ]
         # 只扫描源码目录，排除测试和第三方代码
         source_dirs = [
-            "agents", "api", "auth", "cache", "collaboration",
-            "core", "db", "erp", "knowledge", "llm", "rag", "router", "tools",
+            "agents",
+            "api",
+            "auth",
+            "cache",
+            "collaboration",
+            "core",
+            "db",
+            "erp",
+            "knowledge",
+            "llm",
+            "rag",
+            "router",
+            "tools",
         ]
         for src_dir in source_dirs:
             if not os.path.isdir(src_dir):
@@ -1753,9 +1808,7 @@ class TestReActAgentDeep:
         mock_kb = MagicMock()
         mock_kb.available = True
         mock_kb.query_multiple = AsyncMock(
-            return_value=[
-                {"content": "烟酰胺精华适合油性和混合性肌肤，建议每天使用一次。"}
-            ]
+            return_value=[{"content": "烟酰胺精华适合油性和混合性肌肤，建议每天使用一次。"}]
         )
         mock_kb.rewrite_query = AsyncMock(side_effect=lambda q, llm: q)
         agent.set_knowledge_base(mock_kb)
@@ -1775,9 +1828,7 @@ class TestReActAgentDeep:
             getattr(m, "content", "") for m in captured_messages if hasattr(m, "content")
         )
         assert "烟酰胺精华" in all_content, "RAG 知识应被注入到 LLM 上下文中"
-        assert "知识库" in all_content or "检索知识" in all_content, (
-            "RAG 内容应包含知识库标记"
-        )
+        assert "知识库" in all_content or "检索知识" in all_content, "RAG 内容应包含知识库标记"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1799,13 +1850,17 @@ class TestSelfReflection:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_tools(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
 
         mock_llm = MagicMock()
-        mock_llm.async_invoke = AsyncMock(return_value=MagicMock(content="原始回答", tool_calls=None))
+        mock_llm.async_invoke = AsyncMock(
+            return_value=MagicMock(content="原始回答", tool_calls=None)
+        )
         agent.set_llm(mock_llm)
 
         sm = MagicMock()
@@ -1836,7 +1891,9 @@ class TestSelfReflection:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_tools(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
@@ -1878,7 +1935,9 @@ class TestSelfReflection:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_tools(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
@@ -1923,7 +1982,9 @@ class TestSelfReflection:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_tools(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
@@ -2052,7 +2113,9 @@ class TestBlackboardEnhanced:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_llm(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
@@ -2084,11 +2147,15 @@ class TestBlackboardEnhanced:
         agent.set_blackboard(MockBB())
 
         state = {"session_id": "bb_read", "customer_query": "推荐防晒霜"}
-        result = await agent.process(state)
+        await agent.process(state)
 
         human_content = ""
         for msg in captured_messages:
-            if hasattr(msg, "content") and isinstance(msg.content, str) and "推荐防晒霜" in msg.content:
+            if (
+                hasattr(msg, "content")
+                and isinstance(msg.content, str)
+                and "推荐防晒霜" in msg.content
+            ):
                 human_content = msg.content
                 break
 
@@ -2104,7 +2171,9 @@ class TestBlackboardEnhanced:
         class DummyAgent(BaseAgent):
             async def process(self, state):
                 return await self._process_with_llm(
-                    state, "test prompt", fallback_response="fallback",
+                    state,
+                    "test prompt",
+                    fallback_response="fallback",
                 )
 
         agent = DummyAgent(name="test", role="test", expertise=["test"])
@@ -2145,11 +2214,13 @@ class TestERPFactory:
         """ERP_MODE=real 但缺少配置时自动降级到 mock"""
         import erp.factory as ef
 
-        with patch.object(ef, "ERP_MODE", "real"), \
-             patch.object(ef, "ERP_BASE_URL", ""), \
-             patch.object(ef, "ERP_APP_ID", ""), \
-             patch.object(ef, "ERP_APP_SECRET", ""), \
-             patch.object(ef, "ERP_DB_ID", ""):
+        with (
+            patch.object(ef, "ERP_MODE", "real"),
+            patch.object(ef, "ERP_BASE_URL", ""),
+            patch.object(ef, "ERP_APP_ID", ""),
+            patch.object(ef, "ERP_APP_SECRET", ""),
+            patch.object(ef, "ERP_DB_ID", ""),
+        ):
             adapter = ef.create_erp_adapter()
             assert adapter.__class__.__name__ == "KingdeeMockAdapter"
 
@@ -2173,13 +2244,15 @@ class TestERPFactory:
             "ERP_APP_SECRET": ("应用密钥", "secret456"),
             "ERP_DB_ID": ("账套 ID", "db789"),
         }
-        with patch.object(ef, "ERP_MODE", "real"), \
-             patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields), \
-             patch.object(ef, "ERP_BASE_URL", "https://kd.example.com"), \
-             patch.object(ef, "ERP_APP_ID", "app123"), \
-             patch.object(ef, "ERP_APP_SECRET", "secret456"), \
-             patch.object(ef, "ERP_DB_ID", "db789"), \
-             patch.dict("sys.modules", {"erp.kingdee_real_adapter": fake_module}):
+        with (
+            patch.object(ef, "ERP_MODE", "real"),
+            patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields),
+            patch.object(ef, "ERP_BASE_URL", "https://kd.example.com"),
+            patch.object(ef, "ERP_APP_ID", "app123"),
+            patch.object(ef, "ERP_APP_SECRET", "secret456"),
+            patch.object(ef, "ERP_DB_ID", "db789"),
+            patch.dict("sys.modules", {"erp.kingdee_real_adapter": fake_module}),
+        ):
             ef.create_erp_adapter()
             mock_adapter_cls.assert_called_once_with(
                 base_url="https://kd.example.com",
@@ -2198,9 +2271,11 @@ class TestERPFactory:
             "ERP_APP_SECRET": ("应用密钥", "secret456"),
             "ERP_DB_ID": ("账套 ID", "db789"),
         }
-        with patch.object(ef, "ERP_MODE", "real"), \
-             patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields), \
-             patch.dict("sys.modules", {"erp.kingdee_real_adapter": None}):
+        with (
+            patch.object(ef, "ERP_MODE", "real"),
+            patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields),
+            patch.dict("sys.modules", {"erp.kingdee_real_adapter": None}),
+        ):
             adapter = ef.create_erp_adapter()
             assert adapter.__class__.__name__ == "KingdeeMockAdapter"
 
@@ -2330,10 +2405,12 @@ class TestComplaintAgentRAGFallback:
 
         kb = MagicMock()
         kb.available = True
-        kb.query_multiple = AsyncMock(return_value=[
-            {"content": "过敏投诉应先确认产品批次并建议就医"},
-            {"content": "可提供无条件退款"},
-        ])
+        kb.query_multiple = AsyncMock(
+            return_value=[
+                {"content": "过敏投诉应先确认产品批次并建议就医"},
+                {"content": "可提供无条件退款"},
+            ]
+        )
         agent.set_knowledge_base(kb)
 
         state = {"session_id": "complaint_rag_ok", "customer_query": "面霜过敏"}
@@ -2376,10 +2453,15 @@ class TestGeneralAgentPaths:
         agent.set_blackboard(bb)
 
         erp = MagicMock()
-        erp.query_customer = AsyncMock(return_value={
-            "name": "张三", "phone": "13800138000", "level": "VIP",
-            "total_spent": 50000, "address": "北京市朝阳区",
-        })
+        erp.query_customer = AsyncMock(
+            return_value={
+                "name": "张三",
+                "phone": "13800138000",
+                "level": "VIP",
+                "total_spent": 50000,
+                "address": "北京市朝阳区",
+            }
+        )
         agent.set_erp(erp)
 
         state = {"session_id": "general_erp", "customer_query": "我是客户 C001，想查一下订单"}
@@ -2550,6 +2632,7 @@ class TestResponseCacheL2AndRedis:
         # Redis setex should be called via threading
         # Give thread time to run
         import time
+
         time.sleep(0.1)
         # The mock may or may not have been called depending on threading
         # Just verify no exception was raised
@@ -2618,3 +2701,88 @@ class TestResponseCacheL2AndRedis:
 
         cache = ResponseCache(l1_max=100, l2_max=0)
         cache._evict_l1()  # should not raise
+
+    def test_alertmanager_config_no_self_referencing_urls(self):
+        """验证 alertmanager.yml 格式有效性，且不包含指向本机的自指 URL，以防止告警丢失"""
+        import yaml
+        import os
+
+        project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        config_path = os.path.join(project_dir, "monitoring", "alertmanager.yml")
+        assert os.path.exists(config_path), f"配置文件不存在: {config_path}"
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+
+        assert config is not None
+        assert "receivers" in config, "Alertmanager 应该有 receivers 配置"
+
+        # 检查 receivers 中的 webhook_configs
+        for receiver in config["receivers"]:
+            webhook_configs = receiver.get("webhook_configs", [])
+            for webhook in webhook_configs:
+                url = webhook.get("url", "")
+                assert "app:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+                assert "localhost:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+                assert "127.0.0.1:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+
+    def test_secrets_rotation_script(self):
+        """测试 scripts/rotate_secrets.py 能否正确轮换密钥并且不破坏其他配置"""
+        import subprocess
+        import os
+        import tempfile
+
+        # 创建一个临时的 env 文件
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, encoding="utf-8") as tmp:
+            tmp.write(
+                "JWT_SECRET=old_jwt_secret\n"
+                "SESSION_TOKEN_SECRET=old_session_secret\n"
+                "OPENAI_API_KEY=sk-stay_same\n"
+                "DATABASE_URL=postgresql://user:pass@localhost/db\n"
+            )
+            tmp_path = tmp.name
+
+        try:
+            # 运行 rotate_secrets.py 脚本
+            project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            script_path = os.path.join(project_dir, "scripts", "rotate_secrets.py")
+            res = subprocess.run(
+                ["python3", script_path, tmp_path],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            assert "密钥轮换成功完成" in res.stdout
+
+            # 读取轮换后的文件内容
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                content = f.read()
+
+            lines = content.splitlines()
+            rotated_dict = {}
+            for line in lines:
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    rotated_dict[k] = v
+
+            # 验证内部密钥已被轮换并且是新的随机值
+            assert rotated_dict["JWT_SECRET"] != "old_jwt_secret"
+            assert rotated_dict["SESSION_TOKEN_SECRET"] != "old_session_secret"
+            assert len(rotated_dict["JWT_SECRET"]) > 10
+
+            # 验证外部配置和 API 密钥保持原样
+            assert rotated_dict["OPENAI_API_KEY"] == "sk-stay_same"
+            assert rotated_dict["DATABASE_URL"] == "postgresql://user:pass@localhost/db"
+
+        finally:
+            # 清理临时文件和备份文件
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            # 清理生成的备份文件 (.bak.*)
+            dir_name = os.path.dirname(tmp_path)
+            base_name = os.path.basename(tmp_path)
+            for f in os.listdir(dir_name):
+                if f.startswith(base_name + ".bak."):
+                    os.remove(os.path.join(dir_name, f))
+
+

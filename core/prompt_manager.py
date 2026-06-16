@@ -161,7 +161,7 @@ class PromptManager:
             }
         except Exception as e:
             db.rollback()
-            logger.error(f"保存 Prompt 失败: {e}")
+            logger.error(f"保存 Prompt 失败: {e}", exc_info=True)
             raise
         finally:
             db.close()
@@ -186,7 +186,9 @@ class PromptManager:
                     "is_active": bool(v.is_active),
                     "score_avg": v.score_avg,
                     "feedback_count": v.feedback_count,
-                    "prompt_preview": v.prompt_text[:200] + "..." if len(v.prompt_text) > 200 else v.prompt_text,
+                    "prompt_preview": v.prompt_text[:200] + "..."
+                    if len(v.prompt_text) > 200
+                    else v.prompt_text,
                     "created_at": v.created_at.isoformat() if v.created_at else None,
                 }
                 for v in versions

@@ -8,6 +8,13 @@ repos:
         files: '^\.env'
         pass_filenames: true
 
+      - id: no-api-keys-in-env
+        name: Prevent API keys in .env files
+        entry: bash -c '! grep -rnE "sk-[A-Za-z0-9]{20,}|api_key=['\''\"]?[A-Za-z0-9]{20,}" --include="*.env*" . 2>/dev/null'
+        language: system
+        files: '\.env'
+        pass_filenames: false
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.0
     hooks:

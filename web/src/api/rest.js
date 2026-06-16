@@ -17,7 +17,7 @@ async function _request(method, path, body = null, extraHeaders = {}) {
   const resp = await fetchWithAuth(path, opts);
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: resp.statusText }));
-    throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
+    throw new Error(err.error || err.detail || err.message || `HTTP ${resp.status}`);
   }
   return resp.json();
 }
@@ -98,7 +98,7 @@ export function sendChatWithImage(query, imageFile, sessionId) {
     async (resp) => {
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
-        throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
+        throw new Error(err.error || err.detail || err.message || `HTTP ${resp.status}`);
       }
       return resp.json();
     },
@@ -130,7 +130,7 @@ export function sendChatWithFile(query, file, sessionId) {
     async (resp) => {
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ error: resp.statusText }));
-        throw new Error(err.detail || err.error || `HTTP ${resp.status}`);
+        throw new Error(err.error || err.detail || err.message || `HTTP ${resp.status}`);
       }
       return resp.json();
     },
@@ -267,4 +267,31 @@ export function getUserMe() {
 /** 获取可用 TTS 语音列表 */
 export function getTTSVoices() {
   return _request('GET', '/api/tts/voices');
+}
+
+// ===== 语音服务 API（通过 fetchWithAuth 认证） =====
+
+/**
+ * 发送语音文件到 ASR + 对话管道
+ * 审计 v2 Task 2.3: voice.js 改用 fetchWithAuth 以通过中央认证拦截器
+ */
+export function sendVoiceForm(formData) {
+  return fetchWithAuth('/api/chat/voice', {
+    method: 'POST',
+    body: formData,
+  });
+}
+
+/**
+ * 文本转语音（TTS）
+ */
+export function sendTTS(text, voice = '') {
+  const formData = new FormData();
+  formData.append('text', text.substring(0, 2000));
+  if (voice) formData.append('voice', voice);
+
+  return fetchWithAuth('/api/tts', {
+    method: 'POST',
+    body: formData,
+  });
 }

@@ -37,13 +37,17 @@ from core import config as _cfg  # noqa: E402
 _security_errors = []
 
 if (not _cfg.JWT_SECRET or _cfg.JWT_SECRET in ("", "change-me-in-production")) and not DEV_MODE:
-        _security_errors.append("JWT_SECRET 未配置或使用默认值，生产环境必须设置")
+    _security_errors.append("JWT_SECRET 未配置或使用默认值，生产环境必须设置")
 
-if not DEV_MODE and (not _cfg.SESSION_TOKEN_SECRET or _cfg.SESSION_TOKEN_SECRET in (
-    "",
-    "change-me-session-secret-in-production",
-)):
-        _security_errors.append("SESSION_TOKEN_SECRET 未配置，会话校验将被禁用")
+if not DEV_MODE and (
+    not _cfg.SESSION_TOKEN_SECRET
+    or _cfg.SESSION_TOKEN_SECRET
+    in (
+        "",
+        "change-me-session-secret-in-production",
+    )
+):
+    _security_errors.append("SESSION_TOKEN_SECRET 未配置，会话校验将被禁用")
 
 if _security_errors:
     for err in _security_errors:

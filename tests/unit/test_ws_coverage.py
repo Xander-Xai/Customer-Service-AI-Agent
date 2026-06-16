@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 def _make_ws_app(dev_mode=True):
     """创建带 WebSocket 路由的测试 app"""
     from api.routes.ws import router
+
     app = FastAPI()
     app.include_router(router)
 
@@ -97,17 +98,17 @@ class TestWSAuthenticate:
     """WebSocket 认证测试"""
 
     @pytest.mark.asyncio
-    async def test_ws_authenticate_dev_mode(self):
-        """DEV_MODE 跳过认证"""
+    async def test_ws_authenticate_dev_mode_skips_auth(self):
+        """v5.3: 移除 DEV_MODE 短路后，未传任何凭证的连接被拒绝（审计 v2 P0 A-1 修复）"""
         from api.routes.ws import _ws_authenticate
 
         mock_ws = AsyncMock()
+        mock_ws.receive_json = AsyncMock(side_effect=asyncio.TimeoutError)
+        mock_ws.send_json = AsyncMock()
+        mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", True), \
-             patch("api.routes.ws.API_KEY_ENABLED", True):
-            api_key, token, payload = await _ws_authenticate(mock_ws, "")
-            assert api_key == ""
-            assert token == ""
+        with patch("api.routes.ws.API_KEY_ENABLED", False), pytest.raises(asyncio.TimeoutError):
+            await _ws_authenticate(mock_ws, "")
 
     @pytest.mark.asyncio
     async def test_ws_authenticate_with_api_key(self):
@@ -117,9 +118,10 @@ class TestWSAuthenticate:
         mock_ws = AsyncMock()
         mock_ws.receive_json = AsyncMock(return_value={"api_key": "valid-key"})
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "valid-key"):
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "valid-key"),
+        ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "")
             assert api_key == "valid-key"
 
@@ -129,15 +131,18 @@ class TestWSAuthenticate:
         from api.routes.ws import _ws_authenticate
 
         mock_ws = AsyncMock()
-        mock_ws.receive_json = AsyncMock(return_value={
-            "token": "jwt-token",
-            "session_token": "sess-token",
-        })
+        mock_ws.receive_json = AsyncMock(
+            return_value={
+                "token": "jwt-token",
+                "session_token": "sess-token",
+            }
+        )
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "server-key"), \
-             patch("auth.service.decode_token", return_value={"sub": "user1"}):
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "server-key"),
+            patch("auth.service.decode_token", return_value={"sub": "user1"}),
+        ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "")
             assert payload == {"sub": "user1"}
 
@@ -151,11 +156,12 @@ class TestWSAuthenticate:
         mock_ws.send_json = AsyncMock()
         mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "server-key"), \
-             pytest.raises(ValueError, match="Missing credentials"):
-                await _ws_authenticate(mock_ws, "")
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "server-key"),
+            pytest.raises(ValueError, match="Missing credentials"),
+        ):
+            await _ws_authenticate(mock_ws, "")
 
     @pytest.mark.asyncio
     async def test_ws_authenticate_invalid_token(self):
@@ -167,12 +173,13 @@ class TestWSAuthenticate:
         mock_ws.send_json = AsyncMock()
         mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "server-key"), \
-             patch("auth.service.decode_token", return_value=None), \
-             pytest.raises(ValueError, match="Invalid token"):
-                await _ws_authenticate(mock_ws, "")
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "server-key"),
+            patch("auth.service.decode_token", return_value=None),
+            pytest.raises(ValueError, match="Invalid token"),
+        ):
+            await _ws_authenticate(mock_ws, "")
 
     @pytest.mark.asyncio
     async def test_ws_authenticate_timeout(self):
@@ -184,23 +191,28 @@ class TestWSAuthenticate:
         mock_ws.send_json = AsyncMock()
         mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "server-key"), pytest.raises(asyncio.TimeoutError):
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "server-key"),
+            pytest.raises(asyncio.TimeoutError),
+        ):
             await _ws_authenticate(mock_ws, "")
 
     @pytest.mark.asyncio
-    async def test_ws_authenticate_ws_api_key_header(self):
-        """通过 header 传递 api_key 时跳过认证消息"""
+    async def test_ws_authenticate_ws_api_key_header_valid(self):
+        """通过 header 传递有效 api_key 时直接认证通过"""
         from api.routes.ws import _ws_authenticate
 
         mock_ws = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True):
-            # ws_api_key 非空表示已通过 query param 或 header 传递
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "header-key"),
+        ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "header-key")
             assert api_key == "header-key"
+            assert token == ""
+            assert payload is None
 
 
 class TestWSChat:
@@ -209,51 +221,60 @@ class TestWSChat:
     def test_ws_router_exists(self):
         """WebSocket 路由存在"""
         from api.routes.ws import router
+
         routes = [r for r in router.routes if hasattr(r, "path")]
         assert len(routes) > 0
 
     def test_ws_connections_dict(self):
         """连接跟踪字典存在"""
         from api.routes.ws import _ws_connections
+
         assert isinstance(_ws_connections, dict)
 
     def test_ws_lock_exists(self):
         """连接锁存在"""
         from api.routes.ws import _ws_lock
+
         assert _ws_lock is not None
 
     def test_ws_router_path(self):
         """WebSocket 路由路径正确"""
         from api.routes.ws import router
+
         paths = [r.path for r in router.routes if hasattr(r, "path")]
         assert "/ws/chat" in paths
 
     def test_ws_sanitize_input(self):
         """sanitize_input 工作正常"""
         from api.utils import sanitize_input
+
         result = sanitize_input("你好<script>alert(1)</script>")
         assert "<script>" not in result
 
     def test_ws_validate_session_id(self):
         """validate_session_id 工作正常"""
         from api.utils import validate_session_id
+
         valid = validate_session_id("test-session-123")
         assert valid == "test-session-123" or len(valid) > 0
 
     def test_ws_validate_session_id_traversal(self):
         """validate_session_id 防路径遍历"""
         from api.utils import validate_session_id
+
         result = validate_session_id("../../etc/passwd")
         assert "../" not in result
 
     def test_ws_cleanup_function(self):
         """cleanup_stale_ws_connections 可调用"""
         from api.routes.ws import cleanup_stale_ws_connections
+
         assert callable(cleanup_stale_ws_connections)
 
     def test_ws_periodic_cleanup_function(self):
         """periodic_ws_cleanup 可调用"""
         from api.routes.ws import periodic_ws_cleanup
+
         assert callable(periodic_ws_cleanup)
 
 
@@ -275,10 +296,11 @@ class TestWSAuthenticateAdvanced:
         mock_ws.send_json = AsyncMock()
         mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.DEV_MODE", False), \
-             patch("api.routes.ws.API_KEY_ENABLED", True), \
-             patch("api.routes.ws.API_KEY", "server-key"), \
-             pytest.raises(RuntimeError):
+        with (
+            patch("api.routes.ws.API_KEY_ENABLED", True),
+            patch("api.routes.ws.API_KEY", "server-key"),
+            pytest.raises(RuntimeError),
+        ):
             await _ws_authenticate(mock_ws, "")
 
 
@@ -321,15 +343,18 @@ class TestWSModuleImports:
     def test_ws_conn_counter_exists(self):
         """_ws_conn_counter 存在"""
         from api.routes.ws import _ws_conn_counter
+
         assert isinstance(_ws_conn_counter, int)
 
     def test_ws_module_logger_exists(self):
         """logger 存在"""
         import api.routes.ws as ws_mod
+
         assert hasattr(ws_mod, "logger")
 
     def test_router_has_websocket_route(self):
         """router 包含 /ws/chat 路由"""
         from api.routes.ws import router
+
         paths = [r.path for r in router.routes if hasattr(r, "path")]
         assert "/ws/chat" in paths

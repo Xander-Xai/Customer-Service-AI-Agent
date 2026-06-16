@@ -52,7 +52,6 @@ def _state(query="你好"):
 
 
 class TestSequentialMode:
-
     @pytest.mark.asyncio
     async def test_agent_found_returns_result(self):
         bus, bb = _mock_bus(), _mock_bb()
@@ -100,7 +99,6 @@ class TestSequentialMode:
 
 
 class TestParallelMode:
-
     @pytest.mark.asyncio
     async def test_multiple_agents_aggregated(self):
         bus, bb = _mock_bus(), _mock_bb()
@@ -147,9 +145,7 @@ class TestParallelMode:
         agent.process_with_retry = _slow_agent
         agents = {"slow_agent": agent}
 
-        result = await mode.execute(
-            agents, _state(), {"agent_list": ["slow_agent"]}
-        )
+        result = await mode.execute(agents, _state(), {"agent_list": ["slow_agent"]})
 
         assert result["mode"] == "parallel"
         # 超时后 gather 收到 TimeoutError，results 为空，聚合为默认消息
@@ -170,9 +166,7 @@ class TestParallelMode:
         agent = _mock_agent(side_effect=RuntimeError("boom"))
         agents = {"bad_agent": agent}
 
-        result = await mode.execute(
-            agents, _state(), {"agent_list": ["bad_agent"]}
-        )
+        result = await mode.execute(agents, _state(), {"agent_list": ["bad_agent"]})
 
         assert "error" in result["response"].lower() or "boom" in result["response"]
 
@@ -182,9 +176,7 @@ class TestParallelMode:
         mode = ParallelMode(bus=bus, bb=bb)
         agents = {"product_agent": _mock_agent("产品结果")}
 
-        await mode.execute(
-            agents, _state(), {"agent_list": ["product_agent"]}
-        )
+        await mode.execute(agents, _state(), {"agent_list": ["product_agent"]})
 
         bb.write.assert_called_once()
         call_args = bb.write.call_args
@@ -195,7 +187,6 @@ class TestParallelMode:
 
 
 class TestConsultationMode:
-
     @pytest.mark.asyncio
     async def test_primary_not_found(self):
         mode = ConsultationMode()
@@ -252,7 +243,8 @@ class TestConsultationMode:
         agents = {"product_agent": primary, "tech_agent": slow_agent}
 
         result = await mode.execute(
-            agents, _state("问题"),
+            agents,
+            _state("问题"),
             {"primary_agent": "product_agent", "consult_agents": ["tech_agent"]},
         )
 
@@ -262,14 +254,13 @@ class TestConsultationMode:
     @pytest.mark.asyncio
     async def test_blackboard_data_injected(self):
         bus, bb = _mock_bus(), _mock_bb()
-        bb.read_prefix = AsyncMock(
-            return_value={"erp.result": {"response": "ERP 补充信息"}}
-        )
+        bb.read_prefix = AsyncMock(return_value={"erp.result": {"response": "ERP 补充信息"}})
         mode = ConsultationMode(bus=bus, bb=bb)
         agents = {"product_agent": _mock_agent("主回答")}
 
         result = await mode.execute(
-            agents, _state("查订单"),
+            agents,
+            _state("查订单"),
             {"primary_agent": "product_agent", "consult_agents": []},
         )
 
@@ -282,7 +273,8 @@ class TestConsultationMode:
         agents = {"product_agent": _mock_agent("主答")}
 
         result = await mode.execute(
-            agents, _state("问题"),
+            agents,
+            _state("问题"),
             {"primary_agent": "product_agent", "consult_agents": ["missing_agent"]},
         )
 
@@ -293,7 +285,6 @@ class TestConsultationMode:
 
 
 class TestHierarchicalMode:
-
     @pytest.mark.asyncio
     async def test_coordinator_not_found(self):
         mode = HierarchicalMode()
@@ -313,7 +304,8 @@ class TestHierarchicalMode:
         }
 
         result = await mode.execute(
-            agents, _state("投诉产品质量"),
+            agents,
+            _state("投诉产品质量"),
             {
                 "coordinator": "general_agent",
                 "sub_tasks": {"complaint_agent": "处理投诉", "product_agent": "检查产品"},
@@ -333,7 +325,8 @@ class TestHierarchicalMode:
         agents = {"general_agent": _mock_agent("汇总")}
 
         result = await mode.execute(
-            agents, _state("投诉"),
+            agents,
+            _state("投诉"),
             {
                 "coordinator": "general_agent",
                 "sub_tasks": {"missing_agent": "任务"},
@@ -359,7 +352,8 @@ class TestHierarchicalMode:
         agents = {"general_agent": coordinator, "slow_agent": slow}
 
         result = await mode.execute(
-            agents, _state("问题"),
+            agents,
+            _state("问题"),
             {
                 "coordinator": "general_agent",
                 "sub_tasks": {"slow_agent": "慢任务"},
@@ -378,7 +372,8 @@ class TestHierarchicalMode:
         agents = {"general_agent": _mock_agent("汇总")}
 
         result = await mode.execute(
-            agents, _state("问题"),
+            agents,
+            _state("问题"),
             {"coordinator": "general_agent", "sub_tasks": {}},
         )
 
@@ -401,7 +396,6 @@ class TestHierarchicalMode:
 
 
 class TestReActMode:
-
     @pytest.mark.asyncio
     async def test_react_agent_found(self):
         bus, bb = _mock_bus(), _mock_bb()
@@ -449,7 +443,6 @@ class TestReActMode:
 
 
 class TestCollaborationModeHelpers:
-
     @pytest.mark.asyncio
     async def test_safe_publish_with_bus(self):
         bus, bb = _mock_bus(), _mock_bb()

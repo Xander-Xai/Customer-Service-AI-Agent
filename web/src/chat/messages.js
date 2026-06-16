@@ -5,7 +5,7 @@
 
 import { getSessionId } from '../state/chatState.js';
 import { getAgentDisplayName, getAgentIcon } from '../utils/agents.js';
-import { copyToClipboard, escapeHtml, scrollToBottom, createElement, setSafeHtml } from '../utils/dom.js';
+import { copyToClipboard, createElement, scrollToBottom, setSafeHtml } from '../utils/dom.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 let progressStatusEl = null;
@@ -30,25 +30,25 @@ export function setSessionId(id) {
 /** 追加用户消息 */
 export function appendUserMessage(content, imageFile) {
   const container = document.getElementById('chatMessages');
-  
+
   const contentChildren = [];
   if (imageFile) {
     const objectUrl = URL.createObjectURL(imageFile);
     contentChildren.push(
       createElement('div', { className: 'message-image-preview' }, [
-        createElement('img', { src: objectUrl, alt: '用户图片' })
-      ])
+        createElement('img', { src: objectUrl, alt: '用户图片' }),
+      ]),
     );
   }
   if (content) {
     contentChildren.push(createElement('div', { className: 'message-bubble' }, [content]));
   }
-  
+
   const msgEl = createElement('div', { className: 'message user' }, [
     createElement('div', { className: 'message-avatar' }, ['👤']),
-    createElement('div', { className: 'message-content' }, contentChildren)
+    createElement('div', { className: 'message-content' }, contentChildren),
   ]);
-  
+
   container.appendChild(msgEl);
   scrollToBottom(container);
 }
@@ -62,7 +62,9 @@ export function appendAssistantMessage(content, meta = {}) {
 
   const metaParts = [];
   if (meta.elapsed) {
-    metaParts.push(createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`]));
+    metaParts.push(
+      createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`]),
+    );
   }
 
   const contentChildren = [
@@ -70,26 +72,32 @@ export function appendAssistantMessage(content, meta = {}) {
     // Agent 流转轨迹（客户端不展示）
     createElement('div', { className: 'message-agent-tag' }, [
       createElement('span', { className: 'agent-icon' }, [agentIcon]),
-      ` ${getAgentDisplayName(meta.agent)}`
+      ` ${getAgentDisplayName(meta.agent)}`,
     ]),
     createElement('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
-      createElement('span', { className: 'message-meta' }, metaParts)
+      createElement('span', { className: 'message-meta' }, metaParts),
     ]),
     createElement('div', { className: 'feedback-bar' }, [
-      createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, ['📋 复制']),
-      createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, ['👍 有帮助']),
-      createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, ['👎 没帮助'])
-    ])
+      createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, [
+        '📋 复制',
+      ]),
+      createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, [
+        '👍 有帮助',
+      ]),
+      createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, [
+        '👎 没帮助',
+      ]),
+    ]),
   ];
 
   const msgEl = createElement('div', { className: 'message assistant' }, [
     createElement('div', { className: 'message-avatar' }, [agentIcon]),
-    createElement('div', { className: 'message-content' }, contentChildren)
+    createElement('div', { className: 'message-content' }, contentChildren),
   ]);
-  
+
   const bubble = msgEl.querySelector('.message-bubble');
   setSafeHtml(bubble, renderMarkdown(content));
-  
+
   container.appendChild(msgEl);
 
   // 绑定反馈和复制按钮事件
@@ -110,8 +118,8 @@ export function appendSystemMessage(content) {
   const msgEl = createElement('div', { className: 'message system' }, [
     createElement('div', { className: 'message-avatar' }, ['ℹ️']),
     createElement('div', { className: 'message-content' }, [
-      createElement('div', { className: 'message-bubble' }, [content])
-    ])
+      createElement('div', { className: 'message-bubble' }, [content]),
+    ]),
   ]);
   container.appendChild(msgEl);
   scrollToBottom(container);
@@ -123,12 +131,14 @@ export function showTypingIndicator() {
   removeTypingIndicator();
   const container = document.getElementById('chatMessages');
   const typingEl = createElement('div', { className: 'typing-indicator', id: 'typingIndicator' }, [
-    createElement('div', { className: 'message-avatar', style: 'background:var(--bg-hover)' }, ['···']),
+    createElement('div', { className: 'message-avatar', style: 'background:var(--bg-hover)' }, [
+      '···',
+    ]),
     createElement('div', { className: 'typing-dots' }, [
       createElement('div', { className: 'typing-dot' }),
       createElement('div', { className: 'typing-dot' }),
-      createElement('div', { className: 'typing-dot' })
-    ])
+      createElement('div', { className: 'typing-dot' }),
+    ]),
   ]);
   container.appendChild(typingEl);
   scrollToBottom(container);
@@ -147,7 +157,7 @@ export function showProgressStatus(text) {
     const container = document.getElementById('chatMessages');
     progressStatusEl = createElement('div', { className: 'progress-status' }, [
       createElement('div', { className: 'progress-spinner' }),
-      createElement('span', { id: 'progressText' }, [text])
+      createElement('span', { id: 'progressText' }, [text]),
     ]);
     container.appendChild(progressStatusEl);
     scrollToBottom(container);
@@ -180,23 +190,29 @@ export function createStreamingMessage() {
     createElement('div', { className: 'message-content' }, [
       createElement('div', { className: 'message-bubble' }, [
         createElement('span', { className: 'streaming-text' }),
-        createElement('span', { className: 'streaming-cursor' }, ['▊'])
+        createElement('span', { className: 'streaming-cursor' }, ['▊']),
       ]),
       createElement('div', { className: 'message-agent-tag' }, [
         createElement('span', { className: 'agent-icon' }, [agentIcon]),
-        ' 客服助手'
+        ' 客服助手',
       ]),
       createElement('div', { style: 'display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, [
-        createElement('span', { className: 'message-meta' })
+        createElement('span', { className: 'message-meta' }),
       ]),
       createElement('div', { className: 'feedback-bar' }, [
-        createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, ['📋 复制']),
-        createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, ['👍 有帮助']),
-        createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, ['👎 没帮助'])
-      ])
-    ])
+        createElement('button', { className: 'btn-msg-action btn-copy', title: '复制回复内容' }, [
+          '📋 复制',
+        ]),
+        createElement('button', { className: 'btn-feedback positive', title: '有帮助' }, [
+          '👍 有帮助',
+        ]),
+        createElement('button', { className: 'btn-feedback negative', title: '没帮助' }, [
+          '👎 没帮助',
+        ]),
+      ]),
+    ]),
   ]);
-  
+
   container.appendChild(wrapper);
   scrollToBottom(container);
 
@@ -227,7 +243,7 @@ export function createStreamingMessage() {
         const icon = getAgentIcon(meta.agent);
         agentTag.replaceChildren(
           createElement('span', { className: 'agent-icon' }, [icon]),
-          ` ${getAgentDisplayName(meta.agent)}`
+          ` ${getAgentDisplayName(meta.agent)}`,
         );
       }
 
@@ -238,7 +254,7 @@ export function createStreamingMessage() {
       const metaSpan = metaContainer.querySelector('.message-meta');
       if (meta.elapsed && metaSpan) {
         metaSpan.replaceChildren(
-          createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`])
+          createElement('span', { className: 'meta-item' }, [`⏱ ${(meta.elapsed).toFixed(1)}s`]),
         );
       }
 
@@ -275,7 +291,9 @@ function sendFeedback(btn, resolved) {
   _feedbackSubmitter(sid, rating, idx)
     .then(() => {
       const bar = btn.parentElement;
-      bar.replaceChildren(createElement('span', { style: 'font-size:11px;color:var(--text-muted)' }, ['✅ 感谢反馈']));
+      bar.replaceChildren(
+        createElement('span', { style: 'font-size:11px;color:var(--text-muted)' }, ['✅ 感谢反馈']),
+      );
     })
     .catch(() => {});
 }

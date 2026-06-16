@@ -88,7 +88,11 @@ async def get_authenticated_session(
     sid = validate_session_id(session_id)
     client_provided_sid = bool(session_id)
 
-    if client_provided_sid and session_manager and not session_manager.validate_session_token(sid, session_token or ""):
+    if (
+        client_provided_sid
+        and session_manager
+        and not session_manager.validate_session_token(sid, session_token or "")
+    ):
         raise _SessionValidationError(403, "会话令牌无效")
 
     user_id = extract_user_id(request)
@@ -164,7 +168,7 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
         try:
             result = await ctx.graph_task
         except Exception as e:
-            logger.error(f"SSE 图执行失败: {e}")
+            logger.error(f"SSE 图执行失败: {e}", exc_info=True)
             yield _sse_event({"type": "error", "content": "服务内部错误，请稍后重试"})
             return
 
@@ -212,7 +216,8 @@ async def rest_chat(data: ChatRequest, request: Request):
         return JSONResponse({"error": "query 不能为空"}, status_code=400)
 
     try:
-        result = await run_graph(session.sid, query)
+        user_id = extract_user_id(request)
+        result = await run_graph(session.sid, query, user_id=user_id)
         # 统一字段映射（对齐 WS/SSE 端点）
         mapped = {
             "response": result.get("response", ""),
@@ -280,5 +285,3 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
 
 
 # ── 多模态图片对话 ──
-
-

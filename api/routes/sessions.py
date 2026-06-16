@@ -112,11 +112,7 @@ async def get_session_checkpoint(session_id: str, request: Request):
 
     # v5.1: 从 app.state 获取 graph_app，替代模块级全局变量 import
     graph_app = getattr(request.app.state, "graph_app", None)
-    if (
-        not graph_app
-        or not hasattr(graph_app, "checkpointer")
-        or not graph_app.checkpointer
-    ):
+    if not graph_app or not hasattr(graph_app, "checkpointer") or not graph_app.checkpointer:
         return JSONResponse({"error": "Checkpoint 功能未启用"}, status_code=503)
 
     try:

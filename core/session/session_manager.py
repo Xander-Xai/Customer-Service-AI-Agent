@@ -16,6 +16,7 @@
 """
 
 import asyncio
+import base64 as _base64
 import functools
 import hashlib
 import hmac
@@ -132,6 +133,52 @@ def _dual_mode(async_func):
     return wrapper
 
 
+# ---------------------------------------------------------------------------
+# H-2: 会话数据加密（AES-256-Fernet）
+# ---------------------------------------------------------------------------
+
+
+def _get_encryption_key() -> bytes | None:
+    """获取加密密钥。未配置时返回 None（向后兼容）。"""
+    from core import config
+
+    key_str = getattr(config, "SESSION_ENCRYPTION_KEY", "") or os.environ.get(
+        "SESSION_ENCRYPTION_KEY", ""
+    )
+    if not key_str:
+        return None
+    key_bytes = key_str.encode("utf-8")
+    return hashlib.sha256(key_bytes).digest()
+
+
+def _encrypt_data(data: str, key: bytes | None) -> str:
+    """加密数据。无 key 时返回原文（向后兼容）。"""
+    if not key:
+        return data
+    try:
+        from cryptography.fernet import Fernet
+
+        f = Fernet(_base64.urlsafe_b64encode(key))
+        return f.encrypt(data.encode("utf-8")).decode("utf-8")
+    except ImportError:
+        return data
+
+
+def _decrypt_data(data: str, key: bytes | None) -> str:
+    """解密数据。无 key 时返回原文（向后兼容）。"""
+    if not key:
+        return data
+    try:
+        from cryptography.fernet import Fernet
+
+        f = Fernet(_base64.urlsafe_b64encode(key))
+        return f.decrypt(data.encode("utf-8")).decode("utf-8")
+    except ImportError:
+        return data
+    except Exception:
+        return data
+
+
 class EnhancedSessionManager:
     """
     增强会话管理器
@@ -232,20 +279,26 @@ class EnhancedSessionManager:
             if os.path.exists(fp):
                 try:
                     with open(fp, encoding="utf-8") as f:
-                        return json.load(f)
+                        raw = f.read()
+                    key = _get_encryption_key()
+                    decrypted = _decrypt_data(raw, key)
+                    return json.loads(decrypted)
                 except Exception as e:
                     logger.warning(f"加载会话文件失败 session={session_id}: {e}")
         return []
 
     def _save_to_file(self, session_id: str, messages: list):
-        """文件后端持久化"""
+        """文件后端持久化（H-2: 加密后写入）"""
         if self.storage_backend == "file":
             fp = os.path.join(
                 self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json"
             )
             try:
+                raw = json.dumps(messages, ensure_ascii=False)
+                key = _get_encryption_key()
+                encrypted = _encrypt_data(raw, key)
                 with open(fp, "w", encoding="utf-8") as f:
-                    json.dump(messages, f, ensure_ascii=False)
+                    f.write(encrypted)
             except Exception as e:
                 logger.warning(f"文件保存失败: {e}")
 
@@ -304,11 +357,12 @@ class EnhancedSessionManager:
                 try:
 
                     def _redis_load():
+                        key = _get_encryption_key()
                         stored = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:messages")
                         if stored:
-                            msgs = json.loads(stored)
+                            msgs = json.loads(_decrypt_data(stored, key))
                             meta_raw = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:meta")
-                            meta = json.loads(meta_raw) if meta_raw else {}
+                            meta = json.loads(_decrypt_data(meta_raw, key)) if meta_raw else {}
                             return msgs, meta
                         return None, None
 
@@ -469,10 +523,12 @@ class EnhancedSessionManager:
                     ttl = self.storage_config.get("ttl", 86400)
 
                     def _redis_save():
+                        key = _get_encryption_key()
+                        msgs_json = json.dumps(session["messages"], ensure_ascii=False)
                         r.setex(
                             f"{_CFG_REDIS_PREFIX}{session_id}:messages",
                             ttl,
-                            json.dumps(session["messages"], ensure_ascii=False),
+                            _encrypt_data(msgs_json, key),
                         )
                         meta = {
                             "created_at": session["created_at"],
@@ -485,7 +541,7 @@ class EnhancedSessionManager:
                         r.setex(
                             f"{_CFG_REDIS_PREFIX}{session_id}:meta",
                             ttl,
-                            json.dumps(meta, ensure_ascii=False),
+                            _encrypt_data(json.dumps(meta, ensure_ascii=False), key),
                         )
 
                     await asyncio.to_thread(_redis_save)

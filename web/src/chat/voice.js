@@ -1,4 +1,4 @@
-import { getTTSVoices } from '../api/rest.js';
+import { getTTSVoices, sendTTS, sendVoiceForm } from '../api/rest.js';
 import { showToast } from '../utils/toast.js';
 import {
   appendAssistantMessage,
@@ -136,17 +136,10 @@ async function _sendVoiceMessage(audioBlob) {
   formData.append('session_id', getCurrentSessionId() || '');
   formData.append('session_token', getCurrentSessionToken() || '');
 
-  const headers = {};
-  const token = localStorage.getItem('token');
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else {
-    const apiKey = localStorage.getItem('api_key') || '';
-    if (apiKey) headers['X-API-Key'] = apiKey;
-  }
-
+  // v5.3: 统一走 rest.js 的 fetchWithAuth 中央拦截器
+  // （审计 v2 Task 2.3 — 消除直接 fetch 调用）
   try {
-    const resp = await fetch('/api/chat/voice', { method: 'POST', headers, body: formData });
+    const resp = await sendVoiceForm(formData);
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ error: resp.statusText }));
       throw new Error(err.error || `HTTP ${resp.status}`);
@@ -191,21 +184,10 @@ export async function playTTS(text) {
   // 确保语音列表已加载
   if (!Object.keys(availableVoices).length) await loadVoices();
 
-  const headers = {};
-  const token = localStorage.getItem('token');
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  } else {
-    const apiKey = localStorage.getItem('api_key') || '';
-    if (apiKey) headers['X-API-Key'] = apiKey;
-  }
-
-  const formData = new FormData();
-  formData.append('text', text.substring(0, 2000));
-  if (selectedVoice) formData.append('voice', selectedVoice);
-
+  // v5.3: 统一走 rest.js 的 fetchWithAuth 中央拦截器
+  // （审计 v2 Task 2.3 — 消除直接 fetch 调用）
   try {
-    const resp = await fetch('/api/tts', { method: 'POST', headers, body: formData });
+    const resp = await sendTTS(text, selectedVoice);
     if (!resp.ok) {
       return;
     }

@@ -4,6 +4,7 @@
 - PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
+
 import asyncio
 import contextlib
 import hashlib
@@ -408,7 +409,7 @@ def register_user(username: str, password: str, display_name: str = "") -> dict[
         return {"success": True, "user_id": user.id, "username": username}
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"用户注册失败: {e}")
+        logger.error(f"用户注册失败: {e}", exc_info=True)
         return {"success": False, "error": "注册失败，请稍后重试"}
     finally:
         db.close()

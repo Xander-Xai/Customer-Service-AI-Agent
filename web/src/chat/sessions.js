@@ -79,10 +79,14 @@ export async function loadSessionList() {
 
     if (sessions.length === 0) {
       list.replaceChildren(
-        createElement('div', { style: 'padding:32px 20px;text-align:center;color:var(--text-muted);font-size:13px' }, [
-          createElement('div', { style: 'font-size:32px;margin-bottom:12px' }, ['💬']),
-          CHAT.emptySessionList
-        ])
+        createElement(
+          'div',
+          { style: 'padding:32px 20px;text-align:center;color:var(--text-muted);font-size:13px' },
+          [
+            createElement('div', { style: 'font-size:32px;margin-bottom:12px' }, ['💬']),
+            CHAT.emptySessionList,
+          ],
+        ),
       );
       return;
     }
@@ -94,20 +98,26 @@ export async function loadSessionList() {
 
       const metaChildren = [
         createElement('span', {}, [`💬 ${s.message_count || 0}条`]),
-        createElement('span', {}, [timeStr])
+        createElement('span', {}, [timeStr]),
       ];
       if (driftWarn) {
         metaChildren.push(createElement('span', { style: 'color:var(--warning)' }, [driftWarn]));
       }
 
-      const sessionItem = createElement('div', { 
-        className: `session-item ${isActive ? 'active' : ''}`, 
-        dataset: { sessionId: s.session_id }
-      }, [
-        createElement('div', { className: 'session-item-title' }, [s.title || `对话 ${s.session_id.slice(0, 8)}`]),
-        createElement('div', { className: 'session-item-meta' }, metaChildren),
-        createElement('button', { className: 'btn-delete-session', title: '删除会话' }, ['🗑'])
-      ]);
+      const sessionItem = createElement(
+        'div',
+        {
+          className: `session-item ${isActive ? 'active' : ''}`,
+          dataset: { sessionId: s.session_id },
+        },
+        [
+          createElement('div', { className: 'session-item-title' }, [
+            s.title || `对话 ${s.session_id.slice(0, 8)}`,
+          ]),
+          createElement('div', { className: 'session-item-meta' }, metaChildren),
+          createElement('button', { className: 'btn-delete-session', title: '删除会话' }, ['🗑']),
+        ],
+      );
 
       sessionItem.addEventListener('click', (e) => {
         if (e.target.closest('.btn-delete-session')) return;
@@ -126,7 +136,6 @@ export async function loadSessionList() {
     });
 
     list.replaceChildren(...items);
-
   } catch (_e) {}
 }
 
@@ -151,8 +160,8 @@ export async function selectSession(sessionId) {
       container.replaceChildren(
         createElement('div', { style: 'padding:40px;text-align:center;color:var(--text-muted)' }, [
           createElement('div', { style: 'font-size:32px;margin-bottom:12px' }, ['📭']),
-          CHAT.emptySession
-        ])
+          CHAT.emptySession,
+        ]),
       );
     } else {
       messages.forEach((msg) => {
@@ -194,37 +203,73 @@ function _showSessionDetail(sessionId, session) {
   const createdAt = session.created_at ? formatTime(session.created_at) : '--';
   const lastActivity = session.last_activity ? formatTime(session.last_activity) : '--';
 
-  const summaryChild = session.summary ? createElement('div', {}, [
-    createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['摘要']),
-    createElement('div', { style: 'font-size:13px' }, [session.summary])
-  ]) : null;
+  const summaryChild = session.summary
+    ? createElement('div', {}, [
+        createElement(
+          'div',
+          { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+          ['摘要'],
+        ),
+        createElement('div', { style: 'font-size:13px' }, [session.summary]),
+      ])
+    : null;
 
   content.replaceChildren(
-    createElement('div', { style: 'display:flex;flex-direction:column;gap:12px' }, [
-      createElement('div', {}, [
-        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['会话 ID']),
-        createElement('div', { style: 'font-family:monospace;font-size:12px;word-break:break-all' }, [sessionId])
-      ]),
-      createElement('div', { style: 'display:flex;gap:16px' }, [
+    createElement(
+      'div',
+      { style: 'display:flex;flex-direction:column;gap:12px' },
+      [
         createElement('div', {}, [
-          createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['消息数']),
-          createElement('div', { style: 'font-size:14px;font-weight:600' }, [msgCount])
+          createElement(
+            'div',
+            { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+            ['会话 ID'],
+          ),
+          createElement(
+            'div',
+            { style: 'font-family:monospace;font-size:12px;word-break:break-all' },
+            [sessionId],
+          ),
+        ]),
+        createElement('div', { style: 'display:flex;gap:16px' }, [
+          createElement('div', {}, [
+            createElement(
+              'div',
+              { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+              ['消息数'],
+            ),
+            createElement('div', { style: 'font-size:14px;font-weight:600' }, [msgCount]),
+          ]),
+          createElement('div', {}, [
+            createElement(
+              'div',
+              { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+              ['漂移次数'],
+            ),
+            createElement('div', { style: 'font-size:14px;font-weight:600' }, [
+              session.drift_count || 0,
+            ]),
+          ]),
         ]),
         createElement('div', {}, [
-          createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['漂移次数']),
-          createElement('div', { style: 'font-size:14px;font-weight:600' }, [session.drift_count || 0])
-        ])
-      ]),
-      createElement('div', {}, [
-        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['创建时间']),
-        createElement('div', { style: 'font-size:13px' }, [createdAt])
-      ]),
-      createElement('div', {}, [
-        createElement('div', { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' }, ['最后活动']),
-        createElement('div', { style: 'font-size:13px' }, [lastActivity])
-      ]),
-      summaryChild
-    ].filter(Boolean))
+          createElement(
+            'div',
+            { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+            ['创建时间'],
+          ),
+          createElement('div', { style: 'font-size:13px' }, [createdAt]),
+        ]),
+        createElement('div', {}, [
+          createElement(
+            'div',
+            { style: 'font-size:11px;color:var(--text-muted);margin-bottom:2px' },
+            ['最后活动'],
+          ),
+          createElement('div', { style: 'font-size:13px' }, [lastActivity]),
+        ]),
+        summaryChild,
+      ].filter(Boolean),
+    ),
   );
 
   panel.classList.add('open');

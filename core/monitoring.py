@@ -80,7 +80,9 @@ class MetricsCollector:
         # v5.0: 查询日志（用于热门问题和质量趋势）
         self._query_log: deque = deque(maxlen=1000)  # (timestamp, query, query_type, score, agent)
         # v5.0: 反馈分类统计
-        self._feedback_by_category: dict[str, dict[str, int]] = {}  # category -> {positive, negative}
+        self._feedback_by_category: dict[
+            str, dict[str, int]
+        ] = {}  # category -> {positive, negative}
 
     def _ensure_lock(self):
         """P1-2: Lock 已在 __init__ 中初始化，直接返回"""
@@ -267,6 +269,7 @@ class MetricsCollector:
         """最近 N 天质量评分趋势（基于真实查询日志）"""
         async with self._ensure_lock():
             from datetime import date, timedelta
+
             now = time.time()
             trends = []
             for i in range(days - 1, -1, -1):
@@ -279,17 +282,20 @@ class MetricsCollector:
                 else:
                     score = 0.0
                 d = date.today() - timedelta(days=i)
-                trends.append({
-                    "date": d.isoformat(),
-                    "avg_score": round(score, 1),
-                    "total_queries": len(day_entries),
-                })
+                trends.append(
+                    {
+                        "date": d.isoformat(),
+                        "avg_score": round(score, 1),
+                        "total_queries": len(day_entries),
+                    }
+                )
             return trends
 
     async def get_hot_questions(self, limit: int = 10) -> list[dict]:
         """热门问题 TOP N（基于真实查询日志）"""
         async with self._ensure_lock():
             from collections import Counter
+
             # 按 agent 分类统计查询频次
             agent_counts: Counter = Counter()
             for entry in self._query_log:
@@ -331,6 +337,7 @@ class MetricsCollector:
             }
 
         # --- Section: Snapshot Persistence (optional, requires Redis) ---
+
     async def save_snapshot(self, redis_client=None) -> bool:
         """持久化指标快照到 Redis（可选，需 Redis 可用）"""
         if redis_client is None:

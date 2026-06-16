@@ -14,7 +14,11 @@ export function renderAgentChart(data, containerId = 'agentChart') {
   const entries = Object.entries(counts);
   if (entries.length === 0) {
     container.replaceChildren(
-      createElement('div', { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' }, ['暂无数据'])
+      createElement(
+        'div',
+        { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' },
+        ['暂无数据'],
+      ),
     );
     return;
   }
@@ -22,8 +26,11 @@ export function renderAgentChart(data, containerId = 'agentChart') {
   const items = entries.map(([name, count], i) => {
     return createElement('div', { className: 'bar-item' }, [
       createElement('div', { className: 'bar-value' }, [count]),
-      createElement('div', { className: `bar-fill ${colors[i % colors.length]}`, style: `height:${(count / maxVal) * 100}%` }),
-      createElement('div', { className: 'bar-label' }, [name])
+      createElement('div', {
+        className: `bar-fill ${colors[i % colors.length]}`,
+        style: `height:${(count / maxVal) * 100}%`,
+      }),
+      createElement('div', { className: 'bar-label' }, [name]),
     ]);
   });
   container.replaceChildren(...items);
@@ -56,7 +63,11 @@ export function renderModeChart(data, containerId = 'modeChart') {
   const entries = Object.entries(counts);
   if (entries.length === 0) {
     container.replaceChildren(
-      createElement('div', { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' }, ['暂无数据'])
+      createElement(
+        'div',
+        { style: 'text-align:center;padding:40px;color:var(--text-muted);width:100%' },
+        ['暂无数据'],
+      ),
     );
     return;
   }
@@ -64,8 +75,11 @@ export function renderModeChart(data, containerId = 'modeChart') {
   const items = entries.map(([name, count]) => {
     return createElement('div', { className: 'bar-item' }, [
       createElement('div', { className: 'bar-value' }, [count]),
-      createElement('div', { className: `bar-fill ${modeColors[name] || 'primary'}`, style: `height:${(count / maxVal) * 100}%` }),
-      createElement('div', { className: 'bar-label' }, [modeLabels[name] || name])
+      createElement('div', {
+        className: `bar-fill ${modeColors[name] || 'primary'}`,
+        style: `height:${(count / maxVal) * 100}%`,
+      }),
+      createElement('div', { className: 'bar-label' }, [modeLabels[name] || name]),
     ]);
   });
   container.replaceChildren(...items);

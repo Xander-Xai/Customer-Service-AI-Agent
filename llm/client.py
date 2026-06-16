@@ -136,13 +136,15 @@ class OpenAICompatibleClient:
                 return
             from core.token_tracker import TokenUsage
 
-            await tracker.record(TokenUsage(
-                prompt_tokens=usage.get("prompt_tokens", 0),
-                completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("total_tokens", 0),
-                model=result.get("model", self.model),
-                latency_ms=latency_ms,
-            ))
+            await tracker.record(
+                TokenUsage(
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                    model=result.get("model", self.model),
+                    latency_ms=latency_ms,
+                )
+            )
         except Exception:
             pass  # 追踪失败不影响主流程
 
@@ -154,12 +156,13 @@ class OpenAICompatibleClient:
         # v5.3: Token Quota 检查
         try:
             from core.token_quota import get_quota_manager
+
             quota_mgr = get_quota_manager()
             # 尝试从消息中提取 user_id（如果有的话）
             user_id = None
             for msg in messages:
-                if hasattr(msg, 'metadata') and msg.metadata:
-                    user_id = msg.metadata.get('user_id')
+                if hasattr(msg, "metadata") and msg.metadata:
+                    user_id = msg.metadata.get("user_id")
                     break
             if user_id:
                 quota_check = quota_mgr.check_quota(str(user_id))
@@ -213,6 +216,7 @@ class OpenAICompatibleClient:
                     # v5.3: Token Quota 消耗
                     try:
                         from core.token_quota import get_quota_manager
+
                         quota_mgr = get_quota_manager()
                         usage = result.get("usage", {})
                         total_tokens = usage.get("total_tokens", 0)

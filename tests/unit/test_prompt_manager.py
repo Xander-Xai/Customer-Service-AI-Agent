@@ -26,7 +26,9 @@ class TestPromptManager:
         pm = PromptManager(cache_ttl=60.0)
 
         # 模拟 DB 返回
-        with patch.object(pm, "_load_from_db", return_value=("DB 版本 Prompt", "v1.0")) as mock_load:
+        with patch.object(
+            pm, "_load_from_db", return_value=("DB 版本 Prompt", "v1.0")
+        ) as mock_load:
             result1 = pm.get_prompt("product_agent", default_prompt="默认")
             result2 = pm.get_prompt("product_agent", default_prompt="默认")
 
@@ -39,10 +41,14 @@ class TestPromptManager:
         """缓存过期后重新查询 DB"""
         pm = PromptManager(cache_ttl=0.1)  # 100ms TTL
 
-        with patch.object(pm, "_load_from_db", side_effect=[
-            ("v1 Prompt", "v1.0"),
-            ("v2 Prompt", "v2.0"),
-        ]) as mock_load:
+        with patch.object(
+            pm,
+            "_load_from_db",
+            side_effect=[
+                ("v1 Prompt", "v1.0"),
+                ("v2 Prompt", "v2.0"),
+            ],
+        ) as mock_load:
             result1 = pm.get_prompt("tech_agent", default_prompt="默认")
             time.sleep(0.15)  # 等待缓存过期
             result2 = pm.get_prompt("tech_agent", default_prompt="默认")
@@ -158,7 +164,9 @@ class TestPromptManager:
         mock_pv.created_at = MagicMock()
 
         mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [mock_pv]
+        mock_db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [
+            mock_pv
+        ]
 
         with patch("db.database.get_db_session", return_value=mock_db):
             versions = pm.list_versions("product_agent")
@@ -173,7 +181,8 @@ class TestPromptManager:
         pm = PromptManager()
         mock_db = MagicMock()
         mock_db.query.return_value.distinct.return_value.all.return_value = [
-            ("product_agent",), ("tech_agent",)
+            ("product_agent",),
+            ("tech_agent",),
         ]
 
         with patch("db.database.get_db_session", return_value=mock_db):
@@ -233,9 +242,11 @@ class TestPromptManagerAPI:
         from fastapi.testclient import TestClient
 
         app, pm = self._build_app()
-        with patch("core.prompt_manager.PromptManager.list_agents", return_value=[]):
-            with TestClient(app) as client:
-                resp = client.get("/api/admin/prompts/agents")
+        with (
+            patch("core.prompt_manager.PromptManager.list_agents", return_value=[]),
+            TestClient(app) as client,
+        ):
+            resp = client.get("/api/admin/prompts/agents")
         assert resp.status_code == 200
         assert resp.json()["agents"] == []
 
@@ -244,9 +255,14 @@ class TestPromptManagerAPI:
         from fastapi.testclient import TestClient
 
         app, pm = self._build_app()
-        with patch("core.prompt_manager.PromptManager.list_agents", return_value=["product_agent", "tech_agent"]):
-            with TestClient(app) as client:
-                resp = client.get("/api/admin/prompts/agents")
+        with (
+            patch(
+                "core.prompt_manager.PromptManager.list_agents",
+                return_value=["product_agent", "tech_agent"],
+            ),
+            TestClient(app) as client,
+        ):
+            resp = client.get("/api/admin/prompts/agents")
         assert resp.status_code == 200
         assert len(resp.json()["agents"]) == 2
 
@@ -256,11 +272,21 @@ class TestPromptManagerAPI:
 
         app, pm = self._build_app()
         mock_versions = [
-            {"id": 1, "version": "v1.0", "is_active": True, "score_avg": 0.8, "feedback_count": 5, "prompt_preview": "test...", "created_at": "2026-01-01"},
+            {
+                "id": 1,
+                "version": "v1.0",
+                "is_active": True,
+                "score_avg": 0.8,
+                "feedback_count": 5,
+                "prompt_preview": "test...",
+                "created_at": "2026-01-01",
+            },
         ]
-        with patch("core.prompt_manager.PromptManager.list_versions", return_value=mock_versions):
-            with TestClient(app) as client:
-                resp = client.get("/api/admin/prompts/product_agent")
+        with (
+            patch("core.prompt_manager.PromptManager.list_versions", return_value=mock_versions),
+            TestClient(app) as client,
+        ):
+            resp = client.get("/api/admin/prompts/product_agent")
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
@@ -269,13 +295,25 @@ class TestPromptManagerAPI:
         from fastapi.testclient import TestClient
 
         app, pm = self._build_app()
-        mock_result = {"id": 1, "agent_name": "product_agent", "version": "v2.0", "is_active": 1, "created_at": "2026-01-01"}
-        with patch("core.prompt_manager.PromptManager.save_prompt", return_value=mock_result):
-            with TestClient(app) as client:
-                resp = client.post(
-                    "/api/admin/prompts/product_agent",
-                    json={"prompt_text": "这是一个新的产品专家 Prompt，长度超过10字符", "version": "v2.0", "activate": True},
-                )
+        mock_result = {
+            "id": 1,
+            "agent_name": "product_agent",
+            "version": "v2.0",
+            "is_active": 1,
+            "created_at": "2026-01-01",
+        }
+        with (
+            patch("core.prompt_manager.PromptManager.save_prompt", return_value=mock_result),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/api/admin/prompts/product_agent",
+                json={
+                    "prompt_text": "这是一个新的产品专家 Prompt，长度超过10字符",
+                    "version": "v2.0",
+                    "activate": True,
+                },
+            )
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
         assert resp.json()["prompt"]["version"] == "v2.0"

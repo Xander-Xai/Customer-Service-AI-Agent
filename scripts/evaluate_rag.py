@@ -220,7 +220,7 @@ EVAL_DATASET: list[dict[str, Any]] = [
 
 def compute_faithfulness(answer: str, contexts: list[str]) -> float:
     """简单的 faithfulness 计算：回答中有多少句子被上下文支持"""
-    sentences = re.split(r'[。！？\n]', answer)
+    sentences = re.split(r"[。！？\n]", answer)
     sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 5]
     if not sentences:
         return 0.0
@@ -319,7 +319,9 @@ async def evaluate_rag():
             dcg += rel / math.log2(rank + 1)
         # IDCG: 如果所有相关文档都排在最前面
         n_relevant = min(precision_hits, K)
-        idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_relevant + 1)) if n_relevant > 0 else 0
+        idcg = (
+            sum(1.0 / math.log2(i + 1) for i in range(1, n_relevant + 1)) if n_relevant > 0 else 0
+        )
         ndcg_at_k = dcg / idcg if idcg > 0 else 0.0
 
         # Faithfulness: 检索结果与查询关键词的匹配质量
@@ -424,7 +426,9 @@ async def evaluate_rag():
     print()
     print(f'  "我的 RAG 系统使用 ChromaDB 向量检索，{pk_count + faq_count + ts_count} 篇文档')
     print("   分 3 个 collection（产品知识/FAQ/技术支持）。")
-    print(f"   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}，Faithfulness {avg_faithfulness:.1%}。")
+    print(
+        f"   评估结果：Top-{K} Hit Rate {hit_rate:.1%}，MRR {avg_mrr:.3f}，Faithfulness {avg_faithfulness:.1%}。"
+    )
     print(f'   这意味着 {hit_rate:.0%} 的用户问题能在前 {K} 条检索结果中找到相关答案。"')
     print()
     print("=" * 70)

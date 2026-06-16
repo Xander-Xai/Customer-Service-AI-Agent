@@ -1,6 +1,7 @@
 """
 测试 auth.service 和 tools.erp_tools（补齐覆盖率至 80%+）
 """
+
 import asyncio
 import hashlib
 import os
@@ -10,6 +11,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ─── auth.service ───────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _reset_auth_globals(monkeypatch):
+    """Reset auth.service globals before each test to prevent cross-test/state leakage."""
+    import auth.service
+
+    monkeypatch.setattr(auth.service, "_revoked_jtis", set())
+    dl = auth.service._TokenDenylist()
+    dl._use_redis = False
+    monkeypatch.setattr(auth.service, "_denylist", dl)
 
 
 class TestPasswordHashing:
@@ -22,7 +33,7 @@ class TestPasswordHashing:
         assert "$" in h
         salt, dk = h.split("$", 1)
         assert len(salt) == 32  # 16 bytes hex
-        assert len(dk) == 64    # sha256 hex
+        assert len(dk) == 64  # sha256 hex
 
     def test_hash_password_unique_salt(self):
         from auth.service import hash_password
@@ -75,7 +86,9 @@ class TestTokenCreation:
         from auth.service import create_token
 
         token = create_token(1, "testuser", "customer")
-        payload = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])
+        payload = pyjwt.decode(
+            token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"]
+        )
         assert payload["sub"] == "1"
         assert payload["username"] == "testuser"
         assert payload["role"] == "customer"
@@ -91,7 +104,9 @@ class TestTokenCreation:
         from auth.service import create_access_token
 
         token = create_access_token(1, "user", "admin")
-        payload = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])
+        payload = pyjwt.decode(
+            token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"]
+        )
         assert payload["type"] == "access"
 
     @patch("auth.service._config")
@@ -148,7 +163,10 @@ class TestTokenDecode:
         token = create_token(1, "u", "r")
         # Manually decode to get jti
         import jwt as pyjwt
-        jti = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])["jti"]
+
+        jti = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])[
+            "jti"
+        ]
         _revoked_jtis.add(jti)
         try:
             assert decode_token(token) is None
@@ -160,23 +178,25 @@ class TestTokenDecodeAsync:
     """异步 token 解码"""
 
     @patch("auth.service._config")
-    def test_decode_async_valid(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_decode_async_valid(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
         mock_config.REDIS_JWT_PREFIX = "csai:jwt:blacklist:"
         from auth.service import create_token, decode_token_async
 
         token = create_token(1, "u", "r")
-        result = asyncio.get_event_loop().run_until_complete(decode_token_async(token))
+        result = await decode_token_async(token)
         assert result is not None
         assert result["sub"] == 1
 
     @patch("auth.service._config")
-    def test_decode_async_no_secret(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_decode_async_no_secret(self, mock_config):
         mock_config.JWT_SECRET = ""
         from auth.service import decode_token_async
 
-        result = asyncio.get_event_loop().run_until_complete(decode_token_async("bad"))
+        result = await decode_token_async("bad")
         assert result is None
 
 
@@ -184,7 +204,8 @@ class TestTokenRevocation:
     """Token 吊销"""
 
     @patch("auth.service._config")
-    def test_revoke_token(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_revoke_token(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
         mock_config.REDIS_JWT_PREFIX = "csai:jwt:blacklist:"
@@ -192,9 +213,12 @@ class TestTokenRevocation:
 
         token = create_token(1, "u", "r")
         import jwt as pyjwt
-        jti = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])["jti"]
 
-        result = asyncio.get_event_loop().run_until_complete(revoke_token(token))
+        jti = pyjwt.decode(token, "test_secret_key_at_least_32_chars_long!!", algorithms=["HS256"])[
+            "jti"
+        ]
+
+        result = await revoke_token(token)
         assert result is True
         assert jti in _revoked_jtis
         # After revocation, decode should fail (memory path)
@@ -204,36 +228,39 @@ class TestTokenRevocation:
             _revoked_jtis.discard(jti)
 
     @patch("auth.service._config")
-    def test_revoke_invalid_token(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_revoke_invalid_token(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         from auth.service import revoke_token
 
-        result = asyncio.get_event_loop().run_until_complete(revoke_token("bad"))
+        result = await revoke_token("bad")
         assert result is False
 
 
 class TestTokenDenylist:
     """内存模式 Token 黑名单"""
 
-    def test_memory_denylist_add_contains(self):
+    @pytest.mark.asyncio
+    async def test_memory_denylist_add_contains(self):
         from auth.service import _TokenDenylist
 
         dl = _TokenDenylist()
         dl._use_redis = False  # force memory mode
-        asyncio.get_event_loop().run_until_complete(dl.add("jti1", 60))
-        result = asyncio.get_event_loop().run_until_complete(dl.contains("jti1"))
+        await dl.add("jti1", 60)
+        result = await dl.contains("jti1")
         assert result is True
-        result = asyncio.get_event_loop().run_until_complete(dl.contains("jti2"))
+        result = await dl.contains("jti2")
         assert result is False
 
-    def test_memory_denylist_eviction(self):
+    @pytest.mark.asyncio
+    async def test_memory_denylist_eviction(self):
         from auth.service import _TokenDenylist
 
         dl = _TokenDenylist()
         dl._use_redis = False
         dl.MAX_DENYLIST_SIZE = 5
         for i in range(6):
-            asyncio.get_event_loop().run_until_complete(dl.add(f"jti_{i}", 60))
+            await dl.add(f"jti_{i}", 60)
         # Should have evicted some entries
         assert len(dl._memory_set) <= 5
 
@@ -251,11 +278,13 @@ class TestUserFunctions:
         mock_user = MagicMock()
         mock_user.id = 1
         mock_session.refresh = MagicMock()
-        with patch("auth.service.get_db_session", return_value=mock_session):
-            with patch("auth.service.User", return_value=mock_user):
-                result = register_user("newuser", "password123")
-                assert result["success"] is True
-                assert result["username"] == "newuser"
+        with (
+            patch("auth.service.get_db_session", return_value=mock_session),
+            patch("auth.service.User", return_value=mock_user),
+        ):
+            result = register_user("newuser", "password123")
+            assert result["success"] is True
+            assert result["username"] == "newuser"
 
     @patch("auth.service._config")
     def test_register_user_duplicate(self, mock_config):
@@ -279,13 +308,16 @@ class TestUserFunctions:
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = None
         mock_session.commit.side_effect = SQLAlchemyError("db error")
-        with patch("auth.service.get_db_session", return_value=mock_session):
-            with patch("auth.service.User", return_value=MagicMock()):
-                result = register_user("u", "p")
-                assert result["success"] is False
+        with (
+            patch("auth.service.get_db_session", return_value=mock_session),
+            patch("auth.service.User", return_value=MagicMock()),
+        ):
+            result = register_user("u", "p")
+            assert result["success"] is False
 
     @patch("auth.service._config")
-    def test_authenticate_user_success(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_authenticate_user_success(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.JWT_EXPIRE_HOURS = 72
         mock_config.JWT_REFRESH_EXPIRE_HOURS = 168
@@ -303,16 +335,15 @@ class TestUserFunctions:
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = mock_user
         with patch("auth.service.get_db_session", return_value=mock_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                authenticate_user("alice", "correct")
-            )
+            result = await authenticate_user("alice", "correct")
             assert result is not None
             assert result["username"] == "alice"
             assert "token" in result
             assert "refresh_token" in result
 
     @patch("auth.service._config")
-    def test_authenticate_user_wrong_password(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_authenticate_user_wrong_password(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         from auth.service import authenticate_user, hash_password
 
@@ -321,22 +352,19 @@ class TestUserFunctions:
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = mock_user
         with patch("auth.service.get_db_session", return_value=mock_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                authenticate_user("alice", "wrong")
-            )
+            result = await authenticate_user("alice", "wrong")
             assert result is None
 
     @patch("auth.service._config")
-    def test_authenticate_user_not_found(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_authenticate_user_not_found(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         from auth.service import authenticate_user
 
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = None
         with patch("auth.service.get_db_session", return_value=mock_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                authenticate_user("nobody", "pw")
-            )
+            result = await authenticate_user("nobody", "pw")
             assert result is None
 
     @patch("auth.service._config")
@@ -385,13 +413,15 @@ class TestUserFunctions:
 
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.first.return_value = None
-        with patch("auth.service.get_db_session", return_value=mock_session):
-            with patch("auth.service.User") as MockUser:
-                mock_admin = MagicMock()
-                MockUser.return_value = mock_admin
-                init_default_admin()
-                mock_session.add.assert_called_once_with(mock_admin)
-                mock_session.commit.assert_called_once()
+        with (
+            patch("auth.service.get_db_session", return_value=mock_session),
+            patch("auth.service.User") as MockUser,
+        ):
+            mock_admin = MagicMock()
+            MockUser.return_value = mock_admin
+            init_default_admin()
+            mock_session.add.assert_called_once_with(mock_admin)
+            mock_session.commit.assert_called_once()
 
     @patch("auth.service._config")
     def test_init_default_admin_exists(self, mock_config):
@@ -409,7 +439,8 @@ class TestRevokeUserTokens:
     """用户 Token 吊销"""
 
     @patch("auth.service._config")
-    def test_revoke_without_redis(self, mock_config):
+    @pytest.mark.asyncio
+    async def test_revoke_without_redis(self, mock_config):
         mock_config.JWT_SECRET = "test_secret_key_at_least_32_chars_long!!"
         mock_config.REDIS_JWT_PREFIX = "csai:jwt:blacklist:"
         from auth.service import revoke_user_tokens
@@ -417,7 +448,7 @@ class TestRevokeUserTokens:
         # Patch _denylist to not use redis
         with patch("auth.service._denylist") as mock_dl:
             mock_dl._use_redis = False
-            result = asyncio.get_event_loop().run_until_complete(revoke_user_tokens(1))
+            result = await revoke_user_tokens(1)
             assert result == 0
 
 
@@ -435,13 +466,20 @@ class TestERPTools:
     @pytest.fixture
     def registry(self, mock_erp):
         from tools.erp_tools import create_erp_tools
+
         return create_erp_tools(mock_erp)
 
     @pytest.mark.asyncio
     async def test_query_product_found(self, registry, mock_erp):
         mock_erp.query_product.return_value = [
-            {"name": "面霜", "category": "护肤", "price": 199, "specs": "50ml",
-             "ingredients": "玻尿酸", "suitable": "干性"}
+            {
+                "name": "面霜",
+                "category": "护肤",
+                "price": 199,
+                "specs": "50ml",
+                "ingredients": "玻尿酸",
+                "suitable": "干性",
+            }
         ]
         tools = registry.list_tools()
         assert "query_product" in tools
@@ -473,8 +511,14 @@ class TestERPTools:
     @pytest.mark.asyncio
     async def test_query_order_found(self, registry, mock_erp):
         mock_erp.query_order.return_value = [
-            {"order_id": "ORD001", "customer_name": "张三", "status": "已发货",
-             "total": 599, "tracking": "SF123456", "created": "2026-06-01"}
+            {
+                "order_id": "ORD001",
+                "customer_name": "张三",
+                "status": "已发货",
+                "total": 599,
+                "tracking": "SF123456",
+                "created": "2026-06-01",
+            }
         ]
         result = await registry.execute("query_order", {"order_id": "ORD001", "customer_id": ""})
         assert "ORD001" in result
@@ -489,8 +533,8 @@ class TestERPTools:
     @pytest.mark.asyncio
     async def test_query_order_limit_5(self, registry, mock_erp):
         mock_erp.query_order.return_value = [
-            {"order_id": f"ORD{i}", "customer_name": "C", "status": "S",
-             "total": 100} for i in range(10)
+            {"order_id": f"ORD{i}", "customer_name": "C", "status": "S", "total": 100}
+            for i in range(10)
         ]
         result = await registry.execute("query_order", {"order_id": "", "customer_id": "C001"})
         # Only first 5 orders shown
@@ -499,8 +543,12 @@ class TestERPTools:
     @pytest.mark.asyncio
     async def test_query_customer_found(self, registry, mock_erp):
         mock_erp.query_customer.return_value = {
-            "name": "李四", "phone": "13800000000", "level": "VIP",
-            "total_spent": 10000, "total_orders": 25, "address": "北京市"
+            "name": "李四",
+            "phone": "13800000000",
+            "level": "VIP",
+            "total_spent": 10000,
+            "total_orders": 25,
+            "address": "北京市",
         }
         result = await registry.execute("query_customer", {"customer_id": "C001"})
         assert "李四" in result

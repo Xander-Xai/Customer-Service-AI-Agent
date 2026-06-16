@@ -8,7 +8,6 @@ from core.graph_builder import _format_duration
 
 
 class TestFormatDuration:
-
     def test_milliseconds(self):
         assert _format_duration(0.001) == "1ms"
         assert _format_duration(0.5) == "500ms"
@@ -24,11 +23,11 @@ class TestFormatDuration:
 
 
 class TestMakeGraph:
-
     def test_make_graph_creates_container_and_builds(self):
         # Reset singleton
         import core.graph_builder as gb
         from core.graph_builder import make_graph
+
         gb._default_container = None
 
         with patch("core.graph_builder.build_graph") as mock_build:
@@ -40,6 +39,7 @@ class TestMakeGraph:
     def test_make_graph_reuses_singleton(self):
         import core.graph_builder as gb
         from core.graph_builder import make_graph
+
         gb._default_container = None
 
         with patch("core.graph_builder.build_graph") as mock_build:
@@ -51,4 +51,5 @@ class TestMakeGraph:
 
     def teardown_method(self):
         import core.graph_builder as gb
+
         gb._default_container = None

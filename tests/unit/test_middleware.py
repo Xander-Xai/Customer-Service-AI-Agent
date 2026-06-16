@@ -82,8 +82,10 @@ def _make_app():
 @pytest.fixture()
 def client():
     """DEV_MODE=False, 无 Redis: 用于测试安全头、认证、CSRF 等"""
-    with patch("api.middleware.get_redis_client", return_value=None), \
-         patch("api.middleware.DEV_MODE", False):
+    with (
+        patch("api.middleware.get_redis_client", return_value=None),
+        patch("api.middleware.DEV_MODE", False),
+    ):
         app = _make_app()
         yield TestClient(app, raise_server_exceptions=False)
 
@@ -91,8 +93,10 @@ def client():
 @pytest.fixture()
 def dev_client():
     """DEV_MODE=True, 无 Redis: 用于测试限流（auth bypass）"""
-    with patch("api.middleware.get_redis_client", return_value=None), \
-         patch("api.middleware.DEV_MODE", True):
+    with (
+        patch("api.middleware.get_redis_client", return_value=None),
+        patch("api.middleware.DEV_MODE", True),
+    ):
         app = _make_app()
         yield TestClient(app, raise_server_exceptions=False)
 
@@ -105,15 +109,18 @@ def dev_client():
 class TestRateLimitWhitelist:
     """白名单路径不被限流，即使大量请求也不会返回 429"""
 
-    @pytest.mark.parametrize("path", [
-        "/",
-        "/api/health",
-        "/login.html",
-        "/admin.html",
-        "/widget.html",
-        "/static/style.css",
-        "/ws/connect",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/api/health",
+            "/login.html",
+            "/admin.html",
+            "/widget.html",
+            "/static/style.css",
+            "/ws/connect",
+        ],
+    )
     def test_whitelist_path_not_rate_limited(self, dev_client, path):
         """白名单路径即使超量请求也不应返回 429"""
         for _ in range(100):
@@ -194,16 +201,18 @@ class TestRateLimitLogic:
         """请求到达 RATE_LIMIT_MAX(60) 后返回 429"""
         for i in range(60):
             r = dev_client.get("/api/test")
-            assert r.status_code == 200, f"第 {i+1} 次请求应成功"
+            assert r.status_code == 200, f"第 {i + 1} 次请求应成功"
         resp = dev_client.get("/api/test")
         assert resp.status_code == 429
         assert "Rate limit" in resp.json()["error"]
 
     def test_custom_rate_limit_max(self):
         """通过 RATE_LIMIT_MAX 环境变量自定义限流阈值"""
-        with patch.dict(os.environ, {"RATE_LIMIT_MAX": "5", "RATE_LIMIT_WINDOW": "60"}), \
-             patch("api.middleware.get_redis_client", return_value=None), \
-             patch("api.middleware.DEV_MODE", True):
+        with (
+            patch.dict(os.environ, {"RATE_LIMIT_MAX": "5", "RATE_LIMIT_WINDOW": "60"}),
+            patch("api.middleware.get_redis_client", return_value=None),
+            patch("api.middleware.DEV_MODE", True),
+        ):
             app = _make_app()
             c = TestClient(app, raise_server_exceptions=False)
             for _ in range(5):
@@ -248,14 +257,17 @@ class TestRateLimitLogic:
 class TestAuthWhitelist:
     """认证白名单路径无需凭证即可访问"""
 
-    @pytest.mark.parametrize("path", [
-        "/",
-        "/api/health",
-        "/login.html",
-        "/admin.html",
-        "/widget.html",
-        "/static/style.css",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/api/health",
+            "/login.html",
+            "/admin.html",
+            "/widget.html",
+            "/static/style.css",
+        ],
+    )
     def test_whitelist_no_auth_required(self, client, path):
         """白名单路径在无认证时返回 200"""
         resp = client.get(path)
@@ -397,11 +409,13 @@ class TestRolePermissions:
 
     def test_customer_permissions(self):
         from api.middleware import check_role_permission
+
         assert check_role_permission("customer", "chat") is True
         assert check_role_permission("customer", "user_management") is False
 
     def test_admin_permissions(self):
         from api.middleware import check_role_permission
+
         assert check_role_permission("admin", "chat") is True
         assert check_role_permission("admin", "user_management") is True
         assert check_role_permission("admin", "knowledge_management") is True
@@ -409,5 +423,6 @@ class TestRolePermissions:
 
     def test_unknown_role_has_no_permissions(self):
         from api.middleware import check_role_permission
+
         assert check_role_permission("hacker", "chat") is False
         assert check_role_permission("", "chat") is False

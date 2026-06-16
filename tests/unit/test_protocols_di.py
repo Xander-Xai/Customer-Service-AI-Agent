@@ -67,6 +67,7 @@ class TestAgentConstructorInjection:
         class MockLLM:
             async def async_invoke(self, messages, **kw):
                 return None
+
             async def async_invoke_stream(self, messages, **kw):
                 yield ""
 
@@ -125,6 +126,7 @@ class TestDependencyInjection:
         mock_request.app.state.container = mock_container
 
         from api.dependencies import get_container
+
         result = get_container(mock_request)
         assert result is mock_container
 
@@ -138,5 +140,6 @@ class TestDependencyInjection:
         mock_request.app.state.container = None
 
         from api.dependencies import get_container
+
         with pytest.raises(RuntimeError, match="ServiceContainer 未初始化"):
             get_container(mock_request)

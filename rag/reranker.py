@@ -96,7 +96,7 @@ class BM25Reranker:
             idf[term] = math.log((n_docs - doc_freq + 0.5) / (doc_freq + 0.5) + 1)
 
         # 计算每个文档的 BM25 分数
-        for i, (result, doc_terms) in enumerate(zip(results, doc_terms_list)):
+        for i, (_result, doc_terms) in enumerate(zip(results, doc_terms_list, strict=True)):
             score = 0.0
             dl = len(doc_terms)
             term_counts = Counter(doc_terms)
@@ -104,7 +104,9 @@ class BM25Reranker:
                 if qt not in term_counts:
                     continue
                 tf = term_counts[qt]
-                tf_norm = (tf * (self.K1 + 1)) / (tf + self.K1 * (1 - self.B + self.B * dl / max(avg_dl, 1)))
+                tf_norm = (tf * (self.K1 + 1)) / (
+                    tf + self.K1 * (1 - self.B + self.B * dl / max(avg_dl, 1))
+                )
                 score += idf.get(qt, 0) * tf_norm
             results[i]["rerank_score"] = score
 
@@ -117,6 +119,7 @@ class BM25Reranker:
         text = text.lower()
         try:
             import jieba
+
             # 使用 jieba 进行精确模式分词
             tokens = list(jieba.cut(text))
             # 过滤掉空白符

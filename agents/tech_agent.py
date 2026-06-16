@@ -35,10 +35,14 @@ class TechAgent(BaseAgent):
         )
 
         # 写入技术诊断信息到黑板
-        await self._write_blackboard("tech.diagnosis", {
-            "query": customer_query,
-            "has_tech_context": bool(rag_context),
-        }, ttl=300)
+        await self._write_blackboard(
+            "tech.diagnosis",
+            {
+                "query": customer_query,
+                "has_tech_context": bool(rag_context),
+            },
+            ttl=300,
+        )
 
         return await self._process_with_llm(
             state,

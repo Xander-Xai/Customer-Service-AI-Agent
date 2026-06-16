@@ -7,6 +7,45 @@ from typing import Any
 
 from .base_agent import BaseAgent
 
+
+def _sanitize_pii(data: dict) -> dict:
+    """脱敏敏感个人信息，防止 PII 泄露到第三方 LLM"""
+    import copy
+
+    sanitized = copy.deepcopy(data)
+    # 脱敏手机号: 138****8888
+    phone = sanitized.get("phone", sanitized.get("mobile", ""))
+    if phone:
+        phone_str = str(phone)
+        if len(phone_str) >= 7:
+            sanitized["phone"] = phone_str[:3] + "****" + phone_str[-4:]
+        else:
+            sanitized["phone"] = "****"
+    # 脱敏地址: 保留到区/县级别
+    address = sanitized.get("address", "")
+    if address:
+        addr_str = str(address)
+        parts = addr_str.split()
+        if len(parts) > 2:
+            sanitized["address"] = " ".join(parts[:2]) + " ..."
+        elif len(parts) > 1:
+            sanitized["address"] = parts[0] + " ..."
+        else:
+            sanitized["address"] = "..."
+    # 消费总额转为范围
+    total = sanitized.get("total_spent", sanitized.get("total_amount", 0))
+    if isinstance(total, (int, float)):
+        if total < 1000:
+            sanitized["total_spent"] = "< 1,000"
+        elif total < 5000:
+            sanitized["total_spent"] = "1,000 - 5,000"
+        elif total < 10000:
+            sanitized["total_spent"] = "5,000 - 10,000"
+        else:
+            sanitized["total_spent"] = "> 10,000"
+    return sanitized
+
+
 _SYSTEM_PROMPT = """你是{self_name}，专门负责{self_role}。
 专业领域：{self_expertise}
 
@@ -68,9 +107,12 @@ class BillingAgent(BaseAgent):
         if customer_id:
             customer = await self.erp.query_customer(customer_id)
             if customer:
+                sanitized_customer = _sanitize_pii(customer)
                 results.append(
-                    f"客户: {customer.get('name', '')} | 电话: {customer.get('phone', '')} "
-                    f"| 等级: {customer.get('level', '')} | 累计消费: {customer.get('total_spent', 0)}元"
+                    f"客户: {sanitized_customer.get('name', '')} "
+                    f"| 电话: {sanitized_customer.get('phone', '')} "
+                    f"| 等级: {sanitized_customer.get('level', '')} "
+                    f"| 累计消费: {sanitized_customer.get('total_spent', 0)}元"
                 )
 
         return "\n".join(results) if results else ""

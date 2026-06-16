@@ -93,7 +93,11 @@ class QueryRouter:
         rule_type, rule_scores, complexity = rule_result
         rule_override = False
         final_type = llm_result["query_type"]
-        if rule_type and rule_type != llm_result["query_type"] and llm_result.get("confidence", 0) < 0.7:
+        if (
+            rule_type
+            and rule_type != llm_result["query_type"]
+            and llm_result.get("confidence", 0) < 0.7
+        ):
             final_type = rule_type
             rule_override = True
 
@@ -150,7 +154,7 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
                     return result
             return {"query_type": "general_inquiry", "confidence": 0.3, "raw": raw}
         except Exception as e:
-            logger.error(f"LLM 分类失败: {e}")
+            logger.error(f"LLM 分类失败: {e}", exc_info=True)
             return {"query_type": "general_inquiry", "confidence": 0.1, "raw": "llm_error"}
 
     def _rule_classify_and_score(

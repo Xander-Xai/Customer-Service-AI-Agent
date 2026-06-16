@@ -2,7 +2,6 @@
 RAG Reranker + Query Rewriter 测试（v5.1）
 """
 
-
 from rag.query_rewriter import QueryRewriter, create_query_rewriter
 from rag.reranker import BM25Reranker, CrossEncoderReranker, create_reranker
 
@@ -39,9 +38,7 @@ class TestBM25Reranker:
     def test_rerank_respects_top_k(self):
         """top_k 限制返回数量"""
         reranker = BM25Reranker()
-        results = [
-            {"content": f"文档{i}", "distance": float(i)} for i in range(10)
-        ]
+        results = [{"content": f"文档{i}", "distance": float(i)} for i in range(10)]
         result = reranker.rerank("测试", results, top_k=3)
         assert len(result) == 3
 

@@ -4,6 +4,7 @@ FastAPI 应用工厂 + 核心路由（v5.0 — 路由拆分后）
 中间件 → api/middleware.py | 聊天路由 → api/routes/chat.py
 WebSocket → api/routes/ws.py | 监控 → api/routes/monitoring.py
 """
+
 import asyncio
 import contextlib
 import os
@@ -47,10 +48,18 @@ _circuit_breaker_ref = None
 
 
 async def _run_graph(
-    session_id: str, query: str, stream_callback=None, multimodal_content=None
+    session_id: str,
+    query: str,
+    stream_callback=None,
+    multimodal_content=None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """执行 LangGraph 图（原生异步 + SLA 告警 + 解决状态追踪）"""
+    from core.shared_blackboard import set_blackboard_session_id
+    set_blackboard_session_id(session_id)
+
     start = time.time()
+
 
     state = {
         "session_id": session_id,
@@ -71,6 +80,8 @@ async def _run_graph(
     if multimodal_content:
         state["multimodal_content"] = multimodal_content
         state["has_multimodal"] = True
+    if user_id:
+        state["user_id"] = user_id
 
     try:
         # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传

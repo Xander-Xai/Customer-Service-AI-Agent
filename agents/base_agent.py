@@ -183,6 +183,10 @@ class BaseAgent(ABC):
 
     async def process_with_retry(self, state: dict[str, Any]) -> dict[str, Any]:
         """带指数退避重试的 async process 包装（v3.4: 仅重试瞬态错误）"""
+        from core.shared_blackboard import set_blackboard_session_id
+        session_id = state.get("session_id", "default")
+        set_blackboard_session_id(session_id)
+
         last_exception = None
         for attempt in range(RETRY_MAX_ATTEMPTS):
             try:
@@ -199,7 +203,8 @@ class BaseAgent(ABC):
             except Exception as e:
                 # 非瞬态错误（ValueError、TypeError 等）直接抛出
                 self.logger.error(
-                    f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (permanent): {e}"
+                    f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (permanent): {e}",
+                    exc_info=True,
                 )
                 raise
         raise last_exception
@@ -221,14 +226,14 @@ class BaseAgent(ABC):
                 context_lines.append(f"{role}: {content}")
             return "\n".join(context_lines)
         except Exception as e:
-            self.logger.error(f"获取对话上下文出错: {e}")
+            self.logger.error(f"获取对话上下文出错: {e}", exc_info=True)
             return ""
 
     async def _add_message_to_session(self, session_id: str, message: str, is_user: bool = True):
         try:
             await self.session_manager.add_message(session_id, message, is_user)
         except Exception as e:
-            self.logger.error(f"添加消息出错: {e}")
+            self.logger.error(f"添加消息出错: {e}", exc_info=True)
 
     def _format_system_prompt(self, template: str) -> str:
         """v5.1: 统一系统提示词格式化。
@@ -359,11 +364,16 @@ class BaseAgent(ABC):
             # v5.1: 多模态融合检索
             if image_uri and hasattr(self.knowledge_base, "query_multimodal"):
                 results = await self.knowledge_base.query_multimodal(
-                    effective_query, image_uri=image_uri, collections=collections, n_results=n_results
+                    effective_query,
+                    image_uri=image_uri,
+                    collections=collections,
+                    n_results=n_results,
                 )
             elif collections:
                 # v5.2: 多检索一些结果用于重排序
-                fetch_n = n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
+                fetch_n = (
+                    n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
+                )
                 results = await self.knowledge_base.query_multiple(
                     collections, effective_query, fetch_n
                 )
@@ -371,7 +381,9 @@ class BaseAgent(ABC):
                 if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
                     results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
             else:
-                results = await self.knowledge_base.query("product_knowledge", effective_query, n_results)
+                results = await self.knowledge_base.query(
+                    "product_knowledge", effective_query, n_results
+                )
             if not results:
                 return ""
             parts = []
@@ -430,7 +442,7 @@ class BaseAgent(ABC):
                 for prefix in ["product.", "tech.", "erp.", "complaint."]:
                     entries = await self.bb.read_prefix(prefix)
                     if entries:
-                        for key, val in entries.items():
+                        for _key, val in entries.items():
                             if isinstance(val, dict):
                                 bb_findings.append(f"[{prefix.rstrip('.')}] {val}")
                 if bb_findings:
@@ -452,9 +464,13 @@ class BaseAgent(ABC):
             # 构造 list 类型 content：文本部分 + 多模态部分
             content_list = [{"type": "text", "text": user_content}]
             content_list.extend(multimodal_parts)
-            messages.append(HumanMessage(content=content_list))
+            human_msg = HumanMessage(content=content_list)
         else:
-            messages.append(HumanMessage(content=user_content))
+            human_msg = HumanMessage(content=user_content)
+        user_id = state.get("user_id")
+        if user_id:
+            human_msg.metadata = {"user_id": user_id}
+        messages.append(human_msg)
 
         return session_id, messages, drift
 
@@ -499,8 +515,20 @@ class BaseAgent(ABC):
         for round_num in range(max_tool_rounds):
             try:
                 response = await effective_llm.async_invoke(messages, tools=tools)
+            except LLMServiceError as e:
+                is_quota = "Quota" in str(e)
+                self.logger.warning(
+                    f"LLM 服务降级 (round {round_num}) [{get_trace_id()}]: {e}",
+                    exc_info=not is_quota,
+                )
+                response_content = (
+                    "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
+                )
+                break
             except Exception as e:
-                self.logger.error(f"LLM 调用出错 (round {round_num}) [{get_trace_id()}]: {e}")
+                self.logger.error(
+                    f"LLM 调用出错 (round {round_num}) [{get_trace_id()}]: {e}", exc_info=True
+                )
                 response_content = fallback_response
                 break
 
@@ -634,14 +662,22 @@ class BaseAgent(ABC):
                     except Exception as e:
                         self.logger.debug(f"stream_callback 推送 chunk 失败: {e}")
             except LLMServiceError as e:
-                self.logger.error(f"LLM 服务错误 [{get_trace_id()}]: {e}")
-                response_content = fallback_response
+                is_quota = "Quota" in str(e)
+                self.logger.warning(
+                    f"LLM 服务降级 [{get_trace_id()}]: {e}",
+                    exc_info=not is_quota,
+                )
+                response_content = (
+                    "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
+                )
                 try:
-                    await stream_callback({"type": "chunk", "content": fallback_response})
+                    await stream_callback({"type": "chunk", "content": response_content})
                 except Exception as cb_err:
                     self.logger.debug(f"stream_callback 推送 fallback 失败: {cb_err}")
             except Exception as e:
-                self.logger.error(f"LLM 流式调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}")
+                self.logger.error(
+                    f"LLM 流式调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}", exc_info=True
+                )
                 response_content = fallback_response
                 try:
                     await stream_callback({"type": "chunk", "content": fallback_response})
@@ -653,10 +689,18 @@ class BaseAgent(ABC):
                 response = await effective_llm.async_invoke(messages)
                 response_content = response.content
             except LLMServiceError as e:
-                self.logger.error(f"LLM 服务错误 [{get_trace_id()}]: {e}")
-                response_content = fallback_response
+                is_quota = "Quota" in str(e)
+                self.logger.warning(
+                    f"LLM 服务降级 [{get_trace_id()}]: {e}",
+                    exc_info=not is_quota,
+                )
+                response_content = (
+                    "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
+                )
             except Exception as e:
-                self.logger.error(f"LLM 调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}")
+                self.logger.error(
+                    f"LLM 调用异常 [{get_trace_id()}]: {type(e).__name__}: {e}", exc_info=True
+                )
                 response_content = fallback_response
 
         await self._add_message_to_session(session_id, response_content, is_user=False)
