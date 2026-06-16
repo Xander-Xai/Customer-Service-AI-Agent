@@ -6,11 +6,16 @@ v5.1: 集成 CLIP 多模态 embedding，支持图片语义检索。
 """
 
 import asyncio
+import threading
+import uuid
 from typing import Any
 
 from core.logger import get_logger
 
 logger = get_logger("rag.knowledge_base")
+
+# v5.4: 全局锁防止并发测试时 ChromaDB 租户冲突
+_chromadb_lock = threading.Lock()
 
 
 class CosmeticsKnowledgeBase:
@@ -42,15 +47,17 @@ class CosmeticsKnowledgeBase:
                 self._client = chromadb.PersistentClient(path=persist_directory)
             else:
                 # v5.3: 使用 EphemeralClient 避免持久化污染；显式禁用 telemetry 并允许 reset
+                # v5.4: 加锁防止并发测试时 ChromaDB 租户冲突
                 from chromadb.config import Settings
 
-                self._client = chromadb.EphemeralClient(
-                    settings=Settings(
-                        anonymized_telemetry=False,
-                        allow_reset=True,
-                        migrations="apply",
+                with _chromadb_lock:
+                    self._client = chromadb.EphemeralClient(
+                        settings=Settings(
+                            anonymized_telemetry=False,
+                            allow_reset=True,
+                            migrations="apply",
+                        )
                     )
-                )
             self._collections: dict[str, Any] = {}
             self._available = True
             clip_info = (

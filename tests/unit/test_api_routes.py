@@ -1509,6 +1509,7 @@ class TestMonitoringRoutes:
             return_value={"resolution_rate": 0.85, "avg_handle_time": 2.5}
         )
         metrics.load_snapshot = MagicMock(return_value=None)
+        metrics.update_business_metrics = AsyncMock()
         metrics.get_quality_trends = AsyncMock(
             return_value=[
                 {"date": "2026-06-03", "avg_score": 0.85, "total_queries": 120},

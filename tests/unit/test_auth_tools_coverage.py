@@ -30,10 +30,9 @@ class TestPasswordHashing:
         from auth.service import hash_password
 
         h = hash_password("test123")
+        # v5.4: Argon2id 格式: $argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>
         assert "$" in h
-        salt, dk = h.split("$", 1)
-        assert len(salt) == 32  # 16 bytes hex
-        assert len(dk) == 64  # sha256 hex
+        assert "argon2id" in h
 
     def test_hash_password_unique_salt(self):
         from auth.service import hash_password

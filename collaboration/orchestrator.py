@@ -1,11 +1,21 @@
 """
 协作编排器（v4.3: 新增运行时模式升级 + ReAct 推理模式选择）
-核心改造：
-- 统一模式选择逻辑（消除与 multi_agent_customer_service.py 的重复）
-- graph 节点直接委托 orchestrator
-- 结构化日志
-- v3.5: 高复杂度多领域查询路由到 ReAct 模式
-- v4.3: 运行时模式升级（低质量响应自动升级到更复杂模式）
+
+核心职责：
+1. 根据查询复杂度、类型、关键词动态选择最佳协作模式
+2. 管理5种协作模式的实例化与执行
+3. 支持运行时模式升级（低质量响应自动升级到更复杂模式）
+
+协作模式选择策略：
+- 简单查询 (fast_path=True) → Sequential（顺序执行，最快）
+- 投诉类 (complaint) → Hierarchical（层级协调，需要多方参与）
+- 多领域/高复杂度 (>70) → ReAct（推理+行动，处理复杂问题）
+- 单一领域中等复杂度 → Parallel/Consultation（并行或咨询）
+
+架构设计：
+- 单一数据源：所有模式选择逻辑集中在此类
+- 解耦设计：graph节点仅调用orchestrator，不直接依赖具体模式
+- 可扩展性：新增模式只需注册到_modes字典
 """
 
 from typing import Any
@@ -30,17 +40,47 @@ _COMPLAINT_KEYWORDS = set(INTENT_KEYWORDS.get("complaint", []))
 
 
 def _has_keywords(query: str, keywords: set) -> bool:
-    """检查查询是否包含指定关键词集合中的任一关键词"""
+    """
+    检查查询是否包含指定关键词集合中的任一关键词
+    
+    Args:
+        query: 用户查询文本
+        keywords: 关键词集合
+        
+    Returns:
+        bool: 如果查询包含任一关键词则返回True
+    """
     return any(kw in query for kw in keywords)
 
 
 class CollaborationOrchestrator:
     """
     协作编排器（v3.0 - 唯一模式选择来源）
-    所有协作模式选择逻辑统一在此处，graph 节点通过本类执行
+    
+    核心职责：
+    1. 统一模式选择逻辑（消除与 multi_agent_customer_service.py 的重复）
+    2. graph 节点直接委托 orchestrator 执行协作
+    3. 提供结构化日志和监控指标
+    
+    设计原则：
+    - 单一职责：仅负责任务分发和模式选择
+    - 开闭原则：新增模式无需修改现有代码，只需注册
+    - 依赖倒置：通过MessageBus和Blackboard解耦Agent通信
+    
+    使用示例：
+        >>> orchestrator = CollaborationOrchestrator(bus, blackboard)
+        >>> mode_name, context = orchestrator.build_context(routing_result, state)
+        >>> print(mode_name)  # 'parallel'
     """
 
     def __init__(self, message_bus: MessageBus, blackboard: SharedBlackboard):
+        """
+        初始化协作编排器
+        
+        Args:
+            message_bus: 消息总线，用于Agent间异步通信
+            blackboard: 共享黑板，用于状态共享和数据传递
+        """
         self.bus = message_bus
         self.bb = blackboard
         self._modes = {
@@ -52,20 +92,60 @@ class CollaborationOrchestrator:
         }
 
     def select_mode_name(self, routing_result: Any, state: dict[str, Any]) -> str:
-        """仅选择模式名称（供 LangGraph Conditional Edge 使用）"""
+        """
+        仅选择模式名称（供 LangGraph Conditional Edge 使用）
+        
+        Args:
+            routing_result: 路由结果，包含复杂度、类型等信息
+            state: LangGraph状态字典
+            
+        Returns:
+            str: 选定的协作模式名称
+        """
         mode_name, _ = self._select_mode(routing_result, state)
         return mode_name
 
     def build_context(
         self, routing_result: Any, state: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """选择模式并返回 (mode_name, context)（供 graph 节点使用）"""
+        """
+        选择模式并返回上下文（供 graph 节点使用）
+        
+        Args:
+            routing_result: 路由结果
+            state: LangGraph状态字典
+            
+        Returns:
+            tuple: (mode_name, context_dict) 
+                   - mode_name: 协作模式名称
+                   - context_dict: 传递给模式的上下文参数
+        """
         return self._select_mode(routing_result, state)
 
     def _select_mode(
         self, routing_result: Any, state: dict[str, Any]
     ) -> tuple[str, dict[str, Any]]:
-        """统一的模式选择逻辑（唯一的模式选择来源）"""
+        """
+        统一的模式选择逻辑（唯一的模式选择来源）
+        
+        决策流程：
+        1. 快速通道判断 (< threshold) → Sequential
+        2. 投诉类查询 → Hierarchical（需要协调多方）
+        3. 高复杂度多领域 → ReAct（推理+行动）
+        4. 其他情况根据领域数量选择 Parallel/Consultation
+        
+        Args:
+            routing_result: 路由结果对象
+                - complexity: 复杂度评分 (0-100)
+                - query_type: 查询类型 (product/billing/complaint等)
+                - agent_name: 主责Agent名称
+                - fast_path: 是否快速通道
+            state: LangGraph状态字典
+                - customer_query: 用户原始查询
+                
+        Returns:
+            tuple: (mode_name, context)
+        """
         complexity = routing_result.complexity
         query_type = routing_result.query_type
         primary_agent = routing_result.agent_name

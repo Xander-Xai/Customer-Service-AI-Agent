@@ -67,7 +67,11 @@ class ChatHistory(Base):
     user = relationship("User", back_populates="chat_histories")
 
     # v5.1: 复合索引，加速按 session 查询历史（按时间排序）
-    __table_args__ = (Index("ix_chat_session_created", "session_id", "created_at"),)
+    # v5.4: 新增用户维度复合索引，加速用户历史查询
+    __table_args__ = (
+        Index("ix_chat_session_created", "session_id", "created_at"),
+        Index("ix_chat_user_created", "user_id", "created_at"),  # P0: 优化用户历史查询
+    )
 
 
 class AuditLog(Base):
@@ -85,6 +89,11 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     user = relationship("User", back_populates="audit_logs")
+
+    # v5.4: 复合索引，加速审计日志查询（按动作和时间筛选）
+    __table_args__ = (
+        Index("ix_audit_action_time", "action", "timestamp"),  # P0: 优化审计查询
+    )
 
 
 class Feedback(Base):

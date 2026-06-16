@@ -1,42 +1,36 @@
 """
-认证路由（v4.0 — JWT Bearer 认证）
-- POST /api/auth/register — 注册
-- POST /api/auth/login — 登录
-- GET  /api/auth/me — 当前用户信息
-- GET  /api/auth/users — 用户列表（admin）
+用户认证路由：注册 / 登录 / Token 刷新（v5.0）
+- PBKDF2-SHA256 密码哈希（OWASP 最低标准）
+- JWT Access + Refresh Token 双令牌机制
+- 管理员首次登录强制改密
+- v5.0: 密码复杂度校验（至少两类字符）
 """
 
-from datetime import datetime, timezone
+import secrets
+import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
-from db.database import get_db
-from db.models import AuditLog, User
-
-from .service import (
+from auth.service import (
     authenticate_user,
     get_current_user,
+    hash_password,
     refresh_access_token,
     register_user,
     revoke_token,
+    verify_password,
 )
-
-
-def _dt_to_iso(dt):
-    """将 datetime 对象转换为 unix 时间戳（秒），None 安全
-    前端使用 new Date(timestamp * 1000) 渲染。
-    """
-    if dt is None:
-        return None
-    if isinstance(dt, datetime):
-        return dt.timestamp()
-    return dt
-
-
-from core.logger import get_logger  # noqa: E402
-
-logger = get_logger("auth.router")
+from core.config import (
+    DEV_MODE,
+    JWT_EXPIRE_HOURS,
+    JWT_REFRESH_EXPIRE_HOURS,
+    JWT_SECRET,
+)
+from core.logger import get_logger
+from db.database import get_db
+from db.models import AuditLog, User
 
 router = APIRouter(prefix="/api/auth", tags=["认证"])
 
@@ -49,8 +43,9 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., min_length=6, max_length=64)
     display_name: str = Field(default="", max_length=64)
 
-    @validator("password")
-    def password_complexity(cls, v):
+    @field_validator("password")
+    @classmethod
+    def password_complexity(cls, v: str) -> str:
         """v5.0: 要求至少包含两类字符（字母+数字、字母+特殊字符等）"""
         has_letter = any(c.isalpha() for c in v)
         has_digit = any(c.isdigit() for c in v)
@@ -73,6 +68,11 @@ class RefreshRequest(BaseModel):
 
 
 # ── 辅助函数 ──
+
+
+def _dt_to_iso(dt: datetime | None) -> str | None:
+    """将 datetime 转换为 ISO 格式字符串"""
+    return dt.isoformat() if dt else None
 
 
 def _get_token_from_request(request: Request) -> str:

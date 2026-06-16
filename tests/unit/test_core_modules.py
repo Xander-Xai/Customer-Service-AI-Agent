@@ -1794,10 +1794,12 @@ class TestSLAAlertManagerCoverage:
         manager = SLAAlertManager()
         # NOTE: SLA_ALERT_THRESHOLD=50.0 in DEV → critical requires >100%, impossible
         # Patch threshold to 30.0 so 100% > 60% triggers critical
-        with patch("core.monitoring.SLA_ALERT_THRESHOLD", 30.0):
+        # v5.4: 3x threshold triggers emergency, so 100% > 90% triggers emergency
+        # Use 2.5x threshold to get critical
+        with patch("core.monitoring.SLA_ALERT_THRESHOLD", 40.0):
             alert = await manager.check_and_alert(mc)
         assert alert is not None
-        # With 100% violation rate (> 60%), severity should be critical
+        # With 100% violation rate (> 80%), severity should be critical
         assert alert["severity"] == "critical"
 
     def test_get_alerts(self):

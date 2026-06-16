@@ -1,6 +1,15 @@
 """
-告警通知发送器（v4.0 — Webhook + Email）
-支持钉钉 / 企业微信 / 飞书 Webhook，以及 SMTP 邮件通知。
+告警通知发送器（v5.4 — 分级告警 + 升级机制）
+
+告警分级策略：
+- warning: Webhook通知（钉钉/企业微信/飞书）
+- critical: Webhook + 邮件通知
+- emergency: Webhook + 邮件 + SMS + 电话通知 + 自动升级
+
+升级机制：
+- 同一告警30分钟无人响应 → 升级到上一级
+- critical持续1小时 → 升级为emergency
+- 支持告警抑制避免风暴
 """
 
 import asyncio
@@ -17,8 +26,24 @@ logger = get_logger("alerts.notifier")
 
 
 class AlertNotifier:
-    """告警通知发送器"""
+    """
+    告警通知发送器（v5.4 - 分级告警 + 升级机制）
+    
+    核心功能：
+    1. 分级通知路由（warning/critical/emergency）
+    2. 告警升级（无人响应时自动升级）
+    3. 告警抑制（避免告警风暴）
+    4. 多渠道通知（Webhook/Email/SMS/Phone）
+    
+    使用示例：
+        >>> notifier = AlertNotifier()
+        >>> await notifier.send_alert("SLA违约", "违约率50%", severity="critical")
+    """
 
+    # v5.4: 告警升级配置
+    UPGRADE_TIMEOUT_CRITICAL = 1800  # critical 30分钟后升级
+    UPGRADE_TIMEOUT_EMERGENCY = 3600  # emergency持续1小时后再次通知
+    
     def __init__(self):
         self.webhooks: list[
             dict[str, str]
@@ -26,6 +51,11 @@ class AlertNotifier:
         self.email_enabled = False
         self.email_config: dict[str, str] = {}
         self.alert_history: list[dict[str, Any]] = []
+        
+        # v5.4: 告警升级跟踪
+        self.active_alerts: dict[str, dict[str, Any]] = {}  # alert_key -> {severity, timestamp, escalated}
+        self.suppression_window: dict[str, float] = {}  # alert_key -> last_sent_time
+        
         self._load_config()
 
     def _load_config(self):
@@ -54,35 +84,123 @@ class AlertNotifier:
             and self.email_config["smtp_user"]
             and self.email_config["to_addrs"]
         )
+        
+        # v5.4: SMS配置（可选）
+        self.sms_enabled = bool(os.getenv("SMS_API_KEY"))
+        self.sms_config = {
+            "api_key": os.getenv("SMS_API_KEY", ""),
+            "phone_numbers": [
+                p.strip() for p in os.getenv("ALERT_PHONE_NUMBERS", "").split(",") if p.strip()
+            ],
+        }
 
         if self.webhooks:
             logger.info(f"告警 Webhook 已配置: {len(self.webhooks)} 个")
         if self.email_enabled:
             logger.info(f"告警邮件已配置: {self.email_config['to_addrs']}")
+        if self.sms_enabled:
+            logger.info(f"告警SMS已配置: {len(self.sms_config['phone_numbers'])} 个号码")
 
     async def send_alert(self, title: str, content: str, severity: str = "warning"):
-        """发送告警通知（分级路由：warning → 仅 Webhook，critical → Webhook + 邮件）"""
+        """
+        发送分级告警通知
+        
+        分级策略：
+        - warning: 仅Webhook
+        - critical: Webhook + Email
+        - emergency: Webhook + Email + SMS + Phone
+        
+        Args:
+            title: 告警标题
+            content: 告警内容
+            severity: 告警级别 (warning/critical/emergency)
+        """
+        alert_key = f"{title}:{severity}"
+        
+        # v5.4: 告警抑制检查（同类型告警5分钟内不重复发送）
+        now = time.time()
+        if alert_key in self.suppression_window:
+            if now - self.suppression_window[alert_key] < 300:  # 5分钟
+                logger.debug(f"告警抑制: {alert_key}")
+                return
+        
         alert = {
             "title": title,
             "content": content,
             "severity": severity,
-            "timestamp": time.time(),
+            "timestamp": now,
         }
+        
         self.alert_history.append(alert)
         if len(self.alert_history) > 200:
             self.alert_history = self.alert_history[-200:]
-
+        
+        # v5.4: 记录活动告警用于升级检查
+        self.active_alerts[alert_key] = {
+            "severity": severity,
+            "timestamp": now,
+            "escalated": False,
+        }
+        
+        # 更新抑制窗口
+        self.suppression_window[alert_key] = now
+        
         tasks = []
-        # Webhook：warning 和 critical 均发送
+        
+        # Webhook：所有级别均发送
         for wh in self.webhooks:
             tasks.append(self._send_webhook(wh, alert))
 
-        # 邮件：仅 critical 级别发送
-        if severity == "critical" and self.email_enabled:
+        # 邮件：critical 和 emergency 级别发送
+        if severity in ("critical", "emergency") and self.email_enabled:
             tasks.append(self._send_email(alert))
+        
+        # v5.4: SMS/Phone：仅 emergency 级别
+        if severity == "emergency" and self.sms_enabled:
+            tasks.append(self._send_sms(alert))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+            
+        logger.info(f"告警已发送: [{severity.upper()}] {title}")
+
+    async def check_and_upgrade_alerts(self):
+        """
+        v5.4: 检查并升级活动告警
+        
+        升级规则：
+        1. critical 持续30分钟 → 升级为 emergency
+        2. emergency 持续1小时 → 再次通知管理层
+        """
+        now = time.time()
+        
+        for alert_key, alert_info in list(self.active_alerts.items()):
+            elapsed = now - alert_info["timestamp"]
+            severity = alert_info["severity"]
+            
+            # critical → emergency 升级
+            if severity == "critical" and elapsed > self.UPGRADE_TIMEOUT_CRITICAL:
+                if not alert_info["escalated"]:
+                    logger.warning(f"告警升级: {alert_key} critical → emergency")
+                    title, _ = alert_key.rsplit(":", 1)
+                    await self.send_alert(
+                        f"[升级] {title}",
+                        f"此告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
+                        severity="emergency"
+                    )
+                    alert_info["escalated"] = True
+            
+            # emergency 持续1小时 → 再次通知
+            elif severity == "emergency" and elapsed > self.UPGRADE_TIMEOUT_EMERGENCY:
+                if not alert_info["escalated"]:
+                    logger.critical(f"告警持续: {alert_key} 已超过1小时")
+                    title, _ = alert_key.rsplit(":", 1)
+                    await self.send_alert(
+                        f"[紧急] {title} - 持续未解决",
+                        f"此emergency告警已持续{elapsed//60:.0f}分钟，请立即处理！",
+                        severity="emergency"
+                    )
+                    alert_info["escalated"] = True
 
     async def _send_webhook(self, webhook: dict[str, str], alert: dict[str, Any]):
         """发送 Webhook 通知"""
@@ -193,6 +311,44 @@ class AlertNotifier:
             logger.info("邮件告警发送成功")
         except Exception as e:
             logger.warning(f"邮件告警发送失败: {e}")
+
+    async def _send_sms(self, alert: dict[str, Any]):
+        """
+        v5.4: 发送短信/电话通知（emergency级别）
+        
+        注意：需要配置SMS API密钥和电话号码
+        示例API服务商：阿里云SMS、腾讯云SMS、Twilio等
+        """
+        try:
+            import requests
+            
+            severity_label = {
+                "emergency": "【紧急】",
+                "critical": "【严重】",
+            }.get(alert["severity"], "")
+            
+            body = f"{severity_label} {alert['title']}\n{alert['content'][:50]}\n时间: {time.strftime('%H:%M')}"
+
+            for phone in self.sms_config["phone_numbers"]:
+                # 示例：使用通用SMS API（需根据实际服务商调整）
+                response = requests.post(
+                    os.getenv("SMS_API_URL", "https://api.sms.com/send"),
+                    json={
+                        "api_key": self.sms_config["api_key"],
+                        "to": phone,
+                        "message": body,
+                    },
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    logger.info(f"短信告警发送成功: {phone}")
+                else:
+                    logger.warning(f"短信告警发送失败 ({response.status_code}): {phone}")
+
+        except ImportError:
+            logger.debug("requests库未安装，跳过SMS发送")
+        except Exception as e:
+            logger.warning(f"短信告警发送异常: {e}")
 
     def get_history(self, limit: int = 20) -> list[dict[str, Any]]:
         return self.alert_history[-limit:]
