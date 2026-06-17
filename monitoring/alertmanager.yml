@@ -1,0 +1,65 @@
+# Alertmanager 配置 — 药妆智多星客服系统
+#
+# 生产环境部署前必须配置真实外部接收方（Slack/钉钉/邮件）:
+#   - Slack: 在 Prometheus 或 Grafana 中配置 Alertmanager webhook URL
+#   - 钉钉/企微: 配置对应 webhook robot
+#   - 邮件: Alertmanager 原生支持 email_config
+#
+# 当前默认接收方指向应用自身的 webhook 接收端点，仅适合作内部转发。
+# 生产环境应替换为外部告警通道。
+
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: 'default'
+
+  routes:
+    # Critical 告警：立即通知
+    - match:
+        severity: critical
+      receiver: 'critical-webhook'
+      group_wait: 10s
+      repeat_interval: 30m
+
+    # Warning 告警：合并通知
+    - match:
+        severity: warning
+      receiver: 'default'
+      repeat_interval: 4h
+
+receivers:
+  # 默认接收者 — 外部统一告警网关（避免自指导致告警丢失）
+  - name: 'default'
+    webhook_configs:
+      - url: 'http://alert-gateway.production.local/api/v1/alerts'
+        send_resolved: true
+        max_alerts: 5
+    # Slack 告警配置模板
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/REDACTED'
+    #     channel: '#ops-alerts'
+    #     send_resolved: true
+
+  # Critical 严重告警接收者 — 外部紧急告警网关
+  - name: 'critical-webhook'
+    webhook_configs:
+      - url: 'http://alert-gateway.production.local/api/v1/alerts/critical'
+        send_resolved: true
+    # PagerDuty 告警配置模板
+    # pagerduty_configs:
+    #   - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+    #     severity: 'critical'
+
+# 告警抑制规则
+inhibit_rules:
+  # 如果有 critical 告警，抑制同名 warning 告警
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname']
