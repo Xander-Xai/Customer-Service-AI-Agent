@@ -344,13 +344,20 @@ class BaseAgent(ABC):
         collections: list[str] = None,
         n_results: int = KNOWLEDGE_DEFAULT_N_RESULTS,
         image_uri: str = None,
+        state: dict | None = None,
     ) -> str:
         """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
         v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
         v5.2: 支持 Query Rewriting（LLM 改写查询）和 Reranker（重排序）。
+        v5.4: 支持 RAG 预取（state["_rag_prefetch"]），命中时跳过知识库查询。
         返回格式化字符串，可直接拼入 extra_context。
         知识库不可用时静默返回空字符串。
         """
+        # v5.4: RAG 预取捷径 — 路由阶段已并行检索，直接使用
+        if state and state.get("_rag_prefetch"):
+            self.logger.debug("RAG 预取命中，跳过知识库查询")
+            return state["_rag_prefetch"]
+
         if not self.knowledge_base or not self.knowledge_base.available:
             return ""
         try:
@@ -703,6 +710,13 @@ class BaseAgent(ABC):
                 )
                 response_content = fallback_response
 
+        # v5.5: LLM 不可用时降级到 RuleBasedLLM（覆盖 fallback 为智能降级回复）
+        if response_content == fallback_response or response_content.startswith("抱歉"):
+            rule_reply = await self._try_rule_fallback(messages, fallback_response)
+            if rule_reply:
+                self.logger.info(f"[RuleFallback] LLM 降级成功，使用 RuleBasedLLM 回复")
+                response_content = rule_reply
+
         await self._add_message_to_session(session_id, response_content, is_user=False)
         state["response"] = response_content
         state["current_agent"] = self.name
@@ -722,3 +736,22 @@ class BaseAgent(ABC):
         )
 
         return state
+
+    async def _try_rule_fallback(
+        self, messages: list, fallback_response: str
+    ) -> str | None:
+        """v5.5: LLM 降级时尝试使用 RuleBasedLLM 生成有意义的回复。
+
+        从 messages 中提取用户查询，使用 RuleBasedLLM 的关键词模板回复。
+        返回 None 表示 RuleBasedLLM 不可用，由调用方使用原有的 fallback_response。
+        """
+        try:
+            from llm.rule_based_llm import RuleBasedLLM
+
+            rule_llm = RuleBasedLLM()
+            resp = await rule_llm.async_invoke(messages)
+            if resp and resp.content:
+                return resp.content
+        except Exception:
+            self.logger.debug("RuleBasedLLM 降级失败，使用原始 fallback")
+        return None

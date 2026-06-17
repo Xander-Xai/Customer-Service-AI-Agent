@@ -73,11 +73,20 @@ class BillingAgent(BaseAgent):
         if erp_data:
             await self._write_blackboard("erp.order_data", erp_data, ttl=300)
 
+        # v5.5: LLM 不可用时 fallback 中包含已查询到的 ERP 数据
+        fallback_with_erp = "抱歉，处理账单问题时遇到系统错误，请稍后重试。"
+        if erp_data:
+            fallback_with_erp = (
+                "已查询到您的订单信息，但系统暂时无法生成完整回复。\n"
+                f"{erp_data}\n\n"
+                "请稍后重试，或联系人工客服处理。"
+            )
+
         return await self._process_with_llm(
             state,
             self._format_system_prompt(_SYSTEM_PROMPT),
             extra_context=f"[订单/财务数据]\n{erp_data}" if erp_data else "",
-            fallback_response="抱歉，处理账单问题时遇到系统错误，请稍后重试。",
+            fallback_response=fallback_with_erp,
         )
 
     async def _query_erp(self, query: str) -> str:

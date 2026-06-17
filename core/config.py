@@ -49,7 +49,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
 # ===== HTTP 请求配置 =====
-HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 30)
+HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 15)  # v5.4: 从 30s 降至 15s，减少失败场景等待
 HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": "MultiAgentCustomerService/3.0.0"}
 
 # ===== 路由配置 =====
@@ -94,11 +94,11 @@ LLM_ROUTER_TIMEOUT = _float_env(
 )  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
 
 # ===== 重试配置 =====
-RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)
+RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 2)  # v5.4: 从 3 降至 2，减少无效重试
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
 
 # ===== 系统配置 =====
-VERSION = "5.4"
+VERSION = "5.5"
 APP_NAME = "药妆智多星 - Customer Service AI Agent"
 DESCRIPTION = "面向化妆品企业的多智能体客服系统（企业级增强版）"
 
@@ -290,26 +290,20 @@ def validate_required_config():
         errors.append("OPENAI_API_KEY 未配置或使用占位符")
 
     # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
-    if not JWT_SECRET or JWT_SECRET in (
-        "",
-        "change-me-in-production",
-        "dev-jwt-secret-do-not-use-in-prod",
-        "your-jwt-secret-change-in-production",
-    ):
-        errors.append("JWT_SECRET 未配置或使用默认值")
+    if not JWT_SECRET or any(p in JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+        errors.append("JWT_SECRET 未配置或使用默认值/弱密钥")
     elif len(JWT_SECRET) < 32:
         errors.append(
             f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥"
         )
 
     # Session Token Secret
-    if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in (
-        "",
-        "change-me-session-secret-in-production",
-        "dev-session-secret-do-not-use-in-prod",
-        "your-session-secret-change-in-production",
-    ):
-        errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值")
+    if not SESSION_TOKEN_SECRET or any(p in SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+        errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值/弱密钥")
+    elif len(SESSION_TOKEN_SECRET) < 32:
+        errors.append(
+            f"SESSION_TOKEN_SECRET 长度不足（{len(SESSION_TOKEN_SECRET)} < 32），请使用至少 32 字符的随机密钥"
+        )
 
     if not _DEV_MODE and "*" in CORS_ORIGINS:
         errors.append("Production CORS_ORIGINS must not contain wildcard *")
