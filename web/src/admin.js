@@ -34,11 +34,12 @@ import {
   loadPromptVersions,
   loadSystemHealth,
 } from './admin-settings.js';
+import { loadTokenQuota } from './admin-token-quota.js';
 import { loadTokenUsage } from './admin-tokens.js';
 // 导入子模块功能
 import { loadUsers } from './admin-users.js';
 import { getUserMe } from './api/rest.js';
-import { guardPage } from './auth/index.js';
+import { guardPage, logout } from './auth/index.js';
 import { initSettingsPanel, initTheme } from './utils/theme.js';
 import { showToast } from './utils/toast.js';
 
@@ -169,6 +170,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       loadAlertConfig(),
       loadAuditLog(),
       loadPromptAgents(),
+      loadTokenQuota(),
     ]);
     await Promise.all([
       loadSystemHealth(),
@@ -187,6 +189,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       loadMetricsStats(),
       loadFeedbackStats(),
       loadAlertConfig(),
+      loadTokenQuota(),
     ]);
     await Promise.all([
       loadQualityTrends(),
@@ -194,6 +197,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       loadSatisfaction(),
       loadAlertHistory(),
     ]);
+  } else if (role === 'agent' || role === 'customer') {
+    // 客服与普通用户：仅显示 Token Quota
+    await loadTokenQuota();
   }
 
   // 开始定期刷新监控视图

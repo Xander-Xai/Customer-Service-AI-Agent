@@ -66,12 +66,20 @@ export function getCircuitBreaker() {
 }
 
 export function submitFeedback(sessionId, resolved, comment = '') {
-  return _request('POST', '/api/feedback', { session_id: sessionId, resolved, comment });
+  const sessionToken = localStorage.getItem('currentSessionToken') || '';
+  return _request('POST', '/api/feedback', {
+    session_id: sessionId,
+    session_token: sessionToken,
+    resolved,
+    comment,
+  });
 }
 
 export function submitRating(sessionId, rating, messageIndex = 0, comment = '') {
+  const sessionToken = localStorage.getItem('currentSessionToken') || '';
   return _request('POST', '/api/feedback', {
     session_id: sessionId,
+    session_token: sessionToken,
     rating,
     resolved: rating > 0,
     message_index: messageIndex,
@@ -85,10 +93,12 @@ export function getFeedbackStats() {
 
 /** 多模态对话（图片 + 文字） */
 export function sendChatWithImage(query, imageFile, sessionId) {
+  const sessionToken = localStorage.getItem('currentSessionToken') || '';
   const formData = new FormData();
   formData.append('image', imageFile);
   formData.append('query', query || '');
   formData.append('session_id', sessionId || '');
+  formData.append('session_token', sessionToken);
 
   const headers = {};
   const apiKey = localStorage.getItem('api_key') || '';
@@ -117,10 +127,12 @@ export function sendChat(query, sessionId) {
 
 /** 统一文件上传对话（图片/视频/PDF/DOCX/文本） */
 export function sendChatWithFile(query, file, sessionId) {
+  const sessionToken = localStorage.getItem('currentSessionToken') || '';
   const formData = new FormData();
   formData.append('file', file);
   formData.append('query', query || '');
   formData.append('session_id', sessionId || '');
+  formData.append('session_token', sessionToken);
 
   const headers = {};
   const apiKey = localStorage.getItem('api_key') || '';
@@ -260,6 +272,41 @@ export function getTokenUsage() {
 /** 获取当前用户信息 */
 export function getUserMe() {
   return _request('GET', '/api/auth/me');
+}
+
+// ===== 会话与历史 API =====
+
+/** 加载会话历史列表（/api/history 与 /api/sessions 等价别名） */
+export function getHistory(offset = 0, limit = 20) {
+  return _request('GET', `/api/history?offset=${offset}&limit=${limit}`);
+}
+
+/** 加载指定会话的全部历史消息（需要 X-Session-Token） */
+export function getHistoryMessages(sessionId) {
+  const sessionToken = localStorage.getItem('currentSessionToken') || '';
+  return _request(
+    'GET',
+    `/api/history/${sessionId}/messages`,
+    null,
+    sessionToken ? { 'X-Session-Token': sessionToken } : {},
+  );
+}
+
+/** 获取会话 LangGraph checkpoint 状态（断点续传） */
+export function getSessionCheckpoint(sessionId) {
+  return _request('GET', `/api/sessions/${sessionId}/checkpoint`);
+}
+
+// ===== 监控 API =====
+
+/** 当前用户的 Token Quota 状态（需登录） */
+export function getTokenQuota() {
+  return _request('GET', '/api/monitoring/token-quota');
+}
+
+/** Prometheus 格式指标（管理后台调试用） */
+export function getPrometheusMetrics() {
+  return _request('GET', '/metrics/prometheus');
 }
 
 // ===== TTS 语音列表 API =====

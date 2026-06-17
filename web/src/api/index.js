@@ -26,6 +26,9 @@ export const API = {
   getSessions: rest.getSessions,
   getSession: rest.getSession,
   deleteSession: rest.deleteSession,
+  getHistory: rest.getHistory,
+  getHistoryMessages: rest.getHistoryMessages,
+  getSessionCheckpoint: rest.getSessionCheckpoint,
   getAlerts: rest.getAlerts,
   getCircuitBreaker: rest.getCircuitBreaker,
   submitFeedback: rest.submitFeedback,
@@ -49,6 +52,9 @@ export const API = {
   getQualityTrends: rest.getQualityTrends,
   getHotQuestions: rest.getHotQuestions,
   getSatisfaction: rest.getSatisfaction,
+  getTokenQuota: rest.getTokenQuota,
+  getTokenUsage: rest.getTokenUsage,
+  getPrometheusMetrics: rest.getPrometheusMetrics,
 
   // SSE
   sendChatStream,

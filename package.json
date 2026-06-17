@@ -1,8 +1,8 @@
 {
   "name": "customer-service-ai-agent",
-  "version": "5.4.0",
+  "version": "5.4.1",
   "private": true,
-  "description": "药妆智多星多智能体客服系统 - 企业级增强版（Argon2id + 分级告警 + 业务监控）",
+  "description": "药妆智多星多智能体客服系统 - 前后端 API 对齐版（5 个新 REST 端点 + 487 行冗余清理）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -18,7 +18,7 @@
     "@playwright/test": "^1.60.0",
     "jsdom": "^29.1.1",
     "vite": "^8.0.16",
-    "vitest": "^3.2.1"
+    "vitest": "^4.1.9"
   },
   "dependencies": {
     "dompurify": "^3.4.8",
