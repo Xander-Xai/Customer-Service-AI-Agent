@@ -475,8 +475,8 @@ class MetricsCollector:
                 "stats": await self.get_stats(),
                 "kpi": await self.get_kpi_stats(),
             }
-            redis_client.setex(
-                "metrics:snapshot", METRICS_SNAPSHOT_TTL, json.dumps(snapshot, ensure_ascii=False)
+            redis_client.set(
+                "metrics:snapshot", json.dumps(snapshot, ensure_ascii=False), ex=METRICS_SNAPSHOT_TTL
             )
             redis_client.lpush("metrics:history", json.dumps(snapshot, ensure_ascii=False))
             redis_client.ltrim("metrics:history", 0, METRICS_HISTORY_MAX - 1)
