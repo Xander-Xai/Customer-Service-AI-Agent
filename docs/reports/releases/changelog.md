@@ -4,6 +4,34 @@
 
 ---
 
+## v5.5 (2026-06-18) — 账单修复 + LLM 降级增强 + 启动健康检查
+
+### 🔧 修复
+- **账单 Agent 不再显示空泛的系统错误**：LLM 不可用时 fallback 回复嵌入已查询到的 ERP 订单数据，用户至少能看到自己的订单信息后再重试
+- **API Key 校验加固**：检测 `test-`/`mock-`/`sk-placeholder` 等非生产 Key 前缀 + 长度 < 40 判定无效，阻止测试 Key 绕过 RuleBasedLLM 降级（之前仅检查 `startswith("your_")`）
+
+### 🛡️ LLM 降级增强
+- **运行时自动降级到 RuleBasedLLM**：`_process_with_llm()` 捕获 `LLMServiceError` 和通用异常后，尝试使用 RuleBasedLLM 关键词模板生成有意义回复，而非直接返回静态 fallback 文本
+- **兜底保障**：RuleBasedLLM 也失败时，仍使用原有的 `fallback_response`
+
+### 🩺 启动健康检查
+- **LLM 端点启动时验证**：`ServiceContainer.initialize()` 新增 `_check_llm_health()`，10s 超时 ping 确认 LLM 连通性
+- **非阻塞**：失败仅记录日志 `[HealthCheck] ⚠️ LLM 端点不可用`，系统以降级模式继续运行
+
+### 📝 受影响模块
+| 模块 | 文件 |
+|-----|------|
+| 账单 Agent | `agents/billing_agent.py` — fallback 嵌入 ERP 数据 |
+| 基础 Agent | `agents/base_agent.py` — `_try_rule_fallback` 降级 + 调用点 |
+| 容器初始化 | `core/container.py` — API Key 校验 + 健康检查 |
+| LLM 客户端 | `llm/rule_based_llm.py` — 新增 `async_invoke` 兼容降级调用 |
+
+### ✅ 测试
+- `test_modules.py` — 155 passed
+- `test_base_agent_billing_coverage.py` — 32 passed
+
+---
+
 ## v5.4.1 (2026-06-17) — 前后端 API 对齐 + 前端清理
 
 ### 🎯 核心成果

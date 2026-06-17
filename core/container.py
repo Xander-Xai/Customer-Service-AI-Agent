@@ -146,6 +146,9 @@ class ServiceContainer:
             # 1. LLM
             await self._init_llm()
 
+            # v5.5: LLM 健康检查 — 启动时验证端点是否可连接
+            await self._check_llm_health()
+
             # 1.2. Redis 缓存预热（异步，避免阻塞事件循环）
             if hasattr(self, "_redis_url"):
                 await self.cache._init_redis(self._redis_url)
@@ -205,8 +208,16 @@ class ServiceContainer:
         from core.config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
         from llm.client import OpenAICompatibleClient
 
-        # v4.1: 检查 API Key 是否有效
-        api_key_valid = OPENAI_API_KEY and not OPENAI_API_KEY.startswith("your_")
+        # v4.1: 检查 API Key 是否有效（v5.5: 使用游标原则检测，防止 test-mock-key 等非生产 Key 绕过）
+        _PLACEHOLDER_PREFIXES = ("your_", "test-", "mock-", "sk-placeholder", "sk-xxx", "sk-your")
+        api_key_valid = bool(OPENAI_API_KEY) and not any(
+            OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES
+        )
+        # 真实 API Key 至少 40 字符（SiliconFlow / OpenAI 等）
+        if api_key_valid and len(OPENAI_API_KEY) < 40:
+            api_key_valid = False
+            if DEV_MODE:
+                logger.warning(f"⚠️ API Key 长度异常（{len(OPENAI_API_KEY)} < 40），视为无效")
 
         if not api_key_valid and DEV_MODE:
             # 开发模式：API Key 无效时自动降级到规则引擎
@@ -232,6 +243,28 @@ class ServiceContainer:
                 model=OPENAI_MODEL,
                 circuit_breaker=self.circuit_breaker,
             )
+
+    async def _check_llm_health(self):
+        """v5.5: 启动时 LLM 端点健康检查（非阻塞，仅记录日志）。
+
+        规则引擎模式跳过检查。失败时仅记录警告（系统已有 RuleBasedLLM 作为运行时降级）。
+        """
+        from llm.rule_based_llm import RuleBasedLLM
+
+        if isinstance(self.llm, RuleBasedLLM):
+            return  # 规则引擎不需要检查
+
+        try:
+            from langchain_core.messages import HumanMessage
+
+            logger.info("[HealthCheck] 正在检查 LLM 端点...")
+            await asyncio.wait_for(self.llm.async_invoke([HumanMessage(content="hi")]), timeout=10.0)
+            logger.info("[HealthCheck] ✅ LLM 端点连通正常")
+        except asyncio.TimeoutError:
+            logger.warning("[HealthCheck] ⚠️ LLM 端点超时（10s），系统将以降级模式运行")
+        except Exception as e:
+            logger.warning(f"[HealthCheck] ⚠️ LLM 端点不可用: {type(e).__name__}")
+            logger.warning("[HealthCheck] 系统将使用 RuleBasedLLM 作为运行时降级")
 
     async def _init_vision_llm(self):
         """v5.1: 初始化 Vision LLM 客户端（仅在 MULTIMODAL_ENABLED 时）"""
