@@ -144,9 +144,28 @@ export async function selectSession(sessionId) {
   setSession(sessionId);
   setSessionId(sessionId);
 
+  // 启动后台检查 LangGraph checkpoint（如有断点续传）
+  API.getSessionCheckpoint(sessionId)
+    .then((cp) => {
+      if (cp?.has_checkpoint) {
+        // 静默标记 - 后续 send 操作会自然使用
+        try {
+          sessionStorage.setItem(`cp:${sessionId}`, '1');
+        } catch (_e) {}
+      }
+    })
+    .catch(() => {
+      /* checkpoint 未启用或会话不存在，静默 */
+    });
+
   try {
     const data = await API.getSession(sessionId);
     const session = data.session;
+
+    // 从响应中获取 session_token，确保后续请求能通过验证
+    if (session.session_token) {
+      updateSession(sessionId, session.session_token);
+    }
 
     // 激活会话详情侧面板
     _showSessionDetail(sessionId, session);

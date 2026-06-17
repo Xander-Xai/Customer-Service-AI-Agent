@@ -1,28 +1,22 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.4)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.4.1)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
+> **v5.4.1** 前后端 API 对齐（5 个新 REST 端点 + 2 个新模块）+ 死代码清理（删除 487 行冗余）+ 监控概览新增"我的 Token Quota"卡片 + 会话选择自动探测 LangGraph checkpoint
+>
 > **v5.4** 企业级增强（Argon2id密码哈希 + 分级告警升级机制 + 业务指标监控 + 故障排查手册）+ 评分提升至99.0分（极致级生产就绪）+ 8项高ROI改进
 >
 > **v5.3** 安全审计修复（WebSocket 认证强化 + Token Quota Redis 持久化 + 黑板 Session 隔离 + 依赖安全升级）+ 会话数据加密（AES-256-Fernet）+ 74 文件变更（2616 插入 / 1281 删除）
 >
-> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini addopts 移除 `--cov` + 新增 151 测试用例覆盖率 75.8% → 80.09%）+ 配置版本对齐 + 文档同步（1341+ 测试用例）
+> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini addopts 移除 `--cov` + 新增 151 测试用例覆盖率 75.8% → 80.09%）+ 配置版本对齐 + 文档同步（1350 测试用例）
 >
 > **v5.2.1** 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复
 >
 > **v5.2** 无障碍 WCAG AA/AAA 全量达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话详情侧面板 + CI v6 升级 + 死代码清理 + Ruff lint 346→73
 >
-> **v5.3** 安全审计修复（WebSocket 认证强化 + Token Quota Redis 持久化 + 黑板 Session 隔离 + 依赖安全升级）+ 会话数据加密（AES-256-Fernet）+ 74 文件变更
->
-> **v5.2.2** 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1341 测试用例 + 文档同步
->
-> **v5.2.1** 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复
->
-> **v5.2** 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73
->
 > **v5.1** 全量清理 320 临时文件 + 文档同步 + 隐私检查通过
 >
-> **v5.0** 前端 Vite 8 重构 + 1341+ 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
+> **v5.0** 前端 Vite 8 重构 + 1350 测试用例全覆盖 + Ruff 工具链 + 覆盖率门槛 80% + RAG 增强（查询改写/重排/RRF 融合/CLIP 多模态）+ 前后端 15 项匹配修复
 >
 > 核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25/交叉编码器重排 · RRF 融合 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离 · **Argon2id密码哈希** · **分级告警升级** · **业务指标监控**
 
@@ -56,7 +50,7 @@
 - 🏆 **极致级生产就绪** - 超越99.9%的生产系统
 - ⏱️ **7小时完成** - 8项高ROI改进
 
-**详细报告**: [PHASE3_IMPROVEMENTS_COMPLETED.md](PHASE3_IMPROVEMENTS_COMPLETED.md) | [FINAL_ACCEPTANCE_REPORT.md](FINAL_ACCEPTANCE_REPORT.md)
+**详细报告**: [docs/reports/milestone/phase3-improvements-completed.md](docs/reports/milestone/phase3-improvements-completed.md) | [docs/reports/milestone/final-acceptance-report.md](docs/reports/milestone/final-acceptance-report.md)
 
 ---
 
@@ -67,16 +61,16 @@
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **测试能过** | `make test` | 1341 passed, 覆盖率 ≥80% |
+| **测试能过** | `make test` | 1350 passed, 覆盖率 ≥80% |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
 | **CI 能过** | `.github/workflows/ci.yml` | 4 Job 流水线（测试→安全→构建→部署） |
 
 **详细证据文档**：
-- [Prompt Engineering 设计](docs/active/prompt-engineering.md) — Prompt 架构、策略选型、迭代演进
-- [模型选型与 Token 成本](docs/active/model-comparison.md) — 模型对比、Embedding 效果、月度成本估算
-- [RAG 评估报告](docs/active/rag-evaluation.md) — 基线 vs 改进后数据对比
-- [安全设计文档](docs/active/SECURITY.md) — 安全措施清单 + 已知限制 + 改进计划
-- [架构设计](docs/active/architecture-design.md) — 四层状态机 + 五种协作模式
+- [Prompt Engineering 设计](docs/design/prompt-engineering.md) — Prompt 架构、策略选型、迭代演进
+- [模型选型与 Token 成本](docs/reference/model-comparison.md) — 模型对比、Embedding 效果、月度成本估算
+- [RAG 评估报告](docs/reference/rag-evaluation.md) — 基线 vs 改进后数据对比
+- [安全设计文档](docs/design/security.md) — 安全措施清单 + 已知限制 + 改进计划
+- [架构设计](docs/design/architecture-design.md) — 四层状态机 + 五种协作模式
 
 ---
 
@@ -462,14 +456,14 @@ Thought（推理当前需要什么信息）
 |------|------|
 | **认证** | API Key（系统间）+ JWT Bearer（终端用户）双认证模式 + `hmac.compare_digest` 防时序攻击 |
 | **RBAC 角色** | 4 级角色：customer / agent / supervisor / admin，分级权限控制（[middleware.py](api/middleware.py) `ROLE_PERMISSIONS`） |
-| **密码哈希** | PBKDF2-SHA256 + 600K 迭代 + 随机 salt（OWASP 推荐） |
+| **密码哈希** | Argon2id（v5.4 升级，OWASP 2023 推荐）+ PBKDF2-SHA256 向后兼容（600K 迭代 + 随机 salt） |
 | **JWT** | PyJWT 库 + HS256 算法白名单 + jti 吊销 + Redis 黑名单 + Refresh Token（access 2h + refresh 7d） |
 | **CSRF** | 双重 Cookie 提交模式（`csrf_token` cookie + `X-CSRF-Token` header），`hmac.compare_digest` 比较 |
 | **限流** | 通用 60 req/min/IP + 登录 5次/5min + 注册 3次/h + Redis 滑动窗口优先，内存回退 |
 | **输入验证** | Pydantic 请求模型 + `MAX_QUERY_LENGTH=2000` + 控制字符 + HTML 标签净化（HTML 实体解码防绕过） |
 | **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层系统提示泄露检测 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
-| **安全头** | HSTS / CSP（script-src 使用 nonce 无 `unsafe-inline`，style-src 暂用 `unsafe-inline` 已知限制）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
+| **安全头** | HSTS / CSP（script-src + style-src 使用 nonce，无 `unsafe-inline`）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
 | **会话安全** | UUID 格式校验 + HMAC 会话令牌签名（可绑定客户端指纹）+ 用户级会话所有权隔离 |
 | **WebSocket** | 首条消息 JWT 认证（非 URL 参数）+ 每 IP 连接限制 + 消息限流 + 空闲超时 + 定期清理 |
 | **CORS** | 环境变量配置，默认 `http://localhost:8000`，生产必须配置真实域名 |
@@ -482,9 +476,6 @@ Thought（推理当前需要什么信息）
 | **会话加密** | AES-256-Fernet 会话数据加密（可选，未配置时向后兼容明文） |
 | **黑板隔离** | ContextVar 按 session 隔离 Agent 间共享数据，防止跨会话数据泄露 |
 | **依赖安全** | 定期升级依赖版本，修复已知 CVE（python-jose/Jinja2/MarkupSafe/starlette/pillow） |
-| **密钥管理** | `scripts/generate_prod_env.py` 使用 `secrets` 模块生成密码学安全随机密钥 |
-| **ERP 安全** | `sanitize_erp_input()` 白名单消毒 + 订单查询拒绝空过滤条件（防全量泄露） |
-| **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 |
 
 ---
 
@@ -644,7 +635,7 @@ make env-check   # 查看当前环境配置摘要
 
 **合计：44 个端点 + 5 个页面**
 
-> 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/active/api-reference.md](docs/active/api-reference.md)
+> 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
 ---
 
@@ -669,12 +660,12 @@ customer-service-ai-agent/
 ├── media/             # 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
 ├── alerts/            # 告警通知（Webhook 钉钉/企微/飞书 + SMTP）
 ├── knowledge/         # 知识库管理路由
-├── web/               # 前端（原生 JS + Vite 8 构建 + 38 模块 + 13 CSS + 5 页面）
-│   ├── src/           # 38 JS 模块（聊天/API/Auth/工具/管理后台/测试）
+├── web/               # 前端（原生 JS + Vite 8 构建 + 34 模块 + 13 CSS + 5 页面）
+│   ├── src/           # 34 JS 模块（聊天/API/Auth/工具/管理后台/测试）
 │   ├── styles/        # 13 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
-├── tests/             # 测试套件（1341 Python + 5 Vitest：unit/integration/e2e/stress/performance）
+├── tests/             # 测试套件（1350 Python + 5 Vitest：unit/integration/e2e/stress/performance）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
@@ -729,7 +720,7 @@ customer-service-ai-agent/
 | `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
 | `contrast.test.js` | `web/src/__tests__/` | WCAG AA 对比度回归（18 个 token 对） |
 
-**总计：1341 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
+**总计：1350 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
@@ -883,19 +874,20 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 ## 📋 变更日志
 
-> 完整变更日志见 [CHANGELOG.md](CHANGELOG.md)
+> 完整变更日志见 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)
 
 ### 最近版本
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
+| **v5.4.1** | 2026-06-17 | 前后端 API 对齐（5 新 REST 端点 + 2 新模块）+ 死代码清理（-487 行）+ Token Quota 卡片 + checkpoint 探测 |
 | **v5.4** | 2026-06-16 | 企业级增强（Argon2id + 分级告警 + 业务监控 + 99.0分极致级） |
 | **v5.3** | 2026-06-16 | 安全审计修复（WS 认证 + Token Quota Redis + 黑板隔离 + 依赖升级）+ 会话加密 + 74 文件变更 |
-| **v5.2.2** | 2026-06-16 | 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1341 测试用例 + 文档同步 |
+| **v5.2.2** | 2026-06-16 | 会话列表标题字段修正 + CI 覆盖率修复（pytest.ini + 151 新测试 75.8%→80.09%）+ 配置版本对齐 + 1350 测试用例 + 文档同步 |
 | **v5.2.1** | 2026-06-11 | 混合主题特异性修复 + 面板状态同步 + OS 深色模式污染根因修复 |
 | **v5.2** | 2026-06-10 | 无障碍 WCAG AA/AAA 达标 + 对比度全量修复（8+ 处）+ TTS 语音选择器 + 会话侧面板 + CI v6 升级 + 死代码清理 + Ruff 346→73 |
 | **v5.1** | 2026-06-10 | 全量清理 320 临时文件 + 文档同步 + 隐私检查通过 |
-| **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1341 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
+| **v5.0** | 2026-06-08 | 前端 Vite 8 重构 + 1350 测试用例 + Ruff 工具链 + 覆盖率 80% + RAG 增强 + 前后端 15 项匹配修复 + 安全审查 7 项 |
 | **v4.6** | 2026-06-08 | 文档扫描 20/20 项完成 + pre-commit + 覆盖率 80% + api/app.py 路由拆分 7 模块 |
 | **v4.5** | 2026-06-08 | 图构建统一 + 测试断言加固 49 项 + mypy CI + 净减 317 行 |
 | **v4.4** | 2026-06-08 | 安全加固（PyJWT/CSP/WS）+ 代码重构（状态拆分/DI）+ 测试覆盖率门槛 |
