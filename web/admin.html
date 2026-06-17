@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <meta charset="UTF-8">
   <meta name="description" content="药妆智多星管理后台 - 系统监控、用户管理、知识库维护">
   <meta name="theme-color" content="#f7f6f3" media="(prefers-color-scheme: light)">
@@ -32,7 +34,7 @@
         </svg>
       </div>
       <span class="nav-logo-text">药妆智多星</span>
-      <span class="nav-logo-version">v5.3</span>
+      <span class="nav-logo-version">v5.4.1</span>
     </div>
     <nav class="nav-links" aria-label="页面导航">
       <a class="nav-link" href="/">对话</a>
@@ -175,6 +177,12 @@
             <div id="satisfactionStats"></div>
           </div>
         </div>
+        <div class="monitor-grid">
+          <div class="metric-card" id="tokenQuotaCard">
+            <div class="card-header"><div class="card-title">我的 Token Quota</div></div>
+            <div id="tokenQuotaStats"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -206,7 +214,7 @@
         <div class="admin-card">
           <h3>添加知识文档</h3>
           <div style="margin-bottom:12px">
-            <label style="font-size:13px;color:var(--text-secondary)">目标集合</label>
+            <label for="addDocCollection" style="font-size:13px;color:var(--text-secondary)">目标集合</label>
             <select id="addDocCollection" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
               <option value="product_knowledge">产品知识 (product_knowledge)</option>
               <option value="faq">常见问题 (faq)</option>
@@ -214,7 +222,7 @@
             </select>
           </div>
           <div style="margin-bottom:12px">
-            <label style="font-size:13px;color:var(--text-secondary)">文档内容（每行一条）</label>
+            <label for="addDocText" style="font-size:13px;color:var(--text-secondary)">文档内容（每行一条）</label>
             <textarea id="addDocText" rows="5" placeholder="输入文档内容，每行一条..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px;resize:vertical;font-size:13px"></textarea>
           </div>
           <button type="button" class="btn-sm primary" id="btnAddDocs">添加文档</button>
@@ -228,7 +236,7 @@
         <div class="admin-card">
           <h3>Agent Prompt 管理</h3>
           <div style="margin-bottom:12px">
-            <label style="font-size:13px;color:var(--text-secondary)">选择 Agent</label>
+            <label for="promptAgentSelect" style="font-size:13px;color:var(--text-secondary)">选择 Agent</label>
             <select id="promptAgentSelect" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
               <option value="">加载中...</option>
             </select>
@@ -239,11 +247,11 @@
         <div class="admin-card">
           <h3>创建新版本</h3>
           <div style="margin-bottom:12px">
-            <label style="font-size:13px;color:var(--text-secondary)">版本号</label>
+            <label for="newPromptVersion" style="font-size:13px;color:var(--text-secondary)">版本号</label>
             <input type="text" id="newPromptVersion" placeholder="如 v2.0" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px">
           </div>
           <div style="margin-bottom:12px">
-            <label style="font-size:13px;color:var(--text-secondary)">Prompt 内容</label>
+            <label for="newPromptText" style="font-size:13px;color:var(--text-secondary)">Prompt 内容</label>
             <textarea id="newPromptText" rows="10" placeholder="输入 Prompt 内容..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-base);margin-top:4px;resize:vertical;font-size:13px;font-family:monospace"></textarea>
           </div>
           <div style="margin-bottom:12px">
