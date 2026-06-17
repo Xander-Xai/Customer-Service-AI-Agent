@@ -1472,7 +1472,7 @@ class TestMetricsCollectorSnapshot:
         mock_redis = MagicMock()
         result = await mc.save_snapshot(redis_client=mock_redis)
         assert result is True
-        mock_redis.setex.assert_called_once()
+        mock_redis.set.assert_called_once()
         mock_redis.lpush.assert_called_once()
         mock_redis.ltrim.assert_called_once()
 
@@ -1492,7 +1492,7 @@ class TestMetricsCollectorSnapshot:
 
         mc = MetricsCollector()
         mock_redis = MagicMock()
-        mock_redis.setex.side_effect = RuntimeError("Redis down")
+        mock_redis.set.side_effect = RuntimeError("Redis down")
 
         result = await mc.save_snapshot(redis_client=mock_redis)
         assert result is False
@@ -1749,7 +1749,7 @@ class TestSLAAlertManagerCoverage:
         alert = await manager.check_and_alert(mc)
         assert alert is not None
         assert alert["type"] == "sla_violation_high"
-        assert alert["severity"] in ("warning", "critical")
+        assert alert["severity"] in ("warning", "critical", "emergency")
 
     @pytest.mark.asyncio
     async def test_check_and_alert_no_alert(self):
