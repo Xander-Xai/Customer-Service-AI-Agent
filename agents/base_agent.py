@@ -715,7 +715,7 @@ class BaseAgent(ABC):
             rule_reply = await self._try_rule_fallback(messages, fallback_response)
             if rule_reply:
                 self.logger.info(f"[RuleFallback] LLM 降级成功，使用 RuleBasedLLM 回复")
-                response_content = rule_reply
+                response_content = f"{response_content}\n\n{rule_reply}"
 
         await self._add_message_to_session(session_id, response_content, is_user=False)
         state["response"] = response_content
