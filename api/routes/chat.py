@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from api.utils import extract_user_id, sanitize_input, validate_session_id
 from core.config import MAX_QUERY_LENGTH
@@ -24,8 +24,9 @@ logger = get_logger("api.chat")
 SSE_CHUNK_TIMEOUT = 60.0  # SSE 事件队列等待超时（秒）
 CHAT_QUERY_MAX_LENGTH = 2000  # 聊天查询最大字符数
 
-# ===== SSE 超时常量 =====
-SSE_CHUNK_TIMEOUT = 60.0  # SSE 事件队列等待超时（秒）
+# ===== 通用错误消息常量 =====
+ERR_INTERNAL = "服务内部错误，请稍后重试"
+ERR_QUERY_EMPTY = "query 不能为空"
 
 
 # ── Pydantic 模型 ──
@@ -36,6 +37,11 @@ class ChatRequest(BaseModel):
     session_id: str = Field(default="", max_length=36)
     session_token: str = Field(default="", max_length=64)
 
+    @field_validator("session_id", "session_token", mode="before")
+    @classmethod
+    def coerce_none_to_empty(cls, v: object) -> object:
+        return "" if v is None else v
+
 
 class ChatStreamRequest(BaseModel):
     """SSE 流式输出请求模型"""
@@ -43,6 +49,11 @@ class ChatStreamRequest(BaseModel):
     query: str = Field(..., max_length=CHAT_QUERY_MAX_LENGTH)
     session_id: str = Field(default="", max_length=36)
     session_token: str = Field(default="", max_length=64)
+
+    @field_validator("session_id", "session_token", mode="before")
+    @classmethod
+    def coerce_none_to_empty(cls, v: object) -> object:
+        return "" if v is None else v
 
 
 # ── SSE 工具 ──
@@ -162,18 +173,21 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                     continue
                 if event is None:
                     break
-                if isinstance(event, dict) and event.get("type") == "chunk":
+                if isinstance(event, dict) and event.get("type") in (
+                    "chunk", "status", "thinking", "tool_call",
+                    "tool_result", "rag_status", "agent_switch",
+                ):
                     yield _sse_event(event)
 
         try:
             result = await ctx.graph_task
         except Exception as e:
             logger.error(f"SSE 图执行失败: {e}", exc_info=True)
-            yield _sse_event({"type": "error", "content": "服务内部错误，请稍后重试"})
+            yield _sse_event({"type": "error", "content": ERR_INTERNAL})
             return
 
         session_token = ""
-        if ctx.session_manager and not ctx.client_provided_sid:
+        if ctx.session_manager:
             session_token = ctx.session_manager.generate_session_token(ctx.sid)
 
         elapsed = round(time.time() - start_time, 3)
@@ -193,7 +207,7 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
         )
     except Exception as e:
         logger.error(f"SSE 流式处理失败: {e}", exc_info=True)
-        yield _sse_event({"type": "error", "content": "服务内部错误，请稍后重试"})
+        yield _sse_event({"type": "error", "content": ERR_INTERNAL})
 
 
 # ── REST 聊天 ──
@@ -213,7 +227,7 @@ async def rest_chat(data: ChatRequest, request: Request):
     run_graph = request.app.state.run_graph
     query = sanitize_input(data.query)[:MAX_QUERY_LENGTH]
     if not query:
-        return JSONResponse({"error": "query 不能为空"}, status_code=400)
+        return JSONResponse({"error": ERR_QUERY_EMPTY}, status_code=400)
 
     try:
         user_id = extract_user_id(request)
@@ -234,7 +248,7 @@ async def rest_chat(data: ChatRequest, request: Request):
         return mapped
     except Exception as e:
         logger.error(f"REST 处理失败: {e}", exc_info=True)
-        return JSONResponse({"error": "服务内部错误，请稍后重试"}, status_code=500)
+        return JSONResponse({"error": ERR_INTERNAL}, status_code=500)
 
 
 # ── SSE 流式输出 ──
@@ -254,7 +268,7 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
 
     query = sanitize_input(data.query)[:MAX_QUERY_LENGTH]
     if not query:
-        return JSONResponse({"error": "query 不能为空"}, status_code=400)
+        return JSONResponse({"error": ERR_QUERY_EMPTY}, status_code=400)
 
     graph_task, chunk_queue = _build_sse_stream_context(
         request,
