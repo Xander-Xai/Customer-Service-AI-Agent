@@ -7,21 +7,26 @@
  * @param {string} query - 用户提问
  * @param {string} sessionId - 会话 ID
  * @param {string} sessionToken - 会话令牌
- * @param {object} callbacks - { onChunk, onDone, onError, onStatus }
+ * @param {object} callbacks - { onChunk, onDone, onError, onStatus, onThinking, onToolCall, onToolResult, onRagStatus, onAgentSwitch }
  * @returns {AbortController} 用于取消请求
  */
 export function sendChatStream(query, sessionId, sessionToken, callbacks = {}) {
-  const { onChunk, onDone, onError, onStatus } = callbacks;
+  const { onChunk, onDone, onError, onStatus, onThinking, onToolCall, onToolResult, onRagStatus, onAgentSwitch } = callbacks;
   const controller = new AbortController();
 
   const token = localStorage.getItem('token');
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
 
+  const payload = {
+    query,
+    ...(sessionId ? { session_id: sessionId } : {}),
+    ...(sessionToken ? { session_token: sessionToken } : {}),
+  };
   fetch('/api/chat/stream', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ query, session_id: sessionId, session_token: sessionToken }),
+    body: JSON.stringify(payload),
     signal: controller.signal,
   })
     .then((response) => {
@@ -47,6 +52,16 @@ export function sendChatStream(query, sessionId, sessionToken, callbacks = {}) {
                 else if (data.type === 'error' && onError) onError(data.content);
                 else if ((data.type === 'status' || data.type === 'progress') && onStatus)
                   onStatus(data);
+                else if (data.type === 'thinking' && onThinking)
+                  onThinking(data);
+                else if (data.type === 'tool_call' && onToolCall)
+                  onToolCall(data);
+                else if (data.type === 'tool_result' && onToolResult)
+                  onToolResult(data);
+                else if (data.type === 'rag_status' && onRagStatus)
+                  onRagStatus(data);
+                else if (data.type === 'agent_switch' && onAgentSwitch)
+                  onAgentSwitch(data);
               } catch (_e) {}
             }
             read();
@@ -121,6 +136,16 @@ export function sendChatStreamWithImage(query, imageFile, sessionId, sessionToke
                 else if (data.type === 'error' && onError) onError(data.content);
                 else if ((data.type === 'status' || data.type === 'progress') && onStatus)
                   onStatus(data);
+                else if (data.type === 'thinking' && onThinking)
+                  onThinking(data);
+                else if (data.type === 'tool_call' && onToolCall)
+                  onToolCall(data);
+                else if (data.type === 'tool_result' && onToolResult)
+                  onToolResult(data);
+                else if (data.type === 'rag_status' && onRagStatus)
+                  onRagStatus(data);
+                else if (data.type === 'agent_switch' && onAgentSwitch)
+                  onAgentSwitch(data);
               } catch (_e) {}
             }
             read();

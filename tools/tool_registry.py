@@ -3,6 +3,7 @@
 支持 OpenAI Function Calling 格式的工具定义、注册和执行。
 """
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -57,13 +58,24 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
-    async def execute(self, name: str, arguments: dict[str, Any]) -> str:
+    async def execute(
+        self, name: str, arguments: dict[str, Any],
+        stream_callback: Callable | None = None,  # v6.0: 转发给工具 handler
+    ) -> str:
         """执行指定工具，返回字符串结果"""
         tool = self._tools.get(name)
         if not tool:
             return f"错误：工具 '{name}' 不存在"
         try:
-            result = await tool.handler(arguments)
+            # v6.0: 注入 stream_callback，仅当 handler 接受此参数时传递
+            if stream_callback is not None:
+                sig = inspect.signature(tool.handler)
+                if "stream_callback" in sig.parameters:
+                    result = await tool.handler(arguments, stream_callback=stream_callback)
+                else:
+                    result = await tool.handler(arguments)
+            else:
+                result = await tool.handler(arguments)
             return str(result) if result is not None else "查询完成，无结果"
         except Exception as e:
             logger.error(f"工具执行失败 [{name}]: {e}", exc_info=True)

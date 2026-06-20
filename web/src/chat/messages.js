@@ -192,6 +192,7 @@ export function createStreamingMessage() {
         createElement('span', { className: 'streaming-text' }),
         createElement('span', { className: 'streaming-cursor' }, ['▊']),
       ]),
+      createElement('div', { className: 'thinking-container', style: 'display:none' }),
       createElement('div', { className: 'message-agent-tag' }, [
         createElement('span', { className: 'agent-icon' }, [agentIcon]),
         ' 客服助手',
@@ -277,6 +278,79 @@ export function createStreamingMessage() {
     },
     getText() {
       return rawText;
+    },
+
+    // v6.0: 追加思考过程
+    appendThinking(content) {
+      const tc = wrapper.querySelector('.thinking-container');
+      if (!tc) return;
+      tc.style.display = 'block';
+      const line = createElement('div', { className: 'thinking-line' }, [content]);
+      tc.appendChild(line);
+      scrollToBottom(container);
+    },
+
+    // v6.0: 追加工具调用卡片
+    appendToolCall(data) {
+      const tc = wrapper.querySelector('.thinking-container');
+      if (!tc) return;
+      tc.style.display = 'block';
+      const card = createElement('div', { className: 'tool-call-card' }, [
+        createElement('div', { className: 'tool-call-header' }, [
+          createElement('span', { className: 'tool-call-icon' }, ['🛠️']),
+          createElement('span', { className: 'tool-call-name' }, [data.name]),
+        ]),
+        createElement('pre', { className: 'tool-call-args' }, [JSON.stringify(data.args, null, 2)]),
+      ]);
+      tc.appendChild(card);
+      scrollToBottom(container);
+    },
+
+    // v6.0: 追加工具结果卡片
+    appendToolResult(data) {
+      const tc = wrapper.querySelector('.thinking-container');
+      if (!tc) return;
+      const card = createElement('div', { className: 'tool-result-card' }, [
+        createElement('div', { className: 'tool-result-header' }, [
+          createElement('span', { className: 'tool-result-icon' }, ['📋']),
+          createElement('span', { className: 'tool-result-name' }, [data.name]),
+        ]),
+        createElement('div', { className: 'tool-result-summary' }, [data.summary]),
+      ]);
+      tc.appendChild(card);
+      scrollToBottom(container);
+    },
+
+    // v6.0: 更新 RAG 检索状态
+    updateRagStatus(data) {
+      const tc = wrapper.querySelector('.thinking-container');
+      if (!tc) return;
+      tc.style.display = 'block';
+      const existing = tc.querySelector(`.rag-status-${data.status}`);
+      if (!existing) {
+        const el = createElement('div', { className: `rag-status rag-status-${data.status}` }, []);
+        tc.appendChild(el);
+      }
+      const statusTexts = {
+        rewriting: '✏️ 查询改写中...',
+        retrieving: '🔍 检索知识库中...',
+        reranking: `📊 重排中 (${data.count || ''}条)`,
+        done: `✅ 检索完成 (${data.count || 0}条结果)`,
+      };
+      const statusEl = tc.querySelector(`.rag-status-${data.status}`);
+      if (statusEl) statusEl.textContent = statusTexts[data.status] || data.status;
+      scrollToBottom(container);
+    },
+
+    // v6.0: 更新 Agent 标签
+    updateAgentTag(agentName) {
+      const tag = wrapper.querySelector('.message-agent-tag');
+      if (!tag) return;
+      const icon = getAgentIcon(agentName);
+      tag.replaceChildren(
+        createElement('span', { className: 'agent-icon' }, [icon]),
+        ` ${getAgentDisplayName(agentName)}`,
+      );
     },
   };
 }

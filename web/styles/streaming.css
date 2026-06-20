@@ -1,0 +1,70 @@
+/* v6.0: SSE 全链路流式 — 思考过程 + 工具调用 + RAG 状态 */
+
+.thinking-container {
+  background: var(--bg-secondary, #f5f5f5);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-top: 8px;
+  font-size: 0.9em;
+}
+
+.thinking-line {
+  color: var(--text-secondary, #666);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.tool-call-card {
+  background: var(--bg-code, #1e1e1e);
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 6px;
+  margin: 6px 0;
+  overflow: hidden;
+}
+
+.tool-call-header {
+  background: var(--bg-hover, #eee);
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-call-name {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.tool-call-args {
+  padding: 8px;
+  margin: 0;
+  font-size: 0.8em;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.tool-result-card {
+  background: var(--bg-secondary, #f9f9f9);
+  border-left: 3px solid var(--accent-color, #4a9eff);
+  border-radius: 4px;
+  margin: 6px 0;
+  padding: 6px 10px;
+}
+
+.tool-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.tool-result-summary {
+  font-size: 0.85em;
+  color: var(--text-secondary, #555);
+}
+
+.rag-status {
+  padding: 3px 0;
+  font-size: 0.85em;
+  color: var(--text-secondary, #666);
+}
