@@ -48,9 +48,17 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
+# ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
+VERSION = os.getenv("APP_VERSION", "5.5")  # 可从环境变量覆盖，便于 CI/CD
+APP_NAME = os.getenv("APP_NAME", "药妆智多星 - Customer Service AI Agent")
+DESCRIPTION = os.getenv(
+    "APP_DESCRIPTION",
+    "面向化妆品企业的多智能体客服系统（企业级增强版）",
+)
+
 # ===== HTTP 请求配置 =====
 HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 15)  # v5.4: 从 30s 降至 15s，减少失败场景等待
-HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": "MultiAgentCustomerService/3.0.0"}
+HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": f"MultiAgentCustomerService/{VERSION}"}
 
 # ===== 路由配置 =====
 ROUTING_COMPLEXITY_THRESHOLD = _int_env("ROUTING_COMPLEXITY_THRESHOLD", 50)
@@ -96,11 +104,6 @@ LLM_ROUTER_TIMEOUT = _float_env(
 # ===== 重试配置 =====
 RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 2)  # v5.4: 从 3 降至 2，减少无效重试
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
-
-# ===== 系统配置 =====
-VERSION = "5.5"
-APP_NAME = "药妆智多星 - Customer Service AI Agent"
-DESCRIPTION = "面向化妆品企业的多智能体客服系统（企业级增强版）"
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
@@ -172,6 +175,20 @@ RAG_N_RESULTS = _int_env("RAG_N_RESULTS", 3)
 RAG_QUERY_REWRITING = (
     os.getenv("RAG_QUERY_REWRITING", "false").lower() == "true"
 )  # v5.2: LLM 改写查询
+
+# ===== v6.0: Qdrant 向量数据库配置 =====
+QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
+QDRANT_PORT = _int_env("QDRANT_PORT", 6333)  # REST API 端口
+QDRANT_GRPC_PORT = _int_env("QDRANT_GRPC_PORT", 6334)
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
+QDRANT_PREFER_GRPC = os.getenv("QDRANT_PREFER_GRPC", "false").lower() == "true"
+QDRANT_COLLECTION_CONFIG = {
+    "vectors": {"size": 768, "distance": "Cosine"},
+    "optimizers_config": {"default_segment_number": 2},
+    "hnsw_config": {"m": 16, "ef_construct": 100},
+}
+# 迁移模式：parallel（双写）| qdrant_only | chroma_legacy
+VECTOR_DB_MODE = os.getenv("VECTOR_DB_MODE", "chroma_legacy")
 
 # ===== v3.5: ReAct 配置 =====
 REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 3)  # v4.3: 从 5 降至 3，控制延迟在 20s 内
