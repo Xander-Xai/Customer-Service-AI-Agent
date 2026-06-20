@@ -218,7 +218,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                     try:
                         await stream_callback({"type": "chunk", "content": cached[i:i + chunk_size]})
                     except Exception:
-                        pass
+                        logger.debug("cache pseudo-stream callback failed")
                     await asyncio.sleep(interval)
 
             state["response"] = cached
@@ -257,10 +257,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
             # v6.0: emit agent_switch 和 mode 事件
             agent_name = routing_result.agent_name
+            await _emit_status(state, "route", f"🔄 协作模式: {mode_name}, Agent: {agent_name}")
             cb = state.get("stream_callback")
             if cb:
                 try:
-                    await cb({"type": "status", "phase": "route", "content": f"🔄 协作模式: {mode_name}"})
                     await cb({"type": "agent_switch", "from": "router", "to": agent_name})
                 except Exception:
                     pass

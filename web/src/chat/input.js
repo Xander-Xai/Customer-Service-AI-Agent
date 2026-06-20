@@ -104,6 +104,7 @@ export function sendMessage() {
 function _sendViaSSE(query) {
   let streaming = null;
   let hasStarted = false;
+  let _isErrorHandled = false; // 防止重复错误处理
 
   const _controller = API.sendChatStream(query, getSessionId(), getSessionToken(), {
     onChunk(content) {
@@ -134,6 +135,9 @@ function _sendViaSSE(query) {
       loadSessionList();
     },
     onError(errMsg) {
+      if (_isErrorHandled) return;
+      _isErrorHandled = true;
+
       if (!hasStarted) {
         // SSE 未开始就失败 → 降级到 WebSocket
         console.log('[SSE] 失败，降级到 WebSocket:', errMsg);
@@ -148,6 +152,27 @@ function _sendViaSSE(query) {
     },
     onStatus(_data) {
       if (!hasStarted) showTypingIndicator();
+    },
+    // v6.0: 全链路流式新事件
+    onThinking(data) {
+      if (!hasStarted) {
+        hasStarted = true;
+        removeTypingIndicator();
+        streaming = createStreamingMessage();
+      }
+      if (streaming) streaming.appendThinking(data.content);
+    },
+    onToolCall(data) {
+      if (streaming) streaming.appendToolCall(data);
+    },
+    onToolResult(data) {
+      if (streaming) streaming.appendToolResult(data);
+    },
+    onRagStatus(data) {
+      if (streaming) streaming.updateRagStatus(data);
+    },
+    onAgentSwitch(data) {
+      if (streaming) streaming.updateAgentTag(data.to);
     },
   });
 }
@@ -226,6 +251,27 @@ function _sendViaSSEWithImage(query, imageFile) {
       },
       onStatus(_data) {
         if (!hasStarted) showTypingIndicator();
+      },
+      // v6.0: 全链路流式新事件
+      onThinking(data) {
+        if (!hasStarted) {
+          hasStarted = true;
+          removeTypingIndicator();
+          streaming = createStreamingMessage();
+        }
+        if (streaming) streaming.appendThinking(data.content);
+      },
+      onToolCall(data) {
+        if (streaming) streaming.appendToolCall(data);
+      },
+      onToolResult(data) {
+        if (streaming) streaming.appendToolResult(data);
+      },
+      onRagStatus(data) {
+        if (streaming) streaming.updateRagStatus(data);
+      },
+      onAgentSwitch(data) {
+        if (streaming) streaming.updateAgentTag(data.to);
       },
     },
   );

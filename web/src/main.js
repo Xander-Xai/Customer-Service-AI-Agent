@@ -11,6 +11,7 @@ import '../styles/layout.css';
 import '../styles/components.css';
 import '../styles/animations.css';
 import '../styles/responsive.css';
+import '../styles/streaming.css';
 
 import { init } from './chat/index.js';
 import { getAvailableVoices, getSelectedVoice, setVoice } from './chat/voice.js';
@@ -25,10 +26,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const voiceSelect = document.getElementById('selectTTSVoice');
   if (voiceSelect) {
     const VOICE_LABELS = {
-      'zh-CN-XiaoxiaoNeural': '晓晓（女声·温暖自然）',
-      'zh-CN-YunxiNeural': '云希（男声·年轻）',
-      'zh-CN-YunjianNeural': '云健（男声·成熟）',
-      'zh-CN-XiaoyiNeural': '晓伊（女声·活泼）',
+      'xiaoxiao': '晓晓（女声·温暖自然）',
+      'yunxi': '云希（男声·年轻）',
+      'yunjian': '云健（男声·成熟）',
+      'xiaoyi': '晓伊（女声·活泼）',
     };
     const savedVoice = localStorage.getItem('ttsVoice') || '';
     if (savedVoice) setVoice(savedVoice);
@@ -38,11 +39,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const entries = Object.entries(voices);
       if (!entries.length) return;
       voiceSelect.replaceChildren();
-      entries.forEach(([, id]) => {
+      entries.forEach(([label, id]) => {
         const opt = document.createElement('option');
         opt.value = id;
         if (id === getSelectedVoice()) opt.selected = true;
-        opt.textContent = VOICE_LABELS[id] || id;
+        opt.textContent = VOICE_LABELS[label] || label;
         voiceSelect.appendChild(opt);
       });
     }

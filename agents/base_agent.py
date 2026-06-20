@@ -590,7 +590,10 @@ class BaseAgent(ABC):
                 # 执行每个工具调用，追加 ToolMessage
                 for p in parsed_tcs:
                     try:
-                        result = await self.tool_registry.execute(p["name"], p["args"])
+                        result = await self.tool_registry.execute(
+                            p["name"], p["args"],
+                            stream_callback=state.get("stream_callback"),
+                        )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
                         result = "工具暂时不可用，请稍后重试"
