@@ -519,6 +519,18 @@ class BaseAgent(ABC):
         response_content = ""
         effective_llm = self._get_effective_llm(state)  # v5.1: 多模态时用 Vision LLM
 
+        # v6.0: 全链路流式 — emit thinking + tool_call + tool_result 事件
+        stream_callback = state.get("stream_callback")
+        if stream_callback:
+            try:
+                await stream_callback({
+                    "type": "thinking",
+                    "content": f"🤔 {self.name} Agent 正在分析中...",
+                    "agent": self.name,
+                })
+            except Exception:
+                pass
+
         for round_num in range(max_tool_rounds):
             try:
                 response = await effective_llm.async_invoke(messages, tools=tools)
@@ -551,6 +563,19 @@ class BaseAgent(ABC):
                             args = {}
                     parsed_tcs.append({"id": tc["id"], "name": tc["name"], "args": args})
 
+                # v6.0: emit tool_call events for visualization
+                if stream_callback:
+                    for p in parsed_tcs:
+                        try:
+                            await stream_callback({
+                                "type": "tool_call",
+                                "name": p["name"],
+                                "args": p["args"],
+                                "agent": self.name,
+                            })
+                        except Exception:
+                            pass
+
                 # 追加 assistant 消息（含 tool_calls）
                 messages.append(
                     AIMessage(
@@ -569,12 +594,65 @@ class BaseAgent(ABC):
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
                         result = "工具暂时不可用，请稍后重试"
+
+                    # v6.0: emit tool_result event
+                    if stream_callback:
+                        try:
+                            await stream_callback({
+                                "type": "tool_result",
+                                "name": p["name"],
+                                "summary": result[:200] if result else "无结果",
+                                "agent": self.name,
+                            })
+                        except Exception:
+                            pass
                     messages.append(ToolMessage(content=result, tool_call_id=p["id"]))
                     self.logger.info(
                         f"[ToolCall] [{get_trace_id()}] {p['name']}({p['args']}) -> {len(str(result))} chars"
                     )
             else:
-                response_content = response.content
+                # v6.0: 有流式回调时使用 async_invoke_stream 输出最终响应
+                if stream_callback:
+                    try:
+                        await stream_callback({
+                            "type": "thinking",
+                            "content": "💡 正在生成回答...",
+                            "agent": self.name,
+                        })
+                    except Exception:
+                        pass
+                    response_content = ""
+                    try:
+                        async for chunk in effective_llm.async_invoke_stream(messages):
+                            response_content += chunk
+                            try:
+                                await stream_callback({"type": "chunk", "content": chunk})
+                            except Exception:
+                                pass
+                    except LLMServiceError as e:
+                        is_quota = "Quota" in str(e)
+                        self.logger.warning(
+                            f"LLM 服务降级 (final) [{get_trace_id()}]: {e}",
+                            exc_info=not is_quota,
+                        )
+                        response_content = (
+                            "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
+                        )
+                        try:
+                            await stream_callback({"type": "chunk", "content": response_content})
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        self.logger.error(
+                            f"LLM 流式调用异常 (final) [{get_trace_id()}]: {e}", exc_info=True
+                        )
+                        response_content = fallback_response
+                        try:
+                            await stream_callback({"type": "chunk", "content": fallback_response})
+                        except Exception:
+                            pass
+                else:
+                    response_content = response.content
                 break
 
         # v5.2: Self-Reflection — 最终回答前自检
