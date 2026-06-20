@@ -16,6 +16,7 @@ v4.1 依赖注入：
 - ServiceContainer（core/container.py）集中管理组件生命周期
 """
 
+import asyncio
 import time
 
 from langgraph.graph import StateGraph
@@ -33,6 +34,20 @@ def _format_duration(seconds: float) -> str:
     if seconds < 1:
         return f"{seconds * 1000:.0f}ms"
     return f"{seconds:.1f}s"
+
+
+async def _emit_status(state: AgentState | dict, phase: str, message: str) -> None:
+    """图节点状态 emit 辅助函数（v6.0: 全链路 SSE 流式）
+
+    从 state 中获取 stream_callback，发出 status 事件。
+    回调不存在或抛出异常时不传播，仅 debug log。
+    """
+    cb = state.get("stream_callback") if isinstance(state, dict) else None
+    if cb:
+        try:
+            await cb({"type": "status", "phase": phase, "content": message})
+        except Exception:
+            logger.debug(f"_emit_status: callback failed (phase={phase})", exc_info=True)
 
 
 # ===== v4.5: 唯一图构建入口 =====
@@ -69,10 +84,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     async def _classify_query_node(state: AgentState) -> AgentState:
         """双层路由节点：LLM Router + Rule Classifier + 复杂度评分（v3.2: 熔断器降级）
         v4.1: 从 state 传播 trace_id 到 contextvars
+        v5.4: RAG 预取与路由并行执行
         """
         trace_id = state.get("trace_id", "")
         if trace_id:
             set_trace_id(trace_id)
+
+        await _emit_status(state, "classify", "📋 正在分类问题...")
 
         query = state["customer_query"]
         session_id = state.get("session_id", "default")
@@ -85,6 +103,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         context = await c.session_mgr.get_conversation_context(session_id)
         context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
+
+        # v5.4: RAG 预取 — 与路由并行执行，提前检索知识库
+        rag_prefetch_task = asyncio.create_task(_rag_prefetch(query))
 
         # v3.2: 熔断器检查 — OPEN 状态时跳过 LLM，仅用规则分类
         if not await c.circuit_breaker.should_allow():
@@ -107,7 +128,11 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             )
         else:
             try:
-                result = await c.router.route(query, context_text)
+                result = await c.router.route(
+                    query,
+                    context_text,
+                    user_id=state.get("user_id"),
+                )
             except Exception as e:
                 logger.warning(f"[Router] 路由异常，降级到通用查询: {e}")
                 result = RoutingResult(
@@ -119,6 +144,11 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                     raw_llm_result="[error_fallback]",
                     rule_override=True,
                 )
+
+        # 等待 RAG 预取结果
+        rag_context = await rag_prefetch_task
+        if rag_context:
+            state["_rag_prefetch"] = rag_context
 
         state["query_type"] = result.query_type
         state["current_agent"] = result.agent_name
@@ -141,19 +171,63 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             },
         )
 
+        await _emit_status(state, "classify", f"📋 分类结果: {result.query_type} (agent={result.agent_name})")
+
         return state
 
+    async def _rag_prefetch(query: str) -> str | None:
+        """RAG 预取：用原始查询提前检索知识库，与路由并行执行
+
+        返回检索到的上下文文本，供 Agent 直接使用（跳过 Agent 内部的 RAG 检索）。
+        失败时返回 None，Agent 会回退到自己的 RAG 检索。
+        """
+        if not c.knowledge_base:
+            return None
+        try:
+            results = await asyncio.wait_for(
+                c.knowledge_base.query("product_knowledge", query, n_results=3),
+                timeout=2.0,
+            )
+            if results:
+                context_parts = []
+                for doc in results:
+                    content = doc.get("content", doc.get("text", ""))
+                    if content:
+                        context_parts.append(f"[知识库] {content}")
+                return "\n".join(context_parts) if context_parts else None
+        except Exception as e:
+            logger.debug(f"[RAG预取] 失败（Agent 将自行检索）: {e}")
+        return None
+
     async def _check_cache_node(state: AgentState) -> AgentState:
-        """缓存检查节点"""
+        """缓存检查节点（v6.0: SSE 状态流式 + 缓存伪流式）"""
         query = state["customer_query"]
+
+        await _emit_status(state, "cache", "🔍 检查缓存中...")
+
         cached = c.cache.get(query)
         if cached:
+            await _emit_status(state, "cache", "⚡ 缓存命中，快速响应中...")
+
+            # v6.0: 缓存伪流式 — 分块输出缓存内容
+            stream_callback = state.get("stream_callback")
+            if stream_callback:
+                chunk_size = 20
+                interval = 0.03
+                for i in range(0, len(cached), chunk_size):
+                    try:
+                        await stream_callback({"type": "chunk", "content": cached[i:i + chunk_size]})
+                    except Exception:
+                        pass
+                    await asyncio.sleep(interval)
+
             state["response"] = cached
             state["cached"] = True
             state["current_agent"] = "cache"
             state["collaboration_mode"] = "cache_hit"
             logger.info(f"[Cache] HIT: {query[:30]}...")
         else:
+            await _emit_status(state, "cache", "🔍 L1 未命中，进行语义匹配...")
             state["cached"] = False
             logger.debug(f"[Cache] MISS: {query[:30]}...")
         return state
@@ -180,6 +254,17 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             if not mode:
                 mode = c.orchestrator._modes["sequential"]
                 mode_name = "sequential"
+
+            # v6.0: emit agent_switch 和 mode 事件
+            agent_name = routing_result.agent_name
+            cb = state.get("stream_callback")
+            if cb:
+                try:
+                    await cb({"type": "status", "phase": "route", "content": f"🔄 协作模式: {mode_name}"})
+                    await cb({"type": "agent_switch", "from": "router", "to": agent_name})
+                except Exception:
+                    pass
+
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
             logger.error(f"[{mode_name}] error: {e}", exc_info=True)
