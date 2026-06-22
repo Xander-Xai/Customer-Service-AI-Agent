@@ -58,7 +58,7 @@ jobs:
 
       - name: Run coverage report
         run: |
-          python -m pytest tests/unit/ tests/integration/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
+          python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
 
       - name: Upload coverage artifact
         if: always()
