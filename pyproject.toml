@@ -1,3 +1,10 @@
+[project]
+name = "customer-service-ai-agent"
+version = "6.0"
+description = "药妆智多星多智能体客服系统"
+requires-python = ">=3.10"
+license = {text = "AGPL-3.0"}
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100
@@ -24,3 +31,98 @@ known-first-party = ["config", "logger", "exceptions", "agents", "api", "auth", 
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+markers = [
+    "real_llm: 真实 LLM 端到端测试（需要真实 API Key，默认跳过）",
+    "stress: 压力测试（耗时较长）",
+    "xdist_group: 组隔离执行标识",
+]
+asyncio_mode = "auto"
+addopts = "--cov-report=term-missing --cov-report=html"
+
+[tool.coverage.run]
+source = [
+    "agents",
+    "alerts",
+    "api",
+    "auth",
+    "cache",
+    "collaboration",
+    "core",
+    "db",
+    "erp",
+    "knowledge",
+    "llm",
+    "media",
+    "rag",
+    "router",
+    "tools",
+]
+omit = [
+    "tests/*",
+    ".venv/*",
+    "venv/*",
+    "*/__pycache__/*",
+    "*/conftest.py",
+    "web/*",
+    "docs/*",
+    "scripts/*",
+    "deploy/*",
+    "monitoring/*",
+    "nginx/*",
+    "loki/*",
+    "data/*",
+    "htmlcov/*",
+    "node_modules/*",
+    "alembic/*",
+    "*erp/kingdee_real_adapter.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+omit = [
+    "*erp/kingdee_real_adapter.py",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+no_implicit_optional = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = ["core.protocols.*", "core.token_tracker.*", "core.prompt_manager.*", "rag.reranker.*", "rag.query_rewriter.*", "api.dependencies.*"]
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_return_any = true
+
+[[tool.mypy.overrides]]
+module = ["core.graph_builder.*", "core.session.*"]
+disallow_untyped_defs = false
+no_implicit_optional = false
+
+[[tool.mypy.overrides]]
+module = ["multi_agent_customer_service.*"]
+disallow_untyped_defs = false
+no_implicit_optional = false
+
+[[tool.mypy.overrides]]
+module = ["core.config", "config"]
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["erp.kingdee_adapter"]
+disallow_untyped_defs = false
