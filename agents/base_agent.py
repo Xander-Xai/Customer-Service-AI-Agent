@@ -687,6 +687,18 @@ class BaseAgent(ABC):
         if not response_content:
             response_content = fallback_response
 
+        if stream_callback:
+            try:
+                await stream_callback(
+                    {
+                        "type": "content_complete",
+                        "content": response_content,
+                        "agent": self.name,
+                    }
+                )
+            except Exception:
+                pass
+
         await self._add_message_to_session(session_id, response_content, is_user=False)
         state["response"] = response_content
         state["current_agent"] = self.name
@@ -796,7 +808,19 @@ class BaseAgent(ABC):
             rule_reply = await self._try_rule_fallback(messages, fallback_response)
             if rule_reply:
                 self.logger.info(f"[RuleFallback] LLM 降级成功，使用 RuleBasedLLM 回复")
-                response_content = f"{response_content}\n\n{rule_reply}"
+                response_content = rule_reply
+
+        if stream_callback:
+            try:
+                await stream_callback(
+                    {
+                        "type": "content_complete",
+                        "content": response_content,
+                        "agent": self.name,
+                    }
+                )
+            except Exception as cb_err:
+                self.logger.debug(f"stream_callback 推送 content_complete 失败: {cb_err}")
 
         await self._add_message_to_session(session_id, response_content, is_user=False)
         state["response"] = response_content

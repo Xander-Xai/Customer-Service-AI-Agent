@@ -31,29 +31,14 @@ from auth.service import init_default_admin  # noqa: E402
 
 init_default_admin()
 
-# ===== 生产环境强制校验安全密钥 =====
-from core import config as _cfg  # noqa: E402
-
-_security_errors = []
-
-if (not _cfg.JWT_SECRET or _cfg.JWT_SECRET in ("", "change-me-in-production")) and not DEV_MODE:
-    _security_errors.append("JWT_SECRET 未配置或使用默认值，生产环境必须设置")
-
-if not DEV_MODE and (
-    not _cfg.SESSION_TOKEN_SECRET
-    or _cfg.SESSION_TOKEN_SECRET
-    in (
-        "",
-        "change-me-session-secret-in-production",
-    )
-):
-    _security_errors.append("SESSION_TOKEN_SECRET 未配置，会话校验将被禁用")
-
-if _security_errors:
-    for err in _security_errors:
-        logger.error(f"🚨 安全启动检查失败: {err}")
-    if not DEV_MODE:
-        raise SystemExit("安全配置不满足生产要求，请检查 .env 文件")
+# ===== 生产环境密钥校验已移至 core/config.py validate_required_config() =====
+# app_factory.py 仅记录非致命的开发环境安全警告
+if DEV_MODE:
+    import core.config as _cfg
+    if not _cfg.JWT_SECRET or any(p in _cfg.JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+        logger.warning("⚠️ JWT_SECRET 未配置或使用默认值，生产环境必须设置")
+    if not _cfg.SESSION_TOKEN_SECRET or any(p in _cfg.SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+        logger.warning("⚠️ SESSION_TOKEN_SECRET 未配置，生产环境必须设置")
 
 
 # ===== 创建 ServiceContainer（同步创建基础设施组件）=====
@@ -90,6 +75,26 @@ async def lifespan(app):
     _app_module._circuit_breaker_ref = _container.circuit_breaker
 
     logger.info("✅ ServiceContainer 初始化完成，所有服务就绪")
+
+    # v5.4: 缓存预热 — 后台异步执行，不阻塞启动
+    try:
+        from scripts.warm_cache import warm_cache_via_api
+
+        async def _warm_background():
+            import asyncio
+
+            await asyncio.sleep(8)  # 等 LLM API 连接就绪
+            try:
+                await warm_cache_via_api("http://localhost:8000", max_concurrent=2)
+            except Exception as e:
+                logger.debug(f"缓存预热失败: {e}")
+
+        import asyncio
+
+        asyncio.create_task(_warm_background())
+        logger.info("缓存预热任务已调度")
+    except Exception as e:
+        logger.debug(f"缓存预热跳过: {e}")
 
     yield
 

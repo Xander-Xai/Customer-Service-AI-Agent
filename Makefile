@@ -160,3 +160,34 @@ lock: ## 生成依赖锁定文件
 	pip install -r requirements.txt 2>/dev/null
 	pip freeze --exclude-editable > requirements-lock.txt
 	@echo "✅ requirements-lock.txt 已生成（请检查并提交）"
+
+# ===== v6.0: Qdrant 运维 =====
+
+# 启动 Qdrant
+.PHONY: qdrant-start
+qdrant-start:
+	docker compose -f deploy/compose/docker-compose.yml up -d qdrant
+
+# 停 Qdrant
+.PHONY: qdrant-stop
+qdrant-stop:
+	docker compose -f deploy/compose/docker-compose.yml stop qdrant
+
+# 数据迁移：ChromaDB → Qdrant
+.PHONY: migrate-qdrant
+migrate-qdrant:
+	python3 scripts/migrate_chroma_to_qdrant.py
+
+# 切换为 Qdrant Only 模式（输出提示）
+.PHONY: use-qdrant
+use-qdrant:
+	@echo "在 .env 中设置:"
+	@echo "  VECTOR_DB_MODE=qdrant_only"
+	@echo "  QDRANT_HOST=localhost"
+	@echo "  QDRANT_PORT=6333"
+	@echo "然后执行: make dev"
+
+# Qdrant 健康检查
+.PHONY: qdrant-health
+qdrant-health:
+	curl -s http://localhost:6333/healthz | python3 -m json.tool

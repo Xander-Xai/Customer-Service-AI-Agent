@@ -26,10 +26,12 @@ import { loadSessionList, updateSessionInfo } from './sessions.js';
 import { hideWelcome } from './welcome.js';
 
 // 状态从 chatState 读取
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const MAX_UPLOAD_SIZE_MB = 5;
 
 /** 判断文件是否为图片类型 */
 function isImageFile(file) {
-  return file.type.startsWith('image/');
+  return ALLOWED_IMAGE_TYPES.has(file.type);
 }
 
 /** 获取文件类型图标 */
@@ -115,6 +117,10 @@ function _sendViaSSE(query) {
       }
       if (streaming && content) streaming.appendChunk(content);
     },
+    onContentComplete(data) {
+      if (!streaming) return;
+      streaming.completeContent(data?.content || '');
+    },
     onDone(data) {
       setWaiting(false);
       updateSendButton();
@@ -139,10 +145,32 @@ function _sendViaSSE(query) {
       _isErrorHandled = true;
 
       if (!hasStarted) {
-        // SSE 未开始就失败 → 降级到 WebSocket
-        console.log('[SSE] 失败，降级到 WebSocket:', errMsg);
+        // SSE 未开始就失败 → 降级到 REST，同步释放等待态，避免 WS pending 卡死
+        console.log('[SSE] 失败，降级到 REST:', errMsg);
         showTypingIndicator();
-        API.send(query, getSessionId(), getSessionToken());
+        API.sendChat(query, getSessionId())
+          .then((result) => {
+            removeTypingIndicator();
+            setWaiting(false);
+            updateSendButton();
+            updateSessionInfo(result.session_id, result.session_token);
+            appendAssistantMessage(result.response || '处理完成', {
+              agent: result.agent || '',
+              elapsed: result.elapsed || 0,
+              mode: result.mode || '',
+              cached: result.cached || false,
+              agentsUsed: result.agents_used || [],
+              resolutionStatus: result.resolution_status || '',
+            });
+            addMessage({ role: 'assistant', content: result.response, agent: result.agent });
+            loadSessionList();
+          })
+          .catch((err) => {
+            removeTypingIndicator();
+            setWaiting(false);
+            updateSendButton();
+            appendSystemMessage(`消息发送失败。详情: ${err.message || errMsg || '未知错误'}`);
+          });
       } else {
         setWaiting(false);
         updateSendButton();
@@ -195,6 +223,10 @@ function _sendViaSSEWithImage(query, imageFile) {
           streaming = createStreamingMessage();
         }
         if (streaming && content) streaming.appendChunk(content);
+      },
+      onContentComplete(data) {
+        if (!streaming) return;
+        streaming.completeContent(data?.content || '');
       },
       onDone(data) {
         setWaiting(false);
@@ -319,7 +351,7 @@ function handleFileSelect(event) {
 
 function validateAndSetFile(file) {
   // 按类型分组校验
-  const isImage = file.type.startsWith('image/');
+  const isImage = isImageFile(file);
   const isVideo = file.type.startsWith('video/');
   const isPdf = file.type === 'application/pdf';
   const isDoc = file.name?.endsWith('.docx') || file.name?.endsWith('.doc');
@@ -330,11 +362,10 @@ function validateAndSetFile(file) {
     return;
   }
 
-  // 分类型大小限制
-  const maxMB = isVideo ? 50 : 20;
-  if (file.size > maxMB * 1024 * 1024) {
+  // 与后端 auth/multimodal 限制保持一致：所有 /api/* 上传请求统一上限 5MB
+  if (file.size > MAX_UPLOAD_SIZE_MB * 1024 * 1024) {
     appendSystemMessage(
-      `文件大小超过限制（最大 ${maxMB}MB），当前大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`,
+      `文件大小超过限制（最大 ${MAX_UPLOAD_SIZE_MB}MB），当前大小: ${(file.size / 1024 / 1024).toFixed(1)}MB`,
     );
     return;
   }

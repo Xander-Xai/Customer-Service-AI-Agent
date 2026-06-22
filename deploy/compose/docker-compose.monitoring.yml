@@ -11,7 +11,7 @@ services:
     ports:
       - "${LOKI_PORT:-3100}:3100"
     volumes:
-      - ../../loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - ../../deploy/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
@@ -28,7 +28,7 @@ services:
     image: grafana/promtail:2.9.0
     container_name: customer-service-promtail
     volumes:
-      - ../../loki/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ../../deploy/loki/promtail-config.yaml:/etc/promtail/config.yml:ro
       - app-logs:/app/logs:ro
       - promtail-positions:/tmp
     command: -config.file=/etc/promtail/config.yml

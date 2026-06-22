@@ -1,7 +1,7 @@
 # ADR-004: RAG 向量库与中文 Embedding 选型
 
 **日期**：2026-06-06
-**状态**：已采纳
+**状态**：已采纳（v6.0 已从 ChromaDB 迁移至 Qdrant，此 ADR 的向量库决策已被 supersede，参见 [release-notes-v6.0.md](../reports/releases/release-notes-v6.0.md)）
 **决策者**：项目负责人
 
 ## 背景
@@ -16,8 +16,8 @@ RAG 知识检索需要向量库和 Embedding 模型。初期使用 ChromaDB 默�
 
 ## 理由
 
-**向量库选型**：
-- ChromaDB 嵌入式部署，无外部依赖，开发/测试友好
+**向量库选型（历史记录 — v6.0 已迁移至 Qdrant）**：
+- ChromaDB 嵌入式部署，无外部依赖，开发/测试友好（v6.0 已替换为 Qdrant：支持水平扩展、Docker 容器化部署、gRPC 协议、更适合生产环境）
 - FAISS 无元数据过滤能力，Pinecone 需要云服务
 - 项目规模（5 个 collection，~170 篇文档）不需要分布式向量库
 
@@ -44,4 +44,4 @@ RAG 知识检索需要向量库和 Embedding 模型。初期使用 ChromaDB 默�
 
 ## 来源文档
 
-[rag-evaluation.md](../active/rag-evaluation.md) · [model-comparison.md](../active/model-comparison.md) 第 3 节
+[rag-evaluation.md](../reference/rag-evaluation.md) · [model-comparison.md](../reference/model-comparison.md) 第 3 节

@@ -4,11 +4,12 @@
 import { API } from '../api/index.js';
 import { initAuthState, logout } from '../auth/index.js';
 import { updateSession } from '../state/chatState.js';
-import { initDragAndDrop, initInputEvents, useQuickPrompt } from './input.js';
+import { initDragAndDrop, initInputEvents, resetWaitingState, useQuickPrompt } from './input.js';
 import {
   appendAssistantMessage,
   appendSystemMessage,
   initCodeCopyDelegate,
+  removeTypingIndicator,
   removeProgressStatus,
   setFeedbackHandler,
   setSessionId,
@@ -159,6 +160,8 @@ function handleProgress(data) {
 }
 
 function handleResponse(data) {
+  resetWaitingState();
+  removeTypingIndicator();
   removeProgressStatus();
 
   const content = data.content || '';
@@ -185,7 +188,15 @@ function handleResponse(data) {
   loadSessionList();
 }
 
+let _lastErrorTimestamp = 0;
+const _ERROR_DEBOUNCE_MS = 2000; // 2秒内重复的错误消息去重
+
 function handleError(data) {
+  resetWaitingState();
+  removeTypingIndicator();
   removeProgressStatus();
+  const now = Date.now();
+  if (now - _lastErrorTimestamp < _ERROR_DEBOUNCE_MS) return;
+  _lastErrorTimestamp = now;
   appendSystemMessage(data.content || '发生未知错误');
 }

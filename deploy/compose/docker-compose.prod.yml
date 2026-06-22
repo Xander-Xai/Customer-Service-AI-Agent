@@ -25,6 +25,14 @@ services:
       # v4.0: 数据库持久化
       - ../../data:/app/data
     command: ["gunicorn", "api.app_factory:app", "-c", "gunicorn.conf.py"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - cs-network
     deploy:
       resources:
         limits:
@@ -32,7 +40,7 @@ services:
           memory: 1G
         reservations:
           cpus: '0.5'
-          memory: 256M
+          memory: 512M
 
   # ===== M4: Loki 日志聚合（生产环境默认启用）=====
   loki:
@@ -41,7 +49,7 @@ services:
     ports:
       - "${LOKI_PORT:-3100}:3100"
     volumes:
-      - ../../loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - ../../deploy/loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki
     command: -config.file=/etc/loki/local-config.yaml
     restart: unless-stopped
@@ -58,12 +66,25 @@ services:
     networks:
       - cs-network
 
-  # ===== M4: Promtail 日志采集 =====
+  # ===== v6.0: Qdrant 生产配置 =====
+  qdrant:
+    volumes:
+      - qdrant-storage:/qdrant/storage
+      - qdrant-snapshots:/qdrant/snapshots
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__LOG_LEVEL=INFO
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
   promtail:
     image: grafana/promtail:2.9.0
     container_name: customer-service-promtail
     volumes:
-      - ../../loki/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - ../../deploy/loki/promtail-config.yaml:/etc/promtail/config.yml:ro
       - app-logs:/app/logs:ro
       - promtail-positions:/tmp
     command: -config.file=/etc/promtail/config.yml
@@ -82,3 +103,5 @@ services:
 volumes:
   loki-data:
   promtail-positions:
+  qdrant-storage:
+  qdrant-snapshots:

@@ -1,6 +1,6 @@
 """
-认证业务逻辑（v4.4）
-- PBKDF2-SHA256 密码哈希（600,000 次迭代，OWASP 推荐）
+认证业务逻辑（v5.4）
+- Argon2id 密码哈希（v5.4 升级，OWASP 2023 推荐）+ PBKDF2-SHA256 向后兼容（600K 迭代）
 - PyJWT token 生成/验证（HS256 + 算法白名单）
 - 用户 CRUD
 """
@@ -73,7 +73,7 @@ class _TokenDenylist:
         """将 jti 加入黑名单"""
         if self._use_redis:
             key = f"{self._prefix}{jti}"
-            await asyncio.to_thread(self._redis.setex, key, max(ttl_seconds, 1), "1")
+            await asyncio.to_thread(self._redis.set, key, "1", ex=max(ttl_seconds, 1))
         else:
             # 内存模式：检查容量，超过上限时清理旧条目
             if len(self._memory_set) >= self.MAX_DENYLIST_SIZE:
@@ -274,10 +274,10 @@ async def create_refresh_token(user_id: int, username: str, role: str) -> str:
                     "csai:jwt:blacklist:",
                 ).replace("blacklist", "refresh")
                 await asyncio.to_thread(
-                    _denylist._redis.setex,
+                    _denylist._redis.set,
                     f"{refresh_prefix}{jti}",
-                    expire_hours * 3600,
                     json.dumps({"user_id": user_id, "username": username}),
+                    ex=expire_hours * 3600,
                 )
             except _redis_mod.RedisError:
                 pass
@@ -377,15 +377,17 @@ def decode_token(token: str) -> dict[str, Any] | None:
     # v4.0: 检查 jti 是否在吊销黑名单中
     jti = payload.get("jti")
     if jti:
-        # 本地 LRU 缓存快速拒绝（Redis 异步检查由 decode_token_async 负责）
+        # 本地 LRU 缓存快速拒绝
         if jti in _revoked_jtis:
             return None
-        # NOTE: denylist.contains is now async; callers must await it.
-        # Use a synchronous cache check for the memory path to avoid breaking sync code.
+        # Redis 黑名单同步检查（Redis 活跃时使用同步 API 检查）
         if _denylist._use_redis:
-            # Async path: cannot call from sync context; return payload and let
-            # async callers check denylist separately via decode_token_async()
-            pass
+            try:
+                key = f"{_denylist._prefix}{jti}"
+                if _denylist._redis.get(key):
+                    return None
+            except Exception:
+                pass  # Redis 查询失败时放行（降级行为）
         elif jti in _denylist._memory_set:
             return None
     # PyJWT 要求 sub 为字符串，但下游代码期望 int，这里转回
@@ -516,9 +518,11 @@ def init_default_admin():
     try:
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
-            import secrets
+            admin_password = os.getenv("ADMIN_PASSWORD")
+            if not admin_password:
+                logger.error("[auth] 致命错误: 未设置 ADMIN_PASSWORD 环境变量。必须显式设置管理员密码。")
+                raise ValueError("ADMIN_PASSWORD environment variable must be set to initialize the admin account.")
 
-            admin_password = os.getenv("ADMIN_PASSWORD", secrets.token_urlsafe(16))
             admin = User(
                 username="admin",
                 password_hash=hash_password(admin_password),
@@ -530,11 +534,7 @@ def init_default_admin():
             db.add(admin)
             db.commit()
             # v4.4 安全加固: 不写入密码文件，不输出密码或哈希到日志
-            if os.getenv("ADMIN_PASSWORD"):
-                logger.info("[auth] 默认管理员已创建（密码来自 ADMIN_PASSWORD 环境变量）")
-            else:
-                logger.info("[auth] 默认管理员已创建，密码已通过 ADMIN_PASSWORD 自动生成")
-                logger.info("[auth] 请通过 ADMIN_PASSWORD 环境变量设置密码，首次登录后请修改密码")
+            logger.info("[auth] 默认管理员已创建（密码来自 ADMIN_PASSWORD 环境变量）")
         else:
             logger.info("管理员账号已存在，跳过初始化")
     finally:

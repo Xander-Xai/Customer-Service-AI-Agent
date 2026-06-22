@@ -64,13 +64,14 @@
 
 .quick-prompt-card {
   background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 16px;
   cursor: pointer;
   text-align: left;
+  -webkit-transition: all var(--duration-normal) var(--ease-spring);
   transition: all var(--duration-normal) var(--ease-spring);
   box-shadow: var(--shadow-sm);
 }
@@ -377,12 +378,13 @@
   align-items: flex-end;
   gap: 12px;
   background: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   padding: 8px 8px 8px 16px;
   box-shadow: var(--shadow-sm);
+  -webkit-transition: all var(--duration-normal) var(--ease-out);
   transition: all var(--duration-normal) var(--ease-out);
 }
 
@@ -424,6 +426,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
@@ -468,6 +471,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -501,6 +505,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
@@ -523,6 +528,7 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   flex-shrink: 0;
 }
@@ -546,6 +552,7 @@
 
 /* 图片预览区域 */
 .image-preview-area {
+  display: none;
   padding: 8px 0;
   margin-bottom: 4px;
 }
@@ -604,6 +611,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -645,6 +653,7 @@
   border-left: 1px solid var(--border);
   z-index: 200;
   transform: translateX(100%);
+  -webkit-transition: transform var(--duration-normal) var(--ease-out);
   transition: transform var(--duration-normal) var(--ease-out);
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
@@ -691,6 +700,7 @@
   gap: 4px;
   margin-top: 4px;
   opacity: 0;
+  -webkit-transition: opacity var(--duration-fast) var(--ease-out);
   transition: opacity var(--duration-fast) var(--ease-out);
 }
 
@@ -709,6 +719,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -753,6 +764,7 @@
   font-size: 11px;
   cursor: pointer;
   opacity: 0;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -791,6 +803,7 @@
   align-items: center;
   justify-content: center;
   opacity: 0;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -881,6 +894,7 @@
 .input-help-hint {
   cursor: pointer;
   color: var(--text-muted);
+  -webkit-transition: color var(--duration-fast) var(--ease-out);
   transition: color var(--duration-fast) var(--ease-out);
 }
 
@@ -889,6 +903,11 @@
 }
 
 /* ===== 流式打字光标 ===== */
+.streaming-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .streaming-cursor {
   display: inline-block;
   width: 2px;
@@ -1004,6 +1023,7 @@
   z-index: 9999;
   font-size: 13px;
   border-radius: 0 0 var(--radius-sm) 0;
+  -webkit-transition: top 0.2s;
   transition: top 0.2s;
 }
 .skip-link:focus {
@@ -1023,6 +1043,7 @@
   color: var(--text-primary);
   font-size: 12px;
   outline: none;
+  -webkit-transition: border-color var(--duration-fast) var(--ease-out);
   transition: border-color var(--duration-fast) var(--ease-out);
 }
 .search-input:focus {

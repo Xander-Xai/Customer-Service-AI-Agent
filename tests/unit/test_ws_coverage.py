@@ -99,7 +99,7 @@ class TestWSAuthenticate:
 
     @pytest.mark.asyncio
     async def test_ws_authenticate_dev_mode_skips_auth(self):
-        """v5.3: 移除 DEV_MODE 短路后，未传任何凭证的连接被拒绝（审计 v2 P0 A-1 修复）"""
+        """v5.4.2: DEV_MODE 下认证自动跳过，返回空凭证"""
         from api.routes.ws import _ws_authenticate
 
         mock_ws = AsyncMock()
@@ -107,8 +107,10 @@ class TestWSAuthenticate:
         mock_ws.send_json = AsyncMock()
         mock_ws.close = AsyncMock()
 
-        with patch("api.routes.ws.API_KEY_ENABLED", False), pytest.raises(asyncio.TimeoutError):
-            await _ws_authenticate(mock_ws, "")
+        api_key, token, payload = await _ws_authenticate(mock_ws, "")
+        assert api_key == ""
+        assert token == ""
+        assert payload is None
 
     @pytest.mark.asyncio
     async def test_ws_authenticate_with_api_key(self):
@@ -121,6 +123,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "valid-key"),
+            patch("api.routes.ws.DEV_MODE", False),
         ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "")
             assert api_key == "valid-key"
@@ -141,6 +144,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "server-key"),
+            patch("api.routes.ws.DEV_MODE", False),
             patch("auth.service.decode_token", return_value={"sub": "user1"}),
         ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "")
@@ -159,6 +163,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "server-key"),
+            patch("api.routes.ws.DEV_MODE", False),
             pytest.raises(ValueError, match="Missing credentials"),
         ):
             await _ws_authenticate(mock_ws, "")
@@ -176,6 +181,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "server-key"),
+            patch("api.routes.ws.DEV_MODE", False),
             patch("auth.service.decode_token", return_value=None),
             pytest.raises(ValueError, match="Invalid token"),
         ):
@@ -194,6 +200,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "server-key"),
+            patch("api.routes.ws.DEV_MODE", False),
             pytest.raises(asyncio.TimeoutError),
         ):
             await _ws_authenticate(mock_ws, "")
@@ -208,6 +215,7 @@ class TestWSAuthenticate:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "header-key"),
+            patch("api.routes.ws.DEV_MODE", False),
         ):
             api_key, token, payload = await _ws_authenticate(mock_ws, "header-key")
             assert api_key == "header-key"
@@ -299,6 +307,7 @@ class TestWSAuthenticateAdvanced:
         with (
             patch("api.routes.ws.API_KEY_ENABLED", True),
             patch("api.routes.ws.API_KEY", "server-key"),
+            patch("api.routes.ws.DEV_MODE", False),
             pytest.raises(RuntimeError),
         ):
             await _ws_authenticate(mock_ws, "")

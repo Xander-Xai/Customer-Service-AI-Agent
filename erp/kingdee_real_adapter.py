@@ -118,6 +118,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
                     max_connections=HTTPX_MAX_CONNECTIONS,
                     max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
                 ),
+                trust_env=False,
             )
         return self._client
 

@@ -1,0 +1,38 @@
+# Prometheus 告警规则 — 药妆智多星客服系统
+groups:
+  - name: csai_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: csai_error_rate_percent > 10
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "错误率过高: {{ $value }}%"
+          description: "最近 2 分钟错误率超过 10%"
+
+      - alert: HighResponseTime
+        expr: csai_avg_response_time_seconds > 20
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "平均响应时间过高: {{ $value }}s"
+          description: "最近 3 分钟平均响应时间超过 20 秒"
+
+      - alert: CircuitBreakerOpen
+        expr: csai_circuit_breaker_consecutive_failures > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "熔断器打开"
+          description: "LLM 连续失败超过阈值，熔断器已打开"
+
+      - alert: SLAViolationHigh
+        expr: csai_sla_window_violation_rate_percent > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SLA 违约率过高: {{ $value }}%"

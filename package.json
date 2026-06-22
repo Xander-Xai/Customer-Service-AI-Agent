@@ -1,8 +1,9 @@
 {
   "name": "customer-service-ai-agent",
-  "version": "5.4.1",
+  "version": "6.0",
   "private": true,
-  "description": "药妆智多星多智能体客服系统 - 前后端 API 对齐版（5 个新 REST 端点 + 487 行冗余清理）",
+  "type": "module",
+  "description": "药妆智多星多智能体客服系统 - v6.0（Qdrant 迁移 + SSE 真流式 + 前后端契约对齐）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -16,7 +17,10 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
     "@playwright/test": "^1.60.0",
+    "autoprefixer": "^10.5.0",
     "jsdom": "^29.1.1",
+    "postcss": "^8.5.15",
+    "postcss-nesting": "^14.0.0",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
   },

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>客服助手</title>
@@ -210,6 +212,7 @@
       font-size: 13px;
       cursor: pointer;
       white-space: nowrap;
+      -webkit-transition: all 0.15s ease;
       transition: all 0.15s ease;
       font-family: var(--font);
     }
@@ -242,6 +245,7 @@
       outline: none;
       min-height: 40px;
       max-height: 80px;
+      -webkit-transition: border-color 0.15s ease;
       transition: border-color 0.15s ease;
     }
     .widget-textarea::placeholder { color: var(--text-muted); }
@@ -260,6 +264,7 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
+      -webkit-transition: background 0.15s ease, opacity 0.15s ease;
       transition: background 0.15s ease, opacity 0.15s ease;
     }
     .btn-send:hover { background: var(--primary-hover); }
@@ -402,7 +407,6 @@
     });
 
     // ── State ──
-    const sessionId = crypto.randomUUID();
     let isSending = false;
 
     // ── Helpers ──
@@ -487,10 +491,7 @@
           "X-API-Key": apiKey,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          session_id: sessionId,
-          query: query,
-        }),
+        body: JSON.stringify({ query: query }),
       })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -577,7 +578,7 @@
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ session_id: sessionId, query: query }),
+        body: JSON.stringify({ query: query }),
       })
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -612,10 +613,11 @@
                 const line = lines[i].trim();
                 if (!line?.startsWith("data:")) continue;
                 const data = line.slice(5).trim();
-                if (data === "[DONE]") { onToken(null, true); return; }
                 try {
                   const parsed = JSON.parse(data);
-                  onToken(parsed.token || parsed.content || "", false);
+                  if (parsed.type === "done") { onToken(null, true); return; }
+                  if (parsed.type === "error") { onToken(null, false, "sse_error"); return; }
+                  if (parsed.type === "chunk" && parsed.content) onToken(parsed.content, false);
                 } catch (e) {
                   if (data) onToken(data, false);
                 }

@@ -22,6 +22,22 @@ async function _request(method, path, body = null, extraHeaders = {}) {
   return resp.json();
 }
 
+async function _requestText(method, path, extraHeaders = {}) {
+  const opts = {
+    method,
+    headers: { ...extraHeaders },
+  };
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) opts.headers['X-API-Key'] = apiKey;
+
+  const resp = await fetchWithAuth(path, opts);
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: resp.statusText }));
+    throw new Error(err.error || err.detail || err.message || `HTTP ${resp.status}`);
+  }
+  return resp.text();
+}
+
 export function getHealth() {
   return _request('GET', '/api/health');
 }
@@ -65,12 +81,14 @@ export function getCircuitBreaker() {
   return _request('GET', '/api/circuit-breaker');
 }
 
-export function submitFeedback(sessionId, resolved, comment = '') {
+export function submitFeedback(sessionId, rating, messageIndex = 0, comment = '') {
   const sessionToken = localStorage.getItem('currentSessionToken') || '';
   return _request('POST', '/api/feedback', {
     session_id: sessionId,
     session_token: sessionToken,
-    resolved,
+    rating,
+    resolved: rating > 0,
+    message_index: messageIndex,
     comment,
   });
 }
@@ -306,7 +324,7 @@ export function getTokenQuota() {
 
 /** Prometheus 格式指标（管理后台调试用） */
 export function getPrometheusMetrics() {
-  return _request('GET', '/metrics/prometheus');
+  return _requestText('GET', '/metrics/prometheus');
 }
 
 // ===== TTS 语音列表 API =====

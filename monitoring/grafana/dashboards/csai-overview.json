@@ -1,0 +1,170 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "csai-main",
+    "title": "药妆智多星 — 客服系统概览",
+    "tags": ["csai", "customer-service"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "title": "总请求数",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "targets": [{ "expr": "csai_requests_total", "legendFormat": "总请求" }],
+        "fieldConfig": {
+          "defaults": { "thresholds": { "steps": [{ "value": 0, "color": "green" }] } }
+        }
+      },
+      {
+        "id": 2,
+        "title": "错误率 %",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "targets": [{ "expr": "csai_error_rate_percent", "legendFormat": "错误率" }],
+        "fieldConfig": {
+          "defaults": {
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 5, "color": "yellow" },
+                { "value": 10, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "平均响应时间 (s)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "targets": [{ "expr": "csai_avg_response_time_seconds", "legendFormat": "平均" }],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 10, "color": "yellow" },
+                { "value": 20, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "缓存命中率 %",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "targets": [{ "expr": "csai_cache_hit_rate_percent", "legendFormat": "命中率" }],
+        "fieldConfig": {
+          "defaults": {
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 30, "color": "yellow" },
+                { "value": 60, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "请求趋势",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+        "targets": [
+          { "expr": "rate(csai_requests_total[5m])", "legendFormat": "请求速率/s" },
+          { "expr": "rate(csai_errors_total[5m])", "legendFormat": "错误速率/s" }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "响应时间趋势",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+        "targets": [
+          { "expr": "csai_avg_response_time_seconds", "legendFormat": "平均" },
+          { "expr": "csai_p95_response_time_seconds", "legendFormat": "P95" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      },
+      {
+        "id": 7,
+        "title": "Agent 调用分布",
+        "type": "piechart",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+        "targets": [{ "expr": "csai_agent_calls_total", "legendFormat": "{{agent}}" }]
+      },
+      {
+        "id": 8,
+        "title": "协作模式分布",
+        "type": "piechart",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+        "targets": [{ "expr": "csai_collaboration_mode_total", "legendFormat": "{{mode}}" }]
+      },
+      {
+        "id": 9,
+        "title": "熔断器状态",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 12, "x": 0, "y": 20 },
+        "targets": [
+          { "expr": "csai_circuit_breaker_consecutive_failures", "legendFormat": "连续失败" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 3, "color": "yellow" },
+                { "value": 5, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "SLA 违约率 %",
+        "type": "gauge",
+        "gridPos": { "h": 4, "w": 12, "x": 12, "y": 20 },
+        "targets": [
+          { "expr": "csai_sla_window_violation_rate_percent", "legendFormat": "窗口违约率" }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 20, "color": "yellow" },
+                { "value": 30, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "KPI — AI 处理率 / 升级率",
+        "type": "bargauge",
+        "gridPos": { "h": 6, "w": 24, "x": 0, "y": 24 },
+        "targets": [
+          { "expr": "csai_total_ai_handled", "legendFormat": "AI 处理" },
+          { "expr": "csai_total_escalated", "legendFormat": "人工升级" },
+          { "expr": "csai_total_single_turn_resolved", "legendFormat": "单轮解决" }
+        ]
+      }
+    ],
+    "schemaVersion": 39,
+    "version": 1
+  },
+  "overwrite": true
+}

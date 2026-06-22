@@ -165,19 +165,33 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
 
         if not ctx.graph_task.done():
             while True:
-                try:
-                    event = await asyncio.wait_for(ctx.chunk_queue.get(), timeout=SSE_CHUNK_TIMEOUT)
-                except asyncio.TimeoutError:
-                    if ctx.graph_task.done():
+                queue_task = asyncio.create_task(ctx.chunk_queue.get())
+                done, pending = await asyncio.wait(
+                    {queue_task, ctx.graph_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if queue_task in done:
+                    event = queue_task.result()
+                    if event is None:
                         break
-                    continue
-                if event is None:
+                    if isinstance(event, dict) and event.get("type") in (
+                        "chunk", "status", "thinking", "tool_call",
+                        "tool_result", "rag_status", "agent_switch", "content_complete",
+                    ):
+                        yield _sse_event(event)
+                    if ctx.graph_task.done() and ctx.chunk_queue.empty():
+                        break
+                else:
+                    queue_task.cancel()
+                    await asyncio.gather(queue_task, return_exceptions=True)
                     break
-                if isinstance(event, dict) and event.get("type") in (
-                    "chunk", "status", "thinking", "tool_call",
-                    "tool_result", "rag_status", "agent_switch",
-                ):
-                    yield _sse_event(event)
+
+                for task in pending:
+                    if task is not ctx.graph_task:
+                        task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
 
         try:
             result = await ctx.graph_task

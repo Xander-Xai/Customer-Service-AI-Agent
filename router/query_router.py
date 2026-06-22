@@ -83,14 +83,41 @@ class QueryRouter:
         self.llm = llm
         self.complexity_threshold = complexity_threshold
 
-    async def route(self, query: str, conversation_context: str = "") -> RoutingResult:
-        """主路由入口（v3.3: LLM 与规则分类并行执行）"""
-        # 并行执行 LLM 分类和规则分类 + 复杂度评分
-        llm_task = self._llm_classify(query, conversation_context)
+    async def route(
+        self,
+        query: str,
+        conversation_context: str = "",
+        user_id: str | None = None,
+    ) -> RoutingResult:
+        """主路由入口（v3.3: LLM 与规则分类并行执行 + v5.4: 高置信规则捷径）"""
+        # 先执行规则分类（纯同步，几乎无开销）
         rule_result = self._rule_classify_and_score(query, conversation_context)
+        rule_type, rule_scores, complexity = rule_result
+
+        # v5.4: 路由捷径 — 规则高置信时跳过 LLM 路由调用
+        # 判定条件：唯一意图命中（confidence >= 0.75 即可，规则分类本身很精准）
+        rule_confidence = self._estimate_rule_confidence(rule_type, rule_scores)
+        if rule_type and rule_confidence >= 0.75:
+            agent_name = INTENT_AGENT_MAP.get(rule_type, "general_agent")
+            fast_path = complexity < self.complexity_threshold
+            logger.info(
+                f"route: ⚡ 路由捷径 type={rule_type} agent={agent_name} "
+                f"rule_confidence={rule_confidence:.2f} (跳过 LLM 路由)"
+            )
+            return RoutingResult(
+                query_type=rule_type,
+                agent_name=agent_name,
+                complexity=complexity,
+                fast_path=fast_path,
+                confidence=rule_confidence,
+                raw_llm_result="rule_shortcut",
+                rule_override=False,
+            )
+
+        # 规则置信不足，走 LLM + 规则并行分类
+        llm_task = self._llm_classify(query, conversation_context, user_id=user_id)
         llm_result = await llm_task
 
-        rule_type, rule_scores, complexity = rule_result
         rule_override = False
         final_type = llm_result["query_type"]
         if (
@@ -119,7 +146,36 @@ class QueryRouter:
             rule_override=rule_override,
         )
 
-    async def _llm_classify(self, query: str, context: str = "") -> dict[str, Any]:
+    def _estimate_rule_confidence(
+        self, rule_type: str | None, rule_scores: dict[str, int]
+    ) -> float:
+        """估算规则分类的置信度
+
+        逻辑：
+        - 唯一意图命中 + 匹配模式数 >= 2 → 高置信 (0.9+)
+        - 唯一意图命中 + 匹配模式数 == 1 → 中置信 (0.7)
+        - 多意图命中 → 低置信 (0.5)，需 LLM 仲裁
+        - 无命中 → 0
+        """
+        if not rule_type or not rule_scores:
+            return 0.0
+
+        num_intents = len(rule_scores)
+        hit_count = rule_scores.get(rule_type, 0)
+
+        if num_intents == 1 and hit_count >= 2:
+            return 0.95
+        if num_intents == 1 and hit_count == 1:
+            return 0.75
+        if num_intents >= 2:
+            # 多意图冲突，置信降低
+            return 0.5
+
+        return 0.5
+
+    async def _llm_classify(
+        self, query: str, context: str = "", user_id: str | None = None
+    ) -> dict[str, Any]:
         if not self.llm:
             return {"query_type": "general_inquiry", "confidence": 0.5, "raw": "no_llm"}
 
@@ -133,7 +189,10 @@ product_info, technical_support, billing, complaint, general_inquiry, order_quer
         messages = [SystemMessage(content=system_prompt)]
         if context:
             messages.append(HumanMessage(content=f"对话上下文：{context}"))
-        messages.append(HumanMessage(content=query))
+        if user_id:
+            messages.append(HumanMessage(content=query, metadata={"user_id": user_id}))
+        else:
+            messages.append(HumanMessage(content=query))
 
         try:
             # 路由使用短超时（LLM_ROUTER_TIMEOUT），避免慢 API 阻塞整个链路

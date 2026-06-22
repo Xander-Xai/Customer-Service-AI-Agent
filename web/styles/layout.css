@@ -2,8 +2,8 @@
 .nav-header {
   height: var(--header-height);
   background: var(--color-surface-base-glass);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
@@ -56,6 +56,7 @@
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   cursor: pointer;
   border: none;
@@ -127,12 +128,13 @@
 .sidebar {
   width: var(--sidebar-width);
   background: var(--color-surface-base-glass);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  -webkit-transition: width var(--duration-normal) var(--ease-out);
   transition: width var(--duration-normal) var(--ease-out);
 }
 
@@ -164,6 +166,7 @@
   align-items: center;
   justify-content: center;
   gap: 8px;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -186,6 +189,7 @@
   padding: 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   margin-bottom: 2px;
   border: 1px solid transparent;
@@ -243,6 +247,7 @@
   padding: 2px 8px;
   margin-left: 8px;
   cursor: pointer;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -250,4 +255,28 @@
   border-color: var(--color-focus);
   color: var(--text-primary);
   background: var(--color-surface-hover);
+}
+
+/* ===== 辅助类 ===== */
+
+/* 屏幕阅读器专用（视觉隐藏，保持可访问性） */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 会话详情面板 */
+.panel-title {
+  font-weight: 600;
+}
+
+.panel-content {
+  padding: 16px;
 }

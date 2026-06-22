@@ -101,7 +101,7 @@ class AudioProcessor:
             "language": language,
         }
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
             resp = await client.post(url, headers=headers, files=files, data=data)
             resp.raise_for_status()
             result = resp.json()

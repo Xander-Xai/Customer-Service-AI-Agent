@@ -44,9 +44,18 @@ export const API = {
   getKnowledgeStats: rest.getKnowledgeStats,
   seedKnowledge: rest.seedKnowledge,
   syncKnowledge: rest.syncKnowledge,
+  addKnowledgeDocs: rest.addKnowledgeDocs,
   getAlertConfig: rest.getAlertConfig,
+  getAlertHistory: rest.getAlertHistory,
   testAlert: rest.testAlert,
   refreshToken: rest.refreshToken,
+  getUserMe: rest.getUserMe,
+  updateUserRole: rest.updateUserRole,
+  getPromptAgents: rest.getPromptAgents,
+  getPromptVersions: rest.getPromptVersions,
+  createPromptVersion: rest.createPromptVersion,
+  activatePromptVersion: rest.activatePromptVersion,
+  getActivePrompt: rest.getActivePrompt,
 
   // 监控 API
   getQualityTrends: rest.getQualityTrends,
@@ -55,6 +64,9 @@ export const API = {
   getTokenQuota: rest.getTokenQuota,
   getTokenUsage: rest.getTokenUsage,
   getPrometheusMetrics: rest.getPrometheusMetrics,
+  getTTSVoices: rest.getTTSVoices,
+  sendVoiceForm: rest.sendVoiceForm,
+  sendTTS: rest.sendTTS,
 
   // SSE
   sendChatStream,

@@ -61,17 +61,25 @@ export async function loadKnowledgeStats() {
 /** 重新种子知识库 */
 export async function reseedKnowledge() {
   if (!confirm('确定重新种子？这会覆盖现有数据。')) return;
-  const data = await seedKnowledge();
-  showToast(data?.message || '操作完成');
-  loadKnowledgeStats();
+  try {
+    const data = await seedKnowledge();
+    showToast(data?.message || '操作完成', 'success');
+    loadKnowledgeStats();
+  } catch (e) {
+    showToast(`种子失败: ${e.message}`, 'error');
+  }
 }
 
 /** 从 ERP 同步知识库 */
 export async function syncFromErp() {
   showToast('正在从 ERP 同步...', 'success');
-  const data = await syncKnowledge();
-  showToast(data?.message || '同步完成');
-  loadKnowledgeStats();
+  try {
+    const data = await syncKnowledge();
+    showToast(data?.message || '同步完成', 'success');
+    loadKnowledgeStats();
+  } catch (e) {
+    showToast(`同步失败: ${e.message}`, 'error');
+  }
 }
 
 /** 处理添加文档 */

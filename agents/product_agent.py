@@ -51,7 +51,7 @@ class ProductAgent(BaseAgent):
 
         # v3.5: RAG 知识库检索（产品成分/功效知识）
         rag_context = await self._retrieve_knowledge(
-            customer_query, collections=["product_knowledge", "faq"]
+            customer_query, collections=["product_knowledge", "faq"], state=state
         )
 
         # 写入产品推荐结论到黑板

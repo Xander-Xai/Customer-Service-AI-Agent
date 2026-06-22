@@ -51,6 +51,7 @@
     width: 280px;
     z-index: 150;
     transform: translateX(-100%);
+    -webkit-transition: transform var(--duration-normal) var(--ease-out);
     transition: transform var(--duration-normal) var(--ease-out);
     box-shadow: none;
   }

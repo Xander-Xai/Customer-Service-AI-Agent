@@ -68,8 +68,8 @@ services:
   # ===== Nginx 配置更新（灰度流量分割）=====
   nginx:
     volumes:
-      - ../../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ../../nginx/ssl:/etc/nginx/ssl:ro
+      - ../../deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../../deploy/nginx/ssl:/etc/nginx/ssl:ro
 
 volumes:
   canary-logs:

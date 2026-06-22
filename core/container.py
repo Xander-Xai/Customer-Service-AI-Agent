@@ -115,6 +115,7 @@ class ServiceContainer:
 
         # RAG & Tools
         self.knowledge_base: KnowledgeBaseProtocol | None = None
+        self._legacy_kb: Any = None  # v6.0: 并行运行时保留的 ChromaDB legacy 实例
         self.tool_registry: ToolRegistryProtocol | None = None
 
         # v5.1: Prompt 版本管理器
@@ -316,10 +317,18 @@ class ServiceContainer:
         logger.info("Token 用量追踪器初始化完成")
 
     async def _init_rag_and_tools(self):
-        """初始化 RAG 知识库 + 工具注册"""
+        """初始化 RAG 知识库 + 工具注册（v6.0: 支持 Qdrant / ChromaDB 双模式）"""
         if self.knowledge_base is None:
-            from core.config import CLIP_ENABLED, RAG_PERSIST_DIRECTORY
-            from rag.knowledge_base import CosmeticsKnowledgeBase
+            from core.config import (
+                CLIP_ENABLED,
+                QDRANT_GRPC_PORT,
+                QDRANT_HOST,
+                QDRANT_API_KEY,
+                QDRANT_PORT,
+                QDRANT_PREFER_GRPC,
+                RAG_PERSIST_DIRECTORY,
+                VECTOR_DB_MODE,
+            )
             from rag.seed_data import (
                 seed_complaint_knowledge,
                 seed_faq,
@@ -328,16 +337,45 @@ class ServiceContainer:
                 seed_tech_support,
             )
 
-            self.knowledge_base = CosmeticsKnowledgeBase(clip_enabled=CLIP_ENABLED)
-            if RAG_PERSIST_DIRECTORY:
-                logger.info("ChromaDB persistent mode, skipping seed")
+            if VECTOR_DB_MODE in ("qdrant_only", "parallel"):
+                # Qdrant 模式
+                from rag.qdrant_knowledge_base import QdrantKnowledgeBase
+
+                self.knowledge_base = QdrantKnowledgeBase(
+                    host=QDRANT_HOST,
+                    port=QDRANT_PORT,
+                    grpc_port=QDRANT_GRPC_PORT,
+                    prefer_grpc=QDRANT_PREFER_GRPC,
+                    api_key=QDRANT_API_KEY,
+                    clip_enabled=CLIP_ENABLED,
+                )
+                logger.info(
+                    f"Qdrant 知识库初始化完成 (host={QDRANT_HOST}, mode={VECTOR_DB_MODE})"
+                )
+
+                if VECTOR_DB_MODE == "parallel":
+                    from rag.legacy_chroma import ChromaKnowledgeBase
+
+                    self._legacy_kb = ChromaKnowledgeBase(clip_enabled=CLIP_ENABLED)
+                    logger.info("Legacy ChromaDB 知识库已初始化（并行模式）")
             else:
-                logger.info("ChromaDB in-memory mode, seeding data")
+                # 兼容模式：使用 ChromaDB legacy
+                from rag.legacy_chroma import ChromaKnowledgeBase
+
+                self.knowledge_base = ChromaKnowledgeBase(clip_enabled=CLIP_ENABLED)
+                logger.info("ChromaDB (legacy) 知识库初始化完成 (mode=chroma_legacy)")
+
+            # 种子数据（所有模式通用）
+            if RAG_PERSIST_DIRECTORY:
+                logger.info("持久化模式，跳过种子数据")
+            else:
+                logger.info("内存模式，初始化种子数据")
                 seed_product_knowledge(self.knowledge_base)
                 seed_faq(self.knowledge_base)
                 seed_tech_support(self.knowledge_base)
                 seed_complaint_knowledge(self.knowledge_base)
                 seed_supplementary_data(self.knowledge_base)
+
             logger.info(
                 f"RAG 知识库初始化完成 "
                 f"(product={self.knowledge_base.get_collection_count('product_knowledge')}, "

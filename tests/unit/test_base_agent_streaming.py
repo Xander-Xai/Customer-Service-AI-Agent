@@ -78,6 +78,7 @@ async def test_process_with_tools_emits_thinking_and_tool_call():
     assert "thinking" in event_types, f"缺少 thinking 事件, got {event_types}"
     assert "tool_call" in event_types, f"缺少 tool_call 事件, got {event_types}"
     assert "tool_result" in event_types, f"缺少 tool_result 事件, got {event_types}"
+    assert "content_complete" in event_types, f"缺少 content_complete 事件, got {event_types}"
 
     tool_call_events = [e for e in events if e["type"] == "tool_call"]
     assert len(tool_call_events) >= 1
@@ -86,6 +87,8 @@ async def test_process_with_tools_emits_thinking_and_tool_call():
     tool_result_events = [e for e in events if e["type"] == "tool_result"]
     assert len(tool_result_events) >= 1
     assert "成分说明" in tool_result_events[0]["summary"]
+    assert events[-1]["type"] == "content_complete"
+    assert "烟酰胺" in events[-1]["content"]
 
 
 @pytest.mark.unit
@@ -137,4 +140,5 @@ async def test_process_with_tools_no_tool_call_no_extra_events():
 
     tool_events = [e for e in events if e["type"] in ("tool_call", "tool_result")]
     assert len(tool_events) == 0
+    assert any(e["type"] == "content_complete" for e in events)
     assert result["response"] == "直接回答"

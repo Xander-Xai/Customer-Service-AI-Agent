@@ -17,6 +17,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 20px;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -112,6 +113,7 @@
   width: 100%;
   max-width: 48px;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  -webkit-transition: height var(--duration-slow) var(--ease-out);
   transition: height var(--duration-slow) var(--ease-out);
   min-height: 4px;
 }
@@ -167,6 +169,7 @@
 }
 .donut-fill {
   stroke-linecap: round;
+  -webkit-transition: stroke-dasharray var(--duration-slow) var(--ease-out);
   transition: stroke-dasharray var(--duration-slow) var(--ease-out);
 }
 

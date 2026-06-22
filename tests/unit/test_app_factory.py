@@ -138,6 +138,58 @@ class TestCreateApp:
         app = self._make_app()
         assert hasattr(app.state, "module_load_time")
 
+    @pytest.mark.asyncio
+    async def test_cached_static_mount_adds_cache_security_and_charset_headers(self):
+        """静态资源包装器直接附带长期缓存、安全头和 utf-8 charset。"""
+        from api.app import _make_cached_static
+
+        sent_messages = []
+
+        async def static_app(scope, receive, send):
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"image/svg+xml")],
+                }
+            )
+            await send({"type": "http.response.body", "body": b"<svg/>", "more_body": False})
+
+        wrapped_app = _make_cached_static(static_app)
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent_messages.append(message)
+
+        await wrapped_app(
+            {
+                "type": "http",
+                "asgi": {"version": "3.0"},
+                "http_version": "1.1",
+                "method": "GET",
+                "scheme": "http",
+                "path": "/assets/logo.svg",
+                "raw_path": b"/assets/logo.svg",
+                "query_string": b"",
+                "root_path": "",
+                "headers": [],
+                "client": ("127.0.0.1", 12345),
+                "server": ("testserver", 80),
+            },
+            receive,
+            send,
+        )
+
+        start_message = next(message for message in sent_messages if message["type"] == "http.response.start")
+        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in start_message["headers"]}
+
+        assert start_message["status"] == 200
+        assert headers["cache-control"] == "public, max-age=31536000, immutable"
+        assert headers["x-content-type-options"] == "nosniff"
+        assert headers["content-type"] == "image/svg+xml; charset=utf-8"
+
 
 class TestAppFactoryLifespan:
     """app_factory.py lifespan 异步初始化测试"""

@@ -956,6 +956,7 @@ class TestWebSocketRoutes:
         # API_KEY_ENABLED=False 且无 token → 认证拒绝
         with (
             patch("api.routes.ws.API_KEY_ENABLED", False),
+            patch("api.routes.ws.DEV_MODE", False),
             self._ws_session(app, dev_mode=False) as ws,
         ):
             # 立即发消息，不传任何凭证
@@ -1018,6 +1019,7 @@ class TestWebSocketRoutes:
         ws_uid = "test-user-123"
         with (
             patch("api.routes.ws.API_KEY_ENABLED", False),
+            patch("api.routes.ws.DEV_MODE", False),
             patch("auth.service.decode_token", return_value={"sub": ws_uid}),
             self._ws_session(app, dev_mode=False) as ws,
         ):
@@ -1124,6 +1126,7 @@ class TestWebSocketRoutes:
         app, sm = self._build_ws_app(dev_mode=False)
         with (
             patch("api.routes.ws.API_KEY_ENABLED", False),
+            patch("api.routes.ws.DEV_MODE", False),
             self._ws_session(app, dev_mode=False) as ws,
         ):
             # 不传 token / api_key → 认证阶段就关闭连接
@@ -1576,7 +1579,7 @@ class TestMonitoringRoutes:
         assert "circuit_breaker" in data["components"]
         assert "redis" in data["components"]
         assert "llm" in data["components"]
-        assert "chromadb" in data["components"]
+        assert "qdrant" in data["components"]
         assert "database" in data["components"]
         assert "uptime_seconds" in data
 
@@ -1966,6 +1969,45 @@ class TestChatRoutesExtra:
         content = resp.text
         assert "done" in content
         assert "status" in content
+
+    @pytest.mark.asyncio
+    async def test_sse_stream_generator_forwards_content_complete_event(self):
+        """_sse_stream_generator 转发 content_complete 且在任务结束后正常退出"""
+        from api.routes.chat import SSEStreamContext, _sse_stream_generator
+
+        queue = asyncio.Queue()
+        await queue.put({"type": "content_complete", "content": "最终正文"})
+        graph_task = asyncio.create_task(
+            asyncio.sleep(
+                0,
+                result={
+                    "response": "最终正文",
+                    "current_agent": "产品专家",
+                    "collaboration_mode": "sequential",
+                    "cached": False,
+                    "agents_used": ["产品专家"],
+                    "resolution_status": "resolved",
+                },
+            )
+        )
+        ctx = SSEStreamContext(
+            graph_task=graph_task,
+            chunk_queue=queue,
+            sid="sid-test",
+            session_manager=self.sm,
+            client_provided_sid=False,
+            status_msg="status",
+            progress_msg="progress",
+        )
+
+        events = []
+        async for payload in _sse_stream_generator(ctx):
+            events.append(payload)
+
+        joined = "".join(events)
+        assert "content_complete" in joined
+        assert "最终正文" in joined
+        assert '"type": "done"' in joined
 
     def test_file_upload_docx(self):
         """POST /api/chat/file -- DOCX 文档上传"""

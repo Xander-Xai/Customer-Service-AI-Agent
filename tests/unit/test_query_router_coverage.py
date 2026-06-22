@@ -6,6 +6,7 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage
 
 from router.query_router import INTENT_AGENT_MAP, QueryRouter, RoutingResult
 
@@ -203,8 +204,13 @@ class TestLlmClassify:
         mock_llm.async_invoke = AsyncMock(return_value=mock_response)
         self.router.llm = mock_llm
 
-        await self.router._llm_classify("产品", context="之前的对话")
+        await self.router._llm_classify("产品", context="之前的对话", user_id="u-1")
         mock_llm.async_invoke.assert_called_once()
+        messages = mock_llm.async_invoke.call_args.args[0]
+        assert any(
+            isinstance(msg, HumanMessage) and getattr(msg, "metadata", {}).get("user_id") == "u-1"
+            for msg in messages
+        )
 
 
 class TestRoute:
@@ -225,32 +231,28 @@ class TestRoute:
         mock_llm.async_invoke = AsyncMock(return_value=mock_response)
         self.router.llm = mock_llm
 
-        result = await self.router.route("这个面霜怎么样")
+        result = await self.router.route("这个面霜怎么样", user_id="u-2")
         assert result.query_type == "product_info"
 
     @pytest.mark.asyncio
     async def test_route_rule_override_low_confidence(self):
-        """LLM 低置信度时规则覆盖"""
-        mock_response = MagicMock()
-        mock_response.content = '{"query_type": "general_inquiry", "confidence": 0.3}'
-        mock_llm = AsyncMock()
-        mock_llm.async_invoke = AsyncMock(return_value=mock_response)
-        self.router.llm = mock_llm
-
+        """LLM 低置信度时规则覆盖（v5.4: 高置信规则匹配走捷径，不调 LLM）"""
+        # "退款" 命中 billing 规则，单意图匹配，置信度 0.75 → 路由捷径
         result = await self.router.route("退款")
-        assert result.query_type == "billing"  # 规则覆盖 LLM
-        assert result.rule_override is True
+        assert result.query_type == "billing"
+        assert result.raw_llm_result == "rule_shortcut"  # 走了捷径，没调 LLM
 
     @pytest.mark.asyncio
     async def test_route_llm_high_confidence_no_override(self):
-        """LLM 高置信度时规则不覆盖"""
+        """LLM 高置信度时规则不覆盖（需用模糊查询绕过路由捷径）"""
+        # "这个问题很奇怪" 不命中任何规则 → 必须走 LLM
         mock_response = MagicMock()
         mock_response.content = '{"query_type": "complaint", "confidence": 0.95}'
         mock_llm = AsyncMock()
         mock_llm.async_invoke = AsyncMock(return_value=mock_response)
         self.router.llm = mock_llm
 
-        result = await self.router.route("退款")
+        result = await self.router.route("这个问题很奇怪")
         assert result.query_type == "complaint"  # LLM 高置信度胜出
         assert result.rule_override is False
 

@@ -415,6 +415,7 @@ class TestUserFunctions:
         with (
             patch("auth.service.get_db_session", return_value=mock_session),
             patch("auth.service.User") as MockUser,
+            patch.dict("os.environ", {"ADMIN_PASSWORD": "test_admin_pwd"}),
         ):
             mock_admin = MagicMock()
             MockUser.return_value = mock_admin

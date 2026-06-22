@@ -72,7 +72,7 @@ class TestSendAlert:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier.send_alert("测试标题", "测试内容", "warning")
         )
         assert len(notifier.alert_history) == 1
@@ -84,7 +84,7 @@ class TestSendAlert:
 
         notifier = AlertNotifier()
         notifier.alert_history = [{"title": f"old{j}"} for j in range(205)]
-        asyncio.get_event_loop().run_until_complete(notifier.send_alert("new", "content"))
+        asyncio.run(notifier.send_alert("new", "content"))
         assert len(notifier.alert_history) <= 200
 
 
@@ -117,7 +117,7 @@ class TestSendWebhook:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -129,7 +129,7 @@ class TestSendWebhook:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "http://localhost:8080/alert", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -141,7 +141,7 @@ class TestSendWebhook:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "http://192.168.1.1/alert", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -153,7 +153,7 @@ class TestSendWebhook:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "http://169.254.169.254/metadata", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -165,7 +165,7 @@ class TestSendWebhook:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "ftp://example.com/file", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -179,7 +179,7 @@ class TestSendWebhook:
 
         mock_post.return_value = MagicMock(status_code=200)
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://oapi.dingtalk.com/robot/send", "type": "dingtalk"},
                 {"severity": "warning", "title": "告警", "content": "内容"},
@@ -194,7 +194,7 @@ class TestSendWebhook:
 
         mock_post.return_value = MagicMock(status_code=200)
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://qyapi.weixin.qq.com/webhook/send", "type": "wecom"},
                 {"severity": "critical", "title": "严重", "content": "问题"},
@@ -209,7 +209,7 @@ class TestSendWebhook:
 
         mock_post.return_value = MagicMock(status_code=200)
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://open.feishu.cn/open-apis/bot/v2/hook/send", "type": "feishu"},
                 {"severity": "info", "title": "信息", "content": "通知"},
@@ -224,7 +224,7 @@ class TestSendWebhook:
 
         mock_post.return_value = MagicMock(status_code=200)
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://example.com/webhook", "type": "slack"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -239,7 +239,7 @@ class TestSendWebhook:
 
         mock_post.return_value = MagicMock(status_code=500)
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://example.com/webhook", "type": "dingtalk", "name": "test"},
                 {"severity": "warning", "title": "t", "content": "c"},
@@ -253,7 +253,7 @@ class TestSendWebhook:
 
         mock_post.side_effect = Exception("网络错误")
         notifier = AlertNotifier()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             notifier._send_webhook(
                 {"url": "https://example.com/webhook", "type": "dingtalk"},
                 {"severity": "warning", "title": "t", "content": "c"},

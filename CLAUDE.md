@@ -2,11 +2,11 @@
 
 ## 项目概述
 基于 LangGraph 的多智能体客服系统，面向化妆品生产/销售企业。
-- Python 3.10+ / FastAPI / LangGraph / ChromaDB
+- Python 3.10+ / FastAPI / LangGraph / Qdrant
 - 四层状态机：缓存 → 路由 → 协作模式 → 响应后处理
 - 8 个 AI Agent，5 种协作模式，双层缓存，RAG + Function Calling + ReAct
-- 1347+ 个测试用例，覆盖率门槛 80%
-- v5.5 新增：API Key 校验加固 + RuleBasedLLM 运行时降级 + LLM 启动健康检查
+- 1390+ 个测试用例，覆盖率门槛 80%
+- v6.0 新增：Qdrant 向量数据库迁移 + ChromaDB→Qdrant 数据迁移脚本 + 并行运行模式
 
 ## 常用命令
 
@@ -73,7 +73,7 @@ make db-downgrade # 回滚迁移
 - `core/` — 基础设施（DI容器/图构建/MessageBus/SharedBlackboard/Monitoring/PromptManager/ABTest/TokenTracker/TokenQuota）
 - `core/session/` — 会话管理（SessionManager/DriftDetector/TokenCounter + **会话数据加密 AES-256-Fernet**）
 - `db/` — SQLAlchemy 模型 + Alembic 迁移
-- `rag/` — ChromaDB 知识库 + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合
+- `rag/` — Qdrant 知识库 + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合（v6.0: 从 ChromaDB 迁移至 Qdrant）
 - `router/` — 双层查询路由（LLM + 规则并行 + 熔断器降级）
 - `collaboration/` — 5 种协作模式 + Orchestrator
 - `tools/` — Function Calling 工具注册（OpenAI 格式）
@@ -87,7 +87,7 @@ make db-downgrade # 回滚迁移
 - `tests/` — 测试套件（unit/integration/e2e/stress/performance）
 
 ### 测试
-- 单元测试在 `tests/unit/`（**20 个文件**）
+- 单元测试在 `tests/unit/`（**25 个文件**）
 - 集成测试在 `tests/integration/`（3 个文件）
 - 端到端测试在 `tests/e2e/`（4 个文件）
 - 压力测试在 `tests/stress/test_stress.py`
