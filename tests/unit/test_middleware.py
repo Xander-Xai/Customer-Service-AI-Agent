@@ -28,25 +28,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "../
 def _make_app():
     """创建带完整中间件栈的测试 FastAPI 应用"""
     from api.middleware import setup_middleware
+    from fastapi.responses import HTMLResponse
 
     app = FastAPI()
     setup_middleware(app)
 
-    @app.get("/")
+    @app.get("/", response_class=HTMLResponse)
     async def root():
-        return {"welcome": True}
+        return HTMLResponse("<html><body>welcome</body></html>")
 
-    @app.get("/login.html")
+    @app.get("/login.html", response_class=HTMLResponse)
     async def login_html():
-        return "<html>login</html>"
+        return HTMLResponse("<html><body>login</body></html>")
 
-    @app.get("/admin.html")
+    @app.get("/admin.html", response_class=HTMLResponse)
     async def admin_html():
-        return "<html>admin</html>"
+        return HTMLResponse("<html><body>admin</body></html>")
 
-    @app.get("/widget.html")
+    @app.get("/widget.html", response_class=HTMLResponse)
     async def widget_html():
-        return "<html>widget</html>"
+        return HTMLResponse("<html><body>widget</body></html>")
 
     @app.get("/api/health")
     async def health():
@@ -156,18 +157,28 @@ class TestSecurityHeaders:
         headers = resp.headers
         assert headers["X-Content-Type-Options"] == "nosniff"
         assert headers["X-Frame-Options"] == "DENY"
-        assert "script-src" in headers["Content-Security-Policy"]
-        assert "frame-ancestors" in headers["Content-Security-Policy"]
+        # CSP 仅对 HTML 响应设置（静态资源/API 无需 CSP，避免 Lighthouse 误报）
         assert headers["Strict-Transport-Security"] == "max-age=31536000; includeSubDomains"
         assert headers["Permissions-Policy"] == "camera=(), geolocation=()"
-        assert headers["X-XSS-Protection"] == "0"
         assert headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
 
-    def test_csp_contains_nonce(self, client):
-        """CSP header 中包含随机 nonce"""
-        resp = client.get("/api/health")
-        csp = resp.headers["Content-Security-Policy"]
+    def test_csp_on_html_response(self, client):
+        """HTML 响应包含 CSP header 和 nonce"""
+        resp = client.get("/")
+        csp = resp.headers.get("Content-Security-Policy", "")
+        assert "script-src" in csp
+        assert "frame-ancestors" in csp
         assert "'nonce-" in csp
+
+    def test_no_csp_on_api_response(self, client):
+        """API 响应不应包含 CSP header（避免 Lighthouse 误报 unneeded header）"""
+        resp = client.get("/api/health")
+        assert "Content-Security-Policy" not in resp.headers
+
+    def test_no_xss_protection_header(self, client):
+        """不再设置 X-XSS-Protection header（已被浏览器弃用，Lighthouse 标记为 unneeded）"""
+        resp = client.get("/api/health")
+        assert "X-XSS-Protection" not in resp.headers
 
     def test_trace_id_present(self, client):
         """每个响应包含 X-Trace-ID"""
@@ -308,9 +319,10 @@ class TestInputSizeProtection:
     """超过 1MB 的 POST 请求应返回 413"""
 
     def test_oversized_post_returns_413(self, dev_client):
-        """POST /api/test 带超大 Content-Length 返回 413"""
-        headers = {"Content-Length": "2000000"}  # 2MB
-        resp = dev_client.post("/api/test", content=b"x", headers=headers)
+        """POST /api/test 带超大 body 返回 413"""
+        # 发送实际超过 5MB 的请求体，触发中间件 Payload too large 检查
+        large_body = b"x" * 6_000_000  # 6MB
+        resp = dev_client.post("/api/test", content=large_body)
         assert resp.status_code == 413
         assert "Payload too large" in resp.json()["error"]
 
