@@ -47,6 +47,14 @@ async def health(request: Request):
     详细监控指标请使用 /api/metrics（需要 supervisor+ 权限）。
     """
     state = request.app.state
+    now = time.time()
+    cached_health = getattr(state, "_cached_health_status", None)
+    cached_time = getattr(state, "_cached_health_time", 0)
+    if cached_health and (now - cached_time) < 5.0:
+        res = dict(cached_health)
+        res["timestamp"] = now
+        return res
+
     cb = getattr(state, "circuit_breaker", None)
     cb_status = cb.get_status() if cb else {"state": "unknown", "consecutive_failures": 0}
 
@@ -73,28 +81,25 @@ async def health(request: Request):
 
     llm_provider = LLM_PROVIDER
 
-    # ChromaDB
-    chromadb_ok = False
+    # v6.0: Qdrant 健康检查
+    qdrant_ok = False
     try:
+        import asyncio
         container = getattr(state, "container", None)
-        if container and getattr(container, "knowledge_base", None) and getattr(container.knowledge_base, "_client", None):
-            client = container.knowledge_base._client
-            client.heartbeat()
-            chromadb_ok = True
+        if container and getattr(container, "knowledge_base", None):
+            kb = container.knowledge_base
+            qdrant_ok = kb.available
+            if qdrant_ok and hasattr(kb, "_client"):
+                await asyncio.to_thread(kb._client.get_collections)
         else:
-            import chromadb
-            from chromadb.config import Settings
-            client = chromadb.EphemeralClient(
-                settings=Settings(
-                    anonymized_telemetry=False,
-                    allow_reset=True,
-                    migrations="apply",
-                )
-            )
-            client.heartbeat()
-            chromadb_ok = True
+            from core.config import QDRANT_HOST, QDRANT_PORT
+            from qdrant_client import QdrantClient
+
+            test_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=3.0)
+            await asyncio.to_thread(test_client.get_collections)
+            qdrant_ok = True
     except Exception as e:
-        logger.debug(f"[Health] ChromaDB 连接检查失败: {e}")
+        logger.debug(f"[Health] Qdrant 连接检查失败: {e}")
 
     # Database
     db_ok = False
@@ -105,8 +110,11 @@ async def health(request: Request):
         from db.database import engine
 
         t0 = time.time()
-        with engine.connect() as conn:
-            conn.execute(_sql_text("SELECT 1"))
+        def _check_db():
+            with engine.connect() as conn:
+                conn.execute(_sql_text("SELECT 1"))
+
+        await asyncio.to_thread(_check_db)
         db_latency_ms = round((time.time() - t0) * 1000, 2)
         db_ok = True
     except Exception as e:
@@ -120,14 +128,14 @@ async def health(request: Request):
     overall = "healthy"
     if not db_ok or not llm_key_valid:
         overall = "unhealthy"
-    elif circuit_state == "open" or (not redis_ok and REDIS_URL) or not chromadb_ok:
+    elif circuit_state == "open" or (not redis_ok and REDIS_URL) or not qdrant_ok:
         overall = "degraded"
 
-    return {
+    res = {
         "status": overall,
         "version": VERSION,
         "mode": "dev" if DEV_MODE else "prod",
-        "timestamp": time.time(),
+        "timestamp": now,
         "uptime_seconds": uptime_seconds,
         "python_version": sys.version.split()[0],
         "components": {
@@ -141,10 +149,13 @@ async def health(request: Request):
                 "key_valid": llm_key_valid,
                 "provider": llm_provider,
             },
-            "chromadb": {"connected": chromadb_ok},
+            "qdrant": {"connected": qdrant_ok},
             "database": {"connected": db_ok, "latency_ms": db_latency_ms},
         },
     }
+    state._cached_health_status = res
+    state._cached_health_time = now
+    return res
 
 
 @router.get("/api/metrics")

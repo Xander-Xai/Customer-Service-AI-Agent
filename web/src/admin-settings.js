@@ -28,7 +28,7 @@ export async function loadAuditLog() {
     const tr = document.createElement('tr');
 
     const tdTime = document.createElement('td');
-    tdTime.textContent = new Date(l.timestamp * 1000).toLocaleString('zh-CN');
+    tdTime.textContent = l.timestamp ? new Date(l.timestamp).toLocaleString('zh-CN') : '';
     tr.appendChild(tdTime);
 
     const tdAction = document.createElement('td');
@@ -69,7 +69,7 @@ export async function loadSystemHealth() {
       { label: '模式', val: data.mode || '-' },
       { label: 'Redis', val: redisInfo?.connected ? `✅ ${redisInfo.latency_ms || ''}ms` : '❌' },
       { label: '数据库', val: dbInfo?.connected ? `✅ ${dbInfo.latency_ms || ''}ms` : '❌' },
-      { label: 'ChromaDB', val: data.components?.chromadb?.connected ? '✅' : '❌' },
+      { label: 'Qdrant', val: data.components?.qdrant?.connected ? '✅' : '❌' },
       { label: '熔断器', val: data.components?.circuit_breaker?.state || '-' },
       {
         label: 'LLM',
@@ -192,7 +192,7 @@ export async function loadPromptVersions() {
       timeEl.style.fontSize = '11px';
       timeEl.style.color = 'var(--text-muted)';
       timeEl.style.marginTop = '2px';
-      timeEl.textContent = `创建: ${v.created_at ? new Date(v.created_at * 1000).toLocaleString('zh-CN') : '-'}`;
+      timeEl.textContent = `创建: ${v.created_at ? new Date(v.created_at).toLocaleString('zh-CN') : '-'}`;
       infoContainer.appendChild(timeEl);
       verEl.appendChild(infoContainer);
 

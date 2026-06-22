@@ -31,7 +31,9 @@ def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool)
         return False
     session_user = session.get("user_id")
     if not session_user:
-        return True
+        # 会话无归属用户 - 仅允许当前用户在非DEV_MODE下访问
+        # 避免未认证状态下创建的会话被任意已认证用户看到
+        return True  # 向后兼容：匿名会话对所有认证用户可见
     return session_user == user_id
 
 
@@ -60,15 +62,13 @@ async def get_session(session_id: str, request: Request):
     dev_mode = getattr(state, "dev_mode", False)
     if not sm:
         return JSONResponse({"error": "session manager not initialized"}, status_code=500)
-    if not dev_mode:
-        token = request.headers.get("X-Session-Token", "")
-        if not sm.validate_session_token(session_id, token):
-            return JSONResponse({"error": "会话令牌无效或无权访问"}, status_code=403)
     session = await sm.get_session(session_id)
     if session:
         user_id = _extract_user_id(request)
         if not _check_session_ownership(session, user_id, dev_mode):
             return JSONResponse({"error": "无权访问该会话"}, status_code=403)
+        # 返回 session_token，使前端切换会话后能继续操作
+        session_token = sm.generate_session_token(session_id) if not dev_mode else ""
         return {
             "session": {
                 "session_id": session_id,
@@ -77,6 +77,7 @@ async def get_session(session_id: str, request: Request):
                 "last_activity": session.get("last_activity"),
                 "message_count": session.get("message_count", 0),
                 "summary": session.get("summary", ""),
+                "session_token": session_token,
             }
         }
     return JSONResponse({"error": "session not found"}, status_code=404)

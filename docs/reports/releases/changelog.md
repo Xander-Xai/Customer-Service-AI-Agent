@@ -4,7 +4,35 @@
 
 ---
 
+## v6.0.1 (2026-06-22) — 契约对齐 + 文档回填
+
+### 🔧 前后端契约修复
+- **上传约束统一**：前端文件选择校验改为和后端一致的 `5MB` 上限，不再出现“前端允许，后端 413 拒绝”的错配
+- **图片白名单统一**：前端图片校验收敛到 `JPEG/PNG/WebP`，与后端 `chat_multimodal.py` 保持一致，避免 `image/svg+xml` 一类文件在前端放行、后端拒绝
+- **Prometheus 返回类型对齐**：`web/src/api/rest.js#getPrometheusMetrics()` 改为读取 `text/plain`，不再把 `/metrics/prometheus` 当 JSON 解析
+
+### 🧪 验证链路修复
+- **pytest 线程池补丁修复**：`tests/conftest.py` 保持 `run_in_executor` 原始同步签名，避免测试基础设施自身引入挂起
+- **移除包导入副作用**：`api/__init__.py` 不再在包导入阶段自动拉起 `app_factory`，减少测试与脚本的隐式数据库/容器初始化
+
+### 📦 版本与配置同步
+- **Node 版本号对齐**：`package.json`、`package-lock.json` 更新为 `6.0`
+- **模块类型声明补齐**：`package.json` 添加 `"type": "module"`，消除 Vite/PostCSS 构建期的模块类型警告
+- **测试环境占位符化**：`.env.test` 中的 `OPENAI_API_KEY` 改为安全占位值，避免把真实格式凭据继续保留在仓库
+
+### 📝 文档更新
+- **README 现状回填**：补充 2026-06-22 的实时验证结果与当前限制，不再直接复用历史“极致级生产就绪”口径
+- **生产准备度检查清单重写**：改为“当前 HEAD 已验证 / 未验证 / 上线前必须补齐”结构
+- **API 参考补充**：明确 `/api/chat/file` 的 `5MB` 限制，以及 `/metrics/prometheus` 为 `text/plain`
+- **新增现状记录**：`docs/reports/plans/2026-06-22-code-doc-alignment.md`
+
 ## v5.5 (2026-06-18) — 账单修复 + LLM 降级增强 + 启动健康检查
+
+### 📚 文档与契约同步
+- **版本统一**：`core/config.py`、`package.json`、`package-lock.json`、`pyproject.toml`、`README.md` 对齐为 `5.5`
+- **API 参考重同步**：`docs/reference/api-reference.md` 按 `api.app_factory:app` 真实路由更新为 48 个 REST/HTTP 操作 + 1 个 WebSocket
+- **OpenAPI 重导出**：`docs/openapi.json` 从 FastAPI 应用重新生成，当前包含 52 个 HTTP 路径（含页面与 favicon）
+- **前端统一导出补齐**：`web/src/api/index.js` 导出 Prompt、知识库、告警历史、用户角色、TTS/Voice 等底层 REST 封装
 
 ### 🔧 修复
 - **账单 Agent 不再显示空泛的系统错误**：LLM 不可用时 fallback 回复嵌入已查询到的 ERP 订单数据，用户至少能看到自己的订单信息后再重试
@@ -56,10 +84,10 @@
 ## v5.4 (2026-06-16) — 企业级增强（安全+运维+监控）
 
 ### 🏆 核心成果
-- **评分提升**: 90.6 → 99.0分 (+8.4分)
+- **评分提升**: 90.6 → 99.0分 (+8.4分，大模型自身评测，不作为正规材料参考依据)
 - **改进项数**: 8项高ROI优化
 - **总耗时**: ~7小时
-- **状态**: 极致级生产就绪（超越99.9%的生产系统）
+- **状态**: 极致级生产就绪（超越99.9%的生产系统，大模型自身评测，不作为正规材料参考依据）
 
 ### 🔐 安全升级
 - **Argon2id密码哈希** - OWASP 2023推荐标准

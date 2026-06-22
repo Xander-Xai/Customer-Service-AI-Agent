@@ -65,7 +65,7 @@ export function showToast(message, type = 'info', duration = 3000) {
       className: 'toast-item',
       role: 'alert',
       'aria-live': 'assertive',
-      style: `padding:12px 16px;border-radius:10px;color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4);transition:all 250ms cubic-bezier(0.16,1,0.3,1);background:${typeBg(type)}`,
+      style: `padding:12px 16px;border-radius:10px;color:#fff;font-size:13px;display:flex;align-items:center;gap:8px;box-shadow:0 4px 12px rgba(0,0,0,0.4);-webkit-transition:all 250ms cubic-bezier(0.16,1,0.3,1);transition:all 250ms cubic-bezier(0.16,1,0.3,1);background:${typeBg(type)}`,
     },
     [
       createElement('span', {}, [typeIcon(type)]),

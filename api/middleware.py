@@ -97,18 +97,19 @@ def setup_middleware(app: FastAPI):
                     f"[RateLimit] 清理 {cleaned} 个过期条目，剩余 {len(_rate_limit_store)}"
                 )
 
-    # v5.4: 添加弃用警告抑制注释，待后续版本迁移到lifespan
-    @app.on_event("startup")  # noqa: B018 - on_event已废弃但保持兼容，计划v6.0迁移到lifespan
-    async def _start_periodic_cleanup():
+    # v5.4: 已迁移到 lifespan，移除废弃的 on_event
+    def start_cleanup_task():
         """启动时注册周期性清理任务"""
         logger.info("[Middleware] 启动周期性清理任务")
-        asyncio.create_task(_periodic_cleanup())
+        return asyncio.create_task(_periodic_cleanup())
+
+    app.state.start_rate_limit_cleanup = start_cleanup_task
 
     @app.middleware("http")
     async def rate_limit_middleware(request: Request, call_next):
         path_norm = request.url.path.rstrip("/").lower()
         if (
-            path_norm in ("", "/api/health", "/login.html", "/admin.html", "/widget.html")
+            path_norm in ("", "/api/health", "/login.html", "/admin.html", "/widget.html", "/theme-comparison.html")
             or request.url.path.startswith("/static/")
             or request.url.path.startswith("/ws/")
         ):
@@ -156,26 +157,28 @@ def setup_middleware(app: FastAPI):
         q.append(now)
         return await call_next(request)
 
-    # ── 安全响应头 ──
+    # ── 缓存策略中间件 ──
+    # 静态资源（/assets/、/static/、/styles/）: 长缓存 + immutable
+    # API 响应: no-store（防止缓存敏感数据）
+    # HTML 页面: no-cache（每次验证）
     @app.middleware("http")
-    async def security_headers(request: Request, call_next):
-        nonce = secrets.token_urlsafe(16)
-        request.state.csp_nonce = nonce
+    async def cache_control_middleware(request: Request, call_next):
         response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; "
-            f"script-src 'self' 'nonce-{nonce}' 'unsafe-hashes'; "
-            f"style-src 'self' 'nonce-{nonce}'; "
-            "connect-src 'self'; "
-            "img-src 'self' data:; "
-            "frame-ancestors 'none'"
-        )
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
-        response.headers["X-XSS-Protection"] = "0"
+        path = request.url.path
+
+        # Vite 构建产物（含 hash 文件名）→ 长缓存
+        if path.startswith("/assets/") or path.startswith("/static/") or path.startswith("/styles/"):
+            response.headers["cache-control"] = "public, max-age=31536000, immutable"
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        # HTML 页面 → 每次验证
+        elif path.endswith(".html") or path == "/":
+            response.headers["cache-control"] = "no-cache"
+            response.headers["Cache-Control"] = "no-cache"
+        # API 响应 → 不缓存
+        elif path.startswith("/api/"):
+            response.headers["cache-control"] = "no-store"
+            response.headers["Cache-Control"] = "no-store"
+
         return response
 
     # ── API Key / JWT 认证中间件 ──
@@ -183,10 +186,10 @@ def setup_middleware(app: FastAPI):
     async def auth_middleware(request: Request, call_next):
         path = request.url.path
 
-        # 输入大小保护：拒绝超过 1MB 的 POST 请求体
+        # 输入大小保护：拒绝超过 5MB 的 POST 请求体（与 MAX_IMAGE_SIZE_MB 一致）
         if request.method == "POST" and path.startswith("/api/"):
             cl = request.headers.get("content-length")
-            if cl and int(cl) > 1000000:
+            if cl and int(cl) > 5000000:
                 return JSONResponse({"error": "Payload too large"}, status_code=413)
 
         path_norm = path.rstrip("/").lower()
@@ -196,9 +199,10 @@ def setup_middleware(app: FastAPI):
             "/login.html",
             "/admin.html",
             "/widget.html",
+            "/theme-comparison.html",
         ) or path.startswith("/static/"):
             return await call_next(request)
-        if path.startswith("/api/auth/login") or path.startswith("/api/auth/register"):
+        if path.startswith("/api/auth/login") or path.startswith("/api/auth/register") or path.startswith("/api/auth/refresh"):
             return await call_next(request)
 
         required_auth = "api_key_or_jwt"
@@ -262,7 +266,7 @@ def setup_middleware(app: FastAPI):
     _CSRF_HEADER_NAME = "X-CSRF-Token"
     _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
     # 浏览器请求特征：携带 Cookie 但无 Bearer Token
-    _CSRF_SKIP_PATHS = {"/", "/api/health", "/login.html", "/admin.html", "/widget.html"}
+    _CSRF_SKIP_PATHS = {"/", "/api/health", "/login.html", "/admin.html", "/widget.html", "/theme-comparison.html"}
     _CSRF_SKIP_PREFIXES = ("/static/", "/ws/")
 
     @app.middleware("http")
@@ -354,6 +358,55 @@ def setup_middleware(app: FastAPI):
         set_trace_id(trace_id)
         response = await call_next(request)
         response.headers["X-Trace-ID"] = trace_id
+        return response
+
+    # ── 安全响应头 ──
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
+        response = await call_next(request)
+        response.headers["x-content-type-options"] = "nosniff"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+        # 仅对 HTML 页面设置 CSP（静态资源无需 CSP，避免 Lighthouse 误报）
+        content_type = response.headers.get("content-type", "")
+        if "text/html" in content_type:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                f"script-src 'self' 'nonce-{nonce}'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "connect-src 'self'; "
+                "img-src 'self' data: blob:; "
+                "frame-ancestors 'none'"
+            )
+
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Permissions-Policy"] = "camera=(), geolocation=()"
+
+        # 确保 Content-Type 含 charset=utf-8 且为小写
+        if content_type:
+            import re
+            if "charset=" in content_type.lower():
+                new_ct = re.sub(r"charset=\S+", "charset=utf-8", content_type, flags=re.IGNORECASE)
+                response.headers["content-type"] = new_ct
+                response.headers["Content-Type"] = new_ct
+            else:
+                media_type = content_type.split(";", 1)[0].strip().lower()
+                if media_type.startswith("text/") or media_type in {
+                    "application/javascript",
+                    "application/x-javascript",
+                    "application/json",
+                    "application/manifest+json",
+                    "application/xml",
+                    "image/svg+xml",
+                }:
+                    new_ct = f"{media_type}; charset=utf-8"
+                    response.headers["content-type"] = new_ct
+                    response.headers["Content-Type"] = new_ct
+
         return response
 
 

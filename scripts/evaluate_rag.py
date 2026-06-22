@@ -250,7 +250,7 @@ async def evaluate_rag():
 
     # 1. 初始化知识库
     kb = CosmeticsKnowledgeBase()  # 内存模式
-    print("[1/4] 初始化 ChromaDB 知识库...")
+    print("[1/4] 初始化 Qdrant 知识库...")
     kb.seed_if_empty("product_knowledge", seed_product_knowledge)
     kb.seed_if_empty("faq", seed_faq)
     kb.seed_if_empty("tech_support", seed_tech_support)

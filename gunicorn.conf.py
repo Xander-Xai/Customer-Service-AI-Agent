@@ -28,3 +28,17 @@ access_log_format = '%(h)s %(l)s %(u)s %(t)s "%(r)s" %(s)s %(b)s "%(f)s" "%(a)s"
 preload_app = True  # 预加载应用（共享内存，减少 fork 开销）
 max_requests = 1000  # Worker 处理 N 个请求后重启（防内存泄漏）
 max_requests_jitter = 50  # 随机抖动，避免同时重启
+
+def post_fork(server, worker):
+    """
+    Worker 进程 fork 后执行。
+    因为 preload_app=True，主进程可能已经建立了数据库连接池，
+    fork 后的子进程共享这些 socket 会导致 SSL SYSCALL error 或 EOF detected。
+    这里需要强制清除连接池。
+    """
+    try:
+        from db.database import engine
+        engine.dispose()
+        server.log.info("Worker fork: SQLAlchemy engine disposed to prevent connection sharing")
+    except ImportError:
+        pass

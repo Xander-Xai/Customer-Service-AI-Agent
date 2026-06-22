@@ -1,0 +1,97 @@
+# Promtail Configuration - 采集 customer-service-ai-agent 应用日志
+# 从 /app/logs/ 目录采集 JSON 格式日志
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # ===== 应用日志采集 =====
+  - job_name: customer-service-ai
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: customer-service-ai
+          app: csai
+          env: prod
+          __path__: /app/logs/*.log
+
+    pipeline_stages:
+      # JSON 格式日志解析
+      - json:
+          expressions:
+            level: level
+            message: message
+            timestamp: timestamp
+            logger: logger
+            module: module
+            func: func
+            line: line
+            exception: exception
+
+      # 提取日志级别
+      - labels:
+          level:
+
+      # 提取时间戳
+      - timestamp:
+          source: timestamp
+          format: "2006-01-02T15:04:05"
+          fallback_formats:
+            - "2006-01-02 15:04:05"
+
+      # 提取消息内容
+      - output:
+          source: message
+
+      # 添加结构化字段
+      - labels:
+          module:
+          func:
+
+      # 过滤空消息
+      - match:
+          selector: '{job="customer-service-ai"}'
+          stages:
+            - drop:
+                expression: ".*"
+                older_than: 720h  # 30 天
+
+  # ===== 压缩日志采集（.gz 文件）=====
+  - job_name: customer-service-ai-compressed
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: customer-service-ai
+          app: csai
+          env: prod
+          compressed: "true"
+          __path__: /app/logs/*.log.gz
+
+    pipeline_stages:
+      # 解压 gzip 文件
+      - json:
+          expressions:
+            level: level
+            message: message
+            timestamp: timestamp
+            logger: logger
+            module: module
+
+      - labels:
+          level:
+
+      - timestamp:
+          source: timestamp
+          format: "2006-01-02T15:04:05"
+
+      - output:
+          source: message

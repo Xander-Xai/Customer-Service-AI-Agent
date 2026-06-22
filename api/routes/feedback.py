@@ -15,6 +15,7 @@ from core.logger import get_logger
 
 class FeedbackRequest(BaseModel):
     session_id: str = Field(..., max_length=36)
+    session_token: str = Field(default="", max_length=64)
     resolved: bool = Field(default=True)
     rating: int = Field(default=1, ge=-1, le=1)  # 1=点赞, -1=点踩
     message_index: int = Field(default=0, ge=0)  # 第几条回复
@@ -45,6 +46,10 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
         session = await sm.get_session(session_id)
         if not session or not session.get("messages"):
             return JSONResponse({"error": "会话不存在或无对话记录"}, status_code=404)
+        # 验证 session_token（防止非会话所有者提交反馈）
+        dev_mode = getattr(state, "dev_mode", False)
+        if not dev_mode and not sm.validate_session_token(session_id, data.session_token):
+            return JSONResponse({"error": "会话令牌无效"}, status_code=403)
 
     # 持久化反馈到数据库
     try:

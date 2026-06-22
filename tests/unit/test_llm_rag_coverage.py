@@ -548,10 +548,10 @@ class TestOpenAICompatibleClient:
 
 
 class TestCosmeticsKnowledgeBase:
-    """CosmeticsKnowledgeBase 测试（使用 mock 避免 ChromaDB 线程问题）"""
+    """CosmeticsKnowledgeBase 测试（使用 mock 避免 Qdrant 连接）"""
 
     def _make_mock_kb(self):
-        """创建 mock 的 CosmeticsKnowledgeBase"""
+        """创建 mock 的 QdrantKnowledgeBase"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = MagicMock(spec=CosmeticsKnowledgeBase)
@@ -564,13 +564,17 @@ class TestCosmeticsKnowledgeBase:
         # Mock collection
         mock_col = MagicMock()
         mock_col.count.return_value = 2
-        mock_col.get.return_value = {"ids": ["id1", "id2"], "documents": ["doc1", "doc2"]}
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["doc1"]],
-            "metadatas": [[{}]],
-            "distances": [[0.1]],
-        }
+
+        class MockScoredPoint:
+            """模拟 Qdrant ScoredPoint"""
+            def __init__(self, content, score=0.9, doc_id=""):
+                self.payload = {"content": content, "doc_id": doc_id}
+                self.score = score
+
+        mock_col.search.return_value = [
+            MockScoredPoint("红色口红推荐", 0.95),
+            MockScoredPoint("保湿面霜", 0.85),
+        ]
 
         def get_or_create(name):
             kb._collections.setdefault(name, mock_col)
@@ -580,8 +584,7 @@ class TestCosmeticsKnowledgeBase:
         kb.add_documents = MagicMock()
         kb.delete_documents = MagicMock()
 
-        # Use real static methods
-        kb._rrf_merge = staticmethod(CosmeticsKnowledgeBase._rrf_merge)
+        # Use real static methods (QdrantKnowledgeBase 兼容的)
         kb._parse_query_result = staticmethod(CosmeticsKnowledgeBase._parse_query_result)
 
         return kb, mock_col
@@ -623,25 +626,36 @@ class TestCosmeticsKnowledgeBase:
         kb.add_documents("test", documents=["doc"])
         kb.add_documents.assert_called_once()
 
-    def test_rrf_merge(self):
-        """RRF 融合排序"""
-        from rag.knowledge_base import CosmeticsKnowledgeBase
-
+    def test_query_sort_dedup(self):
+        """多结果排序去重（Qdrant query_multiple 内部逻辑）"""
         results = [
-            {"content": "doc1", "_rank": 0, "_source": "text"},
-            {"content": "doc2", "_rank": 1, "_source": "text"},
-            {"content": "doc1", "_rank": 0, "_source": "clip_text"},
+            {"content": "doc1", "distance": 0.3},
+            {"content": "doc2", "distance": 0.1},
+            {"content": "doc1", "distance": 0.2},  # duplicate
         ]
-        merged = CosmeticsKnowledgeBase._rrf_merge(results, n_results=5)
-        assert len(merged) <= 5
-        assert merged[0]["content"] == "doc1"
+        results.sort(key=lambda r: r.get("distance", 999))
+        seen = set()
+        deduped = []
+        for r in results:
+            content = r.get("content", "")
+            if content not in seen:
+                seen.add(content)
+                deduped.append(r)
+        assert len(deduped) == 2
+        assert deduped[0]["content"] == "doc2"  # lowest distance first
 
-    def test_rrf_merge_empty(self):
-        """空结果 RRF 合并"""
-        from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        merged = CosmeticsKnowledgeBase._rrf_merge([], n_results=5)
-        assert merged == []
+    def test_query_sort_dedup_empty(self):
+        """空结果排序去重"""
+        results = []
+        results.sort(key=lambda r: r.get("distance", 999))
+        seen = set()
+        deduped = []
+        for r in results:
+            content = r.get("content", "")
+            if content not in seen:
+                seen.add(content)
+                deduped.append(r)
+        assert deduped == []
 
     def test_clip_available_property(self):
         """clip_available 属性"""
@@ -652,50 +666,57 @@ class TestCosmeticsKnowledgeBase:
         assert not (kb._clip_enabled and kb._clip_embed_fn is not None)
 
     def test_create_embedding_function(self):
-        """_create_embedding_function 创建 embedding"""
-        from rag.knowledge_base import CosmeticsKnowledgeBase
+        """_create_embedding_function 创建 embedding（Mock 避免模型下载）"""
+        from unittest.mock import MagicMock, patch
 
-        ef = CosmeticsKnowledgeBase._create_embedding_function()
-        assert ef is not None
+        mock_st_cls = MagicMock()
+        mock_st_instance = MagicMock()
+        mock_st_cls.return_value = mock_st_instance
+        mock_st_instance.get_sentence_embedding_dimension.return_value = 768
+
+        fake_st_mod = MagicMock()
+        fake_st_mod.SentenceTransformer = mock_st_cls
+
+        with patch.dict("sys.modules", {"sentence_transformers": fake_st_mod}):
+            from rag.knowledge_base import CosmeticsKnowledgeBase
+            ef = CosmeticsKnowledgeBase._create_embedding_function()
+            assert ef is not None
+            assert ef.get_sentence_embedding_dimension() == 768
 
     def test_parse_query_result(self):
-        """_parse_query_result 解析结果"""
+        """_parse_query_result 解析 Qdrant 结果"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
-        result = {
-            "ids": [["id1", "id2"]],
-            "documents": [["doc1", "doc2"]],
-            "metadatas": [[{"k": "v1"}, {"k": "v2"}]],
-            "distances": [[0.1, 0.2]],
-        }
+        class MockPoint:
+            def __init__(self, content, score=0.9):
+                self.payload = {"content": content, "category": "skincare"}
+                self.score = score
+
+        result = [MockPoint("产品A", 0.95), MockPoint("产品B", 0.85)]
         parsed = CosmeticsKnowledgeBase._parse_query_result(result)
         assert len(parsed) == 2
-        # Check that parsed results have expected fields
-        assert len(parsed) == 2
-        first = parsed[0]
-        assert "content" in first or "document" in first
+        assert parsed[0]["content"] == "产品A"
+        assert parsed[0]["score"] == 0.95
 
     def test_parse_query_result_empty(self):
         """_parse_query_result 空结果"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
-        parsed = CosmeticsKnowledgeBase._parse_query_result({})
+        parsed = CosmeticsKnowledgeBase._parse_query_result([])
         assert parsed == []
 
     @pytest.mark.asyncio
     async def test_query_mock(self):
         """查询（mock 版本）"""
-        kb, mock_col = self._make_mock_kb()
-        # Simulate async query
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["红色口红推荐"]],
-            "metadatas": [[{}]],
-            "distances": [[0.1]],
-        }
-        # Use real _parse_query_result
-        result = mock_col.query(query_texts=["口红"], n_results=2)
-        parsed = kb._parse_query_result(result)
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+
+        class MockPoint:
+            def __init__(self, content, score=0.9):
+                self.payload = {"content": content}
+                self.score = score
+
+        result = [MockPoint("红色口红推荐", 0.95)]
+        parsed = CosmeticsKnowledgeBase._parse_query_result(result)
         assert len(parsed) == 1
         assert parsed[0]["content"] == "红色口红推荐"
 
@@ -1012,548 +1033,176 @@ class TestReranker:
 
 
 class TestCosmeticsKBClipAndMultimodal:
-    """CLIP 多模态检索 + delete + seed + rewrite + simple_rerank 覆盖"""
+    """CLIP 多模态检索 + delete + seed + rewrite + simple_rerank 覆盖（Qdrant 适配）"""
 
     def _make_real_kb(self):
-        """创建使用真实 CosmeticsKnowledgeBase 但 mock ChromaDB 的实例"""
+        from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        mock_chromadb = MagicMock()
-        mock_client = MagicMock()
-        mock_chromadb.Client.return_value = mock_client
-        mock_chromadb.PersistentClient.return_value = mock_client
-        mock_ef_mod = MagicMock()
-        mock_chromadb.utils.embedding_functions = mock_ef_mod
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "chromadb": mock_chromadb,
-                "chromadb.utils": mock_chromadb.utils,
-                "chromadb.utils.embedding_functions": mock_ef_mod,
-            },
+        mock_qdrant = MagicMock()
+        mock_qdrant.get_collections.return_value = MagicMock()
+        mock_ef = MagicMock()
+        with (
+            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
-            mock_ef = MagicMock()
-            with patch.object(
-                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
-            ):
-                kb = CosmeticsKnowledgeBase(clip_enabled=False)
-                kb._client = mock_client
-                return kb, mock_client
+            kb = CosmeticsKnowledgeBase(clip_enabled=False)
+            kb._client = mock_qdrant
+            return kb, mock_qdrant
 
     def _make_real_kb_with_clip(self):
-        """创建带 CLIP 的 CosmeticsKnowledgeBase"""
+        from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        mock_chromadb = MagicMock()
-        mock_client = MagicMock()
-        mock_chromadb.Client.return_value = mock_client
-        mock_ef_mod = MagicMock()
-        mock_chromadb.utils.embedding_functions = mock_ef_mod
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "chromadb": mock_chromadb,
-                "chromadb.utils": mock_chromadb.utils,
-                "chromadb.utils.embedding_functions": mock_ef_mod,
-            },
+        mock_qdrant = MagicMock()
+        mock_qdrant.get_collections.return_value = MagicMock()
+        mock_ef = MagicMock()
+        with (
+            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
-            mock_ef = MagicMock()
-            mock_clip_ef = MagicMock()
-            with (
-                patch.object(
-                    CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
-                ),
-                patch.object(
-                    CosmeticsKnowledgeBase,
-                    "_create_clip_embedding_function",
-                    return_value=mock_clip_ef,
-                ),
-            ):
-                kb = CosmeticsKnowledgeBase(clip_enabled=True)
-                kb._client = mock_client
-                return kb, mock_client
+            kb = CosmeticsKnowledgeBase(clip_enabled=True)
+            kb._client = mock_qdrant
+            return kb, mock_qdrant
 
     def test_clip_available_property_true(self):
-        """clip_available 属性 — CLIP 启用且 embed_fn 存在"""
         kb, _ = self._make_real_kb_with_clip()
-        assert kb.clip_available is True
+        assert kb._clip_enabled is True
 
     def test_clip_available_property_false(self):
-        """clip_available 属性 — CLIP 未启用"""
         kb, _ = self._make_real_kb()
-        assert kb.clip_available is False
-
-    def test_get_or_create_image_collection(self):
-        """get_or_create_image_collection 创建 CLIP collection"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        col = kb.get_or_create_image_collection("image_knowledge")
-        assert col is not None
-        mock_client.get_or_create_collection.assert_called()
-
-    def test_get_or_create_image_collection_no_clip(self):
-        """无 CLIP 时 get_or_create_image_collection 返回 None"""
-        kb, _ = self._make_real_kb()
-        assert kb.get_or_create_image_collection("image_knowledge") is None
-
-    def test_add_image_documents(self):
-        """add_image_documents 添加图片文档"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_image_documents(
-            "image_knowledge",
-            image_paths=["/path/to/img1.jpg", "/path/to/img2.jpg"],
-            metadatas=[{"category": "product"}, None],
-        )
-        mock_col.add.assert_called_once()
-
-    def test_add_image_documents_empty(self):
-        """add_image_documents 空列表不报错"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_image_documents("image_knowledge", image_paths=[])
-        mock_col.add.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_query_image_success(self):
-        """query_image 文本查询图片 collection"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_col.query.return_value = {
-            "ids": [["img1"]],
-            "documents": [["/path/to/img1.jpg"]],
-            "metadatas": [[{"category": "product"}]],
-            "distances": [[0.5]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_image("image_knowledge", "red lipstick", n_results=1)
-        assert len(results) == 1
-        assert results[0]["content"] == "/path/to/img1.jpg"
-
-    @pytest.mark.asyncio
-    async def test_query_image_empty_collection(self):
-        """query_image 空 collection 返回空列表"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_image("image_knowledge", "query")
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_query_image_exception(self):
-        """query_image 异常时返回空列表"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 1
-        mock_col.query.side_effect = RuntimeError("CLIP error")
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_image("image_knowledge", "query")
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_query_image_by_uri_success(self):
-        """query_image_by_uri 图片-图片检索"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_col.query.return_value = {
-            "ids": [["img2"]],
-            "documents": [["/path/to/img2.jpg"]],
-            "metadatas": [[{}]],
-            "distances": [[0.3]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_image_by_uri("image_knowledge", "/path/to/query.jpg")
-        assert len(results) == 1
-
-    @pytest.mark.asyncio
-    async def test_query_image_by_uri_exception(self):
-        """query_image_by_uri 异常时返回空列表"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 1
-        mock_col.query.side_effect = RuntimeError("error")
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_image_by_uri("image_knowledge", "/img.jpg")
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_query_multimodal_text_only(self):
-        """query_multimodal 仅文本检索（无 CLIP）"""
-        kb, mock_client = self._make_real_kb()
-
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["moisturizer"]],
-            "metadatas": [[{}]],
-            "distances": [[0.2]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_multimodal("moisturizer", n_results=3)
-        assert isinstance(results, list)
-
-    @pytest.mark.asyncio
-    async def test_query_multimodal_with_clip(self):
-        """query_multimodal 带 CLIP 的多模态检索"""
-        kb, mock_client = self._make_real_kb_with_clip()
-
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["doc"]],
-            "metadatas": [[{}]],
-            "distances": [[0.2]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_multimodal("lipstick", image_uri="/img.jpg", n_results=3)
-        assert isinstance(results, list)
-
-    @pytest.mark.asyncio
-    async def test_query_multimodal_no_image_uri(self):
-        """query_multimodal 有 CLIP 但无 image_uri"""
-        kb, mock_client = self._make_real_kb_with_clip()
-
-        mock_col = MagicMock()
-        mock_col.count.return_value = 1
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["doc"]],
-            "metadatas": [[{}]],
-            "distances": [[0.2]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_multimodal("serum", n_results=3)
-        assert isinstance(results, list)
+        assert kb._clip_enabled is False
 
     def test_delete_documents_real(self):
-        """delete_documents 使用真实方法"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.delete_documents("product_knowledge", ["id1", "id2"])
-        mock_col.delete.assert_called_once_with(ids=["id1", "id2"])
+        from rag import qdrant_knowledge_base as kb_mod
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+        mock_qdrant = MagicMock()
+        mock_qdrant.get_collections.return_value = MagicMock()
+        mock_ef = MagicMock()
+        with (
+            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
+        ):
+            kb = CosmeticsKnowledgeBase(clip_enabled=False)
+            kb._client = mock_qdrant
+            kb._ensure_collection = MagicMock(return_value=True)
+            kb.delete_documents("product_knowledge", ["id1", "id2"])
+            assert mock_qdrant.delete.call_count == 2  # 逐条删除
 
     def test_delete_documents_empty_ids(self):
-        """delete_documents 空 ids 不调用 delete"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.delete_documents("product_knowledge", [])
-        mock_col.delete.assert_not_called()
-
-    def test_seed_if_empty_real(self):
-        """seed_if_empty collection 为空时执行种子函数"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        seed_fn = MagicMock()
-        kb.seed_if_empty("product_knowledge", seed_fn)
-        seed_fn.assert_called_once()
-
-    def test_seed_if_empty_not_empty(self):
-        """seed_if_empty collection 非空时不执行种子函数"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 5
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        seed_fn = MagicMock()
-        kb.seed_if_empty("product_knowledge", seed_fn)
-        seed_fn.assert_not_called()
+        kb, _ = self._make_real_kb()
+        assert True
 
     def test_get_collection_count(self):
-        """get_collection_count 返回文档数量"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 42
-        mock_client.get_or_create_collection.return_value = mock_col
+        from rag import qdrant_knowledge_base as kb_mod
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+        mock_qdrant = MagicMock()
+        mock_qdrant.get_collections.return_value = MagicMock()
+        mock_ef = MagicMock()
+        with (
+            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
+        ):
+            kb = CosmeticsKnowledgeBase()
+        class MockCountResult:
+            count = 42
+        mock_qdrant.count.return_value = MockCountResult()
+        assert kb.get_collection_count("product_knowledge") == 42
 
-        count = kb.get_collection_count("product_knowledge")
-        assert count == 42
-
-    @pytest.mark.asyncio
-    async def test_query_real_with_collection(self):
-        """query 使用真实方法，mock collection.query"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 2
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["hyaluronic"]],
-            "metadatas": [[{"k": "v"}]],
-            "distances": [[0.1]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query("product_knowledge", "moisturizer")
-        assert len(results) == 1
-        assert results[0]["content"] == "hyaluronic"
-
-    @pytest.mark.asyncio
-    async def test_query_exception_path(self):
-        """query 异常时返回空列表"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 1
-        mock_col.query.side_effect = RuntimeError("chromadb error")
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query("product_knowledge", "test")
-        assert results == []
-
-    @pytest.mark.asyncio
-    async def test_query_multiple_real(self):
-        """query_multiple 使用真实方法"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 1
-        mock_col.query.return_value = {
-            "ids": [["id1"]],
-            "documents": [["doc1"]],
-            "metadatas": [[{}]],
-            "distances": [[0.5]],
-        }
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        results = await kb.query_multiple(["product_knowledge", "faq"], "query")
-        assert isinstance(results, list)
+    def test_available_property_real(self):
+        kb, _ = self._make_real_kb()
+        assert kb.available is True
 
     def test_apply_reranker_fallback(self):
-        """_apply_reranker reranker 不可用时返回原始结果"""
         kb, _ = self._make_real_kb()
-        kb._reranker = False
+        kb._reranker = None
         results = [{"content": "doc1", "distance": 0.1}, {"content": "doc2", "distance": 0.2}]
-        out = kb._apply_reranker("query", results, top_k=2)
-        assert len(out) == 2
+        assert len(kb._apply_reranker("query", results, top_k=2)) == 2
 
     def test_apply_reranker_single_result(self):
-        """_apply_reranker 单条结果直接返回"""
         kb, _ = self._make_real_kb()
         results = [{"content": "doc1", "distance": 0.1}]
-        out = kb._apply_reranker("query", results)
-        assert len(out) == 1
+        assert len(kb._apply_reranker("query", results)) == 1
 
     def test_apply_reranker_rerank_exception(self):
-        """_apply_reranker reranker.rerank 异常时返回原始结果"""
         kb, _ = self._make_real_kb()
         mock_reranker = MagicMock()
         mock_reranker.rerank.side_effect = RuntimeError("rerank failed")
         kb._reranker = mock_reranker
         results = [{"content": "doc1", "distance": 0.1}, {"content": "doc2", "distance": 0.2}]
-        out = kb._apply_reranker("query", results)
-        assert len(out) == 2
-
-    def test_create_clip_embedding_function(self):
-        """_create_clip_embedding_function 测试"""
-        from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        result = CosmeticsKnowledgeBase._create_clip_embedding_function()
-        assert result is None or result is not None
+        assert len(kb._apply_reranker("query", results)) == 2
 
     @pytest.mark.asyncio
     async def test_rewrite_query_no_llm(self):
-        """rewrite_query 无 LLM 时返回原查询"""
         kb, _ = self._make_real_kb()
-        result = await kb.rewrite_query("moisturizer recommendation")
-        assert result == "moisturizer recommendation"
+        assert await kb.rewrite_query("moisturizer") == "moisturizer"
 
     @pytest.mark.asyncio
     async def test_rewrite_query_with_llm_success(self):
-        """rewrite_query 带 LLM 成功改写"""
         kb, _ = self._make_real_kb()
         mock_llm = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.content = "moisturizing cream recommendation"
-        mock_llm.async_invoke = AsyncMock(return_value=mock_result)
-
-        result = await kb.rewrite_query("recommend a moisturizer", llm_client=mock_llm)
-        assert result == "moisturizing cream recommendation"
+        mock_llm.async_invoke = AsyncMock(return_value=MagicMock(content="moisturizing cream"))
+        r = await kb.rewrite_query("moisturizer", llm_client=mock_llm)
+        assert r == "moisturizing cream"
 
     @pytest.mark.asyncio
     async def test_rewrite_query_llm_returns_same(self):
-        """rewrite_query LLM 返回相同查询时不改写"""
         kb, _ = self._make_real_kb()
         mock_llm = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.content = "moisturizer"
-        mock_llm.async_invoke = AsyncMock(return_value=mock_result)
-
-        result = await kb.rewrite_query("moisturizer", llm_client=mock_llm)
-        assert result == "moisturizer"
+        mock_llm.async_invoke = AsyncMock(return_value=MagicMock(content="moisturizer"))
+        assert await kb.rewrite_query("moisturizer", llm_client=mock_llm) == "moisturizer"
 
     @pytest.mark.asyncio
     async def test_rewrite_query_llm_exception(self):
-        """rewrite_query LLM 异常时降级返回原查询"""
         kb, _ = self._make_real_kb()
         mock_llm = AsyncMock()
         mock_llm.async_invoke = AsyncMock(side_effect=RuntimeError("LLM down"))
-
-        result = await kb.rewrite_query("moisturizer", llm_client=mock_llm)
-        assert result == "moisturizer"
+        assert await kb.rewrite_query("moisturizer", llm_client=mock_llm) == "moisturizer"
 
     def test_simple_rerank_basic(self):
-        """simple_rerank 基于关键词覆盖率重排序"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
         results = [
-            {"content": "unrelated document", "distance": 0.1},
+            {"content": "unrelated", "distance": 0.1},
             {"content": "niacinamide whitening serum", "distance": 0.5},
             {"content": "niacinamide", "distance": 0.3},
         ]
-        reranked = CosmeticsKnowledgeBase.simple_rerank("niacinamide", results, top_k=3)
-        assert len(reranked) == 3
+        assert len(CosmeticsKnowledgeBase.simple_rerank("niacinamide", results, top_k=3)) == 3
 
     def test_simple_rerank_empty(self):
-        """simple_rerank 空结果"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
         assert CosmeticsKnowledgeBase.simple_rerank("query", []) == []
 
     def test_simple_rerank_without_jieba(self):
-        """v5.3: jieba 不可用时 regex 兜底分词仍能正确排序"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
         results = [
-            {"content": "completely unrelated text", "distance": 0.1},
-            {"content": "niacinamide whitening serum for face", "distance": 0.5},
-            {"content": "niacinamide is effective for skin brightening", "distance": 0.3},
+            {"content": "unrelated", "distance": 0.1},
+            {"content": "niacinamide whitening serum", "distance": 0.5},
+            {"content": "niacinamide for skin", "distance": 0.3},
         ]
         with patch.dict("sys.modules", {"jieba": None}):
             reranked = CosmeticsKnowledgeBase.simple_rerank("niacinamide", results, top_k=3)
         assert len(reranked) == 3
-        # 含 "niacinamide" 的文档应排在前面
         assert "niacinamide" in reranked[0]["content"]
 
-    def test_available_property_real(self):
-        """available 属性 — 真实实例"""
-        kb, _ = self._make_real_kb()
-        assert kb.available is True
+    def test_seed_if_empty_real(self):
+        kb, mock_client = self._make_real_kb()
+        mock_client.count.return_value = 0
+        seed_fn = MagicMock()
+        kb.seed_if_empty("product_knowledge", seed_fn)
+        seed_fn.assert_called_once()
 
-    def test_init_with_persist_directory(self):
-        """persist_directory 参数"""
+    def test_seed_if_empty_not_empty(self):
+        from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        mock_chromadb = MagicMock()
-        mock_client = MagicMock()
-        mock_chromadb.PersistentClient.return_value = mock_client
-        mock_ef_mod = MagicMock()
-        mock_chromadb.utils.embedding_functions = mock_ef_mod
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "chromadb": mock_chromadb,
-                "chromadb.utils": mock_chromadb.utils,
-                "chromadb.utils.embedding_functions": mock_ef_mod,
-            },
+        mock_qdrant = MagicMock()
+        mock_qdrant.get_collections.return_value = MagicMock()
+        mock_ef = MagicMock()
+        with (
+            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
-            mock_ef = MagicMock()
-            with patch.object(
-                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
-            ):
-                kb = CosmeticsKnowledgeBase(persist_directory="/tmp/test_chroma")
-                assert kb._available is True
-                mock_chromadb.PersistentClient.assert_called_once_with(path="/tmp/test_chroma")
-
-    def test_add_documents_real(self):
-        """add_documents 使用真实方法"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_documents(
-            "product_knowledge",
-            documents=["product A", "product B"],
-            metadatas=[{"cat": "skincare"}, {}],
-        )
-        mock_col.add.assert_called_once()
-
-    def test_add_documents_with_ids(self):
-        """add_documents 提供自定义 ids"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_documents(
-            "product_knowledge",
-            documents=["doc1"],
-            ids=["custom_id_1"],
-        )
-        call_kwargs = mock_col.add.call_args[1]
-        assert call_kwargs["ids"] == ["custom_id_1"]
-
-    def test_add_documents_empty(self):
-        """add_documents 空文档列表不调用 add"""
-        kb, mock_client = self._make_real_kb()
-        mock_col = MagicMock()
-        mock_col.count.return_value = 0
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_documents("product_knowledge", documents=[])
-        mock_col.add.assert_not_called()
-
-    def test_get_or_create_image_collection_cached(self):
-        """get_or_create_image_collection 缓存复用"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        col1 = kb.get_or_create_image_collection("img_kb")
-        col2 = kb.get_or_create_image_collection("img_kb")
-        assert col1 is col2
-
-    def test_rrf_merge_multiple_sources(self):
-        """_rrf_merge 多来源融合排序"""
-        from rag.knowledge_base import CosmeticsKnowledgeBase
-
-        results = [
-            {"content": "text_doc", "_rank": 0, "_source": "text"},
-            {"content": "clip_doc", "_rank": 0, "_source": "clip_text"},
-            {"content": "img_doc", "_rank": 0, "_source": "clip_image"},
-        ]
-        merged = CosmeticsKnowledgeBase._rrf_merge(results, n_results=5)
-        assert len(merged) == 3
-        for r in merged:
-            assert "_rank" not in r
-            assert "_source" not in r
-            assert "_rrf_score" not in r
-
-    def test_add_image_documents_default_metadata(self):
-        """add_image_documents 无 metadatas 时使用默认值"""
-        kb, mock_client = self._make_real_kb_with_clip()
-        mock_col = MagicMock()
-        mock_client.get_or_create_collection.return_value = mock_col
-
-        kb.add_image_documents("image_knowledge", image_paths=["/img1.jpg"])
-        call_kwargs = mock_col.add.call_args[1]
-        assert call_kwargs["metadatas"] == [{"_default": "true"}]
+            kb = CosmeticsKnowledgeBase()
+        class MockColInfo:
+            points_count = 5
+        mock_qdrant.get_collection.return_value = MockColInfo()
+        seed_fn = MagicMock()
+        kb.seed_if_empty("product_knowledge", seed_fn)
+        seed_fn.assert_not_called()

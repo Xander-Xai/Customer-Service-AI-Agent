@@ -34,4 +34,4 @@
 
 ## 来源文档
 
-[architecture-design.md](../active/architecture-design.md) 第 2.1 节
+[architecture-design.md](../design/architecture-design.md) 第 2.1 节

@@ -367,12 +367,12 @@ function renderHotQuestions(data) {
     textRow.style.marginBottom = '3px';
 
     const nameEl = document.createElement('span');
-    nameEl.textContent = `${i + 1}. ${q.query}`;
+    nameEl.textContent = `${i + 1}. ${q.agent || q.query || '-'}`;
     textRow.appendChild(nameEl);
 
     const countEl = document.createElement('span');
     countEl.style.color = 'var(--text-muted)';
-    countEl.textContent = `${q.count}次 · ${q.category}`;
+    countEl.textContent = `${q.count}次`;
     textRow.appendChild(countEl);
     rowEl.appendChild(textRow);
 

@@ -12,11 +12,11 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
-import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.config import (
     DEV_MODE,
@@ -42,6 +42,84 @@ _bus = None
 _sla_alert_mgr = None
 _redis_client = None
 _circuit_breaker_ref = None
+
+# ── 缓存静态资源包装器（保证 Cache-Control 头，不依赖中间件）──
+# FastAPI middleware 对 mounted sub-app 的响应头修改可能存在版本差异，
+# 此包装器在 ASGI 层直接添加头，确保每个静态文件都能得到长缓存策略。
+
+
+_UTF8_TEXT_CONTENT_TYPES = {
+    "application/javascript",
+    "application/json",
+    "application/manifest+json",
+    "application/xml",
+    "image/svg+xml",
+}
+
+
+def _header_name_bytes(name: str | bytes) -> bytes:
+    return name.lower().encode("latin-1") if isinstance(name, str) else name.lower()
+
+
+def _upsert_header(headers: list[tuple[bytes, bytes]], name: str | bytes, value: str | bytes) -> list[tuple[bytes, bytes]]:
+    name_bytes = _header_name_bytes(name)
+    value_bytes = value.encode("latin-1") if isinstance(value, str) else value
+    filtered = [(key, header_value) for key, header_value in headers if key.lower() != name_bytes]
+    filtered.append((name_bytes, value_bytes))
+    return filtered
+
+
+def _get_header(headers: list[tuple[bytes, bytes]], name: str) -> str:
+    name_bytes = _header_name_bytes(name)
+    for key, value in headers:
+        if key.lower() == name_bytes:
+            return value.decode("latin-1")
+    return ""
+
+
+def _should_append_utf8_charset(content_type: str) -> bool:
+    if not content_type:
+        return False
+
+    normalized = content_type.lower()
+    if "charset=" in normalized:
+        return False
+
+    media_type = normalized.split(";", 1)[0].strip()
+    return media_type.startswith("text/") or media_type in _UTF8_TEXT_CONTENT_TYPES
+
+
+def _make_cached_static(app: ASGIApp, max_age: int = 31536000, extra_headers: dict | None = None) -> ASGIApp:
+    """包装 StaticFiles 子应用，为其所有响应添加缓存头。"""
+    cc = f"public, max-age={max_age}, immutable"
+    extras = list((extra_headers or {}).items())
+
+    async def cached_app(scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await app(scope, receive, send)
+            return
+
+        original_send = send
+
+        async def send_with_headers(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers = _upsert_header(headers, "cache-control", cc)
+                headers = _upsert_header(headers, "x-content-type-options", "nosniff")
+
+                content_type = _get_header(headers, "content-type")
+                if _should_append_utf8_charset(content_type):
+                    media_type = content_type.split(";", 1)[0].strip()
+                    headers = _upsert_header(headers, "content-type", f"{media_type}; charset=utf-8")
+
+                for key, value in extras:
+                    headers = _upsert_header(headers, key, value)
+                message["headers"] = headers
+            await original_send(message)
+
+        await app(scope, receive, send_with_headers)
+
+    return cached_app
 
 
 # ── 图执行引擎（所有路由共用）──
@@ -177,6 +255,7 @@ def create_app(
                 max_connections=HTTPX_MAX_CONNECTIONS,
                 max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
             ),
+            trust_env=False,
         )
         logger.info(
             f"httpx 连接池就绪 (max={HTTPX_MAX_CONNECTIONS} / keepalive={HTTPX_KEEPALIVE_CONNECTIONS})"
@@ -186,6 +265,11 @@ def create_app(
         from api.routes.ws import periodic_ws_cleanup
 
         cleanup_task = asyncio.create_task(periodic_ws_cleanup())
+        
+        # 周期性限流清理 (由 setup_middleware 注入)
+        rate_limit_cleanup_task = None
+        if hasattr(app.state, "start_rate_limit_cleanup"):
+            rate_limit_cleanup_task = app.state.start_rate_limit_cleanup()
 
         # v5.0: circuit_breaker 到 app.state
         container = getattr(app.state, "container", None)
@@ -199,6 +283,11 @@ def create_app(
         cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
+            
+        if rate_limit_cleanup_task:
+            rate_limit_cleanup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await rate_limit_cleanup_task
 
         await app.state.http_client.aclose()
         from llm.client import OpenAICompatibleClient
@@ -230,7 +319,7 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=resolved_origins,
-        allow_methods=["GET", "POST", "DELETE", "PUT"],
+        allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH", "OPTIONS"],
         allow_headers=[
             "X-API-Key",
             "X-Admin-Token",
@@ -257,20 +346,32 @@ def create_app(
     app.include_router(chat_multimodal_router)
     app.include_router(ws_router)
 
-    # ── 静态资源 ──
+    # ── 静态资源（使用缓存包装器，不依赖中间件）──
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     web_dir = os.path.join(project_root, "web")
     static_dir = os.path.join(web_dir, "static")
     dist_dir = os.path.join(web_dir, "static", "dist")
 
     if os.path.isdir(static_dir):
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+        cached_static = _make_cached_static(StaticFiles(directory=static_dir))
+        app.mount("/static", cached_static, name="static")
         logger.info(f"静态资源已挂载: {static_dir}")
 
-    # /assets/ → Vite 构建产物 (base:'/' 时 HTML 引用 /assets/xxx.js)
+    # /styles/ → 样式文件，长缓存 + immutable
+    styles_dir = os.path.join(web_dir, "styles")
+    if os.path.isdir(styles_dir):
+        cached_styles = _make_cached_static(StaticFiles(directory=styles_dir))
+        app.mount("/styles", cached_styles, name="styles")
+        logger.info(f"样式文件已挂载: {styles_dir}")
+
+    # /assets/ → Vite 构建产物（含 hash 文件名），长缓存 1 年 + immutable
     assets_dir = os.path.join(dist_dir, "assets")
     if os.path.isdir(assets_dir):
-        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+        cached_assets = _make_cached_static(
+            StaticFiles(directory=assets_dir),
+            extra_headers={"X-Content-Type-Options": "nosniff"},
+        )
+        app.mount("/assets", cached_assets, name="assets")
         logger.info(f"构建资源已挂载: {assets_dir}")
 
     def _serve_html(request: Request, file_path: str, fallback_msg: str):
@@ -280,7 +381,7 @@ def create_app(
                 content = f.read()
             if nonce:
                 content = content.replace("<script", f'<script nonce="{nonce}"')
-            return HTMLResponse(content=content)
+            return HTMLResponse(content=content, headers={"Content-Type": "text/html; charset=utf-8"})
         return HTMLResponse(f"<h1>{fallback_msg}</h1>", status_code=404)
 
     def _html_path(filename: str) -> str:
@@ -302,5 +403,10 @@ def create_app(
     async def serve_widget(request: Request):
         widget_path = os.path.join(web_dir, "widget.html")
         return _serve_html(request, widget_path, "Widget 未找到")
+
+    @app.get("/theme-comparison.html", response_class=HTMLResponse)
+    async def serve_theme_comparison(request: Request):
+        tc_path = os.path.join(web_dir, "theme-comparison.html")
+        return _serve_html(request, tc_path, "主题对比页面未找到")
 
     return app

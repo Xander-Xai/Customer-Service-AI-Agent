@@ -81,6 +81,7 @@ class ReActAgent(BaseAgent):
             customer_query,
             collections=["product_knowledge", "faq", "tech_support"],
             n_results=5,  # ReAct 模式检索更多结果
+            state=state,
         )
 
         # Step 2: 使用工具调用循环处理

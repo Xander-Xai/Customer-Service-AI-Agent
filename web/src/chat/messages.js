@@ -221,6 +221,7 @@ export function createStreamingMessage() {
   const cursorSpan = wrapper.querySelector('.streaming-cursor');
   const bubble = wrapper.querySelector('.message-bubble');
   let rawText = '';
+  let contentFinalized = false;
 
   // 绑定反馈按钮
   const positiveBtn = wrapper.querySelector('.btn-feedback.positive');
@@ -230,13 +231,21 @@ export function createStreamingMessage() {
   return {
     appendChunk(chunk) {
       rawText += chunk;
-      textSpan.textContent = rawText;
+      if (!contentFinalized) textSpan.textContent = rawText;
       scrollToBottom(container);
     },
-    finalize(meta = {}) {
-      // 移除光标，渲染完整 Markdown
+    completeContent(nextText = rawText) {
+      if (typeof nextText === 'string' && nextText) rawText = nextText;
+      if (contentFinalized) return rawText;
+      contentFinalized = true;
       if (cursorSpan.parentNode) cursorSpan.remove();
       setSafeHtml(bubble, renderMarkdown(rawText));
+      scrollToBottom(container);
+      return rawText;
+    },
+    finalize(meta = {}) {
+      // 正文完成后优先进入最终样式，done 阶段只做元数据和交互收尾
+      this.completeContent(meta.content || rawText);
 
       // 更新元数据
       const agentTag = wrapper.querySelector('.message-agent-tag');

@@ -1,40 +1,19 @@
 /**
  * WebSocket 连接管理
- * 断线重连（指数退避）、消息队列、心跳
+ * 断线重连（指数退避）、消息队列
+ * 心跳完全由服务端驱动：服务端发 {"type":"ping"} → 客户端回复 {"type":"pong"}
  */
 import { emit } from './events.js';
 
 const WS_RECONNECT_BASE = 2000;
 const WS_RECONNECT_MAX = 30000;
-const HEARTBEAT_INTERVAL = 30000;
 
 let _ws = null;
 let _reconnectCount = 0;
 let _reconnectTimer = null;
 let _pendingMessages = [];
 let _connectionReady = false;
-let _heartbeatTimer = null;
 let _sessionId = null;
-
-/** 启动心跳 */
-function _startHeartbeat() {
-  _stopHeartbeat();
-  _heartbeatTimer = setInterval(() => {
-    if (_ws && _ws.readyState === WebSocket.OPEN) {
-      try {
-        _ws.send(JSON.stringify({ type: 'pong' }));
-      } catch (_e) {}
-    }
-  }, HEARTBEAT_INTERVAL);
-}
-
-/** 停止心跳 */
-function _stopHeartbeat() {
-  if (_heartbeatTimer) {
-    clearInterval(_heartbeatTimer);
-    _heartbeatTimer = null;
-  }
-}
 
 /** 建立 WebSocket 连接 */
 export function connect(sessionId) {
@@ -75,7 +54,6 @@ export function connect(sessionId) {
     emit('connected', { sessionId: _sessionId });
     console.log('[WS] 已连接');
     _flushPendingMessages();
-    _startHeartbeat();
   };
 
   _ws.onmessage = (event) => {
@@ -93,7 +71,6 @@ export function connect(sessionId) {
 
   _ws.onclose = (event) => {
     _connectionReady = false;
-    _stopHeartbeat();
     emit('disconnected', { code: event.code, reason: event.reason });
     console.log('[WS] 断开连接', event.code, event.reason);
     if (event.code !== 1000) _scheduleReconnect();
@@ -158,7 +135,6 @@ export function send(query, sessionId, sessionToken) {
 
 /** 关闭 WebSocket 连接 */
 export function disconnect() {
-  _stopHeartbeat();
   if (_reconnectTimer) {
     clearTimeout(_reconnectTimer);
     _reconnectTimer = null;

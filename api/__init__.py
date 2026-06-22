@@ -1,6 +1,7 @@
-"""FastAPI 异步服务层"""
+"""FastAPI 服务层包。
 
-from . import app_factory
-from .app import create_app
+避免在包导入阶段触发 `app_factory` 的数据库/容器初始化副作用。
+需要应用实例时请显式导入 `api.app_factory` 或 `api.app:create_app`。
+"""
 
-__all__ = ["create_app", "app_factory"]
+__all__ = ["app", "app_factory", "middleware", "routes", "utils"]

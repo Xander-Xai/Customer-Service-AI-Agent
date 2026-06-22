@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "药妆智多星多智能体客服系统",
-    "version": "5.2.0"
+    "version": "5.5"
   },
   "paths": {
     "/api/health": {
@@ -25,6 +25,7 @@
     "/api/metrics": {
       "get": {
         "summary": "Metrics Endpoint",
+        "description": "获取系统性能指标（v5.4: 自动更新业务指标）",
         "operationId": "metrics_endpoint_api_metrics_get",
         "responses": {
           "200": {
@@ -776,6 +777,38 @@
         }
       }
     },
+    "/favicon.ico": {
+      "get": {
+        "summary": "Serve Favicon",
+        "operationId": "serve_favicon_favicon_ico_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/favicon.svg": {
+      "get": {
+        "summary": "Serve Favicon Svg",
+        "operationId": "serve_favicon_svg_favicon_svg_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/": {
       "get": {
         "summary": "Serve Index",
@@ -847,10 +880,715 @@
           }
         }
       }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Register",
+        "description": "用户注册",
+        "operationId": "api_register_api_auth_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Login",
+        "description": "用户登录",
+        "operationId": "api_login_api_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Refresh",
+        "description": "P2-3: 用 refresh_token 换取新的 access_token",
+        "operationId": "api_refresh_api_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Logout",
+        "description": "用户登出（v4.0: 吊销当前 JWT token）",
+        "operationId": "api_logout_api_auth_logout_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Me",
+        "description": "获取当前用户信息",
+        "operationId": "api_me_api_auth_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/users": {
+      "get": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api List Users",
+        "description": "用户列表（admin only）",
+        "operationId": "api_list_users_api_auth_users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/audit": {
+      "get": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Api Audit Log",
+        "description": "审计日志（admin only）",
+        "operationId": "api_audit_log_api_auth_audit_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/users/{user_id}/role": {
+      "put": {
+        "tags": [
+          "认证"
+        ],
+        "summary": "Update User Role",
+        "description": "管理员修改用户角色",
+        "operationId": "update_user_role_api_auth_users__user_id__role_put",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge/stats": {
+      "get": {
+        "tags": [
+          "知识库"
+        ],
+        "summary": "Knowledge Stats",
+        "description": "查看知识库统计（v4.0: 需要管理员权限）",
+        "operationId": "knowledge_stats_api_knowledge_stats_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge/seed": {
+      "post": {
+        "tags": [
+          "知识库"
+        ],
+        "summary": "Reseed Knowledge",
+        "description": "重新种子数据（admin only）",
+        "operationId": "reseed_knowledge_api_knowledge_seed_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge/{collection}/add": {
+      "post": {
+        "tags": [
+          "知识库"
+        ],
+        "summary": "Add Documents",
+        "description": "向知识库添加文档（admin only）",
+        "operationId": "add_documents_api_knowledge__collection__add_post",
+        "parameters": [
+          {
+            "name": "collection",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Collection"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddDocRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/knowledge/sync": {
+      "post": {
+        "tags": [
+          "知识库"
+        ],
+        "summary": "Sync From Erp",
+        "description": "从 ERP 同步产品数据到 RAG（admin only）\nv4.1: 支持分页查询 + 空结果处理",
+        "operationId": "sync_from_erp_api_knowledge_sync_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/config": {
+      "get": {
+        "tags": [
+          "告警"
+        ],
+        "summary": "Get Alert Config",
+        "description": "查看告警配置",
+        "operationId": "get_alert_config_api_alerts_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/test": {
+      "post": {
+        "tags": [
+          "告警"
+        ],
+        "summary": "Test Alert",
+        "description": "测试发送告警",
+        "operationId": "test_alert_api_alerts_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestAlertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/alerts/history": {
+      "get": {
+        "tags": [
+          "告警"
+        ],
+        "summary": "Alert History",
+        "description": "告警历史",
+        "operationId": "alert_history_api_alerts_history_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/prompts/agents": {
+      "get": {
+        "summary": "List Agents",
+        "description": "列出所有有 Prompt 版本的 Agent",
+        "operationId": "list_agents_api_admin_prompts_agents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/prompts/{agent_name}": {
+      "get": {
+        "summary": "List Versions",
+        "description": "列出指定 Agent 的所有 Prompt 版本",
+        "operationId": "list_versions_api_admin_prompts__agent_name__get",
+        "parameters": [
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Version",
+        "description": "创建新的 Prompt 版本",
+        "operationId": "create_version_api_admin_prompts__agent_name__post",
+        "parameters": [
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/prompts/{agent_name}/activate": {
+      "put": {
+        "summary": "Activate Version",
+        "description": "激活指定版本（停用其他版本）",
+        "operationId": "activate_version_api_admin_prompts__agent_name__activate_put",
+        "parameters": [
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptActivateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/prompts/{agent_name}/active": {
+      "get": {
+        "summary": "Get Active",
+        "description": "获取当前活跃版本",
+        "operationId": "get_active_api_admin_prompts__agent_name__active_get",
+        "parameters": [
+          {
+            "name": "agent_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AddDocRequest": {
+        "properties": {
+          "documents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Documents"
+          },
+          "metadatas": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadatas"
+          }
+        },
+        "type": "object",
+        "required": [
+          "documents"
+        ],
+        "title": "AddDocRequest"
+      },
       "Body_chat_with_file_api_chat_file_post": {
         "properties": {
           "file": {
@@ -1022,6 +1760,12 @@
             "maxLength": 36,
             "title": "Session Id"
           },
+          "session_token": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Session Token",
+            "default": ""
+          },
           "resolved": {
             "type": "boolean",
             "title": "Resolved",
@@ -1065,6 +1809,149 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "LoginRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "LoginRequest"
+      },
+      "PromptActivateRequest": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "PromptActivateRequest",
+        "description": "激活 Prompt 版本请求"
+      },
+      "PromptCreateRequest": {
+        "properties": {
+          "prompt_text": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 10,
+            "title": "Prompt Text"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Version"
+          },
+          "activate": {
+            "type": "boolean",
+            "title": "Activate",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt_text",
+          "version"
+        ],
+        "title": "PromptCreateRequest",
+        "description": "创建 Prompt 版本请求"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "refresh_token": {
+            "type": "string",
+            "title": "Refresh Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "refresh_token"
+        ],
+        "title": "RefreshRequest",
+        "description": "P2-3: Refresh Token 请求"
+      },
+      "RegisterRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 3,
+            "pattern": "^[a-zA-Z0-9_]+$",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 6,
+            "title": "Password"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Display Name",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "RegisterRequest"
+      },
+      "TestAlertRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Title",
+            "default": "测试告警"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Content",
+            "default": "这是一条测试告警通知"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "info"
+          }
+        },
+        "type": "object",
+        "title": "TestAlertRequest"
+      },
+      "UpdateRoleRequest": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "UpdateRoleRequest"
       },
       "ValidationError": {
         "properties": {

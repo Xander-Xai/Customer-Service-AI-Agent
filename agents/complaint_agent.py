@@ -49,7 +49,7 @@ class ComplaintAgent(BaseAgent):
             try:
                 query = state.get("customer_query", "")
                 extra_context = await self._retrieve_knowledge(
-                    query, collections=["complaint_knowledge", "faq"], n_results=3
+                    query, collections=["complaint_knowledge", "faq"], n_results=3, state=state
                 )
             except Exception as e:
                 self.logger.warning(f"投诉知识库检索失败: {e}")

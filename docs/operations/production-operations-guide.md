@@ -1,7 +1,7 @@
 # 生产环境运维手册
 
-> **版本**: v5.4  
-> **最后更新**: 2026-06-16  
+> **版本**: v6.0  
+> **最后更新**: 2026-06-20  
 > **适用环境**: Production / Canary  
 
 ---
@@ -18,7 +18,7 @@
 
 ---
 
-## 🔍 故障排查（v5.4 新增）
+## 🔍 故障排查（v6.0 复审）
 
 ### 常见问题速查表
 
@@ -28,6 +28,7 @@
 | 缓存命中率低 | 查询多样性高/TTL过短 | 调整TTL，启用预热 | P1 |
 | 数据库连接池耗尽 | 并发过高/慢查询 | 增加连接数，优化查询 | P0 |
 | Redis连接失败 | Redis宕机/网络分区 | 检查Redis状态，重启服务 | P0 |
+| Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，或降级到 chroma_legacy 模式 | P0 |
 | 会话数据丢失 | Session过期/Redis故障 | 检查TTL配置，验证Redis | P1 |
 | 响应时间过长 | LLM延迟/资源不足 | 检查SLA，扩容实例 | P0 |
 | 告警频繁触发 | 阈值过低/真实故障 | 调整阈值，排查根因 | P1 |
@@ -40,12 +41,12 @@
 - 响应时间 > 30s
 - 错误日志: `LLM API timeout`、`Rate limit exceeded` 或 `LLMServiceError`
 - Prometheus指标: `csai_errors_total` 激增
-- **启动日志** (v5.5+): `[HealthCheck] ⚠️ LLM 端点不可用`
+- **启动日志** (v6.0+): `[HealthCheck] ⚠️ LLM 端点不可用`，说明启动健康检查已捕获供应商不可用并自动降级
 
 **诊断步骤**:
 
 ```bash
-# 0. 检查启动时 LLM 健康检查日志（v5.5+）
+# 0. 检查启动时 LLM 健康检查日志（v6.0+）
 docker logs customer-service-app --tail 50 | grep "HealthCheck"
 # 预期: [HealthCheck] ✅ LLM 端点连通正常
 # 异常: [HealthCheck] ⚠️ LLM 端点不可用 — 系统以降级模式运行
@@ -80,7 +81,7 @@ curl -s -X POST ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}/chat/completio
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{
-    "model": "'"${OPENAI_MODEL:-Qwen/Qwen2.5-7B-Instruct}"'",
+    "model": "'"${OPENAI_MODEL:-Qwen/Qwen3-8B}"'",
     "messages": [{"role": "user", "content": "回复OK即可"}],
     "max_tokens": 10
   }' | jq '.choices[0].message.content'
@@ -95,12 +96,11 @@ export DEEPSEEK_API_KEY=your_deepseek_key
 docker compose restart app
 
 # 方案B: 增加超时时间（临时）
-echo "LLM_TIMEOUT=60" >> .env.prod
+echo "HTTP_TIMEOUT=60" >> .env.prod
 docker compose restart app
 
-# 方案C: 启用缓存优先模式（长期）
-echo "CACHE_FIRST=true" >> .env.prod
-docker compose restart app
+# 方案C: 预热高频缓存（长期）
+python3 scripts/warm_cache.py http://localhost:8000
 
 # 方案D: 联系API提供商提升配额
 # OpenAI: https://platform.openai.com/account/limits
@@ -148,7 +148,7 @@ echo "CACHE_TTL_PRODUCT=86400" >> .env.prod
 echo "CACHE_TTL_BILLING=300" >> .env.prod
 
 # 方案B: 启用缓存预热
-python3 scripts/warmup_cache.py --top-queries 100
+python3 scripts/warm_cache.py http://localhost:8000
 
 # 方案C: 优化L2语义匹配阈值
 echo "CACHE_SEMANTIC_THRESHOLD_SHORT=0.7" >> .env.prod  # 降低阈值
@@ -470,6 +470,55 @@ docker compose restart nginx
 - ✅ 定期更新依赖，修复安全漏洞
 - ✅ 使用Lighthouse进行性能审计
 
+### Q9: Qdrant 向量数据库不可用或查询慢
+
+**症状**:
+- 健康检查显示 `qdrant.connected = false`
+- RAG 检索返回空结果或超时
+- 错误日志: `Connection refused to qdrant:6333` 或 `timeout`
+
+**诊断步骤**:
+
+```bash
+# 1. 检查 Qdrant 服务状态
+docker ps | grep qdrant
+docker logs customer-service-qdrant --tail 50
+
+# 2. 测试 Qdrant REST API 连通性（v6.0+ HTTP 端口 6333）
+curl -s http://localhost:6333/collections | jq '.result.collections[].name'
+
+# 3. 检查集合状态和向量配置
+curl -s http://localhost:6333/collections/product_knowledge | jq '.result'
+
+# 4. 检查健康端点
+curl -s http://localhost:8000/api/health | jq '.components.qdrant'
+```
+
+**解决方案**:
+
+```bash
+# 方案A: 重启 Qdrant 容器
+docker compose restart qdrant
+
+# 方案B: 切换回 ChromaDB 兼容模式（紧急降级）
+echo "VECTOR_DB_MODE=chroma_legacy" >> .env.prod
+docker compose restart app
+
+# 方案C: 重建 Qdrant 集合（数据损坏时）
+# 注意：会清空现有数据
+python3 scripts/migrate_chroma_to_qdrant.py --force-recreate
+
+# 方案D: 检查 Qdrant 磁盘空间
+docker exec customer-service-qdrant df -h /qdrant/storage
+```
+
+**预防措施**:
+- ✅ 监控 Qdrant 磁盘使用率（>80% 告警）
+- ✅ 定期备份 Qdrant 快照（`docker cp qdrant:/qdrant/storage ./backups/`）
+- ✅ 为 Qdrant 容器配置资源限制（CPU 2-4 核，内存 4-8GB）
+- ✅ 生产环境建议设置 `gRPC` 端口（6334）以提高性能
+- ✅ 配置 `VECTOR_DB_MODE=qdrant_only` 完全启用 Qdrant 模式
+
 ---
 
 ## 📚 日常运维
@@ -687,7 +736,7 @@ docker compose exec redis redis-cli KEYS "csai:session:*" | xargs docker compose
 # command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
 ```
 
-#### 6. ChromaDB 检索缓慢
+#### 6. Qdrant 检索缓慢（v6.0 从 ChromaDB 迁移）
 
 ```
 # 检查集合大小
@@ -731,7 +780,7 @@ make prod-down
 
 # 2. 从备份恢复
 ls -lt backups/  # 查看最新备份
-tar -xzf backups/YYYYMMDD_HHMMSS/chroma_db.tar.gz -C ./
+# Qdrant 使用 Docker 卷持久化，可通过卷快照或 qdrant snapshot 命令备份
 
 # 3. 恢复数据库
 pg_restore -U csai -d csai backups/YYYYMMDD_HHMMSS/postgres_csai.dump
@@ -993,7 +1042,7 @@ make prod
 - [项目 README](README.md)
 - [生产准备度检查清单](../checklists/production-readiness-checklist.md)
 - [API 文档](http://localhost:8000/docs)
-- [架构设计文档](docs/architecture.md)
+- [架构设计文档](docs/design/architecture-design.md)
 
 ---
 

@@ -111,6 +111,7 @@ class OpenAICompatibleClient:
                         max_connections=HTTPX_MAX_CONNECTIONS,
                         max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
                     ),
+                    trust_env=False,  # 不读取系统代理，直连 LLM API
                 )
                 OpenAICompatibleClient._client_pools[pool_key] = client
             return client

@@ -31,7 +31,7 @@ class TechAgent(BaseAgent):
         customer_query = state["customer_query"]
         # v3.6: RAG 知识库已覆盖硬编码知识，移除冗余 _knowledge
         rag_context = await self._retrieve_knowledge(
-            customer_query, collections=["tech_support", "product_knowledge"]
+            customer_query, collections=["tech_support", "product_knowledge"], state=state
         )
 
         # 写入技术诊断信息到黑板

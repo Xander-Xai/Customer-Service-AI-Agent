@@ -34,4 +34,4 @@
 
 ## 来源文档
 
-[model-comparison.md](../active/model-comparison.md)
+[model-comparison.md](../reference/model-comparison.md)

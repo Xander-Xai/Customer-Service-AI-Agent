@@ -51,7 +51,7 @@ export async function loadUsers() {
 
     // 注册时间
     const tdTime = document.createElement('td');
-    tdTime.textContent = u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN') : '-';
+    tdTime.textContent = u.created_at ? new Date(u.created_at).toLocaleString('zh-CN') : '-';
     tr.appendChild(tdTime);
 
     // 操作（选择角色 + 保存按钮）

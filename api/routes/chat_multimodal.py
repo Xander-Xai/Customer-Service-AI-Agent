@@ -17,6 +17,9 @@ from .chat import _SessionValidationError, get_authenticated_session
 router = APIRouter()
 logger = get_logger("api.chat.multimodal")
 
+# 文件上传大小限制（与 middleware.py 的 5MB POST body 限制一致）
+_MAX_UPLOAD_SIZE = 5 * 1024 * 1024  # 5MB
+
 
 # ===== 图片上传处理 =====
 
@@ -31,8 +34,10 @@ async def _handle_image_upload(
         return JSONResponse({"error": "图片识别功能未启用"}, status_code=503)
 
     content_type = image.content_type or ""
-    if not content_type.startswith("image/"):
-        return JSONResponse({"error": "仅支持图片文件 (JPEG/PNG/WebP)"}, status_code=400)
+    # 限定安全的图片 MIME 类型（拒绝 image/svg+xml 等含 XSS 风险的格式）
+    _SAFE_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+    if content_type not in _SAFE_IMAGE_TYPES:
+        return JSONResponse({"error": "仅支持 JPEG/PNG/WebP 图片格式"}, status_code=400)
 
     from core.config import MAX_IMAGE_SIZE_MB
 
@@ -137,7 +142,6 @@ async def stream_multimodal_chat(
     return StreamingResponse(
         _sse_stream_generator(ctx),
         media_type="text/event-stream",
-        headers={"X-Session-Token": token},
     )
 
 
@@ -148,7 +152,13 @@ async def _handle_audio_upload(audio: UploadFile, request: Request):
     """处理音频上传，返回识别文本"""
     from media.audio_processor import AudioProcessor
 
+    # 前置大小检查（避免内存溢出）
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > _MAX_UPLOAD_SIZE:
+        return JSONResponse({"error": "音频文件过大"}, status_code=413)
     audio_data = await audio.read()
+    if len(audio_data) > _MAX_UPLOAD_SIZE:
+        return JSONResponse({"error": "音频文件大小超过限制（最大 5MB）"}, status_code=413)
     processor = AudioProcessor()
     text = await processor.transcribe(audio_data, audio.filename)
     return text
@@ -235,7 +245,13 @@ async def _handle_document_upload(file: UploadFile, query: str, request: Request
     """处理文档上传（PDF/DOCX/TXT/MD）"""
     from media.document_processor import DocumentProcessor
 
+    # 大小检查
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > _MAX_UPLOAD_SIZE:
+        return None
     file_data = await file.read()
+    if len(file_data) > _MAX_UPLOAD_SIZE:
+        return None
     content_type = file.content_type or ""
     processor = DocumentProcessor()
     text = processor.extract(file_data, content_type, file.filename or "")
@@ -246,7 +262,13 @@ async def _handle_video_upload(file: UploadFile, query: str, request: Request):
     """处理视频上传"""
     from media.video_processor import VideoProcessor
 
+    # 大小检查
+    cl = request.headers.get("content-length")
+    if cl and int(cl) > _MAX_UPLOAD_SIZE:
+        return None
     file_data = await file.read()
+    if len(file_data) > _MAX_UPLOAD_SIZE:
+        return None
     content_type = file.content_type or ""
     processor = VideoProcessor()
     frames = processor.extract_frames(file_data, content_type)
@@ -283,6 +305,8 @@ async def chat_with_file(
         result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
     elif content_type.startswith("video/"):
         video_desc = await _handle_video_upload(file, query, request)
+        if video_desc is None:
+            return JSONResponse({"error": "视频文件过大"}, status_code=413)
         combined_query = (
             f"{query}\n\n视频分析结果：{video_desc}" if query else f"视频分析结果：{video_desc}"
         )
@@ -292,6 +316,8 @@ async def chat_with_file(
         result = await run_graph(auth.sid, combined_query)
     elif any(filename.lower().endswith(ext) for ext in (".pdf", ".docx", ".doc", ".txt", ".md")):
         doc_text = await _handle_document_upload(file, query, request)
+        if doc_text is None:
+            return JSONResponse({"error": "文档文件过大"}, status_code=413)
         combined_query = (
             f"{query}\n\n文档内容：{doc_text}" if query else f"请分析以下文档内容：\n{doc_text}"
         )

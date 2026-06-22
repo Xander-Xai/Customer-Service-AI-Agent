@@ -1,10 +1,25 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v5.4.1)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v6.0)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **v5.4.1** 前后端 API 对齐（5 个新 REST 端点 + 2 个新模块）+ 死代码清理（删除 487 行冗余）+ 监控概览新增"我的 Token Quota"卡片 + 会话选择自动探测 LangGraph checkpoint
+> **当前代码状态（2026-06-22）**
 >
-> **v5.4** 企业级增强（Argon2id密码哈希 + 分级告警升级机制 + 业务指标监控 + 故障排查手册）+ 评分提升至99.0分（极致级生产就绪）+ 8项高ROI改进
+> - 当前仓库版本已统一到 `v6.0`（Python / Node / README 同步）
+> - 1,361+ 个测试用例（35 个测试文件），覆盖率 ≥80%
+> - 已验证：`npm test` 53/53 通过，`npm run build` 通过，88+ 核心单元测试通过
+> - 已修复：`/api/auth/refresh` 在生产环境的认证绕过（CRITICAL）、admin-knowledge 缺少错误反馈
+> - 前后端 50+ API 端点全部对齐验证
+> - 文档已同步更新：架构设计、API 参考、运维指南、快速启动清单
+> - **生产就绪状态**：代码结构完整，核心安全加固到位。上线前请：[生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
+> - **依赖服务**：需 PostgreSQL + Redis + Qdrant 容器运行
+>
+> **v6.0** Qdrant 向量数据库迁移（替代 ChromaDB）+ 数据迁移脚本 + 并行运行模式 + 全链路 SSE 真流式
+>
+> **v5.5** 账单 Agent 降级增强 + LLM 启动健康检查 + API Key 占位符校验加固 + 前端统一 API 导出与 OpenAPI/Markdown 文档重新对齐
+>
+> **v5.4.1** 前后端 API 对齐（checkpoint/history/token-quota/prometheus 等 REST 能力）+ 死代码清理（删除 487 行冗余）+ 监控概览新增"我的 Token Quota"卡片 + 会话选择自动探测 LangGraph checkpoint
+>
+> **v5.4** 企业级增强（Argon2id密码哈希 + 分级告警升级机制 + 业务指标监控 + 故障排查手册）+ 评分提升至99.0分（极致级生产就绪，大模型自身评测，不作为正规材料参考依据）+ 8项高ROI改进
 >
 > **v5.3** 安全审计修复（WebSocket 认证强化 + Token Quota Redis 持久化 + 黑板 Session 隔离 + 依赖安全升级）+ 会话数据加密（AES-256-Fernet）+ 74 文件变更（2616 插入 / 1281 删除）
 >
@@ -22,7 +37,30 @@
 
 ---
 
-## 🎯 v5.4 企业级增强（新增）
+## 🎯 v6.0 核心更新（2026-06-20）
+
+### Qdrant 向量数据库迁移
+- ✅ **ChromaDB → Qdrant** — 完全替换 ChromaDB 为 Qdrant，支持 Docker 容器化部署、gRPC 协议、水平扩展
+- ✅ **并行运行模式** — 支持 `parallel` / `qdrant_only` / `chroma_legacy` 三种运行模式，平滑过渡
+- ✅ **数据迁移脚本** — `scripts/migrate_chroma_to_qdrant.py` 自动迁移 ChromaDB 数据至 Qdrant
+- ✅ **兼容 API 层** — `rag/knowledge_base.py` 统一接口，上层代码无需修改
+- ✅ **25 个单元测试文件** — 1390+ tests，覆盖率 ≥80%
+
+### 全链路 SSE 真流式
+- ✅ **Tool-Calling 流式化** — RAG 检索、工具调用期间实时显示 thinking/tool_call/tool_result 事件
+- ✅ **图节点状态反馈** — 用户能看到缓存检查、分类、路由等各阶段状态
+- ✅ **缓存伪流式** — 缓存命中时分块输出，保持一致的流式体验
+- ✅ **RAG 检索状态** — 查询改写→检索→重排→完成各阶段 emit 状态事件
+
+### 配置变更
+- 新增 `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_COLLECTION_CONFIG` 等配置项
+- 新增 `VECTOR_DB_MODE`（默认 `chroma_legacy`，建议生产环境设为 `qdrant_only`）
+
+---
+
+## 🎯 v5.4 企业级增强（历史记录）
+
+> v5.4 功能已包含在 v6.0 中。以下是 v5.4 的原始记录，供参考。
 
 ### 安全升级
 - ✅ **Argon2id密码哈希** - OWASP 2023推荐标准，抗GPU/ASIC攻击能力提升100倍+
@@ -54,16 +92,19 @@
 
 ---
 
-## ⚡ 3 分钟验证入口
+## ⚡ 当前验证入口
 
-> 面试官快速验证项目的 4 个入口：
+> 建议先按当前 HEAD 的可复现实测来验证，而不是直接相信历史里程碑分数。
 
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **测试能过** | `make test` | 1350 passed, 覆盖率 ≥80% |
+| **前端测试** | `npm test` | 当前 53 个 Vitest 用例通过 |
+| **前端构建** | `npm run build` | `web/static/dist/` 产物生成成功 |
+| **后端关键单测** | `pytest tests/unit/test_app_factory.py tests/unit/test_ws_coverage.py tests/unit/test_auth_tools_coverage.py -q --maxfail=1` | 当前 88 个测试通过 |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
-| **CI 能过** | `.github/workflows/ci.yml` | 4 Job 流水线（测试→安全→构建→部署） |
+
+> 说明：`tests/unit/test_api_routes.py` 当前可正常收集 143 个用例，但整文件执行仍需继续拆查；因此 README 不再把“全量测试已验证通过”写成当前事实。
 
 **详细证据文档**：
 - [Prompt Engineering 设计](docs/design/prompt-engineering.md) — Prompt 架构、策略选型、迭代演进
@@ -142,7 +183,7 @@ graph TB
     end
 
     subgraph External["外部集成"]
-        RAG["ChromaDB — RAG 知识库 4+1 collection"]
+        RAG["Qdrant — RAG 知识库 4+1 collection (v6.0)"]
         ERP["金蝶 ERP — Mock / Real"]
         FC["Function Calling — 4 个 ERP 工具"]
         RWR["查询改写 — 同义词扩展"]
@@ -381,7 +422,7 @@ flowchart LR
 | 会话安全 | HMAC-SHA256 会话所有权令牌，防劫持 | `SESSION_TOKEN_SECRET` |
 | 空闲过期 | 超过 `SESSION_IDLE_TTL` 秒无活动自动清理 | 默认 3600s |
 
-### RAG 知识库（ChromaDB）
+### RAG 知识库（Qdrant，v6.0 从 ChromaDB 迁移）
 
 | Collection | 文档数 | 来源 | 用途 | 使用 Agent |
 |------------|--------|------|------|------------|
@@ -394,9 +435,9 @@ flowchart LR
 **嵌入模型选择**（自动降级）：
 1. `BAAI/bge-small-zh-v1.5`（中文优化轻量模型）
 2. `shibing624/text2vec-base-chinese`（通用中文向量模型）
-3. ChromaDB 默认 `all-MiniLM-L6-v2`（英文兜底）
+3. Qdrant 余弦距离（非 L2）—— `_parse_query_result` 中兼容转换为 L2 距离
 
-**RAG 检索增强管线（[knowledge_base.py](rag/knowledge_base.py)）：**
+**RAG 检索增强管线（[qdrant_knowledge_base.py](rag/qdrant_knowledge_base.py)）：**
 ```
 用户查询 → 查询改写（query_rewriter.py：同义词扩展 + 多问题拆分）
          → 多 collection 并行检索（run_in_executor 异步包装）
@@ -547,7 +588,7 @@ cp .env.example .env
 # ===== LLM 配置（必填） =====
 OPENAI_API_KEY=sk-xxx                              # API Key
 OPENAI_BASE_URL=https://api.siliconflow.cn/v1      # 兼容 OpenAI 的 API 地址
-OPENAI_MODEL=Qwen/Qwen2.5-7B-Instruct              # 模型名称
+OPENAI_MODEL=Qwen/Qwen3-8B              # 模型名称（v6.0: 从 Qwen2.5-7B 升级）
 # LLM_PROVIDER=siliconflow                          # siliconflow | deepseek | openai | custom
 
 # ===== 安全配置（生产必改） =====
@@ -603,7 +644,7 @@ make test
 |------|------|
 | http://localhost:8000 | 前端界面（暗色主题，含对话 + 监控仪表盘） |
 | http://localhost:8000/docs | FastAPI 自动生成的 API 文档（Swagger UI） |
-| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / ChromaDB / 熔断器状态） |
+| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器状态） |
 | http://localhost:3000 | Grafana 仪表盘（admin / `<GRAFANA_PASSWORD>`） |
 | http://localhost:9090 | Prometheus UI |
 
@@ -626,14 +667,14 @@ make env-check   # 查看当前环境配置摘要
 | 会话 | 6 | 列表 / 详情 / 删除 / Checkpoint / 历史 / 消息 |
 | 认证 | 8 | 注册 / 登录 / 刷新 / 登出 / 当前用户 / 用户列表 / 审计 / 角色更新 |
 | 知识库 | 4 | 统计 / 种子 / 添加 / 同步 |
-| 告警 | 3 | 配置 / 测试 / 历史 |
-| 监控 | 12 | 健康 / 指标 / KPI / 缓存 / 告警 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token 追踪 |
+| 告警 | 4 | SLA 告警记录 / 配置 / 测试 / 历史 |
+| 监控 | 11 | 健康 / 指标 / KPI / 缓存 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token Quota / Token 追踪 |
 | Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
 | 反馈 | 2 | 提交 / 统计 |
-| 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
+| 前端 | 4 | 聊天页 / 登录页 / 管理后台 / Widget |
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
-**合计：44 个端点 + 5 个页面**
+**合计：48 个 REST/HTTP 操作 + 1 个 WebSocket + 4 个后端直出页面（OpenAPI 当前包含 52 个 HTTP 路径，含 favicon 资产）。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -651,7 +692,7 @@ customer-service-ai-agent/
 ├── auth/              # JWT 认证（PBKDF2 + Redis 黑名单 + Refresh Token + RBAC）
 ├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
 ├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
-├── rag/               # RAG 知识库（ChromaDB + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合 + 种子数据）
+├── rag/               # RAG 知识库（Qdrant v6.0 + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合 + 种子数据）
 ├── cache/             # 双层缓存（L1 MD5 + L2 Jaccard + Redis 持久化）
 ├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
 ├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
@@ -665,7 +706,7 @@ customer-service-ai-agent/
 │   ├── styles/        # 13 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
-├── tests/             # 测试套件（1350 Python + 5 Vitest：unit/integration/e2e/stress/performance）
+├── tests/             # 测试套件（1390 Python + 5 Vitest：unit/integration/e2e/stress/performance）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
@@ -720,7 +761,7 @@ customer-service-ai-agent/
 | `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
 | `contrast.test.js` | `web/src/__tests__/` | WCAG AA 对比度回归（18 个 token 对） |
 
-**总计：1350 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
+**总计：1390 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
@@ -806,7 +847,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `SLA_HIERARCHICAL_MAX` | 30.0 | Hierarchical 模式 SLA 超时（秒） |
 | `SLA_REACT_MAX` | 30.0 | ReAct 模式 SLA 超时（秒） |
 | **重试** | | |
-| `RETRY_MAX_ATTEMPTS` | 3 | 最大重试次数（仅瞬态错误） |
+| `RETRY_MAX_ATTEMPTS` | 2 | 最大重试次数（仅瞬态错误） |
 | `RETRY_BASE_DELAY` | 1.0 | 基础退避延迟（秒，指数退避 max 10s） |
 | **连接池** | | |
 | `HTTPX_MAX_CONNECTIONS` | 100 | httpx 最大连接数 |
@@ -880,6 +921,8 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
+| **v6.0** | 2026-06-20 | Qdrant 向量数据库迁移（替代 ChromaDB + 数据迁移脚本 + 并行运行模式 + Qdrant 知识库） |
+| **v5.5** | 2026-06-18 | 账单 Agent 降级增强 + LLM 启动健康检查 + API Key 占位符校验加固 + API/文档对齐 |
 | **v5.4.1** | 2026-06-17 | 前后端 API 对齐（5 新 REST 端点 + 2 新模块）+ 死代码清理（-487 行）+ Token Quota 卡片 + checkpoint 探测 |
 | **v5.4** | 2026-06-16 | 企业级增强（Argon2id + 分级告警 + 业务监控 + 99.0分极致级） |
 | **v5.3** | 2026-06-16 | 安全审计修复（WS 认证 + Token Quota Redis + 黑板隔离 + 依赖升级）+ 会话加密 + 74 文件变更 |

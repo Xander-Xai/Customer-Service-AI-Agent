@@ -37,6 +37,7 @@
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
   white-space: nowrap;
 }
@@ -69,6 +70,10 @@
   border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: var(--shadow-sm);
+  -webkit-transition:
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
   transition:
     transform var(--duration-fast) var(--ease-out),
     box-shadow var(--duration-fast) var(--ease-out),
@@ -119,6 +124,7 @@
   background: var(--bg-surface);
   color: var(--text-primary);
   cursor: pointer;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -156,6 +162,7 @@
   background: var(--color-surface-elevated);
   color: var(--text-primary);
   cursor: pointer;
+  -webkit-transition: all var(--duration-fast) var(--ease-out);
   transition: all var(--duration-fast) var(--ease-out);
 }
 
@@ -182,6 +189,18 @@
   background: var(--primary);
   color: var(--text-inverse);
 }
+.tag-supervisor {
+  background: var(--color-action-primary-hover, #7c3aed);
+  color: var(--text-inverse);
+}
+.tag-agent {
+  background: var(--accent, #2563eb);
+  color: var(--text-inverse);
+}
+.tag-customer {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
 .tag-user {
   background: var(--bg-hover);
   color: var(--text-secondary);
@@ -189,6 +208,36 @@
 .tag-active {
   background: var(--success-bg);
   color: var(--success);
+}
+
+.admin-stat-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.role-select {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-base);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.btn-activate-prompt {
+  background: var(--primary);
+  color: var(--text-inverse);
+  border-color: var(--primary);
+}
+.btn-activate-prompt:hover {
+  background: var(--primary-hover);
+}
+
+.btn-role-save {
+  padding: 2px 8px;
+  font-size: 11px;
+  margin-left: 4px;
 }
 
 .empty-state {

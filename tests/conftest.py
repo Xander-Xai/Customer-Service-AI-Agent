@@ -30,14 +30,18 @@ asyncio.to_thread = _patched_to_thread
 _original_run_in_executor = asyncio.BaseEventLoop.run_in_executor
 
 
-async def _patched_run_in_executor(self, executor, func, *args):
+def _patched_run_in_executor(self, executor, func, *args):
+    """保持 run_in_executor 的原始同步签名，避免 pytest/Starlette 卡死。"""
     if executor is None:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
-        try:
-            return await _original_run_in_executor(self, executor, func, *args)
-        finally:
+        future = _original_run_in_executor(self, executor, func, *args)
+
+        def _shutdown_executor(_future):
             executor.shutdown(wait=False)
-    return await _original_run_in_executor(self, executor, func, *args)
+
+        future.add_done_callback(_shutdown_executor)
+        return future
+    return _original_run_in_executor(self, executor, func, *args)
 
 
 asyncio.BaseEventLoop.run_in_executor = _patched_run_in_executor

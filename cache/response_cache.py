@@ -138,6 +138,10 @@ class ResponseCache:
         self._threshold_long = threshold_long
         self._short_text_max_len = short_text_max_len
         self._stats = {"l1_hits": 0, "l2_hits": 0, "misses": 0}
+        self._metrics_pending = 0
+        self._metrics_last_flush = time.monotonic()
+        self._metrics_flush_ops = 25
+        self._metrics_flush_seconds = 1.0
         logger.info(
             f"初始化: L1_max={l1_max} L2_max={l2_max} TTL={default_ttl}s "
             f"threshold_short={threshold_short} threshold_long={threshold_long} "
@@ -200,8 +204,8 @@ class ResponseCache:
                 # LRU：移到末尾（最近使用）
                 self._l1.move_to_end(key_md5)
                 
-                # v5.4: 更新命中率指标
-                self._update_metrics()
+                # v5.4: 指标刷新节流，降低高频命中路径上的额外开销
+                self._schedule_metrics_flush()
                 
                 cache_operation_duration.observe(time.time() - start_time)
                 return resp
@@ -213,8 +217,8 @@ class ResponseCache:
             self._stats["l2_hits"] += 1
             cache_l2_hits.inc()  # v5.4: Prometheus指标
             
-            # v5.4: 更新命中率指标
-            self._update_metrics()
+            # v5.4: 指标刷新节流，降低高频命中路径上的额外开销
+            self._schedule_metrics_flush()
             
             cache_operation_duration.observe(time.time() - start_time)
             return result
@@ -222,13 +226,24 @@ class ResponseCache:
         self._stats["misses"] += 1
         cache_misses.inc()  # v5.4: Prometheus指标
         
-        # v5.4: 更新命中率指标
-        self._update_metrics()
+        # v5.4: 指标刷新节流，降低高频命中路径上的额外开销
+        self._schedule_metrics_flush()
         
         cache_operation_duration.observe(time.time() - start_time)
         return None
     
-    def _update_metrics(self):
+    def _schedule_metrics_flush(self, force: bool = False):
+        """按节奏刷新 Prometheus 指标，避免每次缓存命中都做全量写入。"""
+        self._metrics_pending += 1
+        now = time.monotonic()
+        if not force:
+            pending_ops = self._metrics_pending < self._metrics_flush_ops
+            not_due_yet = (now - self._metrics_last_flush) < self._metrics_flush_seconds
+            if pending_ops and not_due_yet:
+                return
+        self._update_metrics(force=force)
+
+    def _update_metrics(self, force: bool = False):
         """v5.4: 更新Prometheus监控指标"""
         total = self._stats["l1_hits"] + self._stats["l2_hits"] + self._stats["misses"]
         if total > 0:
@@ -238,6 +253,8 @@ class ResponseCache:
         # 更新缓存大小
         cache_l1_size.set(len(self._l1))
         cache_l2_size.set(len(self._l2))
+        self._metrics_pending = 0
+        self._metrics_last_flush = time.monotonic()
 
     def set(self, query: str, response: str):
         """设置缓存（兼容旧 API 别名）"""
@@ -265,7 +282,9 @@ class ResponseCache:
                 data = json.dumps({"response": response, "ts": now}, ensure_ascii=False)
                 key = f"cache:resp:{key_md5}"
                 ttl = int(self._default_ttl)
-                t = threading.Thread(target=self._redis.setex, args=(key, ttl, data), daemon=True)
+                t = threading.Thread(
+                    target=self._redis.set, args=(key, data), kwargs={"ex": ttl}, daemon=True
+                )
                 t.start()
             except Exception:
                 pass
@@ -280,6 +299,9 @@ class ResponseCache:
         for t in tokens:
             self._inverted_index[t].add(cache_key)
 
+        # 写操作后刷新大小指标，保证监控面板的缓存容量信息及时更新
+        self._update_metrics(force=True)
+
     def invalidate(self, query: str):
         key_md5 = self._md5(query)
         self._l1.pop(key_md5, None)
@@ -290,6 +312,8 @@ class ResponseCache:
         self._l2_order.clear()
         self._inverted_index.clear()
         self._redis = None  # v3.6: 重置 Redis 客户端
+        self._metrics_pending = 0
+        self._update_metrics(force=True)
         logger.info("缓存已清空")
 
     def get_stats(self) -> dict[str, int]:

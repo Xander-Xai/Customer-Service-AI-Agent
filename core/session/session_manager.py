@@ -525,10 +525,10 @@ class EnhancedSessionManager:
                     def _redis_save():
                         key = _get_encryption_key()
                         msgs_json = json.dumps(session["messages"], ensure_ascii=False)
-                        r.setex(
+                        r.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:messages",
-                            ttl,
                             _encrypt_data(msgs_json, key),
+                            ex=ttl,
                         )
                         meta = {
                             "created_at": session["created_at"],
@@ -538,10 +538,10 @@ class EnhancedSessionManager:
                             "drift_log": session.get("drift_log", []),
                             "topic_history": list(session.get("topic_history", [])),
                         }
-                        r.setex(
+                        r.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:meta",
-                            ttl,
                             _encrypt_data(json.dumps(meta, ensure_ascii=False), key),
+                            ex=ttl,
                         )
 
                     await asyncio.to_thread(_redis_save)

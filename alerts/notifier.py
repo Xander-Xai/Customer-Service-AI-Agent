@@ -264,7 +264,7 @@ class AlertNotifier:
             else:
                 payload = {"text": text}
 
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, trust_env=False) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code == 200:
                     logger.info(f"Webhook 告警发送成功: {webhook.get('name', wh_type)}")

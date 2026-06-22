@@ -45,11 +45,11 @@ def _float_env(key: str, default: float) -> float:
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "siliconflow")  # siliconflow | deepseek | openai | custom
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-8B")  # v6.0: 从 Qwen2.5-7B 升级
 LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
 # ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
-VERSION = os.getenv("APP_VERSION", "5.5")  # 可从环境变量覆盖，便于 CI/CD
+VERSION = os.getenv("APP_VERSION", "6.0")  # 可从环境变量覆盖，便于 CI/CD
 APP_NAME = os.getenv("APP_NAME", "药妆智多星 - Customer Service AI Agent")
 DESCRIPTION = os.getenv(
     "APP_DESCRIPTION",
