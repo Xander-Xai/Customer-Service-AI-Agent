@@ -857,8 +857,8 @@ class ResponseCache:
                 l1_size = len(
                     list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"更新 L1 缓存指标失败: {e}")
         cache_l1_size.set(l1_size)
 
         # L2 大小近似 = L3 大小（Qdrant 不实时暴露 count）
