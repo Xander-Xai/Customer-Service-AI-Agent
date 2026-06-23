@@ -312,6 +312,9 @@ class ResponseCache:
             except Exception as e:
                 logger.warning(f"L1 Redis invalidate 失败: {e}")
 
+        # Also invalidate L3 Jaccard fallback
+        self._l3_evict_query(normalized)
+
     def invalidate_by_filter(self, filter_dict: dict):
         """
         按 payload 条件批量删除 L2 Qdrant 条目
@@ -762,6 +765,18 @@ class ResponseCache:
             if not self._l3_inverted_index[t]:
                 del self._l3_inverted_index[t]
         del self._l3_cache[key]
+
+    def _l3_evict_query(self, query: str):
+        """从 L3 Jaccard 缓存中移除匹配查询的条目（模糊匹配所有条目）"""
+        normalized = self._normalize(query)
+        tokens = _tokenize(normalized)
+        keys_to_remove = []
+        for key, (cached_tokens, _, _) in self._l3_cache.items():
+            # Remove entries that share tokens with the query
+            if tokens & cached_tokens:
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            self._l3_evict_key(key)
 
     # ==================================================================
     # 内部辅助方法
