@@ -866,3 +866,23 @@ class ResponseCache:
 
         self._metrics_pending = 0
         self._metrics_last_flush = time.monotonic()
+
+    # ==================================================================
+    # v6.1: 消息总线支持（主动失效）
+    # ==================================================================
+
+    async def subscribe_to_bus(self, bus):
+        """订阅消息总线上的缓存失效事件。
+
+        监听 "cache:invalidate" 主题，收到消息后按 payload 中的 query 失效对应缓存条目。
+
+        Args:
+            bus: MessageBus 实例
+        """
+        async def _handle_invalidation(message):
+            query = message.payload.get("query") if isinstance(message.payload, dict) else None
+            if query:
+                self.invalidate(query)
+
+        await bus.subscribe("cache:invalidate", _handle_invalidation)
+        logger.info("已订阅缓存失效事件 (topic=cache:invalidate)")
