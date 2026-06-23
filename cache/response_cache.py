@@ -114,7 +114,7 @@ _DEFAULT_TTL_POLICY: dict[str, int] = {
 
 # ===== L3 常量 =====
 _L3_MAX_SIZE = 500
-_RANDOM_VECTOR_DIM = 384
+_RANDOM_VECTOR_DIM = 768
 
 
 class ResponseCache:
