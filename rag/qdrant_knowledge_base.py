@@ -34,11 +34,16 @@ class QdrantKnowledgeBase:
         prefer_grpc: bool = False,
         api_key: str = "",
         clip_enabled: bool = False,
+        embedding_model=None,       # v6.1: 容器级单例注入
     ):
         self._clip_enabled = clip_enabled
         self._clip_embed_fn = None
         self._reranker = None
-        self._embed_fn = self._create_embedding_function()
+        if embedding_model is not None:
+            self._embed_fn = embedding_model
+            logger.info("Embedding 模型使用容器单例")
+        else:
+            self._embed_fn = self._create_embedding_function()
         self._collection_cache: dict[str, bool] = {}
 
         try:
