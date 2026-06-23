@@ -236,7 +236,13 @@ class ResponseAgent(BaseAgent):
             # v3.2: 仅缓存 resolved 状态的响应，避免缓存低质量回复
             if resolution_status == RESOLUTION_RESOLVED:
                 try:
-                    self.cache.put(query, response)
+                    # v6.1: 写入缓存时携带 Graph State metadata
+                    cache_meta = {
+                        "intent_type": state.get("query_type", "default"),
+                        "user_role": state.get("user_role", "default"),
+                        "product_id": state.get("extracted_entities", {}).get("product_id"),
+                    }
+                    self.cache.put(query, response, metadata=cache_meta)
                     self.logger.debug(f"缓存写入: {query[:30]}...")
                 except Exception as e:
                     self.logger.warning(f"缓存写入失败: {e}")

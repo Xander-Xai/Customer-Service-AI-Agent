@@ -205,7 +205,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
-        cached = c.cache.get(query)
+        cache_metadata = {
+            "user_role": state.get("user_role", "default"),
+        }
+        cached = c.cache.get(query, metadata=cache_metadata)
         if cached:
             await _emit_status(state, "cache", "⚡ 缓存命中，快速响应中...")
 
@@ -322,7 +325,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                             state["collaboration_mode"] = result.get("mode", new_mode)
                             # v5.0: 升级重试后只更新缓存，不重复完整后处理（避免重复写入会话/SLA/事件）
                             if state.get("response") and not state.get("cached", False) and c.cache:
-                                c.cache.put(state["customer_query"], state["response"])
+                                # v6.1: 写入缓存时携带完整 metadata
+                                cache_meta = {
+                                    "intent_type": state.get("query_type", "default"),
+                                    "user_role": state.get("user_role", "default"),
+                                    "product_id": state.get("extracted_entities", {}).get("product_id"),
+                                }
+                                c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
                             logger.info(f"[ModeUpgrade] 升级重试完成: mode={new_mode}")
                     except Exception as e:
                         logger.error(f"[ModeUpgrade] 升级重试失败: {e}，保留原响应", exc_info=True)
@@ -335,7 +344,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     def _fallback_post_process(state: AgentState):
         """降级后处理：仅做缓存写入"""
         if state.get("response") and not state.get("cached", False):
-            c.cache.put(state["customer_query"], state["response"])
+            # v6.1: 写入缓存时携带完整 metadata
+            cache_meta = {
+                "intent_type": state.get("query_type", "default"),
+                "user_role": state.get("user_role", "default"),
+                "product_id": state.get("extracted_entities", {}).get("product_id"),
+            }
+            c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
 
     def _select_collaboration_mode(state: AgentState) -> str:
         """LangGraph Conditional Edge：委托 orchestrator 统一选择"""
