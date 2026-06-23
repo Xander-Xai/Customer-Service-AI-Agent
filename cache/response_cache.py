@@ -27,7 +27,6 @@ import random
 import time
 from collections import defaultdict, deque
 
-from core import config
 from core.logger import get_logger
 from core.session.token_counter import _tokenize_chinese as _tokenize
 
@@ -830,7 +829,7 @@ class ResponseCache:
             try:
                 self._jaccard_set(normalized, response, now)
             except Exception:
-                pass  # L3 不得抛出异常
+                pass  # L3 fallback must never raise
 
         self._update_metrics(force=True)
 
