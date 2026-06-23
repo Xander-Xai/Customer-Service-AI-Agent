@@ -216,6 +216,36 @@ async def cache_stats(request: Request):
     return cache.get_stats() if cache else {"error": "cache not initialized"}
 
 
+@router.post("/api/cache/invalidate")
+async def invalidate_cache(request: Request, body: dict):
+    """按条件删除缓存（主动失效）
+
+    Body 支持：
+    - {"product_id": "SKU_123"} — 按商品 ID 删除
+    - {"intent_type": "pricing_stock"} — 按意图类型删除
+    - {"product_id": "SKU_123", "intent_type": "pricing_stock"} — 联合条件
+    """
+    _require_monitoring_auth(request)
+    cache = getattr(request.app.state, "response_cache", None)
+    if not cache:
+        return {"error": "cache not initialized"}
+
+    filter_dict = {}
+    if body.get("product_id"):
+        filter_dict["product_id"] = body["product_id"]
+    if body.get("intent_type"):
+        filter_dict["intent_type"] = body["intent_type"]
+
+    if not filter_dict:
+        return {"error": "至少提供一个过滤条件 (product_id / intent_type)"}
+
+    try:
+        cache.invalidate_by_filter(filter_dict)
+        return {"status": "ok", "filter": filter_dict}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.get("/api/alerts")
 async def list_alerts(request: Request, limit: int = 20):
     _require_monitoring_auth(request)
