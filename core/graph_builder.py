@@ -329,7 +329,6 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                                 cache_meta = {
                                     "intent_type": state.get("query_type", "default"),
                                     "user_role": state.get("user_role", "default"),
-                                    "product_id": state.get("extracted_entities", {}).get("product_id"),
                                 }
                                 c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
                             logger.info(f"[ModeUpgrade] 升级重试完成: mode={new_mode}")

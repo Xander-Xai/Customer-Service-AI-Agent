@@ -240,7 +240,6 @@ class ResponseAgent(BaseAgent):
                     cache_meta = {
                         "intent_type": state.get("query_type", "default"),
                         "user_role": state.get("user_role", "default"),
-                        "product_id": state.get("extracted_entities", {}).get("product_id"),
                     }
                     self.cache.put(query, response, metadata=cache_meta)
                     self.logger.debug(f"缓存写入: {query[:30]}...")
