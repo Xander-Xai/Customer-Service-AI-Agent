@@ -63,12 +63,39 @@ HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": f"MultiAgentCu
 # ===== 路由配置 =====
 ROUTING_COMPLEXITY_THRESHOLD = _int_env("ROUTING_COMPLEXITY_THRESHOLD", 50)
 
-# ===== 缓存配置 =====
-CACHE_L1_MAX = _int_env("CACHE_L1_MAX", 500)
-CACHE_L2_MAX = _int_env("CACHE_L2_MAX", 2000)
-CACHE_TTL = _int_env("CACHE_TTL", 3600)
-CACHE_SEMANTIC_THRESHOLD_SHORT = _float_env("CACHE_SEMANTIC_THRESHOLD_SHORT", 0.7)
-CACHE_SEMANTIC_THRESHOLD_LONG = _float_env("CACHE_SEMANTIC_THRESHOLD_LONG", 0.5)
+# ===== v6.1: 缓存架构重构 =====
+# L1: Redis 精确缓存
+# （复用 REDIS_URL，不用新增变量）
+
+# L2: Qdrant 语义缓存
+CACHE_QDRANT_COLLECTION = os.getenv("CACHE_QDRANT_COLLECTION", "response_cache")
+CACHE_QDRANT_MAX_POINTS = _int_env("CACHE_QDRANT_MAX_POINTS", 10000)
+CACHE_VECTOR_SCORE_THRESHOLD = _float_env("CACHE_VECTOR_SCORE_THRESHOLD", 0.85)
+
+# TTL 策略: intent_type → TTL(秒)
+CACHE_TTL_POLICY = {
+    "knowledge_qa": 604800,      # 7 天
+    "pricing_stock": 300,        # 5 分钟
+    "policy_rule": 86400,        # 24 小时
+    "order_status": 300,         # 5 分钟
+    "after_sales": 3600,         # 1 小时
+    "chitchat": 600,             # 10 分钟
+    "default": 3600,             # 1 小时
+}
+
+# L3: Jaccard 降级
+CACHE_FALLBACK_ENABLED = os.getenv("CACHE_FALLBACK_ENABLED", "true").lower() == "true"
+CACHE_FALLBACK_THRESHOLD = _float_env("CACHE_FALLBACK_THRESHOLD", 0.6)
+
+# 后台清理
+CACHE_CLEANUP_INTERVAL = _int_env("CACHE_CLEANUP_INTERVAL", 3600)  # 秒
+
+# 向后兼容别名（v6.0 及之前的配置项）
+CACHE_L1_MAX = _int_env("CACHE_L1_MAX", 500)       # 不再用于内存 L1，保留避免 ImportError
+CACHE_L2_MAX = _int_env("CACHE_L2_MAX", 2000)       # 同上
+CACHE_TTL = _int_env("CACHE_TTL", 3600)             # 仅作为 default_ttl 兼容
+CACHE_SEMANTIC_THRESHOLD_SHORT = CACHE_VECTOR_SCORE_THRESHOLD  # 重定向
+CACHE_SEMANTIC_THRESHOLD_LONG = CACHE_VECTOR_SCORE_THRESHOLD   # 重定向
 
 # ===== 会话配置 =====
 SESSION_WINDOW_SIZE = _int_env("SESSION_WINDOW_SIZE", 10)
