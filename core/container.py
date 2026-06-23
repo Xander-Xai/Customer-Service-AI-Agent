@@ -449,10 +449,6 @@ class ServiceContainer:
             fallback_threshold=CACHE_FALLBACK_THRESHOLD,
         )
 
-        # Inject cache into response_agent
-        if self.response_agent and hasattr(self.response_agent, "cache"):
-            self.response_agent.cache = self.cache
-
         # 后台缓存清理任务
         async def _cleanup_loop():
             while True:
