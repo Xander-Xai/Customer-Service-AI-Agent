@@ -44,9 +44,6 @@ class ServiceContainer:
 
         # ===== 基础设施（同步创建，无依赖）=====
         from core.config import (
-            CACHE_L1_MAX,
-            CACHE_L2_MAX,
-            CACHE_TTL,
             REDIS_URL,
             SESSION_STORAGE_BACKEND,
             SESSION_WINDOW_SIZE,
@@ -61,13 +58,8 @@ class ServiceContainer:
         self.circuit_breaker = CircuitBreaker()
         self.sla_alert_mgr = SLAAlertManager(bus=self.bus)
 
-        from cache.response_cache import ResponseCache
-
-        self.cache = ResponseCache(
-            l1_max=CACHE_L1_MAX,
-            l2_max=CACHE_L2_MAX,
-            default_ttl=CACHE_TTL,
-        )
+        # v6.1: ResponseCache 延迟初始化（embedding / Redis / Qdrant 在 initialize() 中注入）
+        self.cache = None
 
         # Session: 可选 Redis 持久化
         from core.session.session_manager import EnhancedSessionManager, default_session_manager
@@ -116,6 +108,8 @@ class ServiceContainer:
         # RAG & Tools
         self.knowledge_base: KnowledgeBaseProtocol | None = None
         self._legacy_kb: Any = None  # v6.0: 并行运行时保留的 ChromaDB legacy 实例
+        # v6.1: 容器级单例 Embedding 模型
+        self.embedding_model: Any = None
         self.tool_registry: ToolRegistryProtocol | None = None
 
         # v5.1: Prompt 版本管理器
@@ -126,6 +120,20 @@ class ServiceContainer:
 
         # v4.1: LangGraph 应用实例
         self.graph_app: Any = None
+
+    def _create_redis_client(self):
+        """v6.1: 创建同步 Redis 客户端（可能失败返回 None）"""
+        try:
+            import redis
+            from core.config import REDIS_URL
+
+            client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=2)
+            client.ping()
+            logger.info("Redis 客户端初始化成功")
+            return client
+        except Exception as e:
+            logger.warning(f"Redis 不可用，L1 缓存将降级: {e}")
+            return None
 
     async def initialize(self):
         """初始化所有延迟加载的组件（幂等，多次调用安全）。
@@ -150,10 +158,6 @@ class ServiceContainer:
             # v5.5: LLM 健康检查 — 启动时验证端点是否可连接
             await self._check_llm_health()
 
-            # 1.2. Redis 缓存预热（异步，避免阻塞事件循环）
-            if hasattr(self, "_redis_url"):
-                await self.cache._init_redis(self._redis_url)
-
             # 1.5. v5.1: Vision LLM（多模态模型，仅在启用时初始化）
             await self._init_vision_llm()
 
@@ -168,6 +172,13 @@ class ServiceContainer:
 
             # 3. RAG + Tools
             await self._init_rag_and_tools()
+
+            # 3.2. v6.1: 初始化 ResponseCache（注入 Redis / Qdrant / Embedding）
+            await self._init_cache()
+
+            # v6.1: 订阅主动失效事件
+            if self.cache and self.bus:
+                await self.cache.subscribe_to_bus(self.bus)
 
             # 3.5. v5.1: Prompt 版本管理器
             await self._init_prompt_manager()
@@ -338,6 +349,17 @@ class ServiceContainer:
             )
 
             if VECTOR_DB_MODE in ("qdrant_only", "parallel"):
+                # v6.1: 加载容器级单例 Embedding 模型
+                if self.embedding_model is None:
+                    try:
+                        from sentence_transformers import SentenceTransformer
+
+                        self.embedding_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
+                        logger.info("容器级 Embedding 模型加载完成 (BAAI/bge-small-zh-v1.5)")
+                    except Exception as e:
+                        logger.warning(f"Embedding 模型加载失败: {e}")
+                        self.embedding_model = None
+
                 # Qdrant 模式
                 from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
@@ -348,6 +370,7 @@ class ServiceContainer:
                     prefer_grpc=QDRANT_PREFER_GRPC,
                     api_key=QDRANT_API_KEY,
                     clip_enabled=CLIP_ENABLED,
+                    embedding_model=self.embedding_model,  # v6.1
                 )
                 logger.info(
                     f"Qdrant 知识库初始化完成 (host={QDRANT_HOST}, mode={VECTOR_DB_MODE})"
@@ -393,6 +416,56 @@ class ServiceContainer:
                 self.erp = create_erp_adapter()
             self.tool_registry = create_erp_tools(self.erp)
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
+
+    async def _init_cache(self):
+        """v6.1: 初始化三级缓存，注入外部依赖"""
+        if self.cache is not None:
+            return
+        from cache.response_cache import ResponseCache
+        from core.config import (
+            CACHE_CLEANUP_INTERVAL,
+            CACHE_FALLBACK_ENABLED,
+            CACHE_FALLBACK_THRESHOLD,
+            CACHE_QDRANT_COLLECTION,
+            CACHE_QDRANT_MAX_POINTS,
+            CACHE_TTL_POLICY,
+            CACHE_VECTOR_SCORE_THRESHOLD,
+        )
+
+        redis_client = self._create_redis_client()
+        qdrant_client = getattr(self.knowledge_base, "_client", None) if self.knowledge_base else None
+        if qdrant_client is None and hasattr(self, "_legacy_kb") and self._legacy_kb:
+            qdrant_client = getattr(self._legacy_kb, "_client", None)
+
+        self.cache = ResponseCache(
+            redis_client=redis_client,
+            qdrant_client=qdrant_client,
+            embedding_model=self.embedding_model,
+            l1_ttl_policy=CACHE_TTL_POLICY,
+            l2_collection=CACHE_QDRANT_COLLECTION,
+            l2_threshold=CACHE_VECTOR_SCORE_THRESHOLD,
+            l2_max_points=CACHE_QDRANT_MAX_POINTS,
+            fallback_enabled=CACHE_FALLBACK_ENABLED,
+            fallback_threshold=CACHE_FALLBACK_THRESHOLD,
+        )
+
+        # Inject cache into response_agent
+        if self.response_agent and hasattr(self.response_agent, "cache"):
+            self.response_agent.cache = self.cache
+
+        # 后台缓存清理任务
+        async def _cleanup_loop():
+            while True:
+                try:
+                    await asyncio.sleep(CACHE_CLEANUP_INTERVAL)
+                    self.cache.cleanup_expired()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.warning(f"缓存清理循环异常: {e}")
+
+        self._cache_cleanup_task = asyncio.create_task(_cleanup_loop())
+        logger.info("ResponseCache 初始化完成 (L1=Redis L2=Qdrant L3=Jaccard)")
 
     async def _init_prompt_manager(self):
         """v5.1: 初始化 Prompt 版本管理器"""
@@ -490,6 +563,19 @@ class ServiceContainer:
             return
 
         logger.info("ServiceContainer 开始关闭...")
+
+        # 0. v6.1: 停止缓存清理任务
+        if hasattr(self, "_cache_cleanup_task") and self._cache_cleanup_task:
+            self._cache_cleanup_task.cancel()
+            logger.info("  ✅ 缓存清理任务已停止")
+
+        # 0.1. v6.1: 关闭 Redis 连接
+        if self.cache and hasattr(self.cache, "_redis") and self.cache._redis:
+            try:
+                self.cache._redis.close()
+                logger.info("  ✅ Redis 连接已关闭")
+            except Exception as e:
+                logger.warning(f"  ⚠️ Redis 关闭异常: {e}")
 
         # 1. 关闭 LLM 连接池
         try:
