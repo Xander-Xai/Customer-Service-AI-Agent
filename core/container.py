@@ -567,6 +567,10 @@ class ServiceContainer:
         # 0. v6.1: 停止缓存清理任务
         if hasattr(self, "_cache_cleanup_task") and self._cache_cleanup_task:
             self._cache_cleanup_task.cancel()
+            try:
+                await self._cache_cleanup_task
+            except (asyncio.CancelledError, Exception):
+                pass
             logger.info("  ✅ 缓存清理任务已停止")
 
         # 0.1. v6.1: 关闭 Redis 连接
