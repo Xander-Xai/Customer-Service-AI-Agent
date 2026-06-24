@@ -364,8 +364,19 @@ async def chat_multimodal(
     file: UploadFile = File(None),
     message: str = Form(""),
     file_type: str = Header("auto"),
+    session_id: str = Form(default=""),
+    session_token: str = Form(default=""),
 ):
-    """统一多模态入口：自动检测文件类型并路由到对应处理器。"""
+    """统一多模态入口：自动检测文件类型并路由到对应处理器。
+
+    支持 voice/image/document 文件预处理，返回提取内容。
+    认证与会话：与 /api/chat/voice 等端点使用相同认证模式。
+    """
+    # 会话认证
+    try:
+        auth = await get_authenticated_session(request, session_id, session_token)
+    except _SessionValidationError as e:
+        return JSONResponse({"error": e.detail}, status_code=e.status_code)
     # If no file, return informative message
     if not file:
         return {"type": "text", "message": message, "note": "纯文本消息请走 /api/chat 端点"}
