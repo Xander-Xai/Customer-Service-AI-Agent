@@ -11,6 +11,9 @@ build/
 node_modules/
 web/static/dist/
 
+# ===== Git Worktree =====
+.worktrees/
+
 # ===== 虚拟环境 =====
 .venv/
 venv/
