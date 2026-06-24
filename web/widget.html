@@ -348,6 +348,49 @@
       background: #f5f5f5;
       color: #1976d2;
     }
+
+    /* ── Image preview (v6.1) ── */
+    .image-preview-area {
+      padding: 0 16px 8px;
+      flex-shrink: 0;
+    }
+    .image-preview {
+      position: relative;
+      display: inline-flex;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-secondary);
+      max-width: 200px;
+    }
+    .image-preview img {
+      max-width: 180px;
+      max-height: 120px;
+      border-radius: 4px;
+      object-fit: cover;
+      display: block;
+    }
+    .preview-remove {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #ff5252;
+      color: white;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .preview-remove:hover {
+      background: #d32f2f;
+    }
   </style>
 </head>
 <body>
@@ -400,6 +443,12 @@
           <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
         </svg>
       </button>
+      <button type="button" class="image-btn" id="imageBtn" title="上传图片" aria-label="上传图片">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+          <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+        </svg>
+      </button>
+      <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp" hidden>
       <button type="button" class="btn-send" id="btnSend" disabled aria-label="发送消息">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true">
           <line x1="22" y1="2" x2="11" y2="13"/>
@@ -407,6 +456,14 @@
         </svg>
       </button>
     </div>
+    <!-- Image preview (v6.1) -->
+    <div id="imagePreviewArea" class="image-preview-area" hidden>
+      <div class="image-preview">
+        <img id="previewImg" src="" alt="图片预览">
+        <button id="removeImageBtn" class="preview-remove" aria-label="移除图片">&#x2715;</button>
+      </div>
+    </div>
+
     <!-- Recording status -->
     <div id="recordingStatus" class="recording-status" hidden>
       <div class="recording-wave">
@@ -493,6 +550,7 @@
 
     // ── State ──
     let isSending = false;
+    var pendingImage = null;
 
     // ── Helpers ──
     function formatTime(d) {
@@ -596,6 +654,12 @@
     function sendMessage(query) {
       query = query.trim();
       if (!query || isSending) return;
+
+      // ===== 图片上传 (v6.1) =====
+      if (pendingImage) {
+        sendImageMessage(query);
+        return;
+      }
 
       setSending(true);
 
@@ -869,6 +933,109 @@
         clearInterval(recordingTimer);
         recordingTimer = null;
       }
+    }
+
+    // ===== 图片上传 (v6.1) =====
+    const imageBtn = document.getElementById('imageBtn');
+    const imageInput = document.getElementById('imageInput');
+    const imagePreviewArea = document.getElementById('imagePreviewArea');
+    const previewImg = document.getElementById('previewImg');
+    const removeImageBtn = document.getElementById('removeImageBtn');
+
+    async function compressImage(file, maxSize, quality) {
+      const img = await createImageBitmap(file);
+      const canvas = document.createElement('canvas');
+      let { width, height } = img;
+      if (width > height && width > maxSize) {
+        height *= maxSize / width;
+        width = maxSize;
+      } else if (height > maxSize) {
+        width *= maxSize / height;
+        height = maxSize;
+      }
+      canvas.width = Math.round(width);
+      canvas.height = Math.round(height);
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+    }
+
+    function sendImageMessage(query) {
+      setSending(true);
+
+      // Add user message with image indicator
+      addMessage("user", renderMarkdown(query) + ' <span class="image-indicator">&#x1F5BC;&#xFE0F;</span>', formatTime(new Date()));
+
+      var typingRow = addTypingIndicator();
+
+      var formData = new FormData();
+      formData.append('file', pendingImage.blob, pendingImage.name);
+      formData.append('query', query);
+
+      fetch('/api/chat/file', {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey },
+        body: formData,
+      })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(data) {
+          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+          var text = data.response || data.message || data.reply || data.content || t.errorPrefix;
+          addMessage("ai", renderMarkdown(text), formatTime(new Date()));
+
+          // Clear pending image
+          pendingImage = null;
+          imagePreviewArea.hidden = true;
+          previewImg.src = '';
+
+          setSending(false);
+        })
+        .catch(function() {
+          if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
+          addMessage("ai", renderMarkdown(t.errorPrefix), formatTime(new Date()));
+          setSending(false);
+        });
+    }
+
+    if (imageBtn) {
+      imageBtn.addEventListener('click', function() {
+        imageInput.click();
+      });
+
+      imageInput.addEventListener('change', async function(e) {
+        var file = e.target.files[0];
+        if (!file) return;
+
+        // Size check: 5MB max
+        if (file.size > 5 * 1024 * 1024) {
+          alert('图片大小不能超过 5MB');
+          imageInput.value = '';
+          return;
+        }
+
+        try {
+          var compressed = await compressImage(file, 1024, 0.8);
+          var reader = new FileReader();
+          reader.onload = function(ev) {
+            previewImg.src = ev.target.result;
+            imagePreviewArea.hidden = false;
+          };
+          reader.readAsDataURL(compressed);
+          pendingImage = { blob: compressed, name: file.name };
+        } catch (err) {
+          console.error('图片处理失败:', err);
+        }
+        imageInput.value = '';
+      });
+
+      removeImageBtn.addEventListener('click', function() {
+        imagePreviewArea.hidden = true;
+        previewImg.src = '';
+        pendingImage = null;
+      });
     }
   })();
   </script>
