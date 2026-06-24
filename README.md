@@ -2,16 +2,15 @@
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **当前代码状态（2026-06-22）**
+> **当前代码状态（2026-06-23）**
 >
-> - 当前仓库版本已统一到 `v6.0`（Python / Node / README 同步）
-> - 1,361+ 个测试用例（35 个测试文件），覆盖率 ≥80%
-> - 已验证：`npm test` 53/53 通过，`npm run build` 通过，88+ 核心单元测试通过
-> - 已修复：`/api/auth/refresh` 在生产环境的认证绕过（CRITICAL）、admin-knowledge 缺少错误反馈
-> - 前后端 50+ API 端点全部对齐验证
-> - 文档已同步更新：架构设计、API 参考、运维指南、快速启动清单
-> - **生产就绪状态**：代码结构完整，核心安全加固到位。上线前请：[生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
-> - **依赖服务**：需 PostgreSQL + Redis + Qdrant 容器运行
+> - 当前仓库版本为 `v6.0`
+> - 本轮重新按代码核对前后端与文档，`app.openapi()` 当前导出 **51 个 HTTP 路径**（WebSocket 不计入 OpenAPI）
+> - 已验证：`npm test` **56/56** 通过，`npm run build` 通过，OpenAPI 可正常生成
+> - 本轮已修复：语音上传 MIME 传递错误、Widget 多轮会话状态丢失、管理后台缺少熔断器/Prometheus 实现映射、生产环境数据库迁移失败仍回退 `create_all`
+> - 文档已按当前实现回填：README、文档索引、API 参考、生产检查清单、变更日志、OpenAPI 导出
+> - **真实上线结论**：当前不能直接宣称“已完成上线验收”；请先逐项执行 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
+> - **依赖服务**：生产部署仍需 PostgreSQL + Redis + Qdrant，且必须提供真实密钥与域名配置
 >
 > **v6.0** Qdrant 向量数据库迁移（替代 ChromaDB）+ 数据迁移脚本 + 并行运行模式 + 全链路 SSE 真流式
 >
@@ -99,12 +98,13 @@
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **前端测试** | `npm test` | 当前 53 个 Vitest 用例通过 |
+| **前端测试** | `npm test` | 当前 56 个 Vitest 用例通过 |
 | **前端构建** | `npm run build` | `web/static/dist/` 产物生成成功 |
-| **后端关键单测** | `pytest tests/unit/test_app_factory.py tests/unit/test_ws_coverage.py tests/unit/test_auth_tools_coverage.py -q --maxfail=1` | 当前 88 个测试通过 |
+| **接口真相源** | `python -c "from api.app_factory import app; print(len(app.openapi()['paths']))"` | 当前输出 `51` |
+| **后端关键模块** | 以 `api/`、`auth/`、`core/`、`db/` 当前实现为准 | 不再使用旧版里程碑数字代替当前验收 |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
 
-> 说明：`tests/unit/test_api_routes.py` 当前可正常收集 143 个用例，但整文件执行仍需继续拆查；因此 README 不再把“全量测试已验证通过”写成当前事实。
+> 说明：`tests/unit/test_api_routes.py` 这类大文件当前仍不适合作为“全量后端验收通过”的直接依据；README 不再把历史分数或旧测试数量写成当前事实。
 
 **详细证据文档**：
 - [Prompt Engineering 设计](docs/design/prompt-engineering.md) — Prompt 架构、策略选型、迭代演进

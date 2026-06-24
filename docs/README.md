@@ -35,7 +35,7 @@
 - LLM 提供商切换 → [operations/llm-provider-switch.md](operations/llm-provider-switch.md)
 - E2E 验证 → [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md)
 - 生产就绪检查 → [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)
-- 当前代码/文档对齐记录 → [reports/plans/2026-06-22-code-doc-alignment.md](reports/plans/2026-06-22-code-doc-alignment.md)
+- 当前代码/文档对齐记录 → [reports/plans/2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
 ### 👑 管理者
@@ -189,7 +189,7 @@
 | 文件 | 说明 |
 |---|---|
 | [frontend-repair-plan.md](reports/plans/frontend-repair-plan.md) | 前端修复计划 |
-| [2026-06-22-code-doc-alignment.md](reports/plans/2026-06-22-code-doc-alignment.md) | 当前代码与文档对齐记录 |
+| [2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md) | 当前代码与文档对齐记录 |
 | [2025-06-15-audit-fixes.md](reports/plans/2025-06-15-audit-fixes.md) | 审计修复实施计划 |
 
 ---
@@ -249,4 +249,4 @@ draft   design/   archive/
 
 ---
 
-*最后更新：2026-06-21*
+*最后更新：2026-06-23*

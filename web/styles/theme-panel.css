@@ -366,3 +366,46 @@ html:not([data-color-mode="light"]):not([data-color-mode="dark"])
     max-width: 100%;
   }
 }
+
+/* ── 语音设置：带标签的选择行 ── */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  gap: 12px;
+}
+
+.settings-row:last-of-type {
+  border-bottom: none;
+}
+
+.settings-row label {
+  font-size: 13px;
+  color: var(--color-text-primary);
+  flex-shrink: 0;
+  min-width: 80px;
+}
+
+.settings-select {
+  flex: 1;
+  max-width: 200px;
+  padding: 6px 10px;
+  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  min-height: 34px;
+}
+
+.settings-select:hover {
+  border-color: var(--color-border-hover);
+}
+
+.settings-select:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}

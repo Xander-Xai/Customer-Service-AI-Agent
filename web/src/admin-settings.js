@@ -7,10 +7,12 @@ import {
   createPromptVersion,
   getActivePrompt,
   getAuditLog,
+  getCircuitBreaker,
   getFeedbackStats,
   getHealth,
   getMetrics,
   getPromptAgents,
+  getPrometheusMetrics,
   getPromptVersions,
 } from './api/rest.js';
 import { showToast } from './utils/toast.js';
@@ -53,13 +55,19 @@ export async function loadAuditLog() {
 // ── 系统健康 ──
 export async function loadSystemHealth() {
   try {
-    const data = await getHealth();
+    const [data, circuitData, prometheusText] = await Promise.all([
+      getHealth(),
+      getCircuitBreaker().catch(() => null),
+      getPrometheusMetrics().catch(() => ''),
+    ]);
     const el = document.getElementById('systemHealth');
     if (!el) return;
     const s = data.status || 'unknown';
     const color = s === 'healthy' ? '#4ade80' : s === 'degraded' ? '#fbbf24' : '#f87171';
     const redisInfo = data.components?.redis;
     const dbInfo = data.components?.database;
+    const circuitEl = document.getElementById('circuitBreakerDetails');
+    const prometheusEl = document.getElementById('prometheusPreview');
 
     el.replaceChildren();
 
@@ -96,6 +104,54 @@ export async function loadSystemHealth() {
 
       el.appendChild(statEl);
     });
+
+    if (circuitEl) {
+      circuitEl.replaceChildren();
+      const circuitItems = [
+        {
+          label: '当前状态',
+          value: circuitData?.state || data.components?.circuit_breaker?.state || 'unknown',
+        },
+        {
+          label: '连续失败次数',
+          value: String(
+            circuitData?.consecutive_failures ??
+              data.components?.circuit_breaker?.consecutive_failures ??
+              0,
+          ),
+        },
+        {
+          label: '恢复时间',
+          value: circuitData?.recovery_time ? `${circuitData.recovery_time}s` : '-',
+        },
+      ];
+
+      circuitItems.forEach((item) => {
+        const statEl = document.createElement('div');
+        statEl.className = 'admin-stat';
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'label';
+        labelSpan.textContent = item.label;
+        statEl.appendChild(labelSpan);
+
+        const valSpan = document.createElement('span');
+        valSpan.className = 'value';
+        valSpan.textContent = item.value;
+        statEl.appendChild(valSpan);
+
+        circuitEl.appendChild(statEl);
+      });
+    }
+
+    if (prometheusEl) {
+      const preview = String(prometheusText || '')
+        .trim()
+        .split('\n')
+        .slice(0, 16)
+        .join('\n');
+      prometheusEl.textContent = preview || '# 暂无 Prometheus 指标输出';
+    }
   } catch (_e) {
     // 忽略加载异常
   }

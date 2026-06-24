@@ -101,7 +101,7 @@ def main():
     print(f"  源: {args.chroma_dir}")
     print(f"  目标: {args.qdrant_host}:{args.qdrant_port}")
     print(f"{'='*50}")
-    print(f"\n下一步: 在 .env 中设置 VECTOR_DB_MODE=qdrant_only 并重启应用")
+    print("\n下一步: 在 .env 中设置 VECTOR_DB_MODE=qdrant_only 并重启应用")
 
 
 if __name__ == "__main__":

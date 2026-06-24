@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "药妆智多星多智能体客服系统",
-    "version": "5.5"
+    "version": "6.0"
   },
   "paths": {
     "/api/health": {
@@ -777,38 +777,6 @@
         }
       }
     },
-    "/favicon.ico": {
-      "get": {
-        "summary": "Serve Favicon",
-        "operationId": "serve_favicon_favicon_ico_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/favicon.svg": {
-      "get": {
-        "summary": "Serve Favicon Svg",
-        "operationId": "serve_favicon_svg_favicon_svg_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
     "/": {
       "get": {
         "summary": "Serve Index",
@@ -867,6 +835,24 @@
       "get": {
         "summary": "Serve Widget",
         "operationId": "serve_widget_widget_html_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/theme-comparison.html": {
+      "get": {
+        "summary": "Serve Theme Comparison",
+        "operationId": "serve_theme_comparison_theme_comparison_html_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1572,6 +1558,7 @@
             "anyOf": [
               {
                 "items": {
+                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"

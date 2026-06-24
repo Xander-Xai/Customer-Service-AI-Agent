@@ -48,6 +48,12 @@ htmlcov/
 *.sqlite
 *.sqlite3
 chat_sessions/
+
+# ===== 知识库数据文件（自动生成，不提交）=====
+data/knowledge_base/*.jsonl
+
+# ===== 基准测试报告 =====
+reports/*.json
 data/*
 !data/seed/
 *.checkpoint

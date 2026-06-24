@@ -23,9 +23,17 @@ logger = get_logger("db")
 # ===== 数据库 URL 解析 =====
 # 优先使用 config.DATABASE_URL（环境变量 DATABASE_URL），为空则回退 SQLite
 try:
-    from core.config import DATABASE_URL as _CFG_DATABASE_URL
+    from core.config import (
+        ConfigurationError as _ConfigurationError,
+        DATABASE_URL as _CFG_DATABASE_URL,
+        DEV_MODE as _DEV_MODE,
+    )
 except ImportError:
+    class _ConfigurationError(RuntimeError):
+        pass
+
     _CFG_DATABASE_URL = os.getenv("DATABASE_URL", "")
+    _DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
 
 _DB_DIR = os.getenv("DB_DIR", "data")
 _DB_PATH = os.getenv("DB_PATH", os.path.join(_DB_DIR, "csai.db"))
@@ -108,6 +116,11 @@ def init_db():
             _alembic_ok = True
             logger.info(f"数据库迁移完成（alembic upgrade head）: {_DB_TYPE}")
     except Exception as e:
+        if not _DEV_MODE:
+            logger.error(f"生产模式数据库迁移失败，拒绝回退 create_all: {e}")
+            raise _ConfigurationError(
+                "数据库迁移失败：生产模式下不会回退到 create_all，请修复 Alembic 环境后重试"
+            ) from e
         logger.warning(f"alembic 迁移失败，回退到 create_all: {e}")
 
     if not _alembic_ok:

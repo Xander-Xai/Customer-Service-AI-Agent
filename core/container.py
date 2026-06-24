@@ -480,11 +480,13 @@ class ServiceContainer:
             return
 
         from agents import (
+            AftersalesAgent,
             BillingAgent,
             ComplaintAgent,
             GeneralAgent,
             ProductAgent,
             ReActAgent,
+            SalesAgent,
             TechAgent,
         )
         from core.config import ERP_MODE
@@ -495,6 +497,8 @@ class ServiceContainer:
             "billing_agent": BillingAgent,
             "complaint_agent": ComplaintAgent,
             "general_agent": GeneralAgent,
+            "sales_agent": SalesAgent,
+            "aftersales_agent": AftersalesAgent,
         }
 
         for name, cls in agent_classes.items():
@@ -510,7 +514,7 @@ class ServiceContainer:
             self.agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
-        for name in ("product_agent", "tech_agent", "complaint_agent"):
+        for name in ("product_agent", "tech_agent", "complaint_agent", "sales_agent", "aftersales_agent"):
             if name in self.agents_dict:
                 self.agents_dict[name].set_knowledge_base(self.knowledge_base)
 
