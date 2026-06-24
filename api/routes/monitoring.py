@@ -92,8 +92,9 @@ async def health(request: Request):
             if qdrant_ok and hasattr(kb, "_client"):
                 await asyncio.to_thread(kb._client.get_collections)
         else:
-            from core.config import QDRANT_HOST, QDRANT_PORT
             from qdrant_client import QdrantClient
+
+            from core.config import QDRANT_HOST, QDRANT_PORT
 
             test_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=3.0)
             await asyncio.to_thread(test_client.get_collections)
@@ -165,11 +166,11 @@ async def metrics_endpoint(request: Request):
     state = request.app.state
     metrics = getattr(state, "metrics", None)
     cache = getattr(state, "response_cache", None)
-    
+
     # v5.4: 更新业务指标Gauge
     if metrics:
         await metrics.update_business_metrics()
-    
+
     stats = await metrics.get_stats() if metrics else {"error": "metrics not initialized"}
     cache_stats = cache.get_stats() if cache else {}
 

@@ -21,6 +21,7 @@ v6.0 重写：
 - 降级路径：Redis 失败 -> Qdrant -> Jaccard -> LLM 调用
 """
 
+import contextlib
 import hashlib
 import json
 import random
@@ -402,12 +403,10 @@ class ResponseCache:
         # L1 大小（Redis scan 近似值）
         l1_size = 0
         if self._redis is not None:
-            try:
+            with contextlib.suppress(Exception):
                 l1_size = len(
                     list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
                 )
-            except Exception:
-                pass
 
         return {
             "l1_hits": self._stats["l1_hits"],
@@ -826,10 +825,8 @@ class ResponseCache:
 
         # ----- L3: Jaccard 内存回退 -----
         if self._fallback_enabled:
-            try:
+            with contextlib.suppress(Exception):
                 self._jaccard_set(normalized, response, now)
-            except Exception:
-                pass  # L3 fallback must never raise
 
         self._update_metrics(force=True)
 

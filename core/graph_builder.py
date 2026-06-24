@@ -17,6 +17,7 @@ v4.1 依赖注入：
 """
 
 import asyncio
+import contextlib
 import time
 
 from langgraph.graph import StateGraph
@@ -205,10 +206,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
-        cache_metadata = {
-            "user_role": state.get("user_role", "default"),
-        }
-        cached = c.cache.get(query, metadata=cache_metadata)
+        if c.cache is not None:
+            cache_metadata = {
+                "user_role": state.get("user_role", "default"),
+            }
+            cached = c.cache.get(query, metadata=cache_metadata)
+        else:
+            cached = None
         if cached:
             await _emit_status(state, "cache", "⚡ 缓存命中，快速响应中...")
 
@@ -263,10 +267,8 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             await _emit_status(state, "route", f"🔄 协作模式: {mode_name}, Agent: {agent_name}")
             cb = state.get("stream_callback")
             if cb:
-                try:
+                with contextlib.suppress(Exception):
                     await cb({"type": "agent_switch", "from": "router", "to": agent_name})
-                except Exception:
-                    pass
 
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
@@ -342,7 +344,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
     def _fallback_post_process(state: AgentState):
         """降级后处理：仅做缓存写入"""
-        if state.get("response") and not state.get("cached", False):
+        if state.get("response") and not state.get("cached", False) and c.cache:
             # v6.1: 写入缓存时携带完整 metadata
             cache_meta = {
                 "intent_type": state.get("query_type", "default"),
