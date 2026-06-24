@@ -152,6 +152,26 @@ try:
     # v6.1: DI 组件
     active_components_total = _gauge('active_components_total', 'Active DI components')
 
+    # v6.1 收尾: RAG 搜索延迟
+    rag_search_latency_seconds = _histogram(
+        "rag_search_latency_seconds",
+        "RAG search query latency distribution",
+        buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
+    )
+
+    # v6.1 收尾: Agent 处理时间
+    agent_process_time_seconds = _histogram(
+        "agent_process_time_seconds",
+        "Agent processing time per call",
+        buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0],
+    )
+
+    # v6.1 收尾: 缓存写入统计
+    cache_writes_total = _counter(
+        "cache_writes_total",
+        "Total number of cache write operations",
+    )
+
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
     # Prometheus 未安装，降级为无操作
@@ -178,6 +198,9 @@ except ImportError:
     rag_recall_at_3 = _NoopMetric()
     scene_routing_total = _NoopMetric()
     active_components_total = _NoopMetric()
+    rag_search_latency_seconds = _NoopMetric()
+    agent_process_time_seconds = _NoopMetric()
+    cache_writes_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 # ===== 性能指标常量 =====
