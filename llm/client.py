@@ -26,8 +26,10 @@ from core.config import (
     HTTPX_KEEPALIVE_CONNECTIONS,
     HTTPX_MAX_CONNECTIONS,
     LLM_MAX_TOKENS,
+    RETRY_BACKOFF_FACTOR,
     RETRY_BASE_DELAY,
     RETRY_MAX_ATTEMPTS,
+    RETRY_MAX_DELAY,
 )
 from core.logger import get_logger, get_trace_id
 
@@ -61,6 +63,8 @@ class OpenAICompatibleClient:
         self.timeout = HTTP_TIMEOUT
         self.max_retries = RETRY_MAX_ATTEMPTS
         self.base_delay = RETRY_BASE_DELAY
+        self.max_delay = RETRY_MAX_DELAY
+        self.backoff_factor = RETRY_BACKOFF_FACTOR
         self.headers = HTTP_HEADERS.copy()
         self.headers["Authorization"] = f"Bearer {api_key}"
         self.circuit_breaker = circuit_breaker
@@ -148,6 +152,14 @@ class OpenAICompatibleClient:
             )
         except Exception:
             pass  # 追踪失败不影响主流程
+
+    @staticmethod
+    def _retry_delay(attempt: int, base_delay: float = 1.0, backoff_factor: int = 2, max_delay: float = 30.0) -> float:
+        """指数退避 + 全抖动（Full Jitter）"""
+        import random
+
+        delay = min(base_delay * (backoff_factor**attempt), max_delay)
+        return random.uniform(0, delay)
 
     async def async_invoke(self, messages, timeout: float | None = None, tools: list | None = None):
         """异步调用（支持 Function Calling，不支持 tools 时自动降级）"""
@@ -241,8 +253,7 @@ class OpenAICompatibleClient:
                     continue
                 if attempt == self.max_retries - 1:
                     break
-                max_delay = 10.0
-                delay = min(self.base_delay * (2**attempt) + random.uniform(0, 0.3), max_delay)
+                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
                 logger.warning(
                     f"[LLM-async] [{get_trace_id()}] retry {attempt + 1}/{self.max_retries}: {e}, wait {delay:.1f}s"
                 )
@@ -289,7 +300,7 @@ class OpenAICompatibleClient:
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
                 if attempt == self.max_retries - 1:
                     break
-                delay = min(self.base_delay * (2**attempt) + random.uniform(0, 0.3), 10.0)
+                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
                 logger.warning(
                     f"[LLM-raw] retry {attempt + 1}/{self.max_retries}: {e}, wait {delay:.1f}s"
                 )
@@ -353,8 +364,7 @@ class OpenAICompatibleClient:
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
                 if attempt == self.max_retries - 1:
                     break
-                max_delay = 10.0
-                delay = min(self.base_delay * (2**attempt) + random.uniform(0, 0.3), max_delay)
+                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
                 logger.warning(
                     f"[LLM-stream] [{get_trace_id()}] retry {attempt + 1}/{self.max_retries}: {e}, "
                     f"wait {delay:.1f}s"
