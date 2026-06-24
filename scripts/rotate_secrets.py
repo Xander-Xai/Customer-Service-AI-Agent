@@ -47,7 +47,7 @@ def load_ledger() -> dict:
     """加载密钥台账"""
     ledger_path = get_ledger_path()
     if ledger_path.exists():
-        with open(ledger_path, "r", encoding="utf-8") as f:
+        with open(ledger_path, encoding="utf-8") as f:
             return json.load(f)
     return {"keys": {}, "last_rotation": None}
 
@@ -130,7 +130,7 @@ def main() -> None:
         print(f"台账文件: {ledger_path}")
         print()
 
-        with open(target_file, "r", encoding="utf-8") as f:
+        with open(target_file, encoding="utf-8") as f:
             content = f.read()
 
         expired_or_near = []
@@ -158,7 +158,7 @@ def main() -> None:
         return
 
     # 读取目标文件
-    with open(target_file, "r", encoding="utf-8") as f:
+    with open(target_file, encoding="utf-8") as f:
         content = f.read()
 
     # 备份原文件

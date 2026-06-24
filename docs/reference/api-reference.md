@@ -8,11 +8,10 @@
 
 | 类型 | 数量 | 说明 |
 |------|------|------|
-| `/api/*` 路径 | 51+ | FastAPI 业务 API 路径（含 auth/knowledge/alerts/prompts） |
-| REST/HTTP 操作 | 54+ | 53+ 个业务操作 + `GET /metrics/prometheus` |
+| HTTP 路径 | 51 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
+| `/api/*` 业务路径 | 40+ | 认证、对话、会话、监控、知识库、告警、Prompt 管理等业务接口 |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话 |
 | HTML 页面 | 5 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html` |
-| 静态资产路径 | 2 | `/favicon.ico`、`/favicon.svg` |
 
 > 说明：OpenAPI 不包含 WebSocket 路由，因此 `WS /ws/chat` 在本文档中单独列出。
 
@@ -171,11 +170,9 @@ ws.onmessage = (event) => {
 |------|------|------|
 | `GET` | `/` | 主页面（对话 + 监控） |
 | `GET` | `/login.html` | 登录/注册页 |
-| `GET` | `/admin.html` | 管理后台（监控/Prompt/用户/知识库/告警/Token Quota） |
-| `GET` | `/widget.html` | 嵌入式对话组件 |
+| `GET` | `/admin.html` | 管理后台（监控/Prompt/用户/知识库/告警/Token Quota/熔断器/Prometheus 预览） |
+| `GET` | `/widget.html` | 嵌入式对话组件（当前已保存 `session_id/session_token`，支持多轮连续对话） |
 | `GET` | `/theme-comparison.html` | 主题对比预览 |
-| `GET` | `/favicon.ico` | favicon |
-| `GET` | `/favicon.svg` | SVG favicon |
 
 ---
 
@@ -187,6 +184,12 @@ ws.onmessage = (event) => {
 | API Key | 系统间调用或开发模式兜底 | `web/src/api/rest.js` 从 `localStorage.api_key` 注入 `X-API-Key` |
 | Session Token | 会话详情、删除、历史消息等会话级校验 | `currentSessionToken` 注入 `X-Session-Token` 或请求体 |
 | Admin Token / RBAC | 监控、管理、Prompt、知识库、告警 | 后端中间件和路由级 `require_admin` / `require_supervisor_or_admin` 校验 |
+
+## 当前前端映射说明
+
+- 主聊天页已经覆盖：`/api/chat`、`/api/chat/stream`、`/api/chat/image`、`/api/chat/multimodal/stream`、`/api/chat/file`、`/api/chat/voice`、会话与反馈相关接口。
+- 管理后台已经覆盖：健康检查、监控指标、KPI、缓存、SLA 告警、知识库、用户、审计日志、Prompt 管理、Token Quota、Token 用量、熔断器详情、Prometheus 文本预览。
+- Widget 当前通过 `/api/chat` 和 `/api/chat/stream` 进行交互，并把服务端返回的 `session_id/session_token` 保存在 `sessionStorage` 中，以保持同一浏览器标签页内的多轮上下文。
 
 ---
 

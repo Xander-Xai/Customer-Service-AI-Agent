@@ -845,13 +845,12 @@ def _generate_l1(random_state: random.Random) -> list[dict[str, Any]]:
     templates = list(itertools.chain.from_iterable(L1_TEMPLATE_GROUPS))
     for ing in INGREDIENTS:
         name, inci, primary_cat, safety_rating, short = ing
-        for rep in range(repeats):
+        for _rep in range(repeats):
             if len(docs) >= L1_TARGET + 50:  # allow slight overshoot
                 break
             template = random_state.choice(templates)
             scene = _pick_weighted(_L1_SCENE_OPTIONS)
 
-            tag_list = [primary_cat, name, safety_rating]
             extra = ["护肤品", "化妆品成分", "护肤知识"]
             tags = _make_tags(name, primary_cat, extra)
             content = template.format(

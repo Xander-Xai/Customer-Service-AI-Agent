@@ -30,16 +30,52 @@ class RoutingResult:
     confidence: float = 0.0
     raw_llm_result: str = ""
     rule_override: bool = False
+    scene: str = "通用"
 
+
+# 完整意图分类列表
+INTENT_CLASSES = [
+    "product_info", "recommendation",       # 售前
+    "order_status", "return_policy",         # 售后
+    "technical_support", "usage_guide",      # 技术
+    "complaint", "negative_feedback",        # 投诉
+    "greeting", "general",                   # 通用
+]
+
+# 场景映射
+SCENE_MAPPING = {
+    "product_info": "售前咨询",
+    "recommendation": "售前咨询",
+    "order_status": "售后支持",
+    "return_policy": "售后支持",
+    "technical_support": "技术答疑",
+    "usage_guide": "技术答疑",
+    "complaint": "投诉处理",
+    "negative_feedback": "投诉处理",
+    "greeting": "通用",
+    "general": "通用",
+    # 旧意图兼容映射
+    "general_inquiry": "通用",
+    "order_query": "售后支持",
+    "billing": "售后支持",
+    "cosmetic_advice": "售前咨询",
+}
 
 # 意图 → Agent 映射
 INTENT_AGENT_MAP = {
     "product_info": "product_agent",
+    "recommendation": "sales_agent",
     "technical_support": "tech_agent",
+    "usage_guide": "tech_agent",
     "billing": "billing_agent",
     "complaint": "complaint_agent",
+    "negative_feedback": "complaint_agent",
     "general_inquiry": "general_agent",
+    "greeting": "general_agent",
+    "general": "general_agent",
     "order_query": "billing_agent",
+    "order_status": "billing_agent",
+    "return_policy": "billing_agent",
     "cosmetic_advice": "product_agent",
 }
 
@@ -48,11 +84,29 @@ _RULE_PATTERNS = {
     "product_info": [
         re.compile(r"产品|商品|精华|面膜|洁面|面霜|化妆水|价格|多少钱|成分|功效|推荐")
     ],
+    "recommendation": [
+        re.compile(r"推荐|适合|建议|哪种|哪款|什么好")
+    ],
     "technical_support": [re.compile(r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存")],
+    "usage_guide": [
+        re.compile(r"怎么用|用法|步骤|顺序|使用|方法")
+    ],
     "billing": [re.compile(r"退款|退货|发票|付款|支付|账单|费用|订单|物流|快递|发货")],
     "complaint": [re.compile(r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|质量.*问题")],
+    "negative_feedback": [
+        re.compile(r"差劲|失望|太差|不好|垃圾|后悔")
+    ],
     "order_query": [re.compile(r"订单号|物流|快递|到货|发货|签收|运单")],
+    "order_status": [
+        re.compile(r"订单|物流|快递|发货|到哪|签收")
+    ],
+    "return_policy": [
+        re.compile(r"退货|退款|换货|退换|退钱")
+    ],
     "cosmetic_advice": [re.compile(r"肤质|油性|干性|敏感|美白|保湿|抗皱|祛痘|祛斑|护肤")],
+    "greeting": [
+        re.compile(r"你好|您好|hi|hello|在吗|有人吗")
+    ],
 }
 
 # 复杂度评分用的预编译正则
@@ -64,15 +118,22 @@ _RE_TECH_TERMS = [
 _RE_PRICE = re.compile(r"\d+[\.\d]*\s*[元块]|¥|￥|\d{10,}")
 
 # 意图优先级（同分时高优先级意图胜出，数值越小越优先）
-# 投诉 > 账单 > 技术 > 订单 > 产品 > 肤质 > 通用
+# 投诉 > 账单 > 技术 > 订单 > 售后 > 产品 > 肤质 > 推荐 > 通用
 _INTENT_PRIORITY = {
     "complaint": 0,
-    "billing": 1,
-    "technical_support": 2,
-    "order_query": 3,
-    "product_info": 4,
-    "cosmetic_advice": 5,
-    "general_inquiry": 6,
+    "negative_feedback": 1,
+    "billing": 2,
+    "order_status": 3,
+    "return_policy": 3,
+    "technical_support": 4,
+    "usage_guide": 5,
+    "order_query": 6,
+    "product_info": 7,
+    "cosmetic_advice": 8,
+    "recommendation": 8,
+    "general_inquiry": 9,
+    "greeting": 10,
+    "general": 10,
 }
 
 
@@ -112,6 +173,7 @@ class QueryRouter:
                 confidence=rule_confidence,
                 raw_llm_result="rule_shortcut",
                 rule_override=False,
+                scene=SCENE_MAPPING.get(rule_type, "通用"),
             )
 
         # 规则置信不足，走 LLM + 规则并行分类
@@ -144,6 +206,7 @@ class QueryRouter:
             confidence=llm_result.get("confidence", 0.5),
             raw_llm_result=llm_result.get("raw", ""),
             rule_override=rule_override,
+            scene=SCENE_MAPPING.get(final_type, "通用"),
         )
 
     def _estimate_rule_confidence(
@@ -180,7 +243,19 @@ class QueryRouter:
             return {"query_type": "general_inquiry", "confidence": 0.5, "raw": "no_llm"}
 
         system_prompt = """你是查询分类专家。将客户查询分类为以下类型之一：
-product_info, technical_support, billing, complaint, general_inquiry, order_query, cosmetic_advice
+product_info, recommendation, order_status, return_policy, technical_support, usage_guide, complaint, negative_feedback, greeting, general
+
+分类说明：
+- product_info: 产品信息查询（价格、成分、功效）
+- recommendation: 产品推荐（适合哪种、什么好）
+- order_status: 订单状态查询（物流、发货）
+- return_policy: 退换货政策（退货、退款、换货）
+- technical_support: 技术支持（过敏、刺激、保质期）
+- usage_guide: 使用指导（怎么用、使用方法、步骤）
+- complaint: 投诉（不满、差评、举报）
+- negative_feedback: 负面反馈（失望、太差、不好）
+- greeting: 问候（你好、您好）
+- general: 其他通用问题
 
 返回 JSON 格式:
 {"query_type": "类型", "confidence": 0.0-1.0, "reason": "简要原因"}

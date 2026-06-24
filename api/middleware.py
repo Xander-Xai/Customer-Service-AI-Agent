@@ -354,8 +354,9 @@ def setup_middleware(app: FastAPI):
     # ── 分布式追踪中间件 ──
     @app.middleware("http")
     async def trace_middleware(request: Request, call_next):
-        trace_id = uuid.uuid4().hex
+        trace_id = request.headers.get("X-Trace-ID", uuid.uuid4().hex)
         set_trace_id(trace_id)
+        request.state.trace_id = trace_id
         response = await call_next(request)
         response.headers["X-Trace-ID"] = trace_id
         return response

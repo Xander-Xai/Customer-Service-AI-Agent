@@ -44,9 +44,34 @@ format: ## 代码格式化
 	ruff check --fix .
 
 # ===== RAG 评估 =====
-eval-rag: ## RAG 检索质量评估
+eval-rag: ## RAG 检索质量评估（基于 500+ 评测集）
 	@echo "📊 RAG 检索质量评估..."
 	python3 scripts/evaluate_rag.py
+
+# ===== 知识库 & 基准测试 =====
+.PHONY: benchmark generate-knowledge-base component-count
+
+## 执行所有基准测试（缓存/延迟/A-B/成本/预取/分层命中率）
+benchmark:
+	@echo "📊 执行全量基准测试..."
+	@mkdir -p reports
+	@for script in benchmark_cache benchmark_latency benchmark_ab_test benchmark_cost benchmark_prefetch benchmark_cache_hierarchy; do \
+		echo "  [$$script]"; \
+		python3 scripts/$$script.py 2>&1 || echo "  ⚠️ $$script 运行失败（可能缺少依赖）"; \
+		echo ""; \
+	done
+	@echo "=== 所有基准测试完成 ==="
+	@ls -la reports/
+
+## 生成 5000+ 条知识库文档
+generate-knowledge-base:
+	@echo "📦 生成知识库数据..."
+	python3 scripts/generate_knowledge_base.py --validate
+
+## DI 容器组件计数
+component-count:
+	@echo "📊 DI 容器活跃组件数:"
+	python3 -c "from core.container import Container; c = Container(); c.initialize(); print(f'  活跃组件: {len(c._services)}')" 2>/dev/null || python3 -c "from core.container import ServiceContainer; c = ServiceContainer(); import asyncio; asyncio.run(c.initialize()); print(f'  活跃组件数: {len(c._services)}')" 2>/dev/null || echo "  ⚠️ 容器不可用"
 
 # ===== 生产环境 =====
 prod: env-prod ## 生产部署

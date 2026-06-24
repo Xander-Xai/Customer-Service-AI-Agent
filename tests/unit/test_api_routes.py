@@ -803,17 +803,30 @@ class TestChatRoutes:
 
     # -- Voice endpoint with VOICE_ENABLED --
 
-    def test_voice_endpoint_enabled_disabled_voice(self):
-        """POST /api/chat/voice -- 语音格式不支持时返回 500 (ValueError 未捕获)"""
-        # chat_with_voice 没有 try/except 包裹 _handle_audio_upload，异常传播
-        from starlette.testclient import TestClient as _TC
+    def test_voice_endpoint_success_uses_content_type(self):
+        """POST /api/chat/voice -- 成功调用 STT，并把 MIME 类型传给处理器"""
+        with patch("media.audio_processor.AudioProcessor.transcribe", new_callable=AsyncMock) as mock_transcribe:
+            mock_transcribe.return_value = "语音转写内容"
+            resp = self.client.post(
+                "/api/chat/voice",
+                files={"audio": ("audio.wav", b"RIFF", "audio/wav")},
+            )
 
-        client = _TC(self.app, raise_server_exceptions=False)
-        resp = client.post(
-            "/api/chat/voice",
-            files={"audio": ("audio.wav", b"RIFF", "audio/wav")},
-        )
-        assert resp.status_code == 500
+        assert resp.status_code == 200
+        assert resp.json()["transcription"] == "语音转写内容"
+        mock_transcribe.assert_awaited_once_with(b"RIFF", "audio/wav")
+
+    def test_voice_endpoint_invalid_audio_returns_400(self):
+        """POST /api/chat/voice -- 非法音频格式返回 400，而不是 500"""
+        with patch("media.audio_processor.AudioProcessor.transcribe", new_callable=AsyncMock) as mock_transcribe:
+            mock_transcribe.side_effect = ValueError("不支持的音频格式: audio/flac")
+            resp = self.client.post(
+                "/api/chat/voice",
+                files={"audio": ("audio.flac", b"fLaC", "audio/flac")},
+            )
+
+        assert resp.status_code == 400
+        assert "不支持的音频格式" in resp.json()["error"]
 
     # -- TTS voices list --
 

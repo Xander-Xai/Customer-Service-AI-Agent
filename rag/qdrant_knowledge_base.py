@@ -34,16 +34,11 @@ class QdrantKnowledgeBase:
         prefer_grpc: bool = False,
         api_key: str = "",
         clip_enabled: bool = False,
-        embedding_model=None,       # v6.1: 容器级单例注入
     ):
         self._clip_enabled = clip_enabled
         self._clip_embed_fn = None
         self._reranker = None
-        if embedding_model is not None:
-            self._embed_fn = embedding_model
-            logger.info("Embedding 模型使用容器单例")
-        else:
-            self._embed_fn = self._create_embedding_function()
+        self._embed_fn = self._create_embedding_function()
         self._collection_cache: dict[str, bool] = {}
 
         try:
@@ -225,6 +220,63 @@ class QdrantKnowledgeBase:
             logger.error(f"Qdrant 查询失败 [{collection_name}]: {e}", exc_info=True)
             return []
 
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        scene: str = None,
+        filter_dict: dict = None,
+        collection_name: str = "product_knowledge",
+    ) -> list[dict]:
+        """检索知识库，支持场景过滤（v6.1: 新增 scene/filter_dict 参数）。
+
+        Args:
+            query: 查询文本
+            top_k: 返回结果数
+            scene: 场景过滤（售前咨询/售后支持/技术答疑/投诉处理）
+            filter_dict: 通用过滤条件
+            collection_name: Qdrant 集合名
+        Returns:
+            标准化结果列表
+        """
+        if not self._ensure_collection(collection_name):
+            return []
+        try:
+            from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+            loop = asyncio.get_running_loop()
+            query_vector = self._embed_texts([query])[0]
+
+            # 构建过滤条件
+            conditions = []
+            if scene:
+                conditions.append(FieldCondition(
+                    key="scene", match=MatchValue(value=scene)
+                ))
+            if filter_dict:
+                for key, value in filter_dict.items():
+                    conditions.append(FieldCondition(
+                        key=key, match=MatchValue(value=value)
+                    ))
+
+            query_filter = Filter(must=conditions) if conditions else None
+
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._client.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=top_k,
+                    with_payload=True,
+                    score_threshold=0.0,
+                    query_filter=query_filter,
+                ),
+            )
+            return self._parse_query_result(result)
+        except Exception as e:
+            logger.error(f"Qdrant search 失败 [{collection_name}]: {e}", exc_info=True)
+            return []
+
     async def query_multiple(
         self, collection_names: list[str], query_text: str, n_results: int = 3
     ) -> list[dict[str, Any]]:
@@ -262,6 +314,7 @@ class QdrantKnowledgeBase:
             payload = scored_point.payload or {}
             docs.append(
                 {
+                    "id": payload.get("doc_id", ""),
                     "content": payload.get("content", ""),
                     "metadata": {k: v for k, v in payload.items() if k not in ("doc_id", "content")},
                     "distance": 1.0 - scored_point.score,
