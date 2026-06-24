@@ -17,6 +17,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 from typing import Any
 
 from core.logger import get_logger
@@ -125,6 +126,7 @@ class ServiceContainer:
         """v6.1: 创建同步 Redis 客户端（可能失败返回 None）"""
         try:
             import redis
+
             from core.config import REDIS_URL
 
             client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=2)
@@ -332,9 +334,9 @@ class ServiceContainer:
         if self.knowledge_base is None:
             from core.config import (
                 CLIP_ENABLED,
+                QDRANT_API_KEY,
                 QDRANT_GRPC_PORT,
                 QDRANT_HOST,
-                QDRANT_API_KEY,
                 QDRANT_PORT,
                 QDRANT_PREFER_GRPC,
                 RAG_PERSIST_DIRECTORY,
@@ -563,10 +565,8 @@ class ServiceContainer:
         # 0. v6.1: 停止缓存清理任务
         if hasattr(self, "_cache_cleanup_task") and self._cache_cleanup_task:
             self._cache_cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._cache_cleanup_task
-            except (asyncio.CancelledError, Exception):
-                pass
             logger.info("  ✅ 缓存清理任务已停止")
 
         # 0.1. v6.1: 关闭 Redis 连接
