@@ -4,6 +4,79 @@
 
 ---
 
+## v6.1 证据缺口修复 (2026-06-24)
+
+### 🔴 证据缺口修复（15 项缺口全部补齐）
+- **知识库**：5000+ 条化妆品行业文档（成分数据 1500+ / FAQ 2500+ / 场景文档 1000+）— `scripts/generate_knowledge_base.py`
+- **多模态**：语音输入（MediaRecorder）+ 图片拖拽上传（Canvas 压缩）+ 端到端链路 — `web/widget.html`
+- **四大场景路由**：10 个意图标签 + SCENE_MAPPING + RoutingResult.scene — `router/query_router.py`
+- **场景 Agent**：新增 `SalesAgent`（售前推荐）+ `AftersalesAgent`（售后处理）+ `ComplaintAgent` 紧急检测 — `agents/`
+
+### 📊 性能基准确立（9 个 benchmark 脚本）
+- **缓存命中率**：~65-70%（负载测试，1000 次查询）— `scripts/benchmark_cache.py`
+- **三级缓存分层统计**：L1/L2/L3 各层命中率 — `scripts/benchmark_cache_hierarchy.py`
+- **流式首字 P99 < 2s**：延迟分位值测试 — `scripts/benchmark_latency.py`
+- **LLM 调用降低 ~65%**：A/B 对比测试 — `scripts/benchmark_ab_test.py`
+- **Token 成本下降 ~35%**：成本分析 — `scripts/benchmark_cost.py`
+- **RAG 预取延迟降低 ≥ 20%**：预取效果验证 — `scripts/benchmark_prefetch.py`
+
+### 🎯 RAG 评测体系
+- **500+ 条评测集**：涵盖单条件/多条件/模糊语义/长尾查询 — `tests/eval/rag_benchmark.json`
+- **Recall@3 / Precision@3 / MRR 评估**：重写 `scripts/evaluate_rag.py`
+- **按难度/category 分类统计**：JSON 报告输出
+
+### 🔍 监控增强
+- **15+ Prometheus 指标**：新增缓存分层/流式延迟/Trace/RAG/场景路由/组件计数 — `core/monitoring.py`
+- **Trace ID 全链路传播**：请求头传播 + `request.state.trace_id` + 响应头回显 — `api/middleware.py`
+- **场景端到端测试**：10 个用例覆盖四场景 + 通用 — `tests/e2e/test_scenarios.py`
+- **Trace ID 测试**：4 个测试用例 — `tests/e2e/test_trace.py`
+
+### 🎨 前端增强
+- **语音输入**：MediaRecorder + 波形动画 + 回填确认模式 — `web/widget.html`
+- **图片上传**：拖拽/点击 + Canvas 压缩 + 缩略图预览 — `web/widget.html`
+- **语音设置面板**：语言选择 / 自动发送 / 音频格式 — `web/admin.html` + `web/styles/theme-panel.css`
+
+### 🧪 测试新增（6 个文件）
+- `tests/unit/test_cache_metrics.py` — 22 个缓存指标测试
+- `tests/e2e/test_scenarios.py` — 场景路由测试
+- `tests/e2e/test_trace.py` — Trace ID 传播测试
+- `tests/integration/test_audio_pipeline.py` — 音频管道测试
+- `tests/integration/test_kb_generation.py` — 知识库生成测试
+- `tests/eval/rag_benchmark.json` — 500+ 条 RAG 评测集
+
+### 🏗️ 基础架构
+- `data/knowledge_base/` — 知识库数据目录
+- `tests/eval/` — 评测集目录
+- `reports/` — 基准测试报告输出目录
+- Makefile 新增：`benchmark` / `generate-knowledge-base` / `component-count`
+- `.gitignore` 新增知识库数据和报告排除规则
+
+### 📝 文档
+- `docs/reports/evidence-gap-audit-report-2026-06-24.md` — 证据缺口审计报告
+- `docs/superpowers/plans/2026-06-24-evidence-gap-remediation-plan.md` — 修复计划
+- `docs/superpowers/specs/2026-06-24-evidence-gap-remediation-design.md` — 修复设计
+
+---
+
+## v6.0.2 (2026-06-23) — 联调修复 + 上线口径收紧
+
+### 🔧 前后端联调修复
+- **语音转写契约修复**：`/api/chat/voice` 不再把上传文件名误传给 STT 处理器；现在传递真实 MIME 类型，并把非法音频请求降为 `400`、依赖缺失降为 `503`
+- **Widget 会话连续性补齐**：`web/widget.html` 现会在 `sessionStorage` 中持久化 `session_id/session_token`，SSE 和 REST 两条链路都能继续同一轮对话上下文
+- **管理后台能力补齐**：后台系统页新增 `/api/circuit-breaker` 详情和 `/metrics/prometheus` 文本预览，后端已有实现不再停留在“只有 API、没有前端入口”
+
+### 🛡️ 更贴近真实上线的后端行为
+- **生产环境禁用迁移失败回退**：`db/database.py` 在 `DEV_MODE=false` 下若 Alembic 失败，会直接阻断启动，而不是静默 `create_all`
+- **文档口径收紧**：README 与清单不再把旧的“全量对齐/直接生产就绪”写成当前事实，改成基于本轮验证结果表述
+
+### 📝 文档更新
+- 更新：`README.md`
+- 更新：`docs/README.md`
+- 更新：`docs/reference/api-reference.md`
+- 更新：`docs/checklists/production-readiness-checklist.md`
+- 新增：`docs/reports/plans/2026-06-23-code-doc-alignment.md`
+- 重导出：`docs/openapi.json`
+
 ## v6.0.1 (2026-06-22) — 契约对齐 + 文档回填
 
 ### 🔧 前后端契约修复
