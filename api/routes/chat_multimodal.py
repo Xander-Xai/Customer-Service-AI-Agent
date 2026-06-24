@@ -5,7 +5,7 @@
 
 import time
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Header, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from api.utils import sanitize_input
@@ -160,7 +160,7 @@ async def _handle_audio_upload(audio: UploadFile, request: Request):
     if len(audio_data) > _MAX_UPLOAD_SIZE:
         return JSONResponse({"error": "音频文件大小超过限制（最大 5MB）"}, status_code=413)
     processor = AudioProcessor()
-    text = await processor.transcribe(audio_data, audio.filename)
+    text = await processor.transcribe(audio_data, audio.content_type or "")
     return text
 
 
@@ -177,7 +177,19 @@ async def chat_with_voice(
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
 
-    text = await _handle_audio_upload(audio, request)
+    try:
+        text = await _handle_audio_upload(audio, request)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ImportError as e:
+        logger.warning(f"语音识别依赖缺失: {e}")
+        return JSONResponse({"error": "语音识别服务未就绪"}, status_code=503)
+    except Exception as e:
+        logger.error(f"语音识别失败: {e}", exc_info=True)
+        return JSONResponse({"error": "语音识别失败，请稍后重试"}, status_code=500)
+
+    if isinstance(text, JSONResponse):
+        return text
     if not text:
         return JSONResponse({"error": "语音识别失败，请重试"}, status_code=400)
 
@@ -344,3 +356,84 @@ async def chat_with_file(
         else "",
         "agents_used": result.get("agents_used", []),
     }
+
+
+@router.post("/api/chat/multimodal")
+async def chat_multimodal(
+    request: Request,
+    file: UploadFile = File(None),
+    message: str = Form(""),
+    file_type: str = Header("auto"),
+):
+    """统一多模态入口：自动检测文件类型并路由到对应处理器。"""
+    # If no file, return informative message
+    if not file:
+        return {"type": "text", "message": message, "note": "纯文本消息请走 /api/chat 端点"}
+
+    # Determine file type from header or auto-detect from content_type
+    ftype = file_type
+    if ftype == "auto":
+        ct = file.content_type or ""
+        if ct.startswith("audio/"):
+            ftype = "voice"
+        elif ct.startswith("image/"):
+            ftype = "image"
+        else:
+            ftype = "unknown"
+
+    content = await file.read()
+
+    # 文件大小校验
+    if len(content) > _MAX_UPLOAD_SIZE:
+        return JSONResponse({"error": "文件大小超过限制（最大 5MB）"}, status_code=413)
+
+    if ftype == "voice":
+        try:
+            from media.audio_processor import AudioProcessor
+
+            processor = AudioProcessor()
+            transcription = await processor.transcribe(content, file.content_type or "")
+            return {
+                "type": "voice",
+                "transcription": transcription,
+                "message": transcription,
+            }
+        except Exception as e:
+            logger.warning(f"语音处理失败: {e}")
+            return JSONResponse({"error": "语音转录处理失败"}, status_code=500)
+
+    elif ftype == "image":
+        try:
+            from media.image_processor import ImageProcessor
+
+            processor = ImageProcessor()
+            data_url = processor.process(content, file.content_type or "")
+            return {
+                "type": "image",
+                "image_url": data_url,
+                "message": message,
+            }
+        except Exception as e:
+            logger.warning(f"图片处理失败: {e}")
+            return JSONResponse({"error": "图片分析处理失败"}, status_code=500)
+
+    elif ftype == "document":
+        try:
+            from media.document_processor import DocumentProcessor
+
+            processor = DocumentProcessor()
+            text = processor.extract(content, file.content_type or "", file.filename or "")
+            return {
+                "type": "document",
+                "content": text,
+                "message": message,
+            }
+        except Exception as e:
+            logger.warning(f"文档处理失败: {e}")
+            return JSONResponse({"error": "文档内容提取失败"}, status_code=500)
+
+    else:
+        return JSONResponse(
+            {"error": f"不支持的文件类型: {file.content_type}"},
+            status_code=400,
+        )
