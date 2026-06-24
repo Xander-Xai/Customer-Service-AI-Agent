@@ -15,6 +15,7 @@ v5.4 新增：
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from collections import deque
@@ -35,54 +36,122 @@ logger = get_logger("monitoring")
 
 # v5.4: 业务指标 Prometheus 监控
 try:
-    from prometheus_client import Counter, Histogram, Gauge
-    
+    from prometheus_client import REGISTRY
+    from prometheus_client import Counter as _PromCounter
+    from prometheus_client import Gauge as _PromGauge
+    from prometheus_client import Histogram as _PromHistogram
+
+    _METRICS: dict[str, object] = {}
+
+    def _counter(name, documentation, *args, **kwargs):
+        """Create or retrieve a Counter metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromCounter(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromCounter(name, documentation, *args, **kwargs)
+        return _METRICS[name]
+
+    def _gauge(name, documentation, *args, **kwargs):
+        """Create or retrieve a Gauge metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromGauge(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromGauge(name, documentation, *args, **kwargs)
+        return _METRICS[name]
+
+    def _histogram(name, documentation, *args, **kwargs):
+        """Create or retrieve a Histogram metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromHistogram(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromHistogram(name, documentation, *args, **kwargs)
+        return _METRICS[name]
+
     # 用户满意度评分分布
-    user_satisfaction_score = Histogram(
+    user_satisfaction_score = _histogram(
         'user_satisfaction_score',
         'User satisfaction score distribution (1-5)',
         buckets=[1, 2, 3, 4, 5],
     )
-    
+
     # Agent 使用次数统计
-    agent_usage_total = Counter(
+    agent_usage_total = _counter(
         'agent_usage_total',
         'Agent usage count by type',
         ['agent_type'],
     )
-    
+
     # 查询意图分布
-    intent_distribution_total = Counter(
+    intent_distribution_total = _counter(
         'intent_distribution_total',
         'Query intent distribution',
         ['intent_type'],
     )
-    
+
     # 协作模式使用统计
-    collaboration_mode_total = Counter(
+    collaboration_mode_total = _counter(
         'collaboration_mode_total',
         'Collaboration mode usage count',
         ['mode_name'],
     )
-    
+
     # 会话解决率
-    session_resolution_rate = Gauge(
+    session_resolution_rate = _gauge(
         'session_resolution_rate',
         'Session resolution rate (resolved / total)',
     )
-    
+
     # 人工升级率
-    escalation_rate = Gauge(
+    escalation_rate = _gauge(
         'escalation_rate',
         'Human escalation rate (escalated / total)',
     )
-    
+
     # 缓存命中率（业务维度）
-    business_cache_hit_rate = Gauge(
+    business_cache_hit_rate = _gauge(
         'business_cache_hit_rate',
         'Business-level cache hit rate',
     )
-    
+
+    # v6.1: 缓存分层命中率
+    cache_l1_hits_total = _counter('cache_l1_hits_total', 'L1 exact-match cache hits')
+    cache_l2_hits_total = _counter('cache_l2_hits_total', 'L2 semantic cache hits')
+    cache_l3_hits_total = _counter('cache_l3_hits_total', 'L3 jaccard fallback cache hits')
+    cache_fallback_total = _counter('cache_fallback_total', 'Fallback to L3 Jaccard')
+
+    # v6.1: 流式响应性能
+    stream_ttfb_seconds = _histogram(
+        'stream_ttfb_seconds',
+        'Time to first byte in streaming responses',
+        buckets=[0.1, 0.5, 1.0, 2.0, 5.0],
+    )
+
+    # v6.1: Trace 跟踪
+    trace_spans_total = _counter('trace_spans_total', 'Total trace spans')
+
+    # v6.1: RAG 检索
+    rag_queries_total = _counter('rag_queries_total', 'RAG queries count')
+    rag_recall_at_3 = _gauge('rag_recall_at_3', 'RAG recall@3 score')
+
+    # v6.1: 场景路由
+    scene_routing_total = _counter(
+        'scene_routing_total',
+        'Scene routing count',
+        ['scene_name'],
+    )
+
+    # v6.1: DI 组件
+    active_components_total = _gauge('active_components_total', 'Active DI components')
+
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
     # Prometheus 未安装，降级为无操作
@@ -91,7 +160,7 @@ except ImportError:
         def set(self, *args, **kwargs): pass
         def observe(self, *args, **kwargs): pass
         def labels(self, *args, **kwargs): return self
-    
+
     user_satisfaction_score = _NoopMetric()
     agent_usage_total = _NoopMetric()
     intent_distribution_total = _NoopMetric()
@@ -99,6 +168,16 @@ except ImportError:
     session_resolution_rate = _NoopMetric()
     escalation_rate = _NoopMetric()
     business_cache_hit_rate = _NoopMetric()
+    cache_l1_hits_total = _NoopMetric()
+    cache_l2_hits_total = _NoopMetric()
+    cache_l3_hits_total = _NoopMetric()
+    cache_fallback_total = _NoopMetric()
+    stream_ttfb_seconds = _NoopMetric()
+    trace_spans_total = _NoopMetric()
+    rag_queries_total = _NoopMetric()
+    rag_recall_at_3 = _NoopMetric()
+    scene_routing_total = _NoopMetric()
+    active_components_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 # ===== 性能指标常量 =====
@@ -204,21 +283,21 @@ class MetricsCollector:
             if elapsed < RESPONSE_TIME_TARGET_MIN:
                 self.sla_too_fast += 1
             self._sla_window.append(elapsed)
-            
+
             # v5.4: 记录Agent使用统计
             if agent:
                 self.agent_call_counts[agent] = self.agent_call_counts.get(agent, 0) + 1
                 agent_usage_total.labels(agent_type=agent).inc()  # Prometheus指标
-            
+
             # v5.4: 记录协作模式统计
             if mode:
                 self.mode_counts[mode] = self.mode_counts.get(mode, 0) + 1
                 collaboration_mode_total.labels(mode_name=mode).inc()  # Prometheus指标
-            
+
             # v5.4: 记录查询意图分布
             if query_type:
                 intent_distribution_total.labels(intent_type=query_type).inc()
-            
+
             # v5.4: 记录用户满意度
             if satisfaction_score and 1 <= satisfaction_score <= 5:
                 user_satisfaction_score.observe(satisfaction_score)
@@ -292,18 +371,53 @@ class MetricsCollector:
                 resolved_count = self.resolution_counts.get("resolved", 0)
                 resolution_rate = resolved_count / max(total_sessions, 1)
                 session_resolution_rate.set(resolution_rate)
-            
+
             # 计算人工升级率
             if self.total_requests > 0:
                 esc_rate = self.total_escalated / self.total_requests
                 escalation_rate.set(esc_rate)
-            
+
             # 计算缓存命中率
             total_cache_ops = self.cache_hits + self.cache_misses
             if total_cache_ops > 0:
                 cache_hit_rate = self.cache_hits / total_cache_ops
                 business_cache_hit_rate.set(cache_hit_rate)
-    
+
+    # ===== v6.1: 新指标记录方法 =====
+
+    async def record_cache_hit(self, level: int):
+        """记录缓存命中层级（1=L1 MD5, 2=L2 Qdrant, 3=L3 Jaccard）"""
+        if level == 1:
+            cache_l1_hits_total.inc()
+        elif level == 2:
+            cache_l2_hits_total.inc()
+        elif level == 3:
+            cache_l3_hits_total.inc()
+        async with self._ensure_lock():
+            self.cache_hits += 1
+
+    async def record_stream_ttfb(self, seconds: float):
+        """记录流式首字响应时间"""
+        await asyncio.to_thread(stream_ttfb_seconds.observe, seconds)
+
+    async def record_trace_span(self):
+        """记录 trace span"""
+        trace_spans_total.inc()
+
+    async def record_rag_query(self, recall: float | None = None):
+        """记录 RAG 查询和召回率"""
+        rag_queries_total.inc()
+        if recall is not None:
+            rag_recall_at_3.set(recall)
+
+    async def record_scene_route(self, scene_name: str):
+        """记录场景路由"""
+        scene_routing_total.labels(scene_name=scene_name).inc()
+
+    async def set_active_components(self, count: int):
+        """设置活跃 DI 组件数"""
+        active_components_total.set(count)
+
     async def get_stats(self) -> dict[str, Any]:
         async with self._ensure_lock():
             times = list(self.response_times)[-STATS_RECENT_COUNT:]  # 最近 N 次
@@ -619,7 +733,7 @@ class SLAAlertManager:
         self.bus = bus
         self.alerts: list[dict[str, Any]] = []
         self.last_alert_time: dict[str, float] = {}
-        
+
         # v5.4: 活动告警跟踪（用于升级检查）
         self.active_alerts: dict[str, dict[str, Any]] = {}
 
@@ -648,7 +762,7 @@ class SLAAlertManager:
                 severity = "critical"
             else:
                 severity = "warning"
-                
+
             alert = {
                 "type": alert_key,
                 "severity": severity,
@@ -663,7 +777,7 @@ class SLAAlertManager:
             if len(self.alerts) > self.ALERT_HISTORY_MAX:
                 self.alerts = self.alerts[-self.ALERT_HISTORY_MAX :]
             self.last_alert_time[alert_key] = time.time()
-            
+
             # v5.4: 记录活动告警
             self.active_alerts[alert_key] = {
                 "severity": severity,
@@ -702,7 +816,7 @@ class SLAAlertManager:
 
             return alert
         return None
-    
+
     async def check_and_upgrade(self):
         """
         v5.4: 检查并升级活动告警
@@ -715,38 +829,38 @@ class SLAAlertManager:
         """
         upgraded = []
         now = time.time()
-        
+
         for alert_key, alert_info in list(self.active_alerts.items()):
             elapsed = now - alert_info["timestamp"]
             severity = alert_info["severity"]
-            
+
             # critical → emergency 升级（30分钟未解决）
             if severity == "critical" and elapsed > 1800:
                 if not alert_info["escalated"]:
                     logger.warning(f"[SLA-Alert] 告警升级: {alert_key} critical → emergency")
-                    
+
                     # 发送升级通知
                     try:
                         from alerts.notifier import alert_notifier
-                        
+
                         await alert_notifier.send_alert(
-                            title=f"[升级] SLA 告警",
+                            title="[升级] SLA 告警",
                             content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
                             severity="emergency"
                         )
-                        
+
                         alert_info["escalated"] = True
                         alert_info["severity"] = "emergency"
                         upgraded.append(alert_key)
                     except Exception as e:
                         logger.error(f"[SLA-Alert] 升级通知失败: {e}")
-        
+
         return upgraded
 
     def get_alerts(self, limit: int = 20) -> list[dict[str, Any]]:
         """获取最近的告警历史"""
         return self.alerts[-limit:]
-    
+
     def get_active_alerts(self) -> dict[str, dict[str, Any]]:
         """v5.4: 获取当前活动告警状态"""
         return self.active_alerts.copy()

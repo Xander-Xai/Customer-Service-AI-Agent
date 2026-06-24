@@ -35,44 +35,89 @@ logger = get_logger("cache")
 
 # ===== Prometheus 监控指标 (v5.4) =====
 try:
-    from prometheus_client import Counter, Gauge, Histogram
+    from prometheus_client import REGISTRY
+    from prometheus_client import Counter as _PromCounter
+    from prometheus_client import Gauge as _PromGauge
+    from prometheus_client import Histogram as _PromHistogram
+
+    _METRICS: dict[str, object] = {}
+
+    def _counter(name, documentation, *args, **kwargs):
+        """Create or retrieve a Counter metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromCounter(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromCounter(name, documentation, *args, **kwargs)
+        return _METRICS[name]
+
+    def _gauge(name, documentation, *args, **kwargs):
+        """Create or retrieve a Gauge metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromGauge(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromGauge(name, documentation, *args, **kwargs)
+        return _METRICS[name]
+
+    def _histogram(name, documentation, *args, **kwargs):
+        """Create or retrieve a Histogram metric (safe for re-import/test sessions)."""
+        if name not in _METRICS:
+            try:
+                _METRICS[name] = _PromHistogram(name, documentation, *args, **kwargs)
+            except ValueError:
+                with contextlib.suppress(KeyError, ValueError):
+                    REGISTRY.unregister(name)
+                _METRICS[name] = _PromHistogram(name, documentation, *args, **kwargs)
+        return _METRICS[name]
 
     # 原始缓存命中统计（保持向后兼容）
-    cache_l1_hits = Counter("cache_l1_hits_total", "L1 Redis exact match cache hits")
-    cache_l2_hits = Counter("cache_l2_hits_total", "L2 Qdrant vector cache hits")
-    cache_misses = Counter("cache_misses_total", "Cache misses")
+    # 从 core.monitoring 导入以避免重复注册同名 Prometheus 指标
+    try:
+        from core.monitoring import cache_l1_hits_total as _l1
+        from core.monitoring import cache_l2_hits_total as _l2
+        cache_l1_hits = _l1
+        cache_l2_hits = _l2
+    except (ImportError, AttributeError):
+        cache_l1_hits = _counter("cache_l1_hits_total", "L1 Redis exact match cache hits")
+        cache_l2_hits = _counter("cache_l2_hits_total", "L2 Qdrant vector cache hits")
+    cache_misses = _counter("cache_misses_total", "Cache misses")
 
     # v6.0 新指标
-    cache_fallback_hits = Counter(
+    cache_fallback_hits = _counter(
         "cache_fallback_hits_total",
         "L3 Jaccard fallback cache hits",
     )
-    cache_qdrant_fallback_total = Counter(
+    cache_qdrant_fallback_total = _counter(
         "cache_qdrant_fallback_total",
         "Qdrant to Jaccard fallback events (Qdrant failures)",
     )
 
     # 缓存大小监控
-    cache_l1_size = Gauge("cache_l1_size", "Number of entries in L1 Redis cache")
-    cache_l2_size = Gauge("cache_l2_size", "Number of entries in L2 Qdrant cache")
+    cache_l1_size = _gauge("cache_l1_size", "Number of entries in L1 Redis cache")
+    cache_l2_size = _gauge("cache_l2_size", "Number of entries in L2 Qdrant cache")
 
     # 缓存命中率
-    cache_hit_rate = Gauge("cache_hit_rate", "Overall cache hit rate (0-1)")
+    cache_hit_rate = _gauge("cache_hit_rate", "Overall cache hit rate (0-1)")
 
     # 缓存操作延迟
-    cache_operation_duration = Histogram(
+    cache_operation_duration = _histogram(
         "cache_operation_seconds",
         "Time spent on cache operations",
         buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
     )
 
     # v6.0 新延迟指标
-    cache_qdrant_latency = Histogram(
+    cache_qdrant_latency = _histogram(
         "cache_qdrant_latency_seconds",
         "Qdrant search latency",
         buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0],
     )
-    cache_redis_latency = Histogram(
+    cache_redis_latency = _histogram(
         "cache_redis_latency_seconds",
         "Redis get/set latency",
         buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
