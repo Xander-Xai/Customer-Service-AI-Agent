@@ -71,7 +71,19 @@ generate-knowledge-base:
 ## DI 容器组件计数
 component-count:
 	@echo "📊 DI 容器活跃组件数:"
-	python3 -c "from core.container import Container; c = Container(); c.initialize(); print(f'  活跃组件: {len(c._services)}')" 2>/dev/null || python3 -c "from core.container import ServiceContainer; c = ServiceContainer(); import asyncio; asyncio.run(c.initialize()); print(f'  活跃组件数: {len(c._services)}')" 2>/dev/null || echo "  ⚠️ 容器不可用"
+	@python3 -c "\
+	import os, sys; \
+	sys.path.insert(0, '.'); \
+	os.environ['DEV_MODE'] = 'true'; \
+	os.environ['QDRANT_HOST'] = 'localhost'; \
+	os.environ['REDIS_URL'] = 'redis://localhost:6379/0'; \
+	from core.container import ServiceContainer; \
+	c = ServiceContainer(); \
+	import asyncio; \
+	asyncio.run(c.initialize()); \
+	svc_count = sum(1 for _ in filter(lambda x: not x.startswith('_') and not callable(getattr(c, x, lambda: None)), dir(c))); \
+	print(f'  服务组件: {svc_count}'); \
+	" 2>/dev/null || echo "  ⚠️ 容器不可用（依赖服务未运行）"
 
 # ===== 生产环境 =====
 prod: env-prod ## 生产部署
