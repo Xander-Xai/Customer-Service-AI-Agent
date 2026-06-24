@@ -1,0 +1,2095 @@
+[
+  {
+    "query_id": "bench_0000",
+    "query": "透明质酸对敏感肌有什么功效？",
+    "expected_doc_ids": [
+      "derm_001310",
+      "derm_000229",
+      "derm_000052"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0001",
+    "query": "神经酰胺有什么作用？",
+    "expected_doc_ids": [
+      "derm_000564",
+      "derm_000502",
+      "derm_000458"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0002",
+    "query": "角鲨烷适合什么肤质？",
+    "expected_doc_ids": [
+      "derm_000286",
+      "derm_000210",
+      "derm_001386"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0003",
+    "query": "烟酰胺能美白吗？",
+    "expected_doc_ids": [
+      "derm_001117",
+      "derm_000179",
+      "derm_001210"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0004",
+    "query": "熊果苷是什么成分？",
+    "expected_doc_ids": [
+      "derm_000865",
+      "derm_000066",
+      "derm_000062"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0005",
+    "query": "传明酸能祛斑吗？",
+    "expected_doc_ids": [
+      "derm_000192",
+      "derm_000448",
+      "derm_000477"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0006",
+    "query": "视黄醇有什么功效？",
+    "expected_doc_ids": [
+      "derm_001035",
+      "derm_001233",
+      "derm_000055"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0007",
+    "query": "胜肽能抗衰老吗？",
+    "expected_doc_ids": [
+      "derm_001150",
+      "derm_000408",
+      "derm_001467"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0008",
+    "query": "玻色因是什么？",
+    "expected_doc_ids": [
+      "derm_001331",
+      "derm_001437",
+      "derm_001117"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0009",
+    "query": "果酸有什么作用？",
+    "expected_doc_ids": [
+      "derm_000860",
+      "derm_000452",
+      "derm_000920"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0010",
+    "query": "水杨酸能去黑头吗？",
+    "expected_doc_ids": [
+      "derm_001207",
+      "derm_000570",
+      "derm_000014"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0011",
+    "query": "壬二酸对痘痘有用吗？",
+    "expected_doc_ids": [
+      "derm_000327",
+      "derm_001430",
+      "derm_000866"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0012",
+    "query": "积雪草提取物能修复皮肤吗？",
+    "expected_doc_ids": [
+      "derm_000697",
+      "derm_000570",
+      "derm_000319"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0013",
+    "query": "泛醇是什么成分？",
+    "expected_doc_ids": [
+      "derm_000441",
+      "derm_000690",
+      "derm_000210"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0014",
+    "query": "物理防晒和化学防晒有什么区别？",
+    "expected_doc_ids": [
+      "derm_000190",
+      "derm_000779",
+      "derm_000199"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0015",
+    "query": "维生素C能抗氧化吗？",
+    "expected_doc_ids": [
+      "derm_000736",
+      "derm_000705",
+      "derm_001237"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0016",
+    "query": "虾青素的抗氧化能力怎么样？",
+    "expected_doc_ids": [
+      "derm_000542",
+      "derm_000089",
+      "derm_001495"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0017",
+    "query": "白藜芦醇有什么功效？",
+    "expected_doc_ids": [
+      "derm_000941",
+      "derm_001099",
+      "derm_000256"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0018",
+    "query": "光甘草定效果好吗？",
+    "expected_doc_ids": [
+      "derm_000776",
+      "derm_000162",
+      "derm_001131"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0019",
+    "query": "依克多因是什么？",
+    "expected_doc_ids": [
+      "derm_000601",
+      "derm_001288",
+      "derm_001267"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0020",
+    "query": "甘草酸二钾能抗炎吗？",
+    "expected_doc_ids": [
+      "derm_000741",
+      "derm_001183",
+      "derm_000394"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0021",
+    "query": "PCA锌能控油吗？",
+    "expected_doc_ids": [
+      "derm_001443",
+      "derm_000143",
+      "derm_000094"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0022",
+    "query": "蓝铜胜肽是什么成分？",
+    "expected_doc_ids": [
+      "derm_001355",
+      "derm_000467",
+      "derm_000593"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0023",
+    "query": "辅酶Q10有什么用？",
+    "expected_doc_ids": [
+      "derm_000164",
+      "derm_000477",
+      "derm_000207"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0024",
+    "query": "红没药醇能舒缓吗？",
+    "expected_doc_ids": [
+      "derm_000779",
+      "derm_000570",
+      "derm_000929"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0025",
+    "query": "377美白成分怎么样？",
+    "expected_doc_ids": [
+      "derm_001302",
+      "derm_000748",
+      "derm_000334"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0026",
+    "query": "玻尿酸的功效是什么？",
+    "expected_doc_ids": [
+      "derm_000759",
+      "derm_000728",
+      "derm_000430"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0027",
+    "query": "A醇能抗皱吗？",
+    "expected_doc_ids": [
+      "derm_001373",
+      "derm_000547",
+      "derm_001438"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0028",
+    "query": "多肽的作用是什么？",
+    "expected_doc_ids": [
+      "derm_001400",
+      "derm_001328",
+      "derm_000147"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0029",
+    "query": "CICA是什么成分？",
+    "expected_doc_ids": [
+      "derm_001248",
+      "derm_001301",
+      "derm_000351"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0030",
+    "query": "维生素B5对皮肤有什么用？",
+    "expected_doc_ids": [
+      "derm_001094",
+      "derm_001494",
+      "derm_000502"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0031",
+    "query": "氧化锌防晒效果如何？",
+    "expected_doc_ids": [
+      "derm_000335",
+      "derm_000947",
+      "derm_000778"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0032",
+    "query": "L-抗坏血酸是什么？",
+    "expected_doc_ids": [
+      "derm_000553",
+      "derm_001311",
+      "derm_001410"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0033",
+    "query": "氨甲环酸能美白吗？",
+    "expected_doc_ids": [
+      "derm_001141",
+      "derm_000450",
+      "derm_001403"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0034",
+    "query": "AHA能去角质吗？",
+    "expected_doc_ids": [
+      "derm_000665",
+      "derm_000115",
+      "derm_000470"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0035",
+    "query": "BHA有什么功效？",
+    "expected_doc_ids": [
+      "derm_000066",
+      "derm_000647",
+      "derm_000822"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0036",
+    "query": "雨生红球藻提取物是什么？",
+    "expected_doc_ids": [
+      "derm_000549",
+      "derm_000136",
+      "derm_000433"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0037",
+    "query": "虎杖提取物有什么用？",
+    "expected_doc_ids": [
+      "derm_001162",
+      "derm_001471",
+      "derm_000645"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0038",
+    "query": "光果甘草根提取物功效？",
+    "expected_doc_ids": [
+      "derm_000436",
+      "derm_001343",
+      "derm_001023"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0039",
+    "query": "Ectoin是什么成分？",
+    "expected_doc_ids": [
+      "derm_000811",
+      "derm_001317",
+      "derm_000940"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0040",
+    "query": "吡咯烷酮羧酸锌有什么用？",
+    "expected_doc_ids": [
+      "derm_000293",
+      "derm_000543",
+      "derm_000286"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0041",
+    "query": "GHK-Cu是什么？",
+    "expected_doc_ids": [
+      "derm_000506",
+      "derm_001150",
+      "derm_001104"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0042",
+    "query": "泛醌是什么？",
+    "expected_doc_ids": [
+      "derm_000539",
+      "derm_001198",
+      "derm_000878"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0043",
+    "query": "洋甘菊提取物能舒缓吗？",
+    "expected_doc_ids": [
+      "derm_001196",
+      "derm_000818",
+      "derm_000742"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0044",
+    "query": "苯乙基间苯二酚是什么？",
+    "expected_doc_ids": [
+      "derm_000450",
+      "derm_000284",
+      "derm_001044"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0045",
+    "query": "Pro-Xylane是什么？",
+    "expected_doc_ids": [
+      "derm_001011",
+      "derm_000187",
+      "derm_000097"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0046",
+    "query": "铜肽有什么作用？",
+    "expected_doc_ids": [
+      "derm_000225",
+      "derm_000314",
+      "derm_001286"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0047",
+    "query": "阿伏苯宗是什么防晒剂？",
+    "expected_doc_ids": [
+      "derm_000328",
+      "derm_001394",
+      "derm_000865"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0048",
+    "query": "二氧化钛是物理防晒还是化学防晒？",
+    "expected_doc_ids": [
+      "derm_001222",
+      "derm_000131",
+      "derm_000789"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0148",
+    "query": "薇诺雅舒敏保湿面霜适合什么皮肤？",
+    "expected_doc_ids": [
+      "faq_01752",
+      "faq_00040",
+      "faq_00459"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0149",
+    "query": "薇诺雅烟酰胺精华液多少钱？",
+    "expected_doc_ids": [
+      "faq_00309",
+      "faq_00611",
+      "faq_00148"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0150",
+    "query": "薇诺雅玻尿酸面膜多少钱？",
+    "expected_doc_ids": [
+      "faq_01513",
+      "faq_00607",
+      "faq_01761"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0151",
+    "query": "薇诺雅防晒霜SPF50多少钱？",
+    "expected_doc_ids": [
+      "faq_00523",
+      "faq_00172",
+      "faq_01263"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0152",
+    "query": "薇诺雅视黄醇抗皱眼霜适合什么人用？",
+    "expected_doc_ids": [
+      "faq_01494",
+      "faq_00164",
+      "faq_01466"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0153",
+    "query": "薇诺雅积雪草修护乳液成分是什么？",
+    "expected_doc_ids": [
+      "faq_00861",
+      "faq_01023",
+      "faq_00422"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0154",
+    "query": "薇诺雅水杨酸净肤水适合什么皮肤？",
+    "expected_doc_ids": [
+      "faq_01449",
+      "faq_01665",
+      "faq_00634"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0155",
+    "query": "薇诺雅角鲨烷护肤油怎么用？",
+    "expected_doc_ids": [
+      "faq_00970",
+      "faq_00666",
+      "faq_00726"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0156",
+    "query": "薇诺雅熊果苷美白套装价格？",
+    "expected_doc_ids": [
+      "faq_01689",
+      "faq_00102",
+      "faq_00735"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0157",
+    "query": "薇诺雅神经酰胺屏障修复霜多少钱？",
+    "expected_doc_ids": [
+      "faq_01361",
+      "faq_01687",
+      "faq_01017"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0158",
+    "query": "薇诺雅水杨酸控油套装有哪些产品？",
+    "expected_doc_ids": [
+      "faq_01093",
+      "faq_00653",
+      "faq_00443"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0159",
+    "query": "薇诺雅视黄醇抗老精华多少钱？",
+    "expected_doc_ids": [
+      "faq_01567",
+      "faq_00159",
+      "scene_00053"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0160",
+    "query": "薇诺雅积雪草舒缓面膜怎么用？",
+    "expected_doc_ids": [
+      "faq_00912",
+      "faq_00818",
+      "scene_00011"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0161",
+    "query": "敏感肌适合用什么面霜？",
+    "expected_doc_ids": [
+      "faq_01433",
+      "faq_01251",
+      "faq_00933"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0162",
+    "query": "有什么好的美白精华推荐？",
+    "expected_doc_ids": [
+      "faq_00914",
+      "faq_00097",
+      "faq_00792"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0163",
+    "query": "补水面膜有什么推荐？",
+    "expected_doc_ids": [
+      "faq_01633",
+      "faq_01345",
+      "faq_01142"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0164",
+    "query": "有什么好的防晒霜推荐？",
+    "expected_doc_ids": [
+      "faq_00285",
+      "faq_01144",
+      "faq_01439"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0165",
+    "query": "抗皱眼霜推荐？",
+    "expected_doc_ids": [
+      "scene_00212",
+      "faq_01638",
+      "faq_01357"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0166",
+    "query": "屏障修复乳液推荐？",
+    "expected_doc_ids": [
+      "faq_00114",
+      "faq_00473",
+      "faq_01070"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0167",
+    "query": "控油化妆水推荐？",
+    "expected_doc_ids": [
+      "faq_00732",
+      "faq_01088",
+      "faq_00157"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0168",
+    "query": "护肤油推荐？",
+    "expected_doc_ids": [
+      "faq_00445",
+      "faq_01780",
+      "faq_01416"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0169",
+    "query": "美白套装推荐？",
+    "expected_doc_ids": [
+      "faq_01285",
+      "faq_01788",
+      "scene_00220"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0170",
+    "query": "屏障修复霜推荐？",
+    "expected_doc_ids": [
+      "faq_00474",
+      "faq_01578",
+      "faq_00779"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0171",
+    "query": "油皮用控油套装推荐？",
+    "expected_doc_ids": [
+      "faq_01044",
+      "faq_00182",
+      "faq_01787"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0172",
+    "query": "抗老精华有什么推荐？",
+    "expected_doc_ids": [
+      "faq_00007",
+      "scene_00255",
+      "faq_00808"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0173",
+    "query": "舒缓面膜推荐？",
+    "expected_doc_ids": [
+      "faq_01492",
+      "faq_01767",
+      "faq_00287"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0174",
+    "query": "薇诺雅有什么美白产品？",
+    "expected_doc_ids": [
+      "faq_01353",
+      "faq_01286",
+      "faq_00511"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0175",
+    "query": "薇诺雅有什么修复产品？",
+    "expected_doc_ids": [
+      "faq_01231",
+      "scene_00203",
+      "faq_01267"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0176",
+    "query": "薇诺雅有什么控油产品？",
+    "expected_doc_ids": [
+      "faq_01673",
+      "faq_01337",
+      "faq_01649"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0177",
+    "query": "薇诺雅面膜有哪些？",
+    "expected_doc_ids": [
+      "faq_01212",
+      "faq_00522",
+      "faq_00786"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0178",
+    "query": "精华液和面霜有什么区别？",
+    "expected_doc_ids": [
+      "faq_01723",
+      "faq_01553",
+      "faq_00713"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0179",
+    "query": "面霜的质地怎么选？",
+    "expected_doc_ids": [
+      "faq_01233",
+      "faq_01664",
+      "faq_00002"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0180",
+    "query": "卸妆产品怎么选？",
+    "expected_doc_ids": [
+      "faq_01245",
+      "faq_01176",
+      "faq_00861"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0181",
+    "query": "防晒产品怎么选购？",
+    "expected_doc_ids": [
+      "faq_01761",
+      "faq_01320",
+      "scene_00030"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0182",
+    "query": "干皮用什么产品？",
+    "expected_doc_ids": [
+      "faq_01810",
+      "faq_01812",
+      "faq_00876"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0183",
+    "query": "油皮用什么产品？",
+    "expected_doc_ids": [
+      "scene_00219",
+      "scene_00064",
+      "faq_00696"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0184",
+    "query": "敏感肌用什么产品？",
+    "expected_doc_ids": [
+      "faq_00348",
+      "faq_01163",
+      "scene_00237"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0185",
+    "query": "混合肌用什么产品？",
+    "expected_doc_ids": [
+      "faq_01373",
+      "faq_00383",
+      "faq_00963"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0186",
+    "query": "痘痘肌用什么产品？",
+    "expected_doc_ids": [
+      "faq_01272",
+      "faq_00921",
+      "faq_00816"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0187",
+    "query": "眼部护理用什么产品？",
+    "expected_doc_ids": [
+      "faq_00604",
+      "faq_00101",
+      "faq_00190"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0188",
+    "query": "男士用什么护肤品？",
+    "expected_doc_ids": [
+      "faq_01003",
+      "scene_00072",
+      "faq_00299"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0189",
+    "query": "孕期可以用什么产品？",
+    "expected_doc_ids": [
+      "faq_01866",
+      "faq_01698",
+      "faq_00797"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0190",
+    "query": "有什么产品适合送礼？",
+    "expected_doc_ids": [
+      "faq_01573",
+      "scene_00150",
+      "faq_01637"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0191",
+    "query": "抗初老用什么产品好？",
+    "expected_doc_ids": [
+      "faq_01000",
+      "faq_00605",
+      "faq_00023"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0192",
+    "query": "夏天适合用什么护肤品？",
+    "expected_doc_ids": [
+      "faq_00437",
+      "faq_01742",
+      "faq_00897"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0193",
+    "query": "冬天适合用什么护肤品？",
+    "expected_doc_ids": [
+      "faq_00721",
+      "scene_00247",
+      "scene_00028"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0194",
+    "query": "有没有去黑头的产品？",
+    "expected_doc_ids": [
+      "faq_00206",
+      "faq_01021",
+      "faq_00498"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0195",
+    "query": "有没有祛痘的产品？",
+    "expected_doc_ids": [
+      "faq_01870",
+      "faq_00547",
+      "scene_00029"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0196",
+    "query": "有什么抗皱产品推荐？",
+    "expected_doc_ids": [
+      "faq_01300",
+      "faq_01813",
+      "scene_00193"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0197",
+    "query": "薇诺雅产品价位怎么样？",
+    "expected_doc_ids": [
+      "faq_01748",
+      "faq_01827",
+      "faq_00652"
+    ],
+    "category": "产品推荐",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0298",
+    "query": "护肤品的正确使用顺序是什么？",
+    "expected_doc_ids": [
+      "scene_00527",
+      "scene_00443",
+      "scene_00393"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0299",
+    "query": "面膜多久敷一次比较好？",
+    "expected_doc_ids": [
+      "scene_00524",
+      "scene_00987",
+      "scene_00347"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0300",
+    "query": "防晒霜的正确使用方法？",
+    "expected_doc_ids": [
+      "scene_00976",
+      "scene_00479",
+      "scene_00510"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0301",
+    "query": "敏感肌应该怎么护肤？",
+    "expected_doc_ids": [
+      "scene_00471",
+      "scene_00465",
+      "scene_00354"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0302",
+    "query": "护肤品搓泥怎么办？",
+    "expected_doc_ids": [
+      "scene_00383",
+      "scene_00469",
+      "scene_00511"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0303",
+    "query": "精华液的正确使用量是多少？",
+    "expected_doc_ids": [
+      "scene_00989",
+      "scene_00448",
+      "scene_00506"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0304",
+    "query": "眼霜怎么正确涂抹？",
+    "expected_doc_ids": [
+      "scene_00319",
+      "scene_00533",
+      "scene_00346"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0305",
+    "query": "护肤品开封后保质期多久？",
+    "expected_doc_ids": [
+      "scene_00462",
+      "scene_00430",
+      "scene_00466"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0306",
+    "query": "夏天护肤和冬天护肤有什么不同？",
+    "expected_doc_ids": [
+      "scene_00360",
+      "scene_00507",
+      "scene_00301"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0307",
+    "query": "医美手术后怎么护理皮肤？",
+    "expected_doc_ids": [
+      "scene_00537",
+      "scene_00512",
+      "scene_00328"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0308",
+    "query": "黑头怎么去除？",
+    "expected_doc_ids": [
+      "scene_00397",
+      "scene_00486",
+      "scene_00991"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0309",
+    "query": "新买的护肤品应该怎么测试是否过敏？",
+    "expected_doc_ids": [
+      "scene_00527",
+      "scene_00327",
+      "scene_00405"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0310",
+    "query": "产品使用方法参考用量是多少？",
+    "expected_doc_ids": [
+      "scene_00437",
+      "scene_00368",
+      "scene_00448"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0311",
+    "query": "护肤品怎么保存？",
+    "expected_doc_ids": [
+      "scene_00525",
+      "scene_00984",
+      "scene_00363"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0312",
+    "query": "换季皮肤怎么护理？",
+    "expected_doc_ids": [
+      "scene_00315",
+      "scene_00423",
+      "scene_00382"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0313",
+    "query": "面霜的正确使用量？",
+    "expected_doc_ids": [
+      "scene_00460",
+      "scene_00308",
+      "scene_00509"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0314",
+    "query": "洁面乳的用量是多少？",
+    "expected_doc_ids": [
+      "scene_00348",
+      "scene_00416",
+      "scene_00359"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0315",
+    "query": "化妆水怎么用效果最好？",
+    "expected_doc_ids": [
+      "scene_00537",
+      "scene_00361",
+      "scene_00379"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0316",
+    "query": "精华液的正确使用步骤？",
+    "expected_doc_ids": [
+      "scene_00991",
+      "scene_00450",
+      "scene_00440"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0317",
+    "query": "防晒霜用量要多少才够？",
+    "expected_doc_ids": [
+      "scene_00513",
+      "scene_00983",
+      "scene_00977"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0318",
+    "query": "眼部护理的正确方法？",
+    "expected_doc_ids": [
+      "scene_00425",
+      "scene_00534",
+      "scene_00375"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0319",
+    "query": "颈部需要护理吗？",
+    "expected_doc_ids": [
+      "scene_00497",
+      "scene_00398",
+      "scene_00370"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0320",
+    "query": "痘痘肌日常怎么护理？",
+    "expected_doc_ids": [
+      "scene_00336",
+      "scene_00442",
+      "scene_00513"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0321",
+    "query": "敷面膜前需要做什么？",
+    "expected_doc_ids": [
+      "scene_00475",
+      "scene_00995",
+      "scene_00437"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0322",
+    "query": "面膜敷完后要洗吗？",
+    "expected_doc_ids": [
+      "scene_00302",
+      "scene_00445",
+      "scene_00453"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0323",
+    "query": "物理防晒和化学防晒的使用方法有什么不同？",
+    "expected_doc_ids": [
+      "scene_00986",
+      "scene_00377",
+      "scene_00529"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0324",
+    "query": "卸妆产品怎么选适合自己的？",
+    "expected_doc_ids": [
+      "scene_00983",
+      "scene_00477",
+      "scene_00471"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0325",
+    "query": "护肤油可以混合面霜用吗？",
+    "expected_doc_ids": [
+      "scene_00494",
+      "scene_00534",
+      "scene_00465"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0326",
+    "query": "早晚护肤步骤有什么不同？",
+    "expected_doc_ids": [
+      "scene_00397",
+      "scene_00423",
+      "scene_00497"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0327",
+    "query": "不同年龄段护肤重点是什么？",
+    "expected_doc_ids": [
+      "scene_00420",
+      "scene_00511",
+      "scene_00323"
+    ],
+    "category": "使用指导",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0398",
+    "query": "怎么退货？退货流程是什么？",
+    "expected_doc_ids": [
+      "scene_00545",
+      "scene_00585",
+      "scene_00608"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0399",
+    "query": "退款多久到账？",
+    "expected_doc_ids": [
+      "scene_00554",
+      "scene_00573",
+      "scene_00730"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0400",
+    "query": "怎么查看物流信息？",
+    "expected_doc_ids": [
+      "scene_00648",
+      "scene_00675",
+      "scene_00570"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0401",
+    "query": "怎么开发票？",
+    "expected_doc_ids": [
+      "scene_00731",
+      "scene_00557",
+      "scene_00662"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0402",
+    "query": "怎么联系客服？",
+    "expected_doc_ids": [
+      "scene_00655",
+      "scene_00740",
+      "scene_00633"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0403",
+    "query": "可以修改收货地址吗？",
+    "expected_doc_ids": [
+      "scene_00672",
+      "scene_00692",
+      "scene_00568"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0404",
+    "query": "订单可以取消吗？",
+    "expected_doc_ids": [
+      "scene_00656",
+      "scene_00669",
+      "scene_00597"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0405",
+    "query": "怎么查防伪？",
+    "expected_doc_ids": [
+      "scene_00998",
+      "scene_00698",
+      "scene_00552"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0406",
+    "query": "怎么验证产品真伪？",
+    "expected_doc_ids": [
+      "scene_00727",
+      "scene_00741",
+      "scene_00773"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0407",
+    "query": "产品过敏了怎么办？",
+    "expected_doc_ids": [
+      "scene_00762",
+      "scene_00709",
+      "scene_00674"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0408",
+    "query": "质量问题怎么处理？",
+    "expected_doc_ids": [
+      "scene_00618",
+      "scene_00658",
+      "scene_00705"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0409",
+    "query": "快递破损怎么办？",
+    "expected_doc_ids": [
+      "scene_00548",
+      "scene_00556",
+      "scene_00663"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0410",
+    "query": "发错商品了怎么办？",
+    "expected_doc_ids": [
+      "scene_00757",
+      "scene_00643",
+      "scene_00650"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0411",
+    "query": "怎么申请换货？",
+    "expected_doc_ids": [
+      "scene_00716",
+      "scene_00568",
+      "scene_00666"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0412",
+    "query": "产品用了没效果怎么办？",
+    "expected_doc_ids": [
+      "scene_00723",
+      "scene_00773",
+      "scene_00654"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0413",
+    "query": "积分怎么获取？",
+    "expected_doc_ids": [
+      "scene_00559",
+      "scene_00771",
+      "scene_00561"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0414",
+    "query": "积分怎么兑换？",
+    "expected_doc_ids": [
+      "scene_00623",
+      "scene_00696",
+      "scene_00578"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0415",
+    "query": "会员等级有什么福利？",
+    "expected_doc_ids": [
+      "scene_00557",
+      "scene_00573",
+      "scene_00611"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0416",
+    "query": "怎么查询产品批次号？",
+    "expected_doc_ids": [
+      "scene_00700",
+      "scene_00703",
+      "scene_00690"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0417",
+    "query": "优惠券怎么使用？",
+    "expected_doc_ids": [
+      "scene_00681",
+      "scene_00723",
+      "scene_00624"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0418",
+    "query": "有宠物家庭能用什么产品？",
+    "expected_doc_ids": [
+      "scene_00638",
+      "scene_00693",
+      "scene_00676"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0419",
+    "query": "企业采购怎么联系？",
+    "expected_doc_ids": [
+      "scene_00616",
+      "scene_00657",
+      "scene_00670"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0420",
+    "query": "怎么申请小样试用？",
+    "expected_doc_ids": [
+      "scene_00695",
+      "scene_00651",
+      "scene_00566"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0421",
+    "query": "海外可以购买吗？",
+    "expected_doc_ids": [
+      "scene_00744",
+      "scene_00720",
+      "scene_00570"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0422",
+    "query": "可以包邮吗？",
+    "expected_doc_ids": [
+      "scene_00759",
+      "scene_00708",
+      "scene_00707"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0423",
+    "query": "能指定快递公司吗？",
+    "expected_doc_ids": [
+      "scene_00765",
+      "scene_00737",
+      "scene_00682"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0424",
+    "query": "订单金额有误怎么办？",
+    "expected_doc_ids": [
+      "scene_00725",
+      "scene_00762",
+      "scene_00596"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0425",
+    "query": "怎么保价？",
+    "expected_doc_ids": [
+      "scene_00651",
+      "scene_00656",
+      "scene_00768"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0426",
+    "query": "赠品可以选吗？",
+    "expected_doc_ids": [
+      "scene_00599",
+      "scene_00646",
+      "scene_00627"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0427",
+    "query": "怎么取消自动续费？",
+    "expected_doc_ids": [
+      "scene_00752",
+      "scene_00657",
+      "scene_00643"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0498",
+    "query": "视黄醇在护肤品中的浓度安全范围是多少？",
+    "expected_doc_ids": [
+      "derm_000236",
+      "derm_000830",
+      "derm_000043"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "medium",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0499",
+    "query": "退货时赠品需要一起退回吗？",
+    "expected_doc_ids": [
+      "scene_00624",
+      "scene_00584",
+      "scene_00746"
+    ],
+    "category": "售后问题",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  }
+]
