@@ -129,8 +129,10 @@ LLM_ROUTER_TIMEOUT = _float_env(
 )  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
 
 # ===== 重试配置 =====
-RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 2)  # v5.4: 从 3 降至 2，减少无效重试
+RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)   # v6.1: 3→指数退避可达 1s/2s/4s 三级
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
+RETRY_MAX_DELAY = _float_env("RETRY_MAX_DELAY", 30.0)     # v6.1: 指数退避最大延迟
+RETRY_BACKOFF_FACTOR = _int_env("RETRY_BACKOFF_FACTOR", 2)  # v6.1: 指数退避因子
 
 # ===== v3.4: 安全配置 ======
 MAX_QUERY_LENGTH = _int_env("MAX_QUERY_LENGTH", 2000)
