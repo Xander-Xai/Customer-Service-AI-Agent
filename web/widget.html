@@ -278,6 +278,76 @@
       font-size: 13px;
     }
     .welcome-msg .emoji { font-size: 28px; margin-bottom: 8px; }
+
+    /* ── Recording status (v6.1) ── */
+    .recording-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      background: #fff3e0;
+      border: 1px solid #ffe0b2;
+      border-radius: 8px;
+      margin-top: 6px;
+      animation: recordingFadeIn 0.2s ease-out;
+    }
+    .recording-wave {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 24px;
+    }
+    .recording-wave span {
+      display: block;
+      width: 3px;
+      height: 40%;
+      background: #ff6f00;
+      border-radius: 2px;
+      animation: wave 1s ease-in-out infinite;
+    }
+    .recording-wave span:nth-child(2) { animation-delay: 0.2s; }
+    .recording-wave span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes wave {
+      0%, 100% { height: 30%; }
+      50% { height: 100%; }
+    }
+    .recording-timer {
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+      color: #e65100;
+      min-width: 40px;
+    }
+    .recording-btn {
+      padding: 4px 10px;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .recording-btn.stop { background: #ff5722; color: white; }
+    .recording-btn.cancel { background: transparent; color: #757575; border-color: #bdbdbd; }
+    @keyframes recordingFadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .voice-btn, .image-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      border-radius: 50%;
+      color: #757575;
+      transition: background 0.2s, color 0.2s;
+    }
+    .voice-btn:hover, .image-btn:hover {
+      background: #f5f5f5;
+      color: #1976d2;
+    }
   </style>
 </head>
 <body>
@@ -324,12 +394,27 @@
         rows="1"
         aria-label="输入消息"
       ></textarea>
+      <button type="button" class="voice-btn" id="voiceBtn" title="语音输入" aria-label="语音输入">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
       <button type="button" class="btn-send" id="btnSend" disabled aria-label="发送消息">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img" aria-hidden="true">
           <line x1="22" y1="2" x2="11" y2="13"/>
           <polygon points="22 2 15 22 11 13 2 9 22 2"/>
         </svg>
       </button>
+    </div>
+    <!-- Recording status -->
+    <div id="recordingStatus" class="recording-status" hidden>
+      <div class="recording-wave">
+        <span></span><span></span><span></span>
+      </div>
+      <span id="recordingTimer" class="recording-timer">0:00</span>
+      <button id="stopRecordingBtn" class="recording-btn stop" aria-label="停止录音">&#x25A0; 停止</button>
+      <button id="cancelRecordingBtn" class="recording-btn cancel" aria-label="取消录音">&#x2715; 取消</button>
     </div>
   </div>
 
@@ -683,6 +768,108 @@
 
     // Focus input
     chatInput.focus();
+
+    // ===== 语音输入 (v6.1) =====
+    var mediaRecorder = null;
+    var audioChunks = [];
+    var recordingTimer = null;
+    var recordingSeconds = 0;
+
+    var voiceBtn = document.getElementById('voiceBtn');
+    var recordingStatusEl = document.getElementById('recordingStatus');
+    var recordingTimerEl = document.getElementById('recordingTimer');
+    var stopBtn = document.getElementById('stopRecordingBtn');
+    var cancelBtn = document.getElementById('cancelRecordingBtn');
+
+    if (voiceBtn) {
+      voiceBtn.addEventListener('click', async function() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') return;
+        try {
+          var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = function(event) {
+            if (event.data.size > 0) audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = async function() {
+            var audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            var formData = new FormData();
+            formData.append('audio', audioBlob, 'voice.webm');
+
+            try {
+              var resp = await fetch('/api/chat/voice', {
+                method: 'POST',
+                headers: { 'X-API-Key': apiKey },
+                body: formData,
+              });
+              var data = await resp.json();
+              if (data.transcription) {
+                chatInput.value = data.transcription;
+                chatInput.focus();
+                // Trigger input event to enable send button and auto-resize
+                chatInput.dispatchEvent(new Event('input'));
+              }
+            } catch (err) {
+              console.error('语音上传失败:', err);
+            }
+
+            stopTimer();
+            stream.getTracks().forEach(function(track) { track.stop(); });
+            audioChunks = [];
+            mediaRecorder = null;
+            recordingStatusEl.hidden = true;
+          };
+
+          mediaRecorder.start();
+          startTimer();
+          recordingStatusEl.hidden = false;
+        } catch (err) {
+          console.error('麦克风访问被拒绝:', err);
+        }
+      });
+
+      stopBtn.addEventListener('click', function() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+      });
+
+      cancelBtn.addEventListener('click', function() {
+        if (mediaRecorder) {
+          if (mediaRecorder.state === 'recording') {
+            mediaRecorder.onstop = null;
+            mediaRecorder.stop();
+          }
+          if (mediaRecorder.stream) {
+            mediaRecorder.stream.getTracks().forEach(function(t) { t.stop(); });
+          }
+        }
+        stopTimer();
+        audioChunks = [];
+        mediaRecorder = null;
+        recordingStatusEl.hidden = true;
+      });
+    }
+
+    function startTimer() {
+      recordingSeconds = 0;
+      recordingTimerEl.textContent = '0:00';
+      recordingTimer = setInterval(function() {
+        recordingSeconds++;
+        var mins = Math.floor(recordingSeconds / 60);
+        var secs = recordingSeconds % 60;
+        recordingTimerEl.textContent = mins + ':' + secs.toString().padStart(2, '0');
+      }, 1000);
+    }
+
+    function stopTimer() {
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+    }
   })();
   </script>
 </body>
