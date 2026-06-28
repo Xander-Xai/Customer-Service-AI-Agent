@@ -4,9 +4,11 @@
 基于 LangGraph 的多智能体客服系统，面向化妆品生产/销售企业。
 - Python 3.10+ / FastAPI / LangGraph / Qdrant
 - 四层状态机：缓存 → 路由 → 协作模式 → 响应后处理
-- 8 个 AI Agent，5 种协作模式，双层缓存，RAG + Function Calling + ReAct
-- 1390+ 个测试用例，覆盖率门槛 80%
+- 9 个 AI Agent，5 种协作模式，三层缓存（L1 Redis + L2 Qdrant + L3 Jaccard），RAG + Function Calling + ReAct
+- 1400+ 个自动化测试用例，覆盖率门槛 80%
 - v6.0 新增：Qdrant 向量数据库迁移 + ChromaDB→Qdrant 数据迁移脚本 + 并行运行模式
+- v6.1 新增：统一多模态入口 + Widget 图片/语音 + 场景过滤 RAG + 5000+ 知识库文档
+- v6.3 新增：前后端联调修复 + 生产就绪加固 + 文档全面同步
 
 ## 常用命令
 
@@ -69,7 +71,7 @@ make db-downgrade # 回滚迁移
 ### 文件组织
 - `agents/` — AI Agent（继承 BaseAgent）+ ResponseEvaluator
 - `api/` — FastAPI 服务层（app_factory/middleware/routes/dependencies）
-- `auth/` — JWT 认证（PBKDF2 + Redis 黑名单 + Refresh Token）
+- `auth/` — JWT 认证（Argon2id + Redis 黑名单 + Refresh Token）
 - `core/` — 基础设施（DI容器/图构建/MessageBus/SharedBlackboard/Monitoring/PromptManager/ABTest/TokenTracker/TokenQuota）
 - `core/session/` — 会话管理（SessionManager/DriftDetector/TokenCounter + **会话数据加密 AES-256-Fernet**）
 - `db/` — SQLAlchemy 模型 + Alembic 迁移
@@ -82,16 +84,16 @@ make db-downgrade # 回滚迁移
 - `media/` — 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
 - `alerts/` — 告警通知（Webhook + SMTP）
 - `knowledge/` — 知识库管理路由
-- `cache/` — 双层缓存（L1 MD5 + L2 Jaccard + Redis 持久化）
+- `cache/` — 三层缓存（L1 Redis MD5 精确匹配 + L2 Qdrant 向量语义 + L3 Jaccard 回退）
 - `web/` — 前端（原生 JS + Vite 8 构建）
 - `tests/` — 测试套件（unit/integration/e2e/stress/performance）
 
 ### 测试
-- 单元测试在 `tests/unit/`（**25 个文件**）
+- 单元测试在 `tests/unit/`（**26 个文件**）
 - 集成测试在 `tests/integration/`（3 个文件）
 - 端到端测试在 `tests/e2e/`（4 个文件）
 - 压力测试在 `tests/stress/test_stress.py`
-- 前端测试在 `web/src/__tests__/`（Vitest，**5 个文件**）
+- 前端测试在 `web/src/__tests__/`（Vitest，**7 个文件**）
 - 大部分测试使用 MockLLM，不需要真实 API Key
 - 真实 LLM E2E 测试需配置 `OPENAI_API_KEY`
 
@@ -107,7 +109,7 @@ make db-downgrade # 回滚迁移
 ## 架构要点
 
 ### 四层状态机
-1. **Layer 0 - 缓存检查**：L1 MD5 精确匹配 + L2 Jaccard 语义匹配
+1. **Layer 0 - 缓存检查**：L1 Redis MD5 精确匹配 + L2 Qdrant 向量语义 + L3 Jaccard 回退
 2. **Layer 1 - 路由分类**：LLM 分类器 + 规则分类器并行（asyncio.gather），高置信规则匹配可跳过 LLM（路由捷径）
 3. **Layer 2 - 协作模式**：Sequential / Parallel / Consultation / Hierarchical / ReAct
 4. **Layer 3 - 响应后处理**：质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播

@@ -4,7 +4,7 @@
 * 前端：Vanilla HTML/CSS/JS + Vite 8 + Vitest 3.x
 * 后端：Python 3.10+ + FastAPI + SQLAlchemy 2.x + Alembic
 * 缓存/队列：Redis 7
-* 向量数据库：Qdrant（v6.0 从 ChromaDB 迁移）
+* 向量数据库：Qdrant（v6.3 起仅使用 Qdrant）
 * 代码质量：Biome (前端 lint + format) + Ruff (后端 lint + format) + mypy (后端类型检查)
 * 测试：Vitest (前端单元) + pytest (后端单元/集成) + Playwright (E2E)
 
@@ -12,23 +12,39 @@
 ```
 customer-service-ai-agent/
 ├── api/                  # FastAPI 路由与中间件
+│   ├── routes/           # 端点路由（chat/sessions/feedback/monitoring/prompts/ws）
+│   └── middleware/       # 认证/限流/CSRF/安全头/追踪（__init__.py + trace_middleware.py）
 ├── core/                 # 核心 DI 容器与 LangGraph 状态机构建
-├── agents/               # 8个 AI 专家 Agent 逻辑
-├── auth/                 # 认证与授权模块
-├── db/                   # 数据库连接与 Schema
-├── web/                  # 前端静态站
+│   └── session/          # 会话管理（SessionManager/DriftDetector/TokenCounter）
+├── agents/               # 9 个 AI Agent（7 领域专家 + ResponseAgent + ReAct）+ Evaluator
+├── auth/                 # 认证与授权模块（JWT + Argon2id + RBAC）
+├── db/                   # 数据库连接与 Schema（SQLAlchemy + Alembic）
+├── router/               # 双层查询路由（LLM + 规则并行 + 复杂度评分）
+├── collaboration/        # 5 种协作模式 + Orchestrator
+├── rag/                  # Qdrant 知识库 + API Embedding（api_embedding.py）+ BM25 检索器（bm25_retriever.py）+ 重排 + RRF 融合 + 种子数据
+├── cache/                # 三层缓存（L1 Redis + L2 Qdrant + L3 Jaccard）
+├── erp/                  # 金蝶 ERP 适配器（Mock/Real + HMAC）
+├── tools/                # Function Calling 工具注册（OpenAI 格式）
+├── llm/                  # LLM 客户端（重试 + 熔断 + FC + SSE）+ 规则兜底
+├── media/                # 多模态处理（图片/音频/视频/文档/TTS）
+├── alerts/               # 告警通知（Webhook + SMTP）
+├── knowledge/            # 知识库管理路由
+├── web/                  # 前端静态站（vanilla JS + Vite 8）
 │   ├── index.html        # 主聊天界面
 │   ├── admin.html        # 管理员控制台
 │   ├── login.html        # 登录与注册页
+│   ├── widget.html       # 可嵌入聊天组件
+│   ├── theme-comparison.html  # 主题对比页
 │   ├── src/              # 前端 JS 逻辑
-│   │   ├── api/          # 中央 API 统一拦截层
-│   │   ├── auth/         # 认证管理器
-│   │   ├── chat/         # 聊天 UI 组件
+│   │   ├── api/          # 中央 API 统一拦截层（rest.js/sse.js/websocket.js/events.js）
+│   │   ├── auth/         # 认证管理器（JWT 自动刷新）
+│   │   ├── chat/         # 聊天 UI 组件（input.js/messages.js/sessions.js/voice.js/search.js/shortcuts.js/welcome.js）
 │   │   ├── state/        # 中央状态管理器 (chatState.js)
-│   │   └── utils/        # 工具函数 (格式化、提示框等)
-│   └── styles/           # CSS 样式表 (变量、布局、动画等)
+│   │   └── utils/        # 工具函数 (theme/Toast/DOM/Markdown/format/agents/copy/monitor-render)
+│   └── styles/           # CSS 样式表 (variables/layout/animations/components等 15 CSS)
 ├── deploy/               # 部署配置 (Docker Compose, Nginx, Prometheus)
-└── tests/                # 后端自动化测试
+├── scripts/              # 运维/benchmark/评测脚本
+├── tests/                # 后端自动化测试（unit/integration/e2e/stress/eval 共 5000+ 条）
 ```
 
 ## 编码规范 (前端)

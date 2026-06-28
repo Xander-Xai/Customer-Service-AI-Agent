@@ -1,16 +1,26 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v6.0)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v6.3)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **当前代码状态（2026-06-23）**
+> **当前代码状态（2026-06-25）**
 >
-> - 当前仓库版本为 `v6.0`
-> - 本轮重新按代码核对前后端与文档，`app.openapi()` 当前导出 **51 个 HTTP 路径**（WebSocket 不计入 OpenAPI）
-> - 已验证：`npm test` **56/56** 通过，`npm run build` 通过，OpenAPI 可正常生成
-> - 本轮已修复：语音上传 MIME 传递错误、Widget 多轮会话状态丢失、管理后台缺少熔断器/Prometheus 实现映射、生产环境数据库迁移失败仍回退 `create_all`
-> - 文档已按当前实现回填：README、文档索引、API 参考、生产检查清单、变更日志、OpenAPI 导出
-> - **真实上线结论**：当前不能直接宣称“已完成上线验收”；请先逐项执行 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
+> - 当前仓库版本为 `v6.3`
+> - 本轮重新按代码核对前后端与文档，`app.openapi()` 当前导出 **53 个 HTTP 路径**（WebSocket 不计入 OpenAPI）
+> - 已验证：`npm test` **60/60** 通过，`npm run build` 通过，OpenAPI 可正常生成
+> - 三级缓存架构重构完成：L1 Redis + L2 Qdrant + L3 Jaccard 回退
+> - 15 项证据缺口已全部补齐：知识库 5000+ 条文档、四大场景路由、场景 Agent、9 个 benchmark 脚本
+> - 统一多模态入口 `/api/chat/multimodal` 支持自动文件类型路由
+> - Prometheus 指标已修复重复注册问题，安全注册 20+ 业务指标
+> - **真实上线结论**：当前不能直接宣称”已完成上线验收”；请先逐项执行 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
 > - **依赖服务**：生产部署仍需 PostgreSQL + Redis + Qdrant，且必须提供真实密钥与域名配置
+>
+> **v6.3** 前后端联调修复（Widget X-File-Type/file_type 头对齐 + session 变量声明 + SSE 解析修正）+ 生产就绪加固（CSP widget 嵌入 + DOMPurify XSS 防护 + Token 刷新竞态修复 + Redis 限流 DoS 修复）+ 文档全面同步
+>
+> **v6.2** 前后端对齐 + 生产就绪修复 + 文档同步（版本/端点计数/Agent/缓存架构）
+>
+> **v6.1.1** 多模态统一入口 + Widget 增强（图片/语音）+ Prometheus 防重注册 + 测试修复
+>
+> **v6.1** 证据缺口修复（15 项缺口补齐）：知识库 5000+ 条文档 + 四大场景路由 + SalesAgent/AftersalesAgent + 三级缓存（L1 Redis + L2 Qdrant + L3 Jaccard）+ 9 benchmark 脚本 + LLM 指数退避重试 + 缓存主动失效 API
 >
 > **v6.0** Qdrant 向量数据库迁移（替代 ChromaDB）+ 数据迁移脚本 + 并行运行模式 + 全链路 SSE 真流式
 >
@@ -40,10 +50,10 @@
 
 ### Qdrant 向量数据库迁移
 - ✅ **ChromaDB → Qdrant** — 完全替换 ChromaDB 为 Qdrant，支持 Docker 容器化部署、gRPC 协议、水平扩展
-- ✅ **并行运行模式** — 支持 `parallel` / `qdrant_only` / `chroma_legacy` 三种运行模式，平滑过渡
 - ✅ **数据迁移脚本** — `scripts/migrate_chroma_to_qdrant.py` 自动迁移 ChromaDB 数据至 Qdrant
+- ✅ **v6.2 已完全移除 ChromaDB** — 仅使用 Qdrant，`chroma_legacy` 模式已移除
 - ✅ **兼容 API 层** — `rag/knowledge_base.py` 统一接口，上层代码无需修改
-- ✅ **25 个单元测试文件** — 1390+ tests，覆盖率 ≥80%
+- ✅ **26 个单元测试文件** — 1400+ tests，覆盖率 ≥80%
 
 ### 全链路 SSE 真流式
 - ✅ **Tool-Calling 流式化** — RAG 检索、工具调用期间实时显示 thinking/tool_call/tool_result 事件
@@ -53,7 +63,7 @@
 
 ### 配置变更
 - 新增 `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_COLLECTION_CONFIG` 等配置项
-- 新增 `VECTOR_DB_MODE`（默认 `chroma_legacy`，建议生产环境设为 `qdrant_only`）
+- `VECTOR_DB_MODE`（默认 `qdrant_only`，v6.2 起仅此一个有效值）
 
 ---
 
@@ -84,7 +94,7 @@
 
 ### 评分提升
 - 📊 **90.6 → 99.0分** (+8.4分)
-- 🏆 **极致级生产就绪** - 超越99.9%的生产系统
+- 🏆 **极致级生产就绪** - 超越99.9%的生产系统（大模型自身评测，不作为正规材料参考依据）
 - ⏱️ **7小时完成** - 8项高ROI改进
 
 **详细报告**: [docs/reports/milestone/phase3-improvements-completed.md](docs/reports/milestone/phase3-improvements-completed.md) | [docs/reports/milestone/final-acceptance-report.md](docs/reports/milestone/final-acceptance-report.md)
@@ -98,9 +108,9 @@
 | 验证项 | 入口 | 预期结果 |
 |--------|------|---------|
 | **代码能跑** | `make dev` → http://localhost:8000 | 聊天界面可用，发送"你好"得到回复 |
-| **前端测试** | `npm test` | 当前 56 个 Vitest 用例通过 |
+| **前端测试** | `npm test` | 当前 60 个 Vitest 用例通过（7 个测试文件） |
 | **前端构建** | `npm run build` | `web/static/dist/` 产物生成成功 |
-| **接口真相源** | `python -c "from api.app_factory import app; print(len(app.openapi()['paths']))"` | 当前输出 `51` |
+| **接口真相源** | `python -c "from api.app_factory import app; print(len(app.openapi()['paths']))"` | 当前输出 `53` |
 | **后端关键模块** | 以 `api/`、`auth/`、`core/`、`db/` 当前实现为准 | 不再使用旧版里程碑数字代替当前验收 |
 | **RAG 有数据** | `python scripts/evaluate_rag.py` | Hit Rate@3 = 80%, MRR = 0.778 |
 
@@ -144,9 +154,9 @@ graph TB
     end
 
     subgraph Cache["缓存层"]
-        L1["L1 精确缓存 — MD5 + LRU OrderedDict"]
-        L2["L2 语义缓存 — Jaccard + jieba 分词 + 倒排索引"]
-        RD2["Redis 持久化 — 可选预热"]
+        L1["L1 Redis 精确缓存 — MD5 SETEX O(1)"]
+        L2["L2 Qdrant 语义缓存 — BGE 向量检索"]
+        L3["L3 Jaccard 回退 — jieba 分词 + 倒排索引"]
     end
 
     subgraph Router["路由层"]
@@ -162,12 +172,14 @@ graph TB
         REACT["ReAct — RAG + FC 推理链"]
     end
 
-    subgraph Expert["8 个 Agent"]
+    subgraph Expert["9 个 Agent + 评估器"]
         PA["ProductAgent — 产品 + RAG + ERP"]
         TA["TechAgent — 技术支持 + RAG"]
         BA["BillingAgent — 账单 + ERP"]
         CA["ComplaintAgent — 投诉 + RAG"]
         GA["GeneralAgent — 通用 + 黑板桥接"]
+        SA["SalesAgent — 售前推荐 + RAG"]
+        AA["AftersalesAgent — 售后处理 + ERP"]
         RA["ReActAgent — 多步推理 + FC"]
         RPA["ResponseAgent — 后处理 + 评估"]
         EV["ResponseEvaluator — 5 维质量评估"]
@@ -210,8 +222,12 @@ graph TB
     RATE --> C0
 
     C0 --> L1
-    L1 -. hit .-> C3
-    C0 --> C1
+    L1 -->|"hit"| C3
+    L1 -->|"miss"| L2
+    L2 -->|"hit"| C3
+    L2 -->|"miss"| L3
+    L3 -->|"hit"| C3
+    L3 -->|"miss"| C1
     C1 --> LLM
     C1 --> RULE
 
@@ -256,7 +272,7 @@ graph TB
 
 | 层级 | 节点 | 职责 | 关键实现 |
 |------|------|------|----------|
-| **Layer 0** | `check_cache` | L1 MD5 精确匹配 + L2 Jaccard 语义匹配，命中直接返回（<10ms） | [response_cache.py](cache/response_cache.py)：L1 OrderedDict + L2 倒排索引 + Redis 持久化 |
+| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（<10ms） | [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
 | **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | [query_router.py](router/query_router.py)：7 种意图分类 + 熔断器降级 |
 | **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | [orchestrator.py](collaboration/orchestrator.py) + [modes.py](collaboration/modes.py) |
 | **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | [response_agent.py](agents/response_agent.py) + [evaluator.py](agents/evaluator.py) |
@@ -321,7 +337,7 @@ sequenceDiagram
 
 ## 🤖 功能模块详解
 
-### Agent 系统（8 个 Agent）
+### Agent 系统（9 个 Agent + 评估器）
 
 | Agent | 职责 | 数据源 | 协作方式 |
 |-------|------|--------|----------|
@@ -331,6 +347,8 @@ sequenceDiagram
 | **BillingAgent** | 退款处理、订单查询（`ORD\d+`/`C\d{3}`）、发票、物流追踪 | ERP（订单 + 客户） | Sequential/Parallel/Consultation |
 | **ComplaintAgent** | 情绪安抚、问题解决、补偿方案、升级处理、投诉协议 | RAG (`complaint_knowledge`, `faq`) + BB 标记 | Hierarchical |
 | **GeneralAgent** | FAQ、产品概览、服务介绍、协调调度、跨 Agent 黑板桥接 | ERP（客户） + BB (`erp.*`) | Sequential/Consultation |
+| **SalesAgent** | 售前推荐、产品对比、购买建议、促销活动 | RAG (`product_knowledge`, `faq`) + ERP | Sequential/Consultation |
+| **AftersalesAgent** | 售后处理、退换货流程、物流查询、售后政策 | ERP（订单） + RAG | Sequential/Consultation |
 | **ReActAgent** | 多步推理：Thought → Action → Observation → Answer | RAG（3 个 collection） + FC（4 个 ERP 工具） | ReAct |
 | **ResponseAgent** | 响应消毒 + 注入防护 + 解决状态评估 + 质量评分 + 模式升级重试 + 缓存写入 + SLA + 事件广播 | Cache + Evaluator + Bus | 最终环节 |
 
@@ -382,30 +400,38 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    Query["用户查询"] --> L1["L1 精确缓存 — MD5 哈希 O(1)"]
+    Query["用户查询"] --> L1["L1 Redis 精确缓存 — MD5 SETEX O(1)"]
     L1 -->|"hit"| Response["直接响应 &lt;10ms"]
-    L1 -->|"miss"| L2["L2 语义缓存 — Jaccard + jieba"]
+    L1 -->|"miss"| L2["L2 Qdrant 语义缓存 — BGE 向量检索"]
     L2 -->|"hit"| Response
-    L2 -->|"miss"| Router["→ Layer 1 路由"]
+    L2 -->|"miss"| L3["L3 Jaccard 回退 — jieba 分词 + 倒排索引"]
+    L3 -->|"hit"| Response
+    L3 -->|"miss"| Router["→ Layer 1 路由"]
 
     subgraph L1Detail["L1 实现"]
         direction TB
-        OD["OrderedDict LRU"]
-        EVICT1["满时淘汰 5%"]
-        TTL1["TTL 3600s"]
+        RD1["Redis SETEX + MD5 标准化"]
+        TTL1["TTL 按意图类型配置"]
     end
 
     subgraph L2Detail["L2 实现"]
         direction TB
+        QD["Qdrant 向量检索 + payload 过滤"]
+        BGE["BGE 嵌入模型"]
+        EX2["expires_at 时间戳过滤"]
+    end
+
+    subgraph L3Detail["L3 实现"]
+        direction TB
         FROZEN["frozenset 存储分词"]
         INV["倒排索引快速候选"]
         DYN["动态阈值 — 短文本 0.7 / 长文本 0.5"]
-        EVICT2["deque FIFO 淘汰 5%"]
+        EVICT3["FIFO 淘汰 5%（最大 500 条）"]
     end
 
     L1Detail --> L1
     L2Detail --> L2
-    L1 -.-> Redis[("Redis SETEX — 预热 + 持久化")]
+    L3Detail --> L3
 ```
 
 ### 会话管理（[session_manager.py](core/session/session_manager.py)）
@@ -557,7 +583,7 @@ Thought（推理当前需要什么信息）
 | **主题系统** | `utils/theme.js` + 8 个 CSS | 亮色 4 种 + 暗色 2 种 + 字号/行高/减弱动效/系统偏好 |
 | **主题预览** | `theme-comparison.html` | 4 种亮色主题并排对比预览选择 |
 | **认证** | `auth/index.js` + `login.js` | JWT 登录/注册 + Token 自动刷新（过期前 5 分钟）+ 角色路由 |
-| **管理后台** | `admin.html` + 8 个 `admin-*.js` 模块 | 监控仪表盘（指标卡片/环形图/趋势图）+ 用户管理 + 知识库管理（统计/种子/添加文档/ERP 同步）+ 告警配置 + Prompt 版本 CRUD + Token 用量统计 + 审计日志 + 系统健康 |
+| **管理后台** | `admin.html` + 7 个 `admin-*.js` 模块 | 监控仪表盘（指标卡片/环形图/趋势图）+ 用户管理 + 知识库管理（统计/种子/添加文档/ERP 同步）+ 告警配置 + Prompt 版本 CRUD + Token 用量统计 + 审计日志 + 系统健康 |
 | **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页，支持 `api_key`/`theme`/`lang` URL 参数，中英双语，SSE+REST 双保险 |
 | **反馈** | `chat/messages.js` | 👍/👎 反馈 + message_index 精确定位 |
 | **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA） |
@@ -671,10 +697,10 @@ make env-check   # 查看当前环境配置摘要
 | 监控 | 11 | 健康 / 指标 / KPI / 缓存 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token Quota / Token 追踪 |
 | Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
 | 反馈 | 2 | 提交 / 统计 |
-| 前端 | 4 | 聊天页 / 登录页 / 管理后台 / Widget |
+| 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
-**合计：48 个 REST/HTTP 操作 + 1 个 WebSocket + 4 个后端直出页面（OpenAPI 当前包含 52 个 HTTP 路径，含 favicon 资产）。**
+**合计：48 个 REST/HTTP 操作 + 1 个 WebSocket + 5 个后端直出页面（OpenAPI 当前包含 53 个 HTTP 路径）。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -684,16 +710,16 @@ make env-check   # 查看当前环境配置摘要
 
 ```
 customer-service-ai-agent/
-├── agents/            # 8 个 AI Agent（BaseAgent + 5 领域 + ReAct + Response + Evaluator）
+├── agents/            # 9 个 AI Agent（7 领域 + ReAct + Response）+ Evaluator
 ├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试/Token追踪/Token配额/黑板）
 │   └── session/       # 会话管理器 + 漂移检测器 + Token 计数器
 ├── api/               # FastAPI 服务层（工厂/中间件/路由/SSE/WebSocket/依赖注入）
 │   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts）
-├── auth/              # JWT 认证（PBKDF2 + Redis 黑名单 + Refresh Token + RBAC）
+├── auth/              # JWT 认证（Argon2id + Redis 黑名单 + Refresh Token + RBAC）
 ├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
 ├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
 ├── rag/               # RAG 知识库（Qdrant v6.0 + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合 + 种子数据）
-├── cache/             # 双层缓存（L1 MD5 + L2 Jaccard + Redis 持久化）
+├── cache/             # 三级缓存（L1 Redis MD5 + L2 Qdrant 向量 + L3 Jaccard 回退）
 ├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
 ├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
 ├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具）
@@ -701,12 +727,12 @@ customer-service-ai-agent/
 ├── media/             # 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
 ├── alerts/            # 告警通知（Webhook 钉钉/企微/飞书 + SMTP）
 ├── knowledge/         # 知识库管理路由
-├── web/               # 前端（原生 JS + Vite 8 构建 + 34 模块 + 13 CSS + 5 页面）
+├── web/               # 前端（原生 JS + Vite 8 构建 + 34 模块 + 14 CSS + 5 页面）
 │   ├── src/           # 34 JS 模块（聊天/API/Auth/工具/管理后台/测试）
-│   ├── styles/        # 13 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
+│   ├── styles/        # 14 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
-├── tests/             # 测试套件（1390 Python + 5 Vitest：unit/integration/e2e/stress/performance）
+├── tests/             # 测试套件（1400+ Python + 60 Vitest：unit/integration/e2e/stress/performance）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
@@ -723,32 +749,44 @@ customer-service-ai-agent/
 
 | 测试文件 | 目录 | 测试数 | 覆盖范围 |
 |---------|------|--------|---------|
-| `test_modules.py` | `unit/` | ~115 | 模块级单元测试：Session / Cache / Router / Agent / ERP / 协作 / RAG / Tools / Config / Evaluator / ReAct / Self-Reflection / ERP Factory |
-| `test_core_modules.py` | `unit/` | ~120 | 核心模块：ABTest / Tracing / AlertNotifier / RuleBasedLLM / KnowledgeRouter / Exceptions / Monitoring / CircuitBreaker / SLA |
-| `test_api_routes.py` | `unit/` | ~115 | API 路由：Sessions / Feedback / Chat(REST+SSE+文件上传) / WebSocket / Monitoring / Dependencies |
-| `test_app_factory.py` | `unit/` | 16 | 应用工厂：create_app / lifespan / _run_graph / _persist_metrics_snapshot |
-| `test_media.py` | `unit/` | ~55 | 多模态处理：Image / Audio / Video / Document / TTS 各处理器 + 边界用例 |
-| `test_llm_rag_coverage.py` | `unit/` | ~105 | LLM 客户端 + RAG 知识库：格式化 / 重试 / 熔断器 / 流式 / CLIP / 查询改写 / 重排器 |
-| `test_session_manager_coverage.py` | `unit/` | ~65 | 会话管理器 + 漂移检测：CRUD / Token / 摘要 / 漂移 / 存储后端 / 同步包装 / TokenCounter |
-| `test_ws_coverage.py` | `unit/` | 28 | WebSocket：连接清理 / 认证 / 限流 / 模块导入 |
-| `test_middleware.py` | `unit/` | 28 | 中间件：限流白名单 / 安全头 / 限流逻辑 / 认证白名单 / 输入保护 / CSRF / 角色权限 |
-| `test_prompt_manager.py` | `unit/` | 25 | Prompt 管理器：CRUD / 缓存 / API 路由 / BaseAgent 集成 |
-| `test_protocols_di.py` | `unit/` | 15 | 协议接口 + 依赖注入：Protocol conformance / Agent 构造注入 / FastAPI DI |
-| `test_rag_reranker.py` | `unit/` | 18 | RAG 重排：BM25 / CrossEncoder / 工厂 / QueryRewriter / 知识库集成 |
+| `test_modules.py` | `unit/` | 153 | 模块级单元测试：Session / Cache / Router / Agent / ERP / 协作 / RAG / Tools / Config / Evaluator / ReAct / Self-Reflection / ERP Factory |
+| `test_core_modules.py` | `unit/` | 140 | 核心模块：ABTest / Tracing / AlertNotifier / RuleBasedLLM / KnowledgeRouter / Exceptions / Monitoring / CircuitBreaker / SLA |
+| `test_api_routes.py` | `unit/` | 145 | API 路由：Sessions / Feedback / Chat(REST+SSE+文件上传) / WebSocket / Monitoring / Dependencies |
+| `test_app_factory.py` | `unit/` | 19 | 应用工厂：create_app / lifespan / _run_graph / _persist_metrics_snapshot |
+| `test_media.py` | `unit/` | 69 | 多模态处理：Image / Audio / Video / Document / TTS 各处理器 + 边界用例 |
+| `test_llm_rag_coverage.py` | `unit/` | 89 | LLM 客户端 + RAG 知识库：格式化 / 重试 / 熔断器 / 流式 / CLIP / 查询改写 / 重排器 |
+| `test_session_manager_coverage.py` | `unit/` | 68 | 会话管理器 + 漂移检测：CRUD / Token / 摘要 / 漂移 / 存储后端 / 同步包装 / TokenCounter |
+| `test_auth_tools_coverage.py` | `unit/` | 45 | 认证服务：注册/登录/刷新/吊销/角色/RBAC + 工具调用权限校验 |
+| `test_middleware.py` | `unit/` | 3 | 中间件：限流白名单 / 安全头 / 限流逻辑 / 认证白名单 / 输入保护 / CSRF / 角色权限 |
+| `test_prompt_manager.py` | `unit/` | 26 | Prompt 管理器：CRUD / 缓存 / API 路由 / BaseAgent 集成 |
+| `test_ws_coverage.py` | `unit/` | 25 | WebSocket：连接清理 / 认证 / 限流 / 模块导入 |
+| `test_rag_reranker.py` | `unit/` | 22 | RAG 重排：BM25 / CrossEncoder / 工厂 / QueryRewriter / 知识库集成 |
+| `test_protocols_di.py` | `unit/` | 13 | 协议接口 + 依赖注入：Protocol conformance / Agent 构造注入 / FastAPI DI |
 | `test_token_tracker_db.py` | `unit/` | 13 | Token 追踪：记录 / 汇总 / 分位数 / DB 回滚保护 |
-| `test_collaboration_modes.py` | `unit/` | 35 | 5 种协作模式全分支覆盖（22% → 97%——v5.2.2 新增） |
-| `test_collaboration_orchestrator.py` | `unit/` | 25 | 模式选择 + 运行时模式升级全分支（48% → 99%——v5.2.2 新增） |
-| `test_query_router_coverage.py` | `unit/` | 34 | 规则分类 + LLM 分类 + 双层路由（0% → 100%——v5.2.2 新增） |
-| `test_alert_notifier_coverage.py` | `unit/` | 20 | Webhook + 邮件 + SSRF 防护（v5.2.2 新增） |
-| `test_base_agent_billing_coverage.py` | `unit/` | 32 | A/B 变体 + 漂移修复 + 账单 Agent（v5.2.2 新增） |
-| `test_graph_builder_coverage.py` | `unit/` | 5 | 工具函数 + 向后兼容包装器（v5.2.2 新增） |
-| `test_integration.py` | `integration/` | 28 | Mock LLM 集成：图调用 / 缓存命中 / 5 种协作模式 / Agent process() / 漂移 / 错误降级 |
-| `test_erp_integration.py` | `integration/` | 40 | ERP 集成：Mock/Real 格式兼容 / Token 刷新 / 重试 / 分页 / 查询流程 |
-| `test_multimodal.py` | `integration/` | 21 | 多模态集成：图片处理 / AgentState 字段 / BaseAgent 消息构建 / Vision LLM 选择 |
-| `test_all.py` | `e2e/` | ~120 | 全链路 E2E：图构建 / API / 会话 / 熔断器 / SLA / 并发 / ReAct / RAG / 性能 / 上下文压力 |
+| `test_cache_metrics.py` | `unit/` | 22 | 缓存指标：L1/L2/L3 命中率 / Qdrant 延迟 / Redis 延迟 |
+| `test_collaboration_modes.py` | `unit/` | 35 | 5 种协作模式全分支覆盖（22% → 97%） |
+| `test_collaboration_orchestrator.py` | `unit/` | 25 | 模式选择 + 运行时模式升级全分支（48% → 99%） |
+| `test_query_router_coverage.py` | `unit/` | 34 | 规则分类 + LLM 分类 + 双层路由（0% → 100%） |
+| `test_alert_notifier_coverage.py` | `unit/` | 20 | Webhook + 邮件 + SSRF 防护 |
+| `test_base_agent_billing_coverage.py` | `unit/` | 32 | A/B 变体 + 漂移修复 + 账单 Agent |
+| `test_graph_builder.py` | `unit/` | 3 | 图构建：条件边 / 向后兼容包装器 |
+| `test_graph_builder_coverage.py` | `unit/` | 5 | 图构建覆盖：包装器 / 分支覆盖 |
+| `test_base_agent_streaming.py` | `unit/` | 2 | BaseAgent 流式输出：stream_callback / content_complete |
+| `test_migration_compat.py` | `unit/` | 16 | ChromaDB→Qdrant 迁移兼容性：旧格式导入 / 数据映射 |
+| `test_qdrant_knowledge_base.py` | `unit/` | 15 | Qdrant 知识库：CRUD / 查询 / 多 collection / 种子数据 |
+| `test_tool_registry_streaming.py` | `unit/` | 3 | 工具注册流式：rag_status 事件 / chunk_queue |
+| `test_integration.py` | `integration/` | 24 | Mock LLM 集成：图调用 / 缓存命中 / 5 种协作模式 / Agent process() / 漂移 / 错误降级 |
+| `test_erp_integration.py` | `integration/` | 41 | ERP 集成：Mock/Real 格式兼容 / Token 刷新 / 重试 / 分页 / 查询流程 |
+| `test_audio_pipeline.py` | `integration/` | 6 | 音频管道：ASR + 对话链路 |
+| `test_kb_generation.py` | `integration/` | 4 | 知识库生成：数据格式 / 数量校验 |
+| `test_multimodal_unit.py` | `integration/` | 21 | 多模态单元测试：图片处理 / AgentState / 消息构建 / Vision LLM 选择 |
+| `test_all.py` | `e2e/` | 153 | 全链路 E2E：图构建 / API / 会话 / 熔断器 / SLA / 并发 / ReAct / RAG / 性能 / 上下文压力 |
 | `test_v4_production.py` | `e2e/` | 27 | 生产功能：数据库 / Auth 服务 / 告警 / API 集成（登录/注册/me/users） |
-| `test_production_features.py` | `e2e/` | 25 | 生产特性：DI 容器 / 并发安全 / 配置校验 / Refresh Token / LLM-as-Judge / OpenTelemetry |
-| `test_e2e_real_llm.py` | `e2e/` | 5 | **真实 LLM E2E**（需 `OPENAI_API_KEY`）：产品 / 退货 / RAG / 多轮 / 注入防御 |
+| `test_production_features.py` | `e2e/` | 20 | 生产特性：DI 容器 / 并发安全 / 配置校验 / Refresh Token / LLM-as-Judge / OpenTelemetry |
+| `test_scenarios.py` | `e2e/` | 4 | 场景路由：四场景 + 通用意图端到端 |
+| `test_trace.py` | `e2e/` | 4 | Trace ID 传播：请求头 → 响应头 |
+| `test_e2e_real_llm.py` | `e2e/` | 10 | **真实 LLM E2E**（需 `OPENAI_API_KEY`）：产品 / 退货 / RAG / 多轮 / 注入防御 |
+| `test_multimodal.py` | `e2e/` | 7 | 多模态端到端：图片上传流式 / 非图片降级 / 多轮会话 |
 | `test_stress.py` | `stress/` | 12 | 压力测试（`@pytest.mark.stress`）：缓存 2000 读写 / 总线 200 并发 / 黑板 400 写入 / 会话 1000 创建 / 路由 800 调用 |
 
 **前端测试**（Vitest + jsdom）：
@@ -760,8 +798,10 @@ customer-service-ai-agent/
 | `copy.test.js` | `web/src/__tests__/` | 剪贴板复制 |
 | `agents.test.js` | `web/src/__tests__/` | Agent 显示名称映射 |
 | `contrast.test.js` | `web/src/__tests__/` | WCAG AA 对比度回归（18 个 token 对） |
+| `sse.test.js` | `web/src/__tests__/` | SSE 流式解析 / 事件分发 |
+| `admin-settings.test.js` | `web/src/__tests__/` | 管理后台设置面板 / Prompt 管理 |
 
-**总计：1390 Python 测试用例 + 5 Vitest 前端测试**（含 5 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
+**总计：1400+ Python 测试用例 + 60 Vitest 前端测试（7 个文件）**（含 10 个真实 LLM E2E 测试，需配置 `OPENAI_API_KEY`；12 个压力测试标记 `@pytest.mark.stress`）
 
 ### 运行测试
 
@@ -816,11 +856,13 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `LLM_ROUTER_TIMEOUT` | 4.0 | 路由 LLM 调用超时（秒） |
 | `REACT_COMPLEXITY_THRESHOLD` | 60 | ReAct 触发复杂度阈值 |
 | **缓存** | | |
-| `CACHE_L1_MAX` | 500 | L1 精确缓存容量（OrderedDict） |
-| `CACHE_L2_MAX` | 2000 | L2 语义缓存容量（倒排索引） |
-| `CACHE_TTL` | 3600 | 缓存过期时间（秒） |
-| `CACHE_SEMANTIC_THRESHOLD_SHORT` | 0.7 | 短文本（≤20 字）语义相似度阈值 |
-| `CACHE_SEMANTIC_THRESHOLD_LONG` | 0.5 | 长文本语义相似度阈值 |
+| `CACHE_QDRANT_COLLECTION` | response_cache | L2 Qdrant 语义缓存集合名 |
+| `CACHE_QDRANT_MAX_POINTS` | 10000 | L2 Qdrant 最大点数 |
+| `CACHE_VECTOR_SCORE_THRESHOLD` | 0.85 | L2 Qdrant 向量相似度阈值 |
+| `CACHE_TTL_POLICY` | intent_type→TTL | 按意图类型的 TTL 策略（knowledge_qa=7d, pricing_stock=5min 等） |
+| `CACHE_FALLBACK_ENABLED` | true | L3 Jaccard 降级开关 |
+| `CACHE_FALLBACK_THRESHOLD` | 0.6 | L3 Jaccard 相似度阈值 |
+| `CACHE_CLEANUP_INTERVAL` | 3600 | 后台清理间隔（秒） |
 | **会话** | | |
 | `SESSION_WINDOW_SIZE` | 10 | 滑动窗口大小 |
 | `SESSION_MAX_TOKENS` | 4000 | 上下文最大 token 数（tiktoken 计数） |
@@ -847,7 +889,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `SLA_HIERARCHICAL_MAX` | 30.0 | Hierarchical 模式 SLA 超时（秒） |
 | `SLA_REACT_MAX` | 30.0 | ReAct 模式 SLA 超时（秒） |
 | **重试** | | |
-| `RETRY_MAX_ATTEMPTS` | 2 | 最大重试次数（仅瞬态错误） |
+| `RETRY_MAX_ATTEMPTS` | 3 | 最大重试次数（仅瞬态错误，指数退避 1s/2s/4s） |
 | `RETRY_BASE_DELAY` | 1.0 | 基础退避延迟（秒，指数退避 max 10s） |
 | **连接池** | | |
 | `HTTPX_MAX_CONNECTIONS` | 100 | httpx 最大连接数 |
@@ -921,6 +963,8 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 | 版本 | 日期 | 主题 |
 |------|------|------|
+| **v6.3** | 2026-06-25 | 前后端联调修复（Widget file-type header + session 连续性 + SSE 解析）+ 生产加固（CSP widget 嵌入 + DOMPurify XSS + Token 刷新竞态 + Redis 限流 DoS 修复）+ 文档同步 |
+| **v6.1.1** | 2026-06-25 | 多模态统一入口 + Widget 增强 + Prometheus 防重注册 + 测试修复 + 文档对齐 |
 | **v6.0** | 2026-06-20 | Qdrant 向量数据库迁移（替代 ChromaDB + 数据迁移脚本 + 并行运行模式 + Qdrant 知识库） |
 | **v5.5** | 2026-06-18 | 账单 Agent 降级增强 + LLM 启动健康检查 + API Key 占位符校验加固 + API/文档对齐 |
 | **v5.4.1** | 2026-06-17 | 前后端 API 对齐（5 新 REST 端点 + 2 新模块）+ 死代码清理（-487 行）+ Token Quota 卡片 + checkpoint 探测 |
