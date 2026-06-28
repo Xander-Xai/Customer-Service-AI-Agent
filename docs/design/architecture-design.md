@@ -98,22 +98,27 @@ class BaseAgent(ABC):
         # 6. 发布事件
 ```
 
-8 个 Agent：6 个领域专家（Product/Tech/Billing/Complaint/General + ResponseAgent）+ ReAct 推理 Agent + ResponseEvaluator 质量评估器。共享相同的 LLM 交互流程，差异仅在 `system_prompt` 和 `extra_context` 的构建方式。模板方法消除了 ~200 行重复代码。
+9 个 Agent：7 个领域专家（Product/Tech/Billing/Complaint/General/Sales/Aftersales）+ ResponseAgent 响应后处理 + ReAct 推理 Agent；另设 ResponseEvaluator 质量评估器负责输出的 5 维评分。其中 SalesAgent 负责售前推荐（产品对比、肤质匹配），AftersalesAgent 负责售后处理（退换货、物流跟踪）。共享相同的 LLM 交互流程，差异仅在 `system_prompt` 和 `extra_context` 的构建方式。模板方法消除了 ~200 行重复代码。
 
 ---
 
 ## 3. 关键技术实现
 
-### 3.1 二级语义缓存
+### 3.1 三级语义缓存
 
-**为什么需要两级而不是一级？**
-- L1（MD5 精确匹配）：O(1) 查找，适合完全相同的问题。命中率约 30%
-- L2（Jaccard 语义匹配）：用 jieba 分词后计算集合相似度。"精华液多少钱" ≈ "这款精华价格是多少" 命中率约 40%
-- 两级组合命中率约 70%，将 LLM 调用量降低到 30% 以下
+**为什么需要三级缓存？**
+- L1（Redis MD5 精确匹配）：Redis SETEX + MD5 标准化，O(1) 查找，适合完全相同的问题。命中率约 30%
+- L2（Qdrant 向量语义检索）：BGE 嵌入模型（bge-large-zh-v1.5）+ Qdrant 向量搜索，支持 payload 过滤。"精华液多少钱" ≈ "这款精华价格是多少" 命中率约 40%
+- L3（Jaccard 回退层）：jieba 分词 + 倒排索引 + 动态阈值，FIFO 淘汰 5%（最大 500 条），向后兼容 v5.x 语义缓存格式
+- 三级组合命中率约 70%，将 LLM 调用量降低到 30% 以下
 
-**倒排索引优化**：L2 语义匹配不做全量扫描，而是通过倒排索引（token → 候选集）缩小搜索范围，将 O(n) 降到 O(k)（k << n）。
+**Embedding API 优化（v6.3）**：将本地 sentence-transformers 替换为异步 HTTP API 调用（SiliconFlow bge-large-zh-v1.5），使用 httpx.AsyncClient 连接池复用，超时从 30s 降至 10s。
+
+**BM25 混合检索（v6.3）**：新增 `BM25Retriever` 内存倒排索引，与 Qdrant 向量检索并行，通过 RRF 融合（k=60）合并结果。BM25 通道专门处理精确关键词匹配，弥补向量检索在专有名词（如"烟酰胺"）上的不足。
 
 **防缓存雪崩**：淘汰时只清除 5% 的低热度条目，避免一次性清除大量缓存导致大量查询同时穿透到 LLM。
+
+**Reranker 二次重排（v6.3）**：检索结果进入 Agent 前经重排序器（Reranker）优化。`ApiReranker` 调用 SiliconFlow / OpenAI 兼容的 CrossEncoder API（`BAAI/bge-reranker-v2-m3`），按相关性分数降序排列，提升 Top-K 精度。API 不可用时自动降级到 `BM25Reranker`（关键词重叠 BM25 公式 + jieba 分词，零外部依赖），确保检索质量不依赖外部服务。
 
 ### 3.2 ReAct 推理引擎
 
@@ -166,6 +171,20 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 **并发安全**：状态转换使用 `asyncio.Lock` 保护，防止多个协程同时从 HALF_OPEN → CLOSED。
 
+### 3.5 多模态处理
+
+统一多模态入口 `/api/chat/multimodal`（v6.1）自动识别并路由 5 种媒体类型：
+
+| 处理器 | 文件类型 | 处理流程 |
+|--------|---------|---------|
+| **ImageProcessor** | png/jpg/webp | 压缩至 ≤4MB → Base64 → 多模态 LLM 理解 |
+| **AudioProcessor** | wav/mp3/ogg | 语音转写（Whisper）→ 文本输入路由 |
+| **VideoProcessor** | mp4/webm | 首帧提取 → ImageProcessor 处理 |
+| **DocumentProcessor** | pdf/docx/txt | 文本提取（PyMuPDF/python-docx）→ 分段注入上下文 |
+| **TTSProcessor** | — | Edge TTS 文本转语音（zh-CN-XiaoxiaoNeural 等）|
+
+图片保留 PNG Alpha 通道（v6.1 修复），语音支持 Widget 麦克风输入。
+
 ---
 
 ## 4. 安全设计
@@ -212,7 +231,7 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 - **主题系统**：8 种主题（亮色 pure/warm/soft/cream + 暗色 classic/warm + 无障碍 + 面板）+ 字号/行高/动画控制
 - **无障碍**：ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA）
 - **移动端**：响应式布局 + 抽屉式导航
-- **管理后台**：`admin.html` + 9 个 admin 模块 — 用户管理/知识库统计/告警配置/Prompt 管理/Token 用量/系统健康/监控仪表盘
+- **管理后台**：`admin.html` + 8 个 admin 模块 — 用户管理/知识库统计/告警配置/Prompt 管理/Token 用量/系统健康/监控仪表盘
 - **可嵌入 Widget**：`widget.html` — 轻量聊天组件
 
 ### 模块结构
@@ -260,7 +279,7 @@ web/src/
 ### 监控指标（Prometheus 格式）
 - **请求指标**：总数、错误率、响应时间（P50/P95）
 - **Agent 指标**：各 Agent 调用次数、协作模式分布
-- **缓存指标**：L1/L2 命中率、缓存大小
+- **缓存指标**：L1/L2/L3 命中率、缓存大小、Qdrant/Redis 操作延迟
 - **SLA 指标**：响应时间达标率、首次解决率、AI 接管率
 - **熔断器指标**：当前状态、失败计数、恢复时间
 
@@ -272,17 +291,18 @@ web/src/
 |------|------|------|------|
 | LLM 框架 | LangGraph | LangChain Agent / AutoGen | LangGraph 状态机更清晰，可控性更强 |
 | Web 框架 | FastAPI | Flask / Django | 原生 async + WebSocket + 自动文档 |
-| 向量库 | Qdrant（v6.0 从 ChromaDB 迁移） | FAISS / Pinecone | Rust 原生，Docker 部署，生产就绪，高并发 |
-| 缓存 | 自研双层 | Redis 单层 | 语义缓存是核心差异点，Redis 无法实现 |
+| 向量库 | Qdrant（v6.0 从 ChromaDB 迁移，v6.3 起完全替代 ChromaDB） | FAISS / Pinecone | Rust 原生，Docker 部署，生产就绪，高并发 |
+| 缓存 | 自研三层（L1 Redis + L2 Qdrant + L3 Jaccard） | Redis 单层 | 三级缓存（精确+向量+分词），Redis 无法实现语义缓存 |
 | 中文分词 | jieba | HanLP / LAC | 轻量、成熟、社区大 |
 | 部署 | Docker Compose | K8s | 项目规模适中，K8s 过重 |
 | 监控 | Prometheus + Grafana | DataDog / ELK | 开源免费、行业标准 |
 
 ### 已知限制与改进方向
-1. **ERP Mock**：生产 ERP 集成仅完成接口抽象，真实适配器未完整实现 → 已预留 `ERP_MODE=real` 开关
-2. **RAG Embedding 优化**：已从默认 all-MiniLM-L6-v2（英文）替换为中文 embedding 降级链（bge-small-zh-v1.5 → text2vec-base-chinese），Hit Rate@3 从 63% 提升到 80%
-3. **前端内联样式**：CSP 的 style-src 已使用 nonce（v5.4 修复，script-src 也是 nonce），但 65 处内联样式理想应迁移到 CSS 类
-4. **小模型注入防御**：Qwen3-8B 对"不泄露系统提示"的指令遵从不足 → 已在输出层增加正则检测兜底（v4.2 修复）
+1. **ERP Mock 模式**：生产 ERP 集成仅完成接口抽象，真实适配器未完整实现（`ERP_MODE=real` 开关已预留但未充分验证），当前默认运行在 Mock 模式
+2. **Widget DOMPurify CDN 依赖**：widget 的 Markdown XSS 防护依赖 CDN 加载 DOMPurify，若 CDN 不可用则降级为纯文本渲染
+3. **RAG Embedding 优化**：已从本地 sentence-transformers 替换为异步 API 嵌入（api_embedding.py bge-large-zh-v1.5），添加 BM25 混合检索（v6.3），多项优化并行以提升 Hit Rate
+4. **前端内联样式**：CSP 的 style-src 仍使用 `unsafe-inline`（部分主题切换和动态样式无法避免），未来可考虑迁移到 CSS 自定义属性方案
+5. **小模型注入防御**：Qwen3-8B 对"不泄露系统提示"的指令遵从不足 → 已在输出层增加正则检测兜底（v4.2 修复）
 
 ### 真实 LLM 测试发现的问题（v4.2）
 E2E 集成测试（硅基流动 Qwen3-8B）暴露了两个 Mock 测试无法覆盖的 Bug：
@@ -295,16 +315,16 @@ E2E 集成测试（硅基流动 Qwen3-8B）暴露了两个 Mock 测试无法覆�
 
 | 层级 | 覆盖范围 | 数量 |
 |------|---------|------|
-| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 / 协作模式 / 查询路由 / 告警通知 / 知识库 / 认证 / 漂移检测 等 25 个文件 | ~1,044 |
-| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 | ~86 |
-| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key） | ~199 |
+| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 / 协作模式 / 查询路由 / 告警通知 / 知识库 / 认证 / 漂移检测 等 26 个文件 | ~1,040 |
+| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 / 音频管道 / 知识库生成 | ~86 |
+| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key）/ 场景路由 / Trace ID 传播 | ~200 |
 | 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 | ~12 |
-| 前端测试 | Agent 映射 / 状态管理 / SSE / 主题 / 对比度 / E2E 流程 | ~5 Vitest + 1 Playwright |
-| **总计** | **25 个单元测试文件，35 个测试文件** | **1,361+ 项** |
+| 前端测试 | Agent 映射 / 状态管理 / SSE / 主题 / 对比度 / 管理后台 | ~60 Vitest（7 个文件） |
+| **总计** | **26 个单元测试文件，39+ 个测试文件** | **~1,370+ 项** |
 
 所有核心测试 **无需 LLM API Key 或网络**，Mock 适配器 + Mock Qdrant + Mock LLM 实现 100% 离线测试。
 
-### v5.3-v5.5 架构增强
+### v5.3+ 架构增强
 
 | 版本 | 增强 | 影响 |
 |------|------|------|
@@ -317,6 +337,14 @@ E2E 集成测试（硅基流动 Qwen3-8B）暴露了两个 Mock 测试无法覆�
 | **v5.5** | 账单 Agent 降级增强 + LLM 启动健康检查 | LLM 不可用时保留 ERP 上下文，启动阶段提前暴露供应商连通性问题 |
 | **v5.5** | API Key 占位符校验加固 | 阻止 `test-` / `mock-` / `sk-placeholder` 等测试 Key 混入生产环境 |
 | **v6.0** | Qdrant 向量数据库迁移 | 替代 ChromaDB，Docker 部署，高并发，余弦距离检索 |
-| **v6.0** | 数据迁移脚本 `scripts/migrate_chroma_to_qdrant.py` | ChromaDB 持久化数据一键迁移到 Qdrant |
 | **v6.0** | 全链路 SSE 真流式（Tool-Calling + RAG 检索 + 图节点状态 + 缓存伪流式） | 实时显示 thinking/tool_call/tool_result/rag_status/agent_switch 等 10 种事件类型 |
-| **v6.0** | 并行运行模式 | VECTOR_DB_MODE=parallel 同时运行 ChromaDB + Qdrant，平滑迁移 |
+| **v6.1** | 四大场景 Agent（Sales/Aftersales/Complaint/General）+知识库 5000+ 文档 | 场景化路由与专业回复 |
+| **v6.1** | 统一多模态入口 `/api/chat/multimodal` | 自动文件类型路由（voice/image/document） |
+| **v6.3** | Embedding API 异步化（api_embedding.py） | 连接池复用，超时从 30s 降至 10s |
+| **v6.3** | BM25Retriever 混合检索 | 与 Qdrant 向量检索并行，RRF 融合，弥补专有名词匹配不足 |
+| **v6.3** | Widget 会话连续性修复 | widget 刷新/重连后恢复已有会话，不再创建新会话 |
+| **v6.3** | CSP frame-ancestors 支持 widget 嵌入 | 允许第三方页面通过 `frame-ancestors` 安全嵌入 widget |
+| **v6.3** | Widget DOMPurify Markdown 净化 | widget 内 Markdown 渲染使用 DOMPurify 防 XSS |
+| **v6.3** | Token refresh 竞态修复 | 并发请求 refresh token 时只触发一次刷新，避免 401 |
+| **v6.3** | Redis 限流 DoS 修复 | 限流 key 设 TTL，Redis 不可用时不拒绝请求 |
+| **v6.3** | file_type header 对齐 | 前端 widget 从 file_type（下划线）改为 file-type（连字符），对齐 FastAPI Header() 参数转换规则 |
