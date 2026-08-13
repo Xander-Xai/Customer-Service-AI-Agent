@@ -12,6 +12,12 @@ import { initSettingsPanel, initTheme } from './utils/theme.js';
 
 let isLogin = true;
 
+/** 从 cookie 中读取指定名称的值 */
+function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  return match ? match[1] : '';
+}
+
 function toggleMode() {
   isLogin = !isLogin;
   document.getElementById('formTitle').textContent = isLogin
@@ -43,7 +49,10 @@ async function handleSubmit(e) {
 
     const resp = await fetch(endpoint, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': getCsrfToken(),
+      },
       body: JSON.stringify(body),
     });
     const data = await resp.json();

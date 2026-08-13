@@ -25,56 +25,60 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Benchmark queries
-BENCHMARK_QUERIES = [
-    "烟酰胺有什么功效？",
-    "敏感肌可以用视黄醇吗？",
-    "透明质酸是什么？",
-    "油性皮肤适合用什么面霜？",
-    "VC精华不能和什么一起用？",
-    "传明酸能祛斑吗？",
-    "果酸和水杨酸有什么区别？",
-    "神经酰胺对皮肤屏障有什么作用？",
-    "防晒霜物理防晒和化学防晒怎么选？",
-    "维诺雅有哪些美白产品？",
-    "你们发什么快递？多久能到？",
-    "怎么退货？退货流程是什么？",
-    "会员有什么等级？各等级权益？",
-    "支持什么付款方式？",
-    "产品保质期多久？开封后能用多长时间？",
-    "怎么辨别产品是不是正品？",
-    "孕期可以用你们的产品吗？",
-    "怎么开发票？",
-    "积分怎么用？怎么兑换？",
-    "企业采购有优惠吗？",
-    "用了产品过敏了怎么办？",
-    "护肤品的正确使用顺序是什么？",
-    "夏天护肤和冬天护肤有什么不同？",
-    "黑头怎么去除？",
-    "医美手术后怎么护理皮肤？",
-    "敏感肌应该怎么护肤？",
-    "面膜多久敷一次比较好？",
-    "成分之间有冲突吗？哪些不能一起用？",
-    "不同年龄段应该怎么选择护肤品？",
-    "运动前后需要护肤吗？",
-]
+# ── Load benchmark queries from eval set ──
+from scripts._benchmark_utils import load_eval_queries
+
+BENCHMARK_QUERIES = load_eval_queries()
+
+# ── Qwen3-8B @ 硅基流动 定价（$/1K tokens）──
+# 与 benchmark_cost.py 保持一致：input/output 分离定价
+COST_PER_1K_TOKENS = {
+    "input": 0.0015,
+    "output": 0.006,
+}
+
+# 默认每查询 token 估算（仅当 LLM 不可用时使用）
+DEFAULT_INPUT_TOKENS_PER_QUERY = 150
+DEFAULT_OUTPUT_TOKENS_PER_QUERY = 80
 
 
-async def _llm_call_latency(llm, query: str) -> float:
-    """Simulated or real LLM call latency measurement."""
+class _LLMCallResult:
+    """Holds latency + token usage from a single LLM call."""
+
+    __slots__ = ("latency_ms", "input_tokens", "output_tokens")
+
+    def __init__(self, latency_ms: float, input_tokens: int = 0, output_tokens: int = 0):
+        self.latency_ms = latency_ms
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+async def _llm_call_latency(llm, query: str) -> _LLMCallResult:
+    """Real or simulated LLM call with latency + token tracking."""
     try:
         from langchain_core.messages import HumanMessage
 
         start = time.time()
-        await llm.async_invoke([HumanMessage(content=query)], timeout=10.0)
-        return (time.time() - start) * 1000
+        response = await llm.async_invoke([HumanMessage(content=query)], timeout=10.0)
+        elapsed_ms = (time.time() - start) * 1000
+
+        # Extract real token counts when available
+        input_tokens = 0
+        output_tokens = 0
+        usage_metadata = getattr(response, "usage_metadata", None) or {}
+        if usage_metadata:
+            input_tokens = usage_metadata.get("input_tokens", 0)
+            output_tokens = usage_metadata.get("output_tokens", 0)
+
+        return _LLMCallResult(elapsed_ms, input_tokens, output_tokens)
     except Exception:
-        # Simulated fallback
+        # Simulated fallback with deterministic token estimates
         import random as _random
 
         _random.seed(hash(query) % (2**31))
         base_ms = 400 + len(query) * 2
-        return abs(base_ms + _random.gauss(0, base_ms * 0.2))
+        latency = abs(base_ms + _random.gauss(0, base_ms * 0.2))
+        return _LLMCallResult(latency, DEFAULT_INPUT_TOKENS_PER_QUERY, DEFAULT_OUTPUT_TOKENS_PER_QUERY)
 
 
 async def benchmark_ab_test():
@@ -127,14 +131,18 @@ async def benchmark_ab_test():
     a_start = time.time()
     a_llm_calls = 0
     a_total_latency = 0.0
+    a_input_tokens = 0
+    a_output_tokens = 0
 
     if llm_available and llm is not None:
         for i, q in enumerate(BENCHMARK_QUERIES):
-            latency_ms = await _llm_call_latency(llm, q)
+            result = await _llm_call_latency(llm, q)
             a_llm_calls += 1
-            a_total_latency += latency_ms
+            a_total_latency += result.latency_ms
+            a_input_tokens += result.input_tokens
+            a_output_tokens += result.output_tokens
             if (i + 1) % 10 == 0:
-                print(f"    {i + 1}/{query_count} (latency={latency_ms:.0f}ms)")
+                print(f"    {i + 1}/{query_count} (latency={result.latency_ms:.0f}ms)")
     else:
         # Simulated: each call takes ~500ms
         import random as _random
@@ -144,6 +152,8 @@ async def benchmark_ab_test():
             latency_ms = 500 + _random.random() * 300
             a_llm_calls += 1
             a_total_latency += latency_ms
+            a_input_tokens += DEFAULT_INPUT_TOKENS_PER_QUERY
+            a_output_tokens += DEFAULT_OUTPUT_TOKENS_PER_QUERY
             await asyncio.sleep(0.01)  # small delay to simulate
             if (i + 1) % 10 == 0:
                 print(f"    {i + 1}/{query_count} (simulated latency={latency_ms:.0f}ms)")
@@ -162,6 +172,8 @@ async def benchmark_ab_test():
     b_llm_calls = 0
     b_cache_hits = 0
     b_total_latency = 0.0
+    b_input_tokens = 0
+    b_output_tokens = 0
 
     for i, q in enumerate(BENCHMARK_QUERIES):
         cache_start = time.time()
@@ -177,12 +189,17 @@ async def benchmark_ab_test():
         else:
             # Cache miss: call LLM
             if llm_available and llm is not None:
-                latency_ms = await _llm_call_latency(llm, q)
+                llm_result = await _llm_call_latency(llm, q)
+                latency_ms = llm_result.latency_ms
+                b_input_tokens += llm_result.input_tokens
+                b_output_tokens += llm_result.output_tokens
             else:
                 import random as _random
 
                 _random.seed(hash(q) % (2**31))
                 latency_ms = 500 + _random.random() * 300
+                b_input_tokens += DEFAULT_INPUT_TOKENS_PER_QUERY
+                b_output_tokens += DEFAULT_OUTPUT_TOKENS_PER_QUERY
             b_llm_calls += 1
             b_total_latency += latency_ms
 
@@ -221,16 +238,22 @@ async def benchmark_ab_test():
     print("  └────────────┴───────────┴───────────┴────────────────┘")
     print()
 
-    # Estimate cost (assuming $0.002 per 1K tokens, ~200 tokens per query)
-    AVG_TOKENS_PER_QUERY = 200
-    COST_PER_1K_TOKENS = 0.002
-    a_cost = a_llm_calls * AVG_TOKENS_PER_QUERY / 1000 * COST_PER_1K_TOKENS
-    b_cost = b_llm_calls * AVG_TOKENS_PER_QUERY / 1000 * COST_PER_1K_TOKENS
+    # Cost estimation using Qwen3-8B separated pricing (consistent with benchmark_cost.py)
+    a_input_cost = a_input_tokens / 1000 * COST_PER_1K_TOKENS["input"]
+    a_output_cost = a_output_tokens / 1000 * COST_PER_1K_TOKENS["output"]
+    a_cost = a_input_cost + a_output_cost
+
+    b_input_cost = b_input_tokens / 1000 * COST_PER_1K_TOKENS["input"]
+    b_output_cost = b_output_tokens / 1000 * COST_PER_1K_TOKENS["output"]
+    b_cost = b_input_cost + b_output_cost
+
     cost_savings = ((a_cost - b_cost) / a_cost * 100) if a_cost > 0 else 0
 
-    print(f"  Estimated cost (${COST_PER_1K_TOKENS}/1K tokens, ~{AVG_TOKENS_PER_QUERY} tok/query):")
-    print(f"    Variant A (no cache):  ${a_cost:.4f}")
-    print(f"    Variant B (with cache): ${b_cost:.4f}")
+    print("  Estimated cost (Qwen3-8B @ 硅基流动):")
+    print(f"    Input pricing:  ${COST_PER_1K_TOKENS['input']}/1K tokens")
+    print(f"    Output pricing: ${COST_PER_1K_TOKENS['output']}/1K tokens")
+    print(f"    Variant A (no cache):  {a_input_tokens} in + {a_output_tokens} out = ${a_cost:.4f}")
+    print(f"    Variant B (with cache): {b_input_tokens} in + {b_output_tokens} out = ${b_cost:.4f}")
     print(f"    Cost savings:           {cost_savings:.1f}%")
     print()
 
@@ -241,14 +264,19 @@ async def benchmark_ab_test():
         "task": "3.5",
         "config": {
             "queries_count": query_count,
-            "avg_tokens_per_query": AVG_TOKENS_PER_QUERY,
+            "model": "Qwen3-8B",
+            "provider": "siliconflow",
             "cost_per_1k_tokens": COST_PER_1K_TOKENS,
             "llm_available": llm_available,
         },
         "variant_a_no_cache": {
             "llm_calls": a_llm_calls,
+            "total_input_tokens": a_input_tokens,
+            "total_output_tokens": a_output_tokens,
             "total_duration_s": round(a_elapsed, 3),
             "avg_latency_ms": round(a_avg_latency, 2),
+            "input_cost": round(a_input_cost, 6),
+            "output_cost": round(a_output_cost, 6),
             "estimated_cost": round(a_cost, 6),
             "total_latency_ms": round(a_total_latency, 2),
         },
@@ -256,8 +284,12 @@ async def benchmark_ab_test():
             "llm_calls": b_llm_calls,
             "cache_hits": b_cache_hits,
             "hit_rate_pct": round(hit_rate, 2),
+            "total_input_tokens": b_input_tokens,
+            "total_output_tokens": b_output_tokens,
             "total_duration_s": round(b_elapsed, 3),
             "avg_latency_ms": round(b_avg_latency, 2),
+            "input_cost": round(b_input_cost, 6),
+            "output_cost": round(b_output_cost, 6),
             "estimated_cost": round(b_cost, 6),
             "total_latency_ms": round(b_total_latency, 2),
         },

@@ -1,10 +1,12 @@
 # v6.0 发布说明 — Qdrant 向量数据库迁移
 
-**发布日期**：2026-06-20
+**发布日期**：2026-06-20 | **当前版本**：v6.3
+
+> **历史文档说明**：本文档记录 v6.0 Qdrant 迁移发布时的原始状态，仅供历史参考。当前系统已演进至 v6.3，ChromaDB 遗留代码（`legacy_chroma.py`）和并行运行模式已完全移除。生产环境仅使用 `VECTOR_DB_MODE=qdrant_only`。有关完整版本历史，请参阅 `docs/reports/releases/changelog.md`。
 
 ## 概述
 
-本版本将核心 RAG 知识库从 ChromaDB 迁移到 Qdrant，实现了更高的并发性能、独立部署能力和生产环境可靠性。同时提供平滑迁移路径，支持并行运行模式，确保零宕机切换。
+本版本将核心 RAG 知识库从 ChromaDB 迁移到 Qdrant，实现了更高的并发性能、独立部署能力和生产环境可靠性。
 
 ## 新功能
 
@@ -22,9 +24,8 @@
 
 ### 并行运行模式
 
-- `VECTOR_DB_MODE=parallel`：同时运行 ChromaDB + Qdrant，适用于灰度切换
-- `VECTOR_DB_MODE=chroma_legacy`：保持旧模式（默认，兼容现有部署）
-- `VECTOR_DB_MODE=qdrant_only`：纯 Qdrant 模式（生产推荐）
+- `VECTOR_DB_MODE=qdrant_only`：纯 Qdrant 模式（v6.3 起唯一选择，ChromaDB 并行/遗留模式已移除）
+- （v6.3 移除：`parallel` 和 `chroma_legacy` 模式）
 
 ### 兼容 API 层
 
@@ -36,8 +37,10 @@
 
 | 操作 | 文件 | 说明 |
 |------|------|------|
-| 新建 | `rag/qdrant_knowledge_base.py` | Qdrant 知识库核心实现 |
-| 新建 | `rag/legacy_chroma.py` | ChromaDB 遗留兼容层 |
+| 新建 | `rag/qdrant_knowledge_base.py` | Qdrant 知识库核心实现（v6.1 起集成 BM25 混合检索） |
+| 新建 | `rag/api_embedding.py` | v6.3 异步 Embedding API 客户端 |
+| 新建 | `rag/bm25_retriever.py` | BM25 关键词检索器（v6.1 起已集成到 RRF 融合排序） |
+| 新建 | `rag/seed_data.py` | 种子数据生成 |
 | 新建 | `scripts/migrate_chroma_to_qdrant.py` | 数据迁移脚本 |
 | 新建 | `tests/unit/test_qdrant_knowledge_base.py` | Qdrant 单元测试（~15 tests） |
 | 新建 | `tests/unit/test_migration_compat.py` | 兼容性测试（10+ tests） |
@@ -57,7 +60,7 @@
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 QDRANT_GRPC_PORT=6334
-VECTOR_DB_MODE=chroma_legacy  # parallel | qdrant_only | chroma_legacy
+VECTOR_DB_MODE=qdrant_only  # 仅使用 Qdrant（v6.3 起唯一有效值）
 ```
 
 ## 升级指南
@@ -93,10 +96,11 @@ make dev
 
 ## 回退方案
 
-若 Qdrant 连接失败，`CosmeticsKnowledgeBase.available` 自动为 False，检索降级返回空结果。可设置 `VECTOR_DB_MODE=chroma_legacy` 回退到 ChromaDB。
+若 Qdrant 连接失败，`CosmeticsKnowledgeBase.available` 自动为 False，检索降级返回空结果。系统以降级模式继续运行（纯 LLM 回复，不依赖 RAG 检索）。
 
 ## 依赖变更
 
 - 新增：`qdrant-client>=1.12.0`
-- 新增：`sentence-transformers>=2.2.0`（原为 ChromaDB 间接依赖）
-- 移除：`chromadb>=0.5.0`（保留在 legacy 模式中可选安装）
+- 新增（v6.3）：`httpx>=0.27.0`（异步 Embedding API）
+- 移除（v6.3）：`chromadb>=0.5.0`
+- 移除（v6.3）：`sentence-transformers>=2.2.0`（替换为 API 调用）

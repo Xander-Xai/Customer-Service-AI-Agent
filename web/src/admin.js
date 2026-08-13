@@ -27,6 +27,7 @@ import {
 } from './admin-knowledge.js';
 import {
   handleCreatePrompt,
+  initVoiceSettings,
   loadAuditLog,
   loadFeedbackStats,
   loadMetricsStats,
@@ -134,6 +135,7 @@ const TOKEN = localStorage.getItem('token');
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
   initSettingsPanel();
+  initVoiceSettings();
 
   if (!TOKEN) {
     window.location.href = '/login.html';

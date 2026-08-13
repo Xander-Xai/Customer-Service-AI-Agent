@@ -72,6 +72,7 @@ export async function reseedKnowledge() {
 
 /** 从 ERP 同步知识库 */
 export async function syncFromErp() {
+  if (!confirm('确定从 ERP 同步？这会覆盖现有产品数据。')) return;
   showToast('正在从 ERP 同步...', 'success');
   try {
     const data = await syncKnowledge();

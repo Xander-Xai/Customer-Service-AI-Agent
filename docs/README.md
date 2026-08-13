@@ -35,7 +35,7 @@
 - LLM 提供商切换 → [operations/llm-provider-switch.md](operations/llm-provider-switch.md)
 - E2E 验证 → [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md)
 - 生产就绪检查 → [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)
-- 当前代码/文档对齐记录 → [reports/plans/2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md)
+- 当前代码/文档对齐记录 → [reports/plans/2026-06-25-v6.2-code-doc-alignment.md](reports/plans/2026-06-25-v6.2-code-doc-alignment.md)（最新：v6.2 全量前后端联调 + 生产就绪修复 + 文档同步）
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
 ### 👑 管理者
@@ -68,7 +68,7 @@
 
 | 文件 | 说明 | 读者 |
 |---|---|---|
-| [architecture-design.md](design/architecture-design.md) | 四层状态机、8 个 Agent、5 种协作模式 | 开发者、新人 |
+| [architecture-design.md](design/architecture-design.md) | 四层状态机、9 个 Agent、5 种协作模式 | 开发者、新人 |
 | [security.md](design/security.md) | 安全架构、威胁模型、认证方案 | 开发者、审计者 |
 | [prompt-engineering.md](design/prompt-engineering.md) | Prompt 策略和模式 | 开发者 |
 | [governance-audit.md](design/governance-audit.md) | 治理审计报告 | 审计者 |
@@ -188,9 +188,10 @@
 
 | 文件 | 说明 |
 |---|---|
-| [frontend-repair-plan.md](reports/plans/frontend-repair-plan.md) | 前端修复计划 |
-| [2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md) | 当前代码与文档对齐记录 |
-| [2025-06-15-audit-fixes.md](reports/plans/2025-06-15-audit-fixes.md) | 审计修复实施计划 |
+| [2026-06-25-code-doc-alignment.md](reports/plans/2026-06-25-code-doc-alignment.md) | 2026-06-25 第二轮全量前后端联调对齐复核 |
+| [2026-06-25-v6.2-code-doc-alignment.md](reports/plans/2026-06-25-v6.2-code-doc-alignment.md) | 2026-06-25 v6.2 全量前后端联调 + 生产就绪修复 + 文档同步 |
+| [2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md) | 2026-06-23 代码与文档对齐记录（历史） |
+| [2026-06-22-code-doc-alignment.md](reports/plans/2026-06-22-code-doc-alignment.md) | 2026-06-22 代码与文档对齐记录（历史） |
 
 ---
 
@@ -249,4 +250,4 @@ draft   design/   archive/
 
 ---
 
-*最后更新：2026-06-23*
+*最后更新：2026-06-25（v6.3 前后端联调修复 + 生产就绪加固 + 文档全面同步）*

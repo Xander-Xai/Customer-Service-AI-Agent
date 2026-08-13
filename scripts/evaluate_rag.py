@@ -4,7 +4,7 @@ RAG 检索质量评估脚本（v6.1 升级版）
 基于 500+ 基准查询，使用 expected_doc_ids 精确评估。
 
 评估指标：Recall@3, Precision@3, MRR（Mean Reciprocal Rank）
-分组维度：difficulty（easy/medium/hard），category（成分知识/产品推荐/使用指导/售后问题）
+分组维度：difficulty（easy/medium/hard），category（成分知识/产品推荐/使用指导/售后问题/投诉处理）
 
 用法：
     python3 scripts/evaluate_rag.py
@@ -27,35 +27,25 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-# ---- 延迟导入，支持 Qdrant 不可用时的回退 ----
+# ---- 延迟导入 ----
 QDRANT_AVAILABLE = False
-CHROMA_AVAILABLE = False
 CosmeticsKnowledgeBase = None
 
 
 def _resolve_kb():
-    """尝试导入 QdrantKnowledgeBase，失败时回退到 ChromaKnowledgeBase"""
-    global CosmeticsKnowledgeBase, QDRANT_AVAILABLE, CHROMA_AVAILABLE
+    """尝试导入 QdrantKnowledgeBase"""
+    global CosmeticsKnowledgeBase, QDRANT_AVAILABLE
 
     try:
         from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
         CosmeticsKnowledgeBase = QdrantKnowledgeBase
         QDRANT_AVAILABLE = True
-        return
     except ImportError:
-        pass
+        print("  [ERROR] QdrantKnowledgeBase 导入失败")
+        sys.exit(1)
     except Exception as e:
-        print(f"  [WARN] QdrantKnowledgeBase 导入失败: {e}")
-
-    try:
-        from rag.legacy_chroma import ChromaKnowledgeBase
-
-        CosmeticsKnowledgeBase = ChromaKnowledgeBase
-        CHROMA_AVAILABLE = True
-        print("  [INFO] 使用 ChromaKnowledgeBase 回退")
-    except ImportError:
-        print("  [ERROR] 既无法导入 QdrantKnowledgeBase 也无法导入 ChromaKnowledgeBase")
+        print(f"  [FATAL] 知识库初始化失败: {e}")
         sys.exit(1)
 
 
@@ -153,13 +143,13 @@ async def evaluate_rag() -> dict:
 
     print("=" * 76)
     print("  RAG 检索质量评估报告 (v6.1)")
-    print("  500 基准查询 | 4 类评估 | 3 级难度 | 4 维度指标")
+    print("  500 基准查询 | 5 类评估 | 3 级难度 | 4 维度指标")
     print("=" * 76)
     print()
 
     # 0. 解析 KB
     _resolve_kb()
-    kb_name = "QdrantKnowledgeBase" if QDRANT_AVAILABLE else "ChromaKnowledgeBase"
+    kb_name = "QdrantKnowledgeBase"
 
     # 1. 加载基准数据
     benchmark = load_benchmark()
@@ -175,21 +165,11 @@ async def evaluate_rag() -> dict:
 
     # 2. 初始化知识库
     print(f"[2/5] 初始化知识库 ({kb_name})...")
-    if QDRANT_AVAILABLE:
-        try:
-            kb = CosmeticsKnowledgeBase(host="localhost", port=6333)
-        except Exception:
-            print("  [WARN] Qdrant 连接失败，使用 ChromaKnowledgeBase 回退")
-            try:
-                from rag.legacy_chroma import ChromaKnowledgeBase as FallbackKB
-
-                kb = FallbackKB()
-                kb_name = "ChromaKnowledgeBase(ephemeral)"
-            except ImportError:
-                print("  [FATAL] 无可用知识库实现")
-                sys.exit(1)
-    else:
-        kb = CosmeticsKnowledgeBase()
+    try:
+        kb = CosmeticsKnowledgeBase(host="localhost", port=6333)
+    except Exception:
+        print("  [FATAL] Qdrant 连接失败")
+        sys.exit(1)
     _resolve_seed_data(kb)
 
     pk_count = kb.get_collection_count("product_knowledge")
@@ -316,7 +296,7 @@ async def evaluate_rag() -> dict:
     for r in results:
         cat_group.setdefault(r["category"], []).append(r)
 
-    for cat in ["成分知识", "产品推荐", "使用指导", "售后问题"]:
+    for cat in ["成分知识", "产品推荐", "使用指导", "售后问题", "投诉处理"]:
         grp = cat_group.get(cat, [])
         if not grp:
             continue

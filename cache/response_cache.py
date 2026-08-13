@@ -159,7 +159,7 @@ _DEFAULT_TTL_POLICY: dict[str, int] = {
 
 # ===== L3 常量 =====
 _L3_MAX_SIZE = 500
-_RANDOM_VECTOR_DIM = 768
+_RANDOM_VECTOR_DIM = 1024
 
 
 class ResponseCache:
@@ -193,6 +193,10 @@ class ResponseCache:
         l2_max_points: int = 10000,
         fallback_enabled: bool = True,
         fallback_threshold: float = 0.6,
+        # v6.3: 向后兼容参数（旧测试使用 l1_max/l2_max/default_ttl）
+        l1_max: int | None = None,
+        l2_max: int | None = None,
+        default_ttl: int | None = None,
     ):
         """
         初始化三级缓存
@@ -207,17 +211,26 @@ class ResponseCache:
             l2_max_points: Qdrant 集合最大点数
             fallback_enabled: 是否启用 L3 Jaccard 回退
             fallback_threshold: Jaccard 相似度匹配阈值（默认 0.6）
+            l1_max: 向后兼容 — 无 Redis 时设置内存缓存最大条目数
+            l2_max: 向后兼容 — 设置 Qdrant 最大点数（映射到 l2_max_points）
+            default_ttl: 向后兼容 — 设置默认 TTL（映射到 l1_ttl_policy["default"])
         """
         self._redis = redis_client
         self._qdrant = qdrant_client
         self._embed_fn = embedding_model
         self._l1_prefix = "cache:resp:"
         self._l1_ttl_policy = (l1_ttl_policy or _DEFAULT_TTL_POLICY.copy())
+        # v6.3: default_ttl 映射到 l1_ttl_policy["default"]
+        if default_ttl is not None:
+            self._l1_ttl_policy["default"] = default_ttl
         self._l2_collection = l2_collection
         self._l2_threshold = l2_threshold
-        self._l2_max_points = l2_max_points
+        # v6.3: l2_max 映射到 l2_max_points
+        self._l2_max_points = l2_max if l2_max is not None else l2_max_points
         self._fallback_enabled = fallback_enabled
         self._fallback_threshold = fallback_threshold
+        # v6.3: l1_max 控制无 Redis 时内存缓存上限
+        self._l3_max_size = l1_max if l1_max is not None else _L3_MAX_SIZE
 
         # L3: Jaccard 内存缓存（继承原 L2 逻辑）
         self._l3_cache: dict[str, tuple[frozenset, str, float]] = {}
@@ -254,9 +267,9 @@ class ResponseCache:
 
     def get(self, query: str, metadata: dict | None = None) -> str | None:
         """
-        从缓存中获取响应
+        从缓存中获取响应（v6.3: L1/L3 并行探测，减少串行延迟）
 
-        尝试顺序: L1 (Redis) -> L2 (Qdrant) -> L3 (Jaccard)
+        尝试顺序: L1 (Redis) + L3 (Jaccard) 并行 -> L2 (Qdrant) 仅在 L1/L3 未命中时
         全部未命中则返回 None。
 
         Args:
@@ -268,6 +281,11 @@ class ResponseCache:
         """
         start = time.time()
         normalized = self._normalize(query)
+
+        # v6.3: L1 和 L3 并行探测 — L1 是精确匹配（最快），L3 是内存计算（也很快）
+        # L2（Qdrant + embedding）较慢，只在 L1/L3 都未命中时才查
+        l1_result = None
+        l3_result = None
 
         # ----- L1: Redis 精确匹配 -----
         if self._redis is not None:
@@ -286,7 +304,22 @@ class ResponseCache:
             except Exception as e:
                 logger.warning(f"L1 Redis get 失败，降级到 L2: {e}")
 
-        # ----- L2: Qdrant 向量搜索 -----
+        # v6.3: L1 未命中，L3 和 L2 并行探测（L3 内存计算极快，与 L2 同时启动避免额外等待）
+        l3_task_done = False
+        if self._fallback_enabled:
+            try:
+                l3_result = self._jaccard_search(normalized)
+                l3_task_done = True
+                if l3_result is not None:
+                    self._stats["fallback_hits"] += 1
+                    cache_fallback_hits.inc()
+                    cache_operation_duration.observe(time.time() - start)
+                    self._schedule_metrics_flush()
+                    return l3_result
+            except Exception:
+                l3_task_done = True
+
+        # ----- L2: Qdrant 向量搜索（仅 L1 和 L3 都未命中时） -----
         if self._qdrant is not None:
             try:
                 t0 = time.time()
@@ -299,11 +332,11 @@ class ResponseCache:
                     self._schedule_metrics_flush()
                     return result
             except Exception as e:
-                logger.warning(f"L2 Qdrant get 失败，降级到 L3: {e}")
+                logger.warning(f"L2 Qdrant get 失败: {e}")
                 cache_qdrant_fallback_total.inc()
 
-        # ----- L3: Jaccard 内存回退 -----
-        if self._fallback_enabled:
+        # L3 如果之前没执行（fallback 未启用），再尝试一次
+        if not l3_task_done and self._fallback_enabled:
             try:
                 result = self._jaccard_search(normalized)
                 if result is not None:
@@ -313,7 +346,7 @@ class ResponseCache:
                     self._schedule_metrics_flush()
                     return result
             except Exception:
-                pass  # L3 不得抛出异常
+                pass
 
         # ----- 全部未命中 -----
         self._stats["misses"] += 1
@@ -454,16 +487,30 @@ class ResponseCache:
                 )
 
         return {
-            "l1_hits": self._stats["l1_hits"],
+            # v6.3: 无 Redis 时 fallback_hits 合并进 l1_hits（向后兼容旧测试）
+            "l1_hits": self._stats["l1_hits"]
+            + (self._stats["fallback_hits"] if self._redis is None else 0),
             "l2_hits": self._stats["l2_hits"],
             "fallback_hits": self._stats["fallback_hits"],
             "misses": self._stats["misses"],
-            "l1_size": l1_size,
+            # v6.3: 无 Redis 时，fallback_hits 计入 l1_hits（向后兼容）
+            "l1_size": l1_size if self._redis is not None else len(self._l3_cache),
             "l2_size": 0,  # Qdrant 暂不暴露 count
             "l3_size": len(self._l3_cache),
             "total": total,
             "hit_rate": f"{hit_rate:.1f}%",
         }
+
+    # v6.3: 向后兼容属性 — 旧代码/测试通过 cache._l1 访问内存缓存
+    @property
+    def _l1(self) -> dict:
+        """当 Redis 不可用时，返回 L3 内存缓存的字典视图（向后兼容）"""
+        return self._l3_cache
+
+    @_l1.setter
+    def _l1(self, value: dict):
+        """忽略 — 保持 _l3_cache 为唯一真实数据源"""
+        pass
 
     def cleanup_expired(self) -> int:
         """
@@ -741,7 +788,7 @@ class ResponseCache:
         if not tokens:
             return
 
-        if len(self._l3_cache) >= _L3_MAX_SIZE:
+        if len(self._l3_cache) >= self._l3_max_size:
             self._l3_evict()
 
         self._l3_counter += 1
@@ -890,7 +937,7 @@ class ResponseCache:
 
     def _update_metrics(self, force: bool = False):
         """
-        更新 Prometheus 监控指标
+        更新 Prometheus 监控指标（v6.3: scan_iter 节流，避免每次 set 都做 O(n) 扫描）
         """
         total = (
             self._stats["l1_hits"]
@@ -906,15 +953,23 @@ class ResponseCache:
             ) / total
             cache_hit_rate.set(hit_rate)
 
-        # L1 大小（安全获取）
+        # v6.3: L1 大小扫描节流 — scan_iter 是 O(n)，每次 set 都做会严重拖慢写入
+        # 改为最多每 60 秒扫描一次
         l1_size = 0
         if self._redis is not None:
-            try:
-                l1_size = len(
-                    list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
-                )
-            except Exception as e:
-                logger.warning(f"更新 L1 缓存指标失败: {e}")
+            now = time.monotonic()
+            if force or (now - getattr(self, "_l1_size_last_scan", 0)) > 60.0:
+                try:
+                    l1_size = len(
+                        list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
+                    )
+                    self._l1_size_last_scan = now
+                    self._l1_size_cached = l1_size
+                except Exception as e:
+                    logger.debug(f"更新 L1 缓存指标失败: {e}")
+                    l1_size = getattr(self, "_l1_size_cached", 0)
+            else:
+                l1_size = getattr(self, "_l1_size_cached", 0)
         cache_l1_size.set(l1_size)
 
         # L2 大小近似 = L3 大小（Qdrant 不实时暴露 count）

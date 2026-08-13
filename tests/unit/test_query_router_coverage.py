@@ -240,7 +240,8 @@ class TestRoute:
         # "退款" 命中 billing 规则，单意图匹配，置信度 0.75 → 路由捷径
         result = await self.router.route("退款")
         assert result.query_type == "billing"
-        assert result.raw_llm_result == "rule_shortcut"  # 走了捷径，没调 LLM
+        # v6.1: raw_llm_result 字段名规则捷径标记变更为 "no_llm"（旧: "rule_shortcut"）
+        assert result.raw_llm_result in ("no_llm", "rule_shortcut")  # 走了捷径，没调 LLM
 
     @pytest.mark.asyncio
     async def test_route_llm_high_confidence_no_override(self):

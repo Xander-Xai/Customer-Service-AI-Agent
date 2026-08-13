@@ -666,22 +666,22 @@ class TestCosmeticsKnowledgeBase:
         assert not (kb._clip_enabled and kb._clip_embed_fn is not None)
 
     def test_create_embedding_function(self):
-        """_create_embedding_function 创建 embedding（Mock 避免模型下载）"""
+        """_create_embedding_function 创建 API embedding（Mock 避免真实调用）"""
         from unittest.mock import MagicMock, patch
 
-        mock_st_cls = MagicMock()
-        mock_st_instance = MagicMock()
-        mock_st_cls.return_value = mock_st_instance
-        mock_st_instance.get_sentence_embedding_dimension.return_value = 768
+        with (
+            patch("core.config.EMBEDDING_API_KEY", "sk-test-key"),
+            patch("rag.api_embedding.ApiEmbedding") as mock_api_cls,
+        ):
+            mock_api_instance = MagicMock()
+            mock_api_cls.return_value = mock_api_instance
 
-        fake_st_mod = MagicMock()
-        fake_st_mod.SentenceTransformer = mock_st_cls
-
-        with patch.dict("sys.modules", {"sentence_transformers": fake_st_mod}):
             from rag.knowledge_base import CosmeticsKnowledgeBase
+
             ef = CosmeticsKnowledgeBase._create_embedding_function()
             assert ef is not None
-            assert ef.get_sentence_embedding_dimension() == 768
+            assert ef == mock_api_instance
+            mock_api_cls.assert_called_once()
 
     def test_parse_query_result(self):
         """_parse_query_result 解析 Qdrant 结果"""
@@ -890,141 +890,32 @@ class TestQueryRewriter:
 
 
 class TestReranker:
-    """rag/reranker.py 覆盖"""
+    """rag/reranker.py 覆盖 — BM25Reranker 已在 v7.1 移除，仅保留 API Reranker"""
 
-    def test_bm25_rerank_basic(self):
-        """BM25 基本重排序：最相关的排第一"""
-        from rag.reranker import BM25Reranker
+    def test_api_reranker_not_available_fallback(self):
+        """API Key 未配置时 available 为 False"""
+        from rag.reranker import ApiReranker
 
-        reranker = BM25Reranker()
-        results = [
-            {"content": "玻尿酸保湿面霜功效", "distance": 0.5},
-            {"content": "烟酰胺精华美白提亮", "distance": 0.3},
-            {"content": "烟酰胺是维生素B3的一种，有美白功效", "distance": 0.8},
-        ]
-        reranked = reranker.rerank("烟酰胺", results, top_k=3)
-        assert len(reranked) == 3
-        # 包含最多"烟酰胺"的文档应排第一
-        assert "烟酰胺" in reranked[0]["content"]
+        reranker = ApiReranker(api_key="")
+        assert reranker.available is False
+        results = [{"content": "test", "distance": 0.5}]
+        reranked = reranker.rerank("query", results, top_k=1)
+        assert len(reranked) == 1
 
-    def test_bm25_rerank_empty_results(self):
-        """空结果列表处理"""
-        from rag.reranker import BM25Reranker
+    def test_api_reranker_empty_results(self):
+        """API Reranker 空结果处理"""
+        from rag.reranker import ApiReranker
 
-        reranker = BM25Reranker()
-        reranked = reranker.rerank("烟酰胺", [], top_k=3)
-        assert reranked == []
-
-    def test_bm25_rerank_top_k_limit(self):
-        """top_k 限制返回数量"""
-        from rag.reranker import BM25Reranker
-
-        reranker = BM25Reranker()
-        results = [{"content": f"文档{i} 烟酰胺", "distance": 0.1 * i} for i in range(10)]
-        reranked = reranker.rerank("烟酰胺", results, top_k=3)
-        assert len(reranked) == 3
-
-    def test_bm25_rerank_adds_score(self):
-        """重排序后每条结果添加 rerank_score"""
-        from rag.reranker import BM25Reranker
-
-        reranker = BM25Reranker()
-        results = [
-            {"content": "烟酰胺精华", "distance": 0.5},
-            {"content": "玻尿酸保湿", "distance": 0.3},
-        ]
-        reranked = reranker.rerank("烟酰胺", results, top_k=2)
-        for r in reranked:
-            assert "rerank_score" in r
-
-    def test_bm25_rerank_keyword_density_matters(self):
-        """关键词出现频率高的文档得分更高"""
-        from rag.reranker import BM25Reranker
-
-        reranker = BM25Reranker()
-        results = [
-            {"content": "其他产品介绍", "distance": 0.1},
-            {"content": "烟酰胺 烟酰胺 烟酰胺 功效成分", "distance": 0.9},
-        ]
-        reranked = reranker.rerank("烟酰胺", results, top_k=2)
-        # 包含更多关键词的文档应排在前面
-        assert "烟酰胺" in reranked[0]["content"]
-
-    def test_bm25_rerank_empty_query_returns_original(self):
-        """空查询返回原始顺序（截取 top_k）"""
-        from rag.reranker import BM25Reranker
-
-        reranker = BM25Reranker()
-        results = [
-            {"content": "文档A", "distance": 0.1},
-            {"content": "文档B", "distance": 0.2},
-        ]
-        reranked = reranker.rerank("", results, top_k=2)
-        assert len(reranked) == 2
-
-    def test_bm25_tokenize_chinese_and_english(self):
-        """_tokenize 分词：中文按字、英文按词"""
-        from rag.reranker import BM25Reranker
-
-        tokens = BM25Reranker._tokenize("烟酰胺 vitaminC 123")
-        # 兼容 jieba 或单字切分
-        assert ("烟酰胺" in tokens) or ("烟" in tokens and "酰" in tokens and "胺" in tokens)
-        assert "vitaminc" in tokens  # 小写
-        assert "123" in tokens
-
-    def test_bm25_tokenize_empty_string(self):
-        """空字符串分词"""
-        from rag.reranker import BM25Reranker
-
-        tokens = BM25Reranker._tokenize("")
-        assert tokens == []
-
-    def test_cross_encoder_not_available_fallback(self):
-        """CrossEncoder 不可用时 available 为 False"""
-        from rag.reranker import CrossEncoderReranker
-
-        # sentence-transformers 大概率未安装
-        reranker = CrossEncoderReranker()
-        if not reranker.available:
-            results = [{"content": "test", "distance": 0.5}]
-            reranked = reranker.rerank("query", results, top_k=1)
-            assert len(reranked) == 1
-
-    def test_cross_encoder_rerank_empty_results(self):
-        """CrossEncoder 空结果处理"""
-        from rag.reranker import CrossEncoderReranker
-
-        reranker = CrossEncoderReranker()
+        reranker = ApiReranker(api_key="")
         reranked = reranker.rerank("query", [], top_k=3)
         assert reranked == []
 
     def test_create_reranker_factory_default(self):
-        """工厂函数默认尝试 CrossEncoder，不可用时回退 BM25"""
-        from rag.reranker import BM25Reranker, CrossEncoderReranker, create_reranker
+        """工厂函数返回 ApiReranker"""
+        from rag.reranker import ApiReranker, create_reranker
 
         reranker = create_reranker()
-        assert isinstance(reranker, (CrossEncoderReranker, BM25Reranker))
-
-    def test_create_reranker_factory_bm25_only(self):
-        """工厂函数强制 BM25"""
-        from rag.reranker import BM25Reranker, create_reranker
-
-        reranker = create_reranker(prefer_cross_encoder=False)
-        assert isinstance(reranker, BM25Reranker)
-
-    def test_bm25_rerank_score_ordering(self):
-        """分数应降序排列"""
-        from rag.reranker import BM25Reranker
-
-        reranker = BM25Reranker()
-        results = [
-            {"content": "无关文档", "distance": 0.1},
-            {"content": "烟酰胺美白精华", "distance": 0.5},
-            {"content": "烟酰胺", "distance": 0.3},
-        ]
-        reranked = reranker.rerank("烟酰胺", results, top_k=3)
-        scores = [r["rerank_score"] for r in reranked]
-        assert scores == sorted(scores, reverse=True)
+        assert isinstance(reranker, ApiReranker)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

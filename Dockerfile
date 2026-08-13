@@ -36,8 +36,8 @@ COPY . .
 
 # 创建非 root 用户 + 数据目录
 RUN useradd --create-home --shell /bin/bash appuser && \
-    mkdir -p /app/logs /app/data /app/chroma_db && \
-    chown -R appuser:appuser /app/logs /app/data /app/chroma_db
+    mkdir -p /app/logs /app/data && \
+    chown -R appuser:appuser /app/logs /app/data
 
 USER appuser
 

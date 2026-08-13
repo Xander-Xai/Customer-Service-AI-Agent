@@ -354,6 +354,11 @@
       padding: 0 16px 8px;
       flex-shrink: 0;
     }
+    .drag-over {
+      border: 2px dashed var(--accent, #4a9eff) !important;
+      background: rgba(74, 158, 255, 0.08) !important;
+      border-radius: var(--radius, 12px);
+    }
     .image-preview {
       position: relative;
       display: inline-flex;
@@ -392,6 +397,7 @@
       background: #d32f2f;
     }
   </style>
+  <script src="/static/vendor/dompurify.min.js"></script>
 </head>
 <body>
   <div class="widget-container" id="widgetRoot">
@@ -551,6 +557,8 @@
     // ── State ──
     let isSending = false;
     var pendingImage = null;
+    var sessionId = "";
+    var sessionToken = "";
 
     // ── Helpers ──
     function formatTime(d) {
@@ -573,6 +581,10 @@
       s = s.replace(/(<li>.*<\/li>\n?)+/g, "<ul>$&</ul>");
       // Newlines
       s = s.replace(/\n/g, "<br>");
+      // Sanitize with DOMPurify (XSS protection)
+      if (typeof DOMPurify !== "undefined") {
+        s = DOMPurify.sanitize(s, { ALLOWED_TAGS: ["strong", "em", "code", "li", "ul", "br"], ALLOWED_ATTR: [] });
+      }
       return s;
     }
 
@@ -634,13 +646,16 @@
           "X-API-Key": apiKey,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: query }),
+        body: JSON.stringify({ query: query, session_id: sessionId, session_token: sessionToken }),
       })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.json();
         })
         .then((data) => {
+          // Update session state from response
+          if (data.session_id) sessionId = data.session_id;
+          if (data.session_token) sessionToken = data.session_token;
           var text = data.response || data.message || data.reply || data.content || JSON.stringify(data);
           callback(text, false);
           callback(null, true);
@@ -727,7 +742,7 @@
           "Content-Type": "application/json",
           Accept: "text/event-stream",
         },
-        body: JSON.stringify({ query: query }),
+        body: JSON.stringify({ query: query, session_id: sessionId, session_token: sessionToken }),
       })
         .then((response) => {
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -735,6 +750,8 @@
           if (ct.indexOf("text/event-stream") === -1 && ct.indexOf("application/json") !== -1) {
             // Server returned JSON instead of SSE, treat as REST
             return response.json().then((data) => {
+              if (data.session_id) sessionId = data.session_id;
+              if (data.session_token) sessionToken = data.session_token;
               var text = data.response || data.message || data.reply || data.content || "";
               if (text) {
                 if (typingRow?.parentNode) typingRow.parentNode.removeChild(typingRow);
@@ -752,23 +769,37 @@
           function pump() {
             return reader.read().then((result) => {
               if (result.done) {
+                // Flush remaining buffer
+                const trimmed = buffer.trim();
+                if (trimmed.startsWith("data:")) {
+                  try {
+                    const parsed = JSON.parse(trimmed.slice(5).trim());
+                    if (parsed.type === "chunk" && parsed.content) onToken(parsed.content, false);
+                  } catch (_e) {}
+                }
                 onToken(null, true);
                 return;
               }
               buffer += decoder.decode(result.value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop();
-              for (let i = 0; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line?.startsWith("data:")) continue;
-                const data = line.slice(5).trim();
+              // SSE spec: events are delimited by blank lines (\n\n)
+              const parts = buffer.split("\n\n");
+              buffer = parts.pop() || "";
+              for (let i = 0; i < parts.length; i++) {
+                const eventBlock = parts[i].trim();
+                if (!eventBlock) continue;
+                // Extract data lines from the event block
+                const dataLines = eventBlock.split("\n")
+                  .filter(function(line) { return line.startsWith("data:"); })
+                  .map(function(line) { return line.slice(5).trim(); })
+                  .join("");
+                if (!dataLines) continue;
                 try {
-                  const parsed = JSON.parse(data);
+                  const parsed = JSON.parse(dataLines);
                   if (parsed.type === "done") { onToken(null, true); return; }
                   if (parsed.type === "error") { onToken(null, false, "sse_error"); return; }
                   if (parsed.type === "chunk" && parsed.content) onToken(parsed.content, false);
-                } catch (e) {
-                  if (data) onToken(data, false);
+                } catch (_e) {
+                  if (dataLines) onToken(dataLines, false);
                 }
               }
               return pump();
@@ -860,20 +891,30 @@
           mediaRecorder.onstop = async function() {
             var audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
             var formData = new FormData();
-            formData.append('audio', audioBlob, 'voice.webm');
+            formData.append('file', audioBlob, 'voice.webm');
+            formData.append('message', '');
+            formData.append('session_id', sessionId || '');
+            formData.append('session_token', sessionToken || '');
 
             try {
-              var resp = await fetch('/api/chat/voice', {
+              // v6.1: 语音上传到统一多模态端点
+              var resp = await fetch('/api/chat/multimodal', {
                 method: 'POST',
-                headers: { 'X-API-Key': apiKey },
+                headers: { 'X-API-Key': apiKey, 'file-type': 'voice' },
                 body: formData,
               });
               var data = await resp.json();
+              if (data.session_id) sessionId = data.session_id;
+              if (data.session_token) sessionToken = data.session_token;
               if (data.transcription) {
                 chatInput.value = data.transcription;
                 chatInput.focus();
                 // Trigger input event to enable send button and auto-resize
                 chatInput.dispatchEvent(new Event('input'));
+              }
+              // v6.1: multimodal endpoint returns AI response directly
+              if (data.response) {
+                addMessage("ai", renderMarkdown(data.response), formatTime(new Date()));
               }
             } catch (err) {
               console.error('语音上传失败:', err);
@@ -972,11 +1013,14 @@
 
       var formData = new FormData();
       formData.append('file', pendingImage.blob, pendingImage.name);
-      formData.append('query', query);
+      formData.append('message', query);
+      formData.append('session_id', sessionId || '');
+      formData.append('session_token', sessionToken || '');
 
-      fetch('/api/chat/file', {
+      // v6.1: 图片上传到统一多模态端点
+      fetch('/api/chat/multimodal', {
         method: 'POST',
-        headers: { 'X-API-Key': apiKey },
+        headers: { 'X-API-Key': apiKey, 'file-type': 'image' },
         body: formData,
       })
         .then(function(r) {
@@ -984,6 +1028,8 @@
           return r.json();
         })
         .then(function(data) {
+          if (data.session_id) sessionId = data.session_id;
+          if (data.session_token) sessionToken = data.session_token;
           if (typingRow && typingRow.parentNode) typingRow.parentNode.removeChild(typingRow);
           var text = data.response || data.message || data.reply || data.content || t.errorPrefix;
           addMessage("ai", renderMarkdown(text), formatTime(new Date()));
@@ -1038,6 +1084,50 @@
         previewImg.src = '';
         pendingImage = null;
       });
+
+      // v6.1: Drag & drop support for image upload
+      var chatInputEl = document.getElementById('chatInput');
+      var dropTarget = chatInputEl ? chatInputEl.closest('.widget-input-row') || chatInputEl.parentElement : null;
+      if (dropTarget) {
+        dropTarget.addEventListener('dragover', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.dataTransfer && e.dataTransfer.types.indexOf('Files') !== -1) {
+            dropTarget.classList.add('drag-over');
+          }
+        });
+        dropTarget.addEventListener('dragleave', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropTarget.classList.remove('drag-over');
+        });
+        dropTarget.addEventListener('drop', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropTarget.classList.remove('drag-over');
+          if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+          var file = e.dataTransfer.files[0];
+          if (!file.type.match(/^image\/(jpeg|png|webp)$/)) {
+            alert('仅支持 JPG/PNG/WebP 格式图片');
+            return;
+          }
+          if (file.size > 5 * 1024 * 1024) {
+            alert('图片大小不能超过 5MB');
+            return;
+          }
+          compressImage(file, 1024, 0.8).then(function(compressed) {
+            var reader = new FileReader();
+            reader.onload = function(ev) {
+              previewImg.src = ev.target.result;
+              imagePreviewArea.hidden = false;
+            };
+            reader.readAsDataURL(compressed);
+            pendingImage = { blob: compressed, name: file.name };
+          }).catch(function(err) {
+            console.error('拖拽图片处理失败:', err);
+          });
+        });
+      }
     }
   })();
   </script>

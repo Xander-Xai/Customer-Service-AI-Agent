@@ -8,17 +8,17 @@ import hmac
 import os
 import secrets
 import time
-import uuid
 from collections import defaultdict, deque
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from api.middleware.trace_middleware import TraceMiddleware
 from api.utils import check_admin_token, check_api_key, check_jwt_auth, is_authenticated
 from core.config import (
     DEV_MODE,
 )
-from core.logger import get_logger, set_trace_id
+from core.logger import get_logger
 
 logger = get_logger("api.middleware")
 
@@ -45,11 +45,11 @@ def get_redis_client():
     return _redis_client
 
 
-def _redis_rate_limit(client_ip: str, max_requests: int, window_seconds: int) -> bool:
-    """Redis 滑动窗口限流，返回 True 表示允许"""
+def _redis_rate_limit(client_ip: str, max_requests: int, window_seconds: int) -> bool | None:
+    """Redis 滑动窗口限流，返回 True 表示允许，False 表示拒绝，None 表示 Redis 不可用"""
     r = get_redis_client()
     if not r:
-        return False
+        return None
     try:
         now = time.time()
         key = f"csai:rate:{client_ip}"
@@ -61,7 +61,9 @@ def _redis_rate_limit(client_ip: str, max_requests: int, window_seconds: int) ->
         return result[1] <= max_requests
     except Exception as e:
         logger.debug(f"[Redis] 限流操作失败: {e}")
-        return False
+        # v6.3: 返回 None 表示 Redis 不可用，而非 False（拒绝）
+        # 避免因 Redis 连接异常导致所有请求被 429 拒绝
+        return None
 
 
 def setup_middleware(app: FastAPI):
@@ -138,11 +140,12 @@ def setup_middleware(app: FastAPI):
             return await call_next(request)
 
         # Redis 优先，失败则回退到内存限流
-        redis_ok = _redis_rate_limit(client_ip, _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW)
-        if get_redis_client() and redis_ok:
+        redis_result = _redis_rate_limit(client_ip, _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW)
+        if redis_result is True:
             return await call_next(request)
-        elif get_redis_client() and not redis_ok:
+        elif redis_result is False:
             return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
+        # redis_result is None: Redis unavailable, fall through to in-memory
 
         # v5.3: 防止内存无限增长 — 新 IP 且存储超限时直接放行
         if client_ip not in _rate_limit_store and len(_rate_limit_store) >= _RATE_LIMIT_STORE_MAX:
@@ -352,14 +355,7 @@ def setup_middleware(app: FastAPI):
         return response
 
     # ── 分布式追踪中间件 ──
-    @app.middleware("http")
-    async def trace_middleware(request: Request, call_next):
-        trace_id = request.headers.get("X-Trace-ID", uuid.uuid4().hex)
-        set_trace_id(trace_id)
-        request.state.trace_id = trace_id
-        response = await call_next(request)
-        response.headers["X-Trace-ID"] = trace_id
-        return response
+    app.add_middleware(TraceMiddleware)
 
     # ── 安全响应头 ──
     @app.middleware("http")
@@ -369,19 +365,25 @@ def setup_middleware(app: FastAPI):
         response = await call_next(request)
         response.headers["x-content-type-options"] = "nosniff"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        # v6.3: X-Frame-Options only for non-widget pages (widget needs iframe embedding)
+        is_widget = request.url.path.rstrip("/").lower() == "/widget.html"
+        if not is_widget:
+            response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
         # 仅对 HTML 页面设置 CSP（静态资源无需 CSP，避免 Lighthouse 误报）
         content_type = response.headers.get("content-type", "")
         if "text/html" in content_type:
+            # v6.3: widget.html 允许 iframe 嵌入，其他页面保持 frame-ancestors 'none'
+            is_widget = request.url.path.rstrip("/").lower() == "/widget.html"
+            frame_ancestors = "'self'" if is_widget else "'none'"
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; "
                 f"script-src 'self' 'nonce-{nonce}'; "
                 "style-src 'self' 'unsafe-inline'; "
                 "connect-src 'self'; "
                 "img-src 'self' data: blob:; "
-                "frame-ancestors 'none'"
+                f"frame-ancestors {frame_ancestors}"
             )
 
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"

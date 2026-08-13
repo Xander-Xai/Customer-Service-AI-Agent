@@ -8,8 +8,8 @@
 
 | 类型 | 数量 | 说明 |
 |------|------|------|
-| HTTP 路径 | 51 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
-| `/api/*` 业务路径 | 40+ | 认证、对话、会话、监控、知识库、告警、Prompt 管理等业务接口 |
+| HTTP 路径 | 55 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
+| `/api/*` 业务路径 | 49 | 认证、对话、多模态、会话、监控、知识库、缓存、告警、Prompt 管理等业务接口（共 50 个后端路由中 49 个位于 `/api/*` 下） |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话 |
 | HTML 页面 | 5 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html` |
 
@@ -56,13 +56,13 @@ ws.onmessage = (event) => {
 | `status` | 初始状态消息 | `{ type, content }` |
 | `progress` | 处理进度更新 | `{ type, content }` |
 | `thinking` | Agent 正在思考 | `{ type, content }` |
-| `tool_call` | 工具调用开始 | `{ type, name, arguments }` |
-| `tool_result` | 工具调用结果 | `{ type, name, result }` |
-| `rag_status` | RAG 检索阶段（改写→检索→重排→完成） | `{ type, status, detail }` |
-| `agent_switch` | Agent 切换 | `{ type, agent }` |
+| `tool_call` | 工具调用开始 | `{ type, name, args }` |
+| `tool_result` | 工具调用结果 | `{ type, name, summary }` |
+| `rag_status` | RAG 检索阶段（改写→检索→重排→完成） | `{ type, status, count }` |
+| `agent_switch` | Agent 切换 | `{ type, to }` |
 | `chunk` | 流式文本片段 | `{ type, content }` |
 | `content_complete` | 内容段完成 | `{ type, content }` |
-| `done` | 全部完成（含最终元数据） | `{ type, content, agent, mode, elapsed, cached, agents_used, session_id, session_token }` |
+| `done` | 全部完成（含最终元数据） | `{ type, content, agent, mode, elapsed, cached, agents_used, resolution_status, session_id, session_token }` |
 
 **WebSocket 安全特性：**
 - 每 IP 连接限制：`WS_MAX_CONNECTIONS_PER_IP=5`，超限返回 4029。
@@ -84,10 +84,36 @@ ws.onmessage = (event) => {
 | `POST` | `/api/chat/multimodal/stream` | 图片 + 文本 SSE 流式对话 | `sendChatStreamWithImage` |
 | `POST` | `/api/chat/voice` | 语音识别 + 对话 | `sendVoiceForm` |
 | `POST` | `/api/chat/file` | 文件上传对话（图片/视频/PDF/DOCX/文本，当前统一 `5MB` 上限） | `sendChatWithFile` |
+| `POST` | `/api/chat/multimodal` | 统一多模态入口：通过 `file-type` Header 指定类型（`auto`/`voice`/`image`/`document`），自动路由到对应处理器 | —（未在前端主应用调用，Widget 使用） |
 | `POST` | `/api/tts` | 文本转语音 | `sendTTS` |
 | `GET` | `/api/tts/voices` | 获取可用 TTS 声音列表 | `getTTSVoices` |
 
 > 上传约束：前端和后端当前均按 `5MB` 统一限制；图片格式白名单为 `image/jpeg`、`image/png`、`image/webp`。
+
+**`POST /api/chat/multimodal` 请求参数：**
+
+| 参数 | 位置 | 类型 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `file` | Form body | UploadFile | — | 上传文件（可选，无文件时走纯文本） |
+| `message` | Form body | string | `""` | 文本消息 |
+| `file-type` | **Header** | string | `"auto"` | 文件类型提示：`auto`（自动检测）、`voice`、`image`、`document`。注意：HTTP Header 名为 `file-type`（连字符），对应 FastAPI 参数 `file_type`（下划线） |
+| `session_id` | Form body | string | `""` | 会话 ID |
+| `session_token` | Form body | string | `""` | 会话令牌 |
+
+**`POST /api/chat/multimodal` 响应 Schema：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `type` | string | 文件类型：`voice` / `image` / `document` / `text` |
+| `response` | string | AI 对话回复（voice/image 时返回） |
+| `agent` | string | 处理 Agent 名称 |
+| `mode` | string | 协作模式（默认 `sequential`） |
+| `elapsed` | float | 处理耗时（秒） |
+| `session_id` | string | 会话 ID |
+| `session_token` | string | 会话令牌 |
+| `transcription` | string | 语音转录文本（仅 `type=voice`） |
+| `image_url` | string | 图片 data URL（仅 `type=image`） |
+| `message` | string | 原始消息文本（voice 时为转录文本，image 时为用户输入） |
 
 ### 认证与 RBAC
 
@@ -128,6 +154,7 @@ ws.onmessage = (event) => {
 | `GET` | `/api/metrics` | 性能指标 + 缓存统计 | `getMetrics` |
 | `GET` | `/api/kpi` | 业务 KPI | `getKPI` |
 | `GET` | `/api/cache/stats` | 缓存统计 | `getCacheStats` |
+| `POST` | `/api/cache/invalidate` | 按条件删除缓存（主动失效，支持 `product_id` / `intent_type` 过滤） | —（未在前端直接调用） |
 | `GET` | `/api/circuit-breaker` | 熔断器状态 | `getCircuitBreaker` |
 | `GET` | `/metrics/prometheus` | Prometheus 文本指标（`text/plain`） | `getPrometheusMetrics` |
 | `GET` | `/api/monitoring/quality-trends` | 质量评分趋势 | `getQualityTrends` |
@@ -171,7 +198,7 @@ ws.onmessage = (event) => {
 | `GET` | `/` | 主页面（对话 + 监控） |
 | `GET` | `/login.html` | 登录/注册页 |
 | `GET` | `/admin.html` | 管理后台（监控/Prompt/用户/知识库/告警/Token Quota/熔断器/Prometheus 预览） |
-| `GET` | `/widget.html` | 嵌入式对话组件（当前已保存 `session_id/session_token`，支持多轮连续对话） |
+| `GET` | `/widget.html` | 嵌入式对话组件（API Key 专用认证，无 JWT；已保存 `session_id/session_token`，支持多轮连续对话） |
 | `GET` | `/theme-comparison.html` | 主题对比预览 |
 
 ---
@@ -184,6 +211,10 @@ ws.onmessage = (event) => {
 | API Key | 系统间调用或开发模式兜底 | `web/src/api/rest.js` 从 `localStorage.api_key` 注入 `X-API-Key` |
 | Session Token | 会话详情、删除、历史消息等会话级校验 | `currentSessionToken` 注入 `X-Session-Token` 或请求体 |
 | Admin Token / RBAC | 监控、管理、Prompt、知识库、告警 | 后端中间件和路由级 `require_admin` / `require_supervisor_or_admin` 校验 |
+
+> **Widget 页面认证**：`/widget.html` 使用 API Key 专用认证（通过 URL 参数 `?api_key=xxx` 传入），不依赖 JWT 登录流程，适用于嵌入式场景。
+
+> **Widget CSP 策略**：`widget.html` 的 `frame-ancestors` 设为 `'self'`（允许 iframe 嵌入），其他 HTML 页面的 `frame-ancestors` 设为 `'none'`（禁止嵌入）。
 
 ## 当前前端映射说明
 

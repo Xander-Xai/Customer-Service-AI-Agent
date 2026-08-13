@@ -19,8 +19,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
-import statistics
 import sys
 import time
 from pathlib import Path
@@ -28,52 +26,55 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Benchmark queries
-BENCHMARK_QUERIES = [
-    "烟酰胺有什么功效？",
-    "敏感肌可以用视黄醇吗？",
-    "透明质酸是什么？",
-    "油性皮肤适合用什么面霜？",
-    "VC精华不能和什么一起用？",
-    "传明酸能祛斑吗？",
-    "果酸和水杨酸有什么区别？",
-    "神经酰胺对皮肤屏障有什么作用？",
-    "防晒霜物理防晒和化学防晒怎么选？",
-    "维诺雅有哪些美白产品？",
-    "你们发什么快递？多久能到？",
-    "怎么退货？退货流程是什么？",
-    "会员有什么等级？各等级权益？",
-    "支持什么付款方式？",
-    "产品保质期多久？开封后能用多长时间？",
-    "怎么辨别产品是不是正品？",
-    "孕期可以用你们的产品吗？",
-    "怎么开发票？",
-    "积分怎么用？怎么兑换？",
-    "企业采购有优惠吗？",
-    "用了产品过敏了怎么办？",
-    "护肤品的正确使用顺序是什么？",
-    "夏天护肤和冬天护肤有什么不同？",
-    "黑头怎么去除？",
-    "医美手术后怎么护理皮肤？",
-    "敏感肌应该怎么护肤？",
-    "面膜多久敷一次比较好？",
-    "成分之间有冲突吗？哪些不能一起用？",
-    "不同年龄段应该怎么选择护肤品？",
-    "运动前后需要护肤吗？",
-]
+# ── Benchmark queries: load from eval set ──
+from scripts._benchmark_utils import load_eval_queries
+
+BENCHMARK_QUERIES = load_eval_queries()
+
+# ── Use numpy for percentile computation (plan requirement) ──
+# Fallback to pure-Python if numpy is not installed
+try:
+    import numpy as np
+
+    _HAS_NUMPY = True
+except ImportError:
+    _HAS_NUMPY = False
 
 
 def compute_percentile(values: list[float], p: float) -> float:
-    """Compute the p-th percentile of a sorted list."""
+    """Compute the p-th percentile using numpy (with stdlib fallback)."""
     if not values:
         return 0.0
-    sorted_vals = sorted(values)
-    k = (p / 100.0) * (len(sorted_vals) - 1)
-    f = math.floor(k)
-    c = math.ceil(k)
+    arr = np.asarray(values, dtype=np.float64) if _HAS_NUMPY else sorted(values)
+    if _HAS_NUMPY:
+        return float(np.percentile(arr, p))
+    # Pure-Python fallback (linear interpolation)
+    k = (p / 100.0) * (len(arr) - 1)
+    f = int(k)
+    c = min(f + 1, len(arr) - 1)
     if f == c:
-        return sorted_vals[int(k)]
-    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
+        return arr[f]
+    return arr[f] * (c - k) + arr[c] * (k - f)
+
+
+def compute_mean(values: list[float]) -> float:
+    """Compute mean using numpy (with stdlib fallback)."""
+    if not values:
+        return 0.0
+    if _HAS_NUMPY:
+        return float(np.mean(values))
+    return sum(values) / len(values)
+
+
+def compute_stdev(values: list[float]) -> float:
+    """Compute standard deviation using numpy (with stdlib fallback)."""
+    if len(values) < 2:
+        return 0.0
+    if _HAS_NUMPY:
+        return float(np.std(values, ddof=1))
+    import statistics
+
+    return statistics.stdev(values)
 
 
 def _simulate_streaming(query: str) -> tuple[float, float]:
@@ -189,10 +190,10 @@ async def benchmark_latency():
             "total_ms": round(compute_percentile(total_values, p), 2),
         }
 
-    mean_ttfb = statistics.mean(ttfb_values) if ttfb_values else 0
-    mean_total = statistics.mean(total_values) if total_values else 0
-    stdev_ttfb = statistics.stdev(ttfb_values) if len(ttfb_values) > 1 else 0
-    stdev_total = statistics.stdev(total_values) if len(total_values) > 1 else 0
+    mean_ttfb = compute_mean(ttfb_values)
+    mean_total = compute_mean(total_values)
+    stdev_ttfb = compute_stdev(ttfb_values)
+    stdev_total = compute_stdev(total_values)
 
     print()
     print("  ┌───────────────────────────────────────────────────────┐")
@@ -217,6 +218,7 @@ async def benchmark_latency():
         "benchmark": "streaming_latency",
         "task": "3.4",
         "mode": "REAL" if use_real else "SIMULATED",
+        "percentile_engine": "numpy" if _HAS_NUMPY else "stdlib",
         "server_url": args.base_url if use_real else None,
         "queries_count": len(queries),
         "latency_percentiles": percentiles,

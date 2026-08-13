@@ -26,6 +26,8 @@ from db.models import User
 logger = get_logger("auth.service")
 
 # 本地 LRU 缓存：已吊销的 JTI 集合（Redis 不可用时的快速拒绝层）
+# v6.2: 添加容量限制，防止内存泄漏
+_MAX_REVOKED_JTIS = 10000
 _revoked_jtis: set = set()
 
 # JWT 配置（v4.0 安全修复：从 config 读取，不再有硬编码默认值）
@@ -380,7 +382,9 @@ def decode_token(token: str) -> dict[str, Any] | None:
         # 本地 LRU 缓存快速拒绝
         if jti in _revoked_jtis:
             return None
-        # Redis 黑名单同步检查（Redis 活跃时使用同步 API 检查）
+        # Redis 黑名单同步检查
+        # 注意：decode_token() 是同步函数，在异步上下文中调用会阻塞事件循环
+        # 建议在异步路由中改用 decode_token_async() 代替
         if _denylist._use_redis:
             try:
                 key = f"{_denylist._prefix}{jti}"
@@ -453,6 +457,12 @@ async def revoke_token(token: str) -> bool:
         ttl = max(int(exp - time.time()), 1)
         await _denylist.add(jti, ttl)
         _revoked_jtis.add(jti)
+        # v6.2: 容量限制，超出时淘汰最早的 10%
+        if len(_revoked_jtis) > _MAX_REVOKED_JTIS:
+            _evict_count = _MAX_REVOKED_JTIS // 10
+            for _ in range(_evict_count):
+                _revoked_jtis.pop()
+            logger.warning(f"已吊销 JTI 缓存达到上限 {_MAX_REVOKED_JTIS}，淘汰 {_evict_count} 条旧记录")
         logger.info(f"Token 已吊销: jti={jti}")
         return True
     return False

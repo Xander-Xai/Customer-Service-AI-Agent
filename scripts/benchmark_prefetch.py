@@ -24,34 +24,10 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Benchmark queries
-BENCHMARK_QUERIES = [
-    "烟酰胺有什么功效？",
-    "敏感肌可以用视黄醇吗？",
-    "透明质酸是什么？",
-    "油性皮肤适合用什么面霜？",
-    "VC精华不能和什么一起用？",
-    "传明酸能祛斑吗？",
-    "果酸和水杨酸有什么区别？",
-    "神经酰胺对皮肤屏障有什么作用？",
-    "防晒霜物理防晒和化学防晒怎么选？",
-    "维诺雅有哪些美白产品？",
-    "你们发什么快递？多久能到？",
-    "怎么退货？退货流程是什么？",
-    "会员有什么等级？各等级权益？",
-    "支持什么付款方式？",
-    "产品保质期多久？开封后能用多长时间？",
-    "怎么辨别产品是不是正品？",
-    "孕期可以用你们的产品吗？",
-    "怎么开发票？",
-    "积分怎么用？怎么兑换？",
-    "企业采购有优惠吗？",
-    "用了产品过敏了怎么办？",
-    "护肤品的正确使用顺序是什么？",
-    "夏天护肤和冬天护肤有什么不同？",
-    "黑头怎么去除？",
-    "医美手术后怎么护理皮肤？",
-]
+# ── Benchmark queries: load from eval set ──
+from scripts._benchmark_utils import load_eval_queries
+
+BENCHMARK_QUERIES = load_eval_queries()
 
 # Simulated latency functions (in milliseconds)
 COLLECTIONS = ["product_knowledge", "faq", "tech_support"]
@@ -87,13 +63,17 @@ async def benchmark_prefetch():
     print()
 
     # ── Try real knowledge base ──
+    _kb = None
+    _kb_available = False
     try:
-        from core.config import VECTOR_DB_MODE
-        from rag.knowledge_base import CosmeticsKnowledgeBase
+        from core.config import QDRANT_HOST, QDRANT_PORT
+        from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
-        _kb = CosmeticsKnowledgeBase()
+        _kb = QdrantKnowledgeBase(host=QDRANT_HOST, port=QDRANT_PORT)
+        # Verify connection works by listing collections
+        _kb._client.get_collections()
         _kb_available = True
-        print(f"[INFO] CosmeticsKnowledgeBase available (mode={VECTOR_DB_MODE})")
+        print(f"[INFO] QdrantKnowledgeBase available (host={QDRANT_HOST})")
     except Exception as e:
         _kb = None
         _kb_available = False
@@ -101,7 +81,7 @@ async def benchmark_prefetch():
         print("[INFO] Using simulated search for benchmark")
     print()
 
-    # Config
+    # Config (used for simulation only)
     class Config:
         search_latency_ms = 150  # Baseline search latency
         classify_latency_ms = 100  # Baseline classification latency
@@ -115,11 +95,19 @@ async def benchmark_prefetch():
     for i, query in enumerate(queries):
         start = time.time()
 
-        # Step 1: Classify
-        category = await _simulate_classify(query, Config.classify_latency_ms)
-
-        # Step 2: Search (only after classify completes)
-        results = await _simulate_search(query, Config.search_latency_ms)
+        if _kb_available and _kb is not None:
+            # Real: classify first (via router), then search
+            from router.query_router import QueryRouter
+            try:
+                router = QueryRouter()
+                await router.route(query)  # classify
+            except Exception:
+                await asyncio.sleep(Config.classify_latency_ms / 1000.0)
+            await _kb.search(query, top_k=3)  # search after classify
+        else:
+            # Simulated fallback
+            _category = await _simulate_classify(query, Config.classify_latency_ms)
+            _results = await _simulate_search(query, Config.search_latency_ms)
 
         elapsed = (time.time() - start) * 1000
         sequential_latencies.append(elapsed)
@@ -136,12 +124,30 @@ async def benchmark_prefetch():
     for i, query in enumerate(queries):
         start = time.time()
 
-        # Launch both tasks concurrently (prefetch = search while classifying)
-        classify_task = _simulate_classify(query, Config.classify_latency_ms)
-        search_task = _simulate_search(query, Config.search_latency_ms)
+        if _kb_available and _kb is not None:
+            # Real: launch classify and search concurrently (prefetch)
+            from router.query_router import QueryRouter
 
-        # Wait for both (they run in parallel)
-        category, results = await asyncio.gather(classify_task, search_task)
+            async def _real_classify(q):
+                try:
+                    router = QueryRouter()
+                    return await router.route(q)
+                except Exception:
+                    await asyncio.sleep(Config.classify_latency_ms / 1000.0)
+                    return None
+
+            classify_task = asyncio.create_task(_real_classify(query))
+            search_task = asyncio.create_task(_kb.search(query, top_k=3))
+            await asyncio.gather(classify_task, search_task)
+        else:
+            # Simulated fallback
+            classify_task = asyncio.create_task(
+                _simulate_classify(query, Config.classify_latency_ms)
+            )
+            search_task = asyncio.create_task(
+                _simulate_search(query, Config.search_latency_ms)
+            )
+            await asyncio.gather(classify_task, search_task)
 
         elapsed = (time.time() - start) * 1000
         prefetch_latencies.append(elapsed)
@@ -193,6 +199,7 @@ async def benchmark_prefetch():
             "search_latency_ms": Config.search_latency_ms,
             "classify_latency_ms": Config.classify_latency_ms,
             "knowledge_base_available": _kb_available,
+            "mode": "REAL" if _kb_available else "SIMULATED",
         },
         "results": {
             "sequential": {

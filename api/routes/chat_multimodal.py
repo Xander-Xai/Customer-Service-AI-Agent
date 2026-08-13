@@ -29,7 +29,7 @@ async def _handle_image_upload(
     query: str,
     request: Request,
 ):
-    """处理图片上传 + 文字查询"""
+    """处理图片上传 + 文字查询（v6.1: 使用 ImageProcessor 替代内联 base64）"""
     if not MULTIMODAL_ENABLED:
         return JSONResponse({"error": "图片识别功能未启用"}, status_code=503)
 
@@ -49,14 +49,24 @@ async def _handle_image_upload(
             status_code=400,
         )
 
-    import base64
+    # v6.1: 使用 ImageProcessor 处理图片（压缩/验证/data URL）
+    try:
+        from media.image_processor import ImageProcessor
 
-    base64_image = base64.b64encode(image_data).decode("utf-8")
+        processor = ImageProcessor()
+        data_url = processor.process(image_data, content_type)
+    except Exception:
+        # 降级：回退到内联 base64
+        import base64
+
+        base64_image = base64.b64encode(image_data).decode("utf-8")
+        data_url = f"data:{content_type};base64,{base64_image}"
+
     multimodal_content = [
         {"type": "text", "text": query or "请分析这张图片"},
         {
             "type": "image_url",
-            "image_url": {"url": f"data:{content_type};base64,{base64_image}"},
+            "image_url": {"url": data_url},
         },
     ]
 
@@ -88,6 +98,7 @@ async def chat_with_image(
     elapsed = time.time() - start
 
     return {
+        "type": "image",
         "response": result.get("response", ""),
         "agent": result.get("current_agent", ""),
         "mode": result.get("collaboration_mode", "sequential"),
@@ -199,6 +210,7 @@ async def chat_with_voice(
     elapsed = time.time() - start
 
     return {
+        "type": "voice",
         "response": result.get("response", ""),
         "agent": result.get("current_agent", ""),
         "elapsed": elapsed,
@@ -404,8 +416,25 @@ async def chat_multimodal(
 
             processor = AudioProcessor()
             transcription = await processor.transcribe(content, file.content_type or "")
+            if not transcription:
+                return JSONResponse({"error": "语音转录结果为空"}, status_code=400)
+
+            # v6.1: 调用 run_graph 实现完整 AI 对话
+            run_graph = request.app.state.run_graph
+            start = time.time()
+            result = await run_graph(auth.sid, transcription)
+            elapsed = time.time() - start
+
             return {
                 "type": "voice",
+                "response": result.get("response", ""),
+                "agent": result.get("current_agent", ""),
+                "mode": result.get("collaboration_mode", "sequential"),
+                "elapsed": elapsed,
+                "session_id": auth.sid,
+                "session_token": auth.session_manager.generate_session_token(auth.sid)
+                if auth.session_manager
+                else "",
                 "transcription": transcription,
                 "message": transcription,
             }
@@ -419,8 +448,30 @@ async def chat_multimodal(
 
             processor = ImageProcessor()
             data_url = processor.process(content, file.content_type or "")
+
+            # 构建 multimodal_content 供 graph 使用
+            multimodal_content = [
+                {"type": "text", "text": message or "请分析这张图片"},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ]
+
+            # v6.1: 调用 run_graph 实现完整 AI 对话
+            query = sanitize_input((message or "请分析这张图片")[:MAX_QUERY_LENGTH])
+            run_graph = request.app.state.run_graph
+            start = time.time()
+            result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
+            elapsed = time.time() - start
+
             return {
                 "type": "image",
+                "response": result.get("response", ""),
+                "agent": result.get("current_agent", ""),
+                "mode": result.get("collaboration_mode", "sequential"),
+                "elapsed": elapsed,
+                "session_id": auth.sid,
+                "session_token": auth.session_manager.generate_session_token(auth.sid)
+                if auth.session_manager
+                else "",
                 "image_url": data_url,
                 "message": message,
             }
