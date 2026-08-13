@@ -13,7 +13,13 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any
 
-from core.config import SLA_CONSULTATION_MAX, SLA_HIERARCHICAL_MAX, SLA_PARALLEL_MAX
+from core.config import (
+    SLA_CONSULTATION_MAX,
+    SLA_HIERARCHICAL_MAX,
+    SLA_PARALLEL_MAX,
+    SLA_REACT_MAX,
+    SLA_SEQUENTIAL_MAX,
+)
 from core.logger import get_logger
 from core.message_bus import Message, MessageBus, MessageType
 from core.shared_blackboard import SharedBlackboard
@@ -68,7 +74,9 @@ class CollaborationMode(ABC):
 
 
 class SequentialMode(CollaborationMode):
-    """顺序模式：单个 Agent 处理"""
+    """顺序模式：单个 Agent 处理（v6.3: 添加 SLA 超时保护，防止无限挂起）"""
+
+    _SEQUENTIAL_TIMEOUT = SLA_SEQUENTIAL_MAX
 
     async def execute(
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
@@ -88,7 +96,22 @@ class SequentialMode(CollaborationMode):
             "agent.start", "sequential_mode", {"agent": agent_name, "mode": "sequential"}
         )
 
-        result = await agent.process_with_retry(dict(state))
+        # v6.3: SLA 超时保护 — 防止 LLM 挂起导致无限等待
+        try:
+            result = await asyncio.wait_for(
+                agent.process_with_retry(dict(state)),
+                timeout=self._SEQUENTIAL_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Sequential {agent_name} 超时 ({self._SEQUENTIAL_TIMEOUT}s)，返回降级回复"
+            )
+            return {
+                "response": "抱歉，响应时间过长，请稍后重试或简化您的提问。",
+                "mode": "sequential",
+                "agents_used": [agent_name],
+                "elapsed": time.time() - start,
+            }
         elapsed = time.time() - start
 
         await self._safe_publish(
@@ -301,9 +324,11 @@ class ConsultationMode(CollaborationMode):
                 f"{state.get('customer_query', '')}\n\n[辅助信息]\n{consult_text}"
             )
 
-        # 从 Blackboard 读取辅助 Agent 写入的 erp.*、tech.* 数据作为补充
-        erp_data = await self._safe_bb_read_prefix("erp.")
-        tech_data = await self._safe_bb_read_prefix("tech.")
+        # v6.3: 黑板前缀读取并行化
+        erp_data, tech_data = await asyncio.gather(
+            self._safe_bb_read_prefix("erp."),
+            self._safe_bb_read_prefix("tech."),
+        )
         bb_context = []
         for key, val in {**erp_data, **tech_data}.items():
             if isinstance(val, dict) and val.get("response"):
@@ -436,7 +461,11 @@ class HierarchicalMode(CollaborationMode):
 
 
 class ReActMode(SequentialMode):
-    """ReAct 推理模式（v3.5）：复用 SequentialMode 流程，仅覆盖 Agent 选择逻辑"""
+    """ReAct 推理模式（v3.5→v6.3: 添加 SLA 超时保护）
+    复用 SequentialMode 流程，仅覆盖 Agent 选择逻辑。
+    """
+
+    _REACT_TIMEOUT = SLA_REACT_MAX
 
     async def execute(
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
@@ -456,7 +485,22 @@ class ReActMode(SequentialMode):
         await self._safe_publish(
             "agent.start", "react_mode", {"agent": agent_name, "mode": "react"}
         )
-        result = await agent.process_with_retry(dict(state))
+        # v6.3: SLA 超时保护
+        try:
+            result = await asyncio.wait_for(
+                agent.process_with_retry(dict(state)),
+                timeout=self._REACT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"ReAct {agent_name} 超时 ({self._REACT_TIMEOUT}s)，返回降级回复"
+            )
+            return {
+                "response": "抱歉，推理过程耗时过长，请稍后重试或简化您的提问。",
+                "mode": "react",
+                "agents_used": [agent_name],
+                "elapsed": time.time() - start,
+            }
         elapsed = time.time() - start
         await self._safe_publish(
             "agent.complete",

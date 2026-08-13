@@ -1174,8 +1174,8 @@ class TestExceptions:
     def test_knowledge_error_custom(self):
         from core.exceptions import KnowledgeError
 
-        exc = KnowledgeError("ChromaDB connection failed")
-        assert str(exc) == "ChromaDB connection failed"
+        exc = KnowledgeError("Qdrant connection failed")
+        assert str(exc) == "Qdrant connection failed"
 
     # --- SessionError ---
 

@@ -50,8 +50,8 @@ export function getKPI() {
 export function getCacheStats() {
   return _request('GET', '/api/cache/stats');
 }
-export function getSessions() {
-  return _request('GET', '/api/sessions');
+export function getSessions(offset = 0, limit = 20) {
+  return _request('GET', `/api/sessions?offset=${offset}&limit=${limit}`);
 }
 
 export function getSession(sessionId) {
@@ -81,7 +81,7 @@ export function getCircuitBreaker() {
   return _request('GET', '/api/circuit-breaker');
 }
 
-export function submitFeedback(sessionId, rating, messageIndex = 0, comment = '') {
+export function submitRating(sessionId, rating, messageIndex = 0, comment = '') {
   const sessionToken = localStorage.getItem('currentSessionToken') || '';
   return _request('POST', '/api/feedback', {
     session_id: sessionId,
@@ -93,16 +93,9 @@ export function submitFeedback(sessionId, rating, messageIndex = 0, comment = ''
   });
 }
 
-export function submitRating(sessionId, rating, messageIndex = 0, comment = '') {
-  const sessionToken = localStorage.getItem('currentSessionToken') || '';
-  return _request('POST', '/api/feedback', {
-    session_id: sessionId,
-    session_token: sessionToken,
-    rating,
-    resolved: rating > 0,
-    message_index: messageIndex,
-    comment,
-  });
+/** @deprecated Use submitRating instead */
+export function submitFeedback(sessionId, rating, messageIndex = 0, comment = '') {
+  return submitRating(sessionId, rating, messageIndex, comment);
 }
 
 export function getFeedbackStats() {
@@ -182,6 +175,13 @@ export function getHotQuestions() {
 /** 客户满意度统计 */
 export function getSatisfaction() {
   return _request('GET', '/api/monitoring/satisfaction');
+}
+
+// ===== 缓存管理 API =====
+
+/** 按条件删除缓存（主动失效） */
+export function invalidateCache(filter = {}) {
+  return _request('POST', '/api/cache/invalidate', filter);
 }
 
 // ===== 管理后台 API =====
@@ -341,8 +341,12 @@ export function getTTSVoices() {
  * 审计 v2 Task 2.3: voice.js 改用 fetchWithAuth 以通过中央认证拦截器
  */
 export function sendVoiceForm(formData) {
+  const headers = {};
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) headers['X-API-Key'] = apiKey;
   return fetchWithAuth('/api/chat/voice', {
     method: 'POST',
+    headers,
     body: formData,
   });
 }
@@ -355,8 +359,12 @@ export function sendTTS(text, voice = '') {
   formData.append('text', text.substring(0, 2000));
   if (voice) formData.append('voice', voice);
 
+  const headers = {};
+  const apiKey = localStorage.getItem('api_key') || '';
+  if (apiKey) headers['X-API-Key'] = apiKey;
   return fetchWithAuth('/api/tts', {
     method: 'POST',
+    headers,
     body: formData,
   });
 }

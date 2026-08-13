@@ -68,6 +68,9 @@ export const API = {
   sendVoiceForm: rest.sendVoiceForm,
   sendTTS: rest.sendTTS,
 
+  // 缓存管理 API
+  invalidateCache: rest.invalidateCache,
+
   // SSE
   sendChatStream,
   sendChatStreamWithImage,

@@ -87,12 +87,20 @@ _RULE_PATTERNS = {
     "recommendation": [
         re.compile(r"推荐|适合|建议|哪种|哪款|什么好")
     ],
-    "technical_support": [re.compile(r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存")],
+    "technical_support": [
+        re.compile(r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存|"
+                   r"A醇|刷酸|脱皮|避光|早C|晚A|建立耐受|禁忌|冲突|"
+                   r"分子量|成分.*冲突|一起用|搭配.*使用|叠加|先后"),
+    ],
     "usage_guide": [
         re.compile(r"怎么用|用法|步骤|顺序|使用|方法")
     ],
     "billing": [re.compile(r"退款|退货|发票|付款|支付|账单|费用|订单|物流|快递|发货")],
-    "complaint": [re.compile(r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|质量.*问题")],
+    "complaint": [
+        re.compile(r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|"
+                   r"质量.*问题|包装破损|发错货|虚假宣传|没有效果|"
+                   r"货不对板|以次充好"),
+    ],
     "negative_feedback": [
         re.compile(r"差劲|失望|太差|不好|垃圾|后悔")
     ],
@@ -101,11 +109,11 @@ _RULE_PATTERNS = {
         re.compile(r"订单|物流|快递|发货|到哪|签收")
     ],
     "return_policy": [
-        re.compile(r"退货|退款|换货|退换|退钱")
+        re.compile(r"退货|退款|换货|退换|退钱|质量问题|质量.*问题"),
     ],
     "cosmetic_advice": [re.compile(r"肤质|油性|干性|敏感|美白|保湿|抗皱|祛痘|祛斑|护肤")],
     "greeting": [
-        re.compile(r"你好|您好|hi|hello|在吗|有人吗")
+        re.compile(r"你好|您好|hi|hello|在吗|有人吗", re.IGNORECASE),
     ],
 }
 

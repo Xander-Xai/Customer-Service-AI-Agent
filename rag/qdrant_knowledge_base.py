@@ -1,10 +1,16 @@
 """
-Qdrant 知识库管理器（v6.0）
-基于向量检索的 RAG 检索增强生成，使用 Qdrant 替代 ChromaDB。
+Qdrant 知识库管理器（v7.0）
+基于向量检索的 RAG 检索增强生成（Qdrant 实现）。
+
+v7.0 混合检索升级：
+- 新增 BM25 词法检索通道（内存倒排索引）
+- 新增 RRF 融合（向量 + BM25 结果排名融合）
+- 新增 HYBRID_SEARCH_ENABLED 配置开关
+- query_multiple() 并行执行向量检索 + BM25 检索
 
 设计要点：
 - API 兼容 CosmeticsKnowledgeBase（KnowledgeBaseProtocol）
-- embedding 在应用侧计算（bge-small-zh-v1.5），Qdrant 仅做向量存储和检索
+- embedding 在应用侧计算（bge-large-zh-v1.5），Qdrant 仅做向量存储和检索
 - 支持 text + image（CLIP）双 embedding
 - 内建重试和连接池
 """
@@ -13,14 +19,70 @@ import asyncio
 import uuid
 from typing import Any
 
+from core.config import (
+    HYBRID_BM25_TOP_K,
+    HYBRID_RRF_K,
+    HYBRID_SEARCH_ENABLED,
+    HYBRID_VECTOR_TOP_K,
+)
 from core.logger import get_logger
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 logger = get_logger("rag.qdrant_knowledge_base")
 
-# bge-small-zh-v1.5 输出维度
-_EMBEDDING_DIM = 768
+# bge-large-zh-v1.5 输出维度
+_EMBEDDING_DIM = 1024
+
+
+# ===== v7.0: RRF 融合函数 =====
+
+
+def rrf_fusion(
+    result_lists: list[list[dict[str, Any]]],
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    """Reciprocal Rank Fusion：融合多个检索通道的结果。
+
+    Args:
+        result_lists: 每个检索通道的结果列表（按各自评分降序排列）
+        k: RRF 平滑常数（默认 60，标准值）
+
+    Returns:
+        按 RRF 综合分数降序排列的去重结果列表
+    """
+    if not result_lists:
+        return []
+    if len(result_lists) == 1:
+        return result_lists[0]
+
+    rrf_scores: dict[str, tuple[float, dict[str, Any]]] = {}
+
+    for channel_results in result_lists:
+        for rank, doc in enumerate(channel_results, start=1):
+            content = doc.get("content", "")
+            if not content:
+                continue
+            score = 1.0 / (k + rank)
+            if content in rrf_scores:
+                existing_score, _ = rrf_scores[content]
+                rrf_scores[content] = (existing_score + score, doc)
+            else:
+                rrf_scores[content] = (score, doc)
+
+    if not rrf_scores:
+        return []
+
+    sorted_items = sorted(rrf_scores.items(), key=lambda x: x[1][0], reverse=True)
+    fused = []
+    for content, (score, doc) in sorted_items:
+        result = dict(doc)
+        result["rrf_score"] = round(score, 4)
+        result.pop("bm25_score", None)
+        result.pop("distance", None)
+        fused.append(result)
+
+    return fused
 
 
 class QdrantKnowledgeBase:
@@ -34,12 +96,16 @@ class QdrantKnowledgeBase:
         prefer_grpc: bool = False,
         api_key: str = "",
         clip_enabled: bool = False,
+        embedding_model=None,
     ):
         self._clip_enabled = clip_enabled
         self._clip_embed_fn = None
         self._reranker = None
-        self._embed_fn = self._create_embedding_function()
+        self._embed_fn = embedding_model or self._create_embedding_function()
         self._collection_cache: dict[str, bool] = {}
+        # v7.0: BM25 词法检索 + 混合检索开关
+        self._bm25 = None
+        self._hybrid_enabled = HYBRID_SEARCH_ENABLED
 
         try:
             self._client = QdrantClient(
@@ -60,28 +126,28 @@ class QdrantKnowledgeBase:
 
     @staticmethod
     def _create_embedding_function():
+        """创建 API 嵌入客户端（替代本地 SentenceTransformer）"""
         try:
-            from sentence_transformers import SentenceTransformer
-        except (ImportError, ModuleNotFoundError):
-            QdrantKnowledgeBase._embed_fn_name = "default(fallback)"
-            logger.warning("sentence_transformers 未安装，中文 embedding 模型不可用，回退到随机向量")
-            return None
+            from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
 
-        models_to_try = [
-            ("BAAI/bge-small-zh-v1.5", "bge-small-zh"),
-            ("shibing624/text2vec-base-chinese", "text2vec-chinese"),
-        ]
-        for model_name, label in models_to_try:
-            try:
-                model = SentenceTransformer(model_name)
-                QdrantKnowledgeBase._embed_fn_name = label
-                logger.info(f"中文 embedding 模型加载成功: {model_name}")
-                return model
-            except Exception as e:
-                logger.debug(f"模型 {model_name} 加载失败: {e}，尝试下一个")
-        QdrantKnowledgeBase._embed_fn_name = "default(fallback)"
-        logger.warning("中文 embedding 模型不可用，回退到随机向量")
-        return None
+            if not EMBEDDING_API_KEY:
+                logger.warning("EMBEDDING_API_KEY 未配置，中文 embedding 不可用，回退到随机向量")
+                return None
+
+            from rag.api_embedding import ApiEmbedding
+
+            model = ApiEmbedding(
+                api_key=EMBEDDING_API_KEY,
+                model=EMBEDDING_MODEL,
+                base_url=EMBEDDING_BASE_URL,
+            )
+            QdrantKnowledgeBase._embed_fn_name = EMBEDDING_MODEL.split("/")[-1]
+            logger.info(f"API Embedding 客户端创建成功: {EMBEDDING_MODEL}")
+            return model
+        except Exception as e:
+            QdrantKnowledgeBase._embed_fn_name = "default(fallback)"
+            logger.warning(f"API Embedding 创建失败: {e}，回退到随机向量")
+            return None
 
     _embed_fn_name: str = "unknown"
 
@@ -164,6 +230,15 @@ class QdrantKnowledgeBase:
         self._client.upsert(collection_name=collection_name, points=points)
         logger.debug(f"Collection '{collection_name}' 添加 {len(documents)} 条文档")
 
+        # v7.0: 同步更新 BM25 索引
+        if self._hybrid_enabled:
+            self._ensure_bm25().add_documents(
+                documents,
+                collection=collection_name,
+                ids=ids,
+                metadatas=cleaned_metadatas,
+            )
+
     def delete_documents(self, collection_name: str, ids: list[str]):
         if not self._ensure_collection(collection_name):
             return
@@ -196,6 +271,29 @@ class QdrantKnowledgeBase:
             return self._client.count(collection_name).count
         except Exception:
             return 0
+
+    async def query_with_vector(
+        self, collection_name: str, query_vector: list[float], n_results: int = 3
+    ) -> list[dict[str, Any]]:
+        """v6.3: 使用预计算的向量查询（避免 query_multiple 中重复 embedding）"""
+        if not self._ensure_collection(collection_name):
+            return []
+        try:
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                lambda: self._client.search(
+                    collection_name=collection_name,
+                    query_vector=query_vector,
+                    limit=n_results,
+                    with_payload=True,
+                    score_threshold=0.0,
+                ),
+            )
+            return self._parse_query_result(result)
+        except Exception as e:
+            logger.error(f"Qdrant 查询失败 [{collection_name}]: {e}", exc_info=True)
+            return []
 
     async def query(
         self, collection_name: str, query_text: str, n_results: int = 3
@@ -280,6 +378,13 @@ class QdrantKnowledgeBase:
     async def query_multiple(
         self, collection_names: list[str], query_text: str, n_results: int = 3
     ) -> list[dict[str, Any]]:
+        """v7.0: 混合检索 — 向量 + BM25 双通道并行 → RRF 融合 → 重排序
+
+        1. 同义词扩展（query rewrite）
+        2. 向量检索 + BM25 检索并行执行（asyncio.gather）
+        3. RRF 融合两个通道的结果
+        4. bge-reranker-v2-m3 / BM25 二次重排
+        """
         try:
             from rag.query_rewriter import QueryRewriter
 
@@ -288,24 +393,104 @@ class QdrantKnowledgeBase:
         except Exception:
             pass
 
-        all_results = []
-        tasks = [self.query(name, query_text, n_results) for name in collection_names]
-        results_list = await asyncio.gather(*tasks, return_exceptions=True)
-        for results in results_list:
-            if isinstance(results, list):
-                all_results.extend(results)
+        loop = asyncio.get_running_loop()
 
-        all_results.sort(key=lambda r: r.get("distance", 999))
+        # ---- 向量检索通道 ----
+        query_vector = await loop.run_in_executor(None, lambda: self._embed_texts([query_text])[0])
+        vector_top_k = max(n_results * 2, HYBRID_VECTOR_TOP_K)
+        vector_tasks = [
+            self.query_with_vector(name, query_vector, vector_top_k)
+            for name in collection_names
+        ]
+
+        # ---- BM25 检索通道（混合检索开启且索引非空时） ----
+        bm25_task = None
+        if self._hybrid_enabled:
+            bm25_top_k = max(n_results * 2, HYBRID_BM25_TOP_K)
+            bm25_task = loop.run_in_executor(
+                None,
+                lambda: self._bm25_search(query_text, collection_names, top_k=bm25_top_k),
+            )
+
+        # ---- 并行执行 ----
+        if bm25_task:
+            vector_results_list, bm25_results = await asyncio.gather(
+                asyncio.gather(*vector_tasks, return_exceptions=True),
+                bm25_task,
+            )
+        else:
+            vector_results_list = await asyncio.gather(*vector_tasks, return_exceptions=True)
+            bm25_results = []
+
+        # 聚合向量结果
+        all_vector_results = []
+        for results in vector_results_list:
+            if isinstance(results, list):
+                all_vector_results.extend(results)
+        all_vector_results.sort(key=lambda r: r.get("distance", 999))
         seen = set()
-        deduped = []
-        for r in all_results:
+        deduped_vector = []
+        for r in all_vector_results:
             content = r.get("content", "")
             if content not in seen:
                 seen.add(content)
-                deduped.append(r)
+                deduped_vector.append(r)
 
-        deduped = self._apply_reranker(query_text, deduped, top_k=n_results)
-        return deduped[:n_results]
+        # ---- RRF 融合 ----
+        channels = [deduped_vector]
+        if bm25_results:
+            channels.append(bm25_results)
+
+        if len(channels) > 1:
+            fused = rrf_fusion(channels, k=HYBRID_RRF_K)
+            logger.debug(
+                f"RRF 融合: vector={len(deduped_vector)} BM25={len(bm25_results)} "
+                f"fused={len(fused)}"
+            )
+        else:
+            fused = deduped_vector
+
+        # ---- 重排序 ----
+        reranked = self._apply_reranker(query_text, fused, top_k=n_results)
+        return reranked[:n_results]
+
+    def _ensure_bm25(self):
+        """懒初始化 BM25 检索器"""
+        if self._bm25 is None:
+            try:
+                from rag.bm25_retriever import BM25Retriever
+
+                self._bm25 = BM25Retriever()
+                logger.info("BM25 检索器初始化完成")
+            except Exception as e:
+                logger.warning(f"BM25 检索器初始化失败: {e}")
+                self._bm25 = False
+                self._hybrid_enabled = False
+        return self._bm25
+
+    def _bm25_search(
+        self,
+        query: str,
+        collection_names: list[str],
+        top_k: int = 8,
+    ) -> list[dict[str, Any]]:
+        """BM25 检索（同步，供 run_in_executor 调用）"""
+        bm25 = self._ensure_bm25()
+        if not bm25:
+            return []
+
+        all_results: list[dict[str, Any]] = []
+        for coll in collection_names:
+            if bm25.collection_size(coll) == 0:
+                continue
+            try:
+                results = bm25.search(query, top_k=top_k, collection=coll)
+                all_results.extend(results)
+            except Exception as e:
+                logger.debug(f"BM25 检索失败 [{coll}]: {e}")
+
+        all_results.sort(key=lambda r: r.get("bm25_score", 0), reverse=True)
+        return all_results[:top_k]
 
     @staticmethod
     def _parse_query_result(result: list) -> list[dict[str, Any]]:

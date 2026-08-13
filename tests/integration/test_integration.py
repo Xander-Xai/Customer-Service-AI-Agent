@@ -87,6 +87,16 @@ class TestGraphEndToEnd:
         # 手动注入 mock LLM
         self.container.llm = self.mock_llm
 
+        # 注入内存缓存（仅 L3 Jaccard），使缓存命中测试可工作
+        from cache.response_cache import ResponseCache
+
+        self.container.cache = ResponseCache(
+            redis_client=None,
+            qdrant_client=None,
+            embedding_model=None,
+            fallback_enabled=True,
+        )
+
     def teardown_method(self):
         if hasattr(self, "patcher"):
             self.patcher.stop()

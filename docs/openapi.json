@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "药妆智多星多智能体客服系统",
-    "version": "6.0"
+    "version": "6.3"
   },
   "paths": {
     "/api/health": {
@@ -65,6 +65,44 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cache/invalidate": {
+      "post": {
+        "summary": "Invalidate Cache",
+        "description": "按条件删除缓存（主动失效）\n\nBody 支持：\n- {\"product_id\": \"SKU_123\"} — 按商品 ID 删除\n- {\"intent_type\": \"pricing_stock\"} — 按意图类型删除\n- {\"product_id\": \"SKU_123\", \"intent_type\": \"pricing_stock\"} — 联合条件",
+        "operationId": "invalidate_cache_api_cache_invalidate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -754,6 +792,54 @@
             }
           },
           "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/multimodal": {
+      "post": {
+        "summary": "Chat Multimodal",
+        "description": "统一多模态入口：自动检测文件类型并路由到对应处理器。\n\n支持 voice/image/document 文件预处理，返回提取内容。\n认证与会话：与 /api/chat/voice 等端点使用相同认证模式。",
+        "operationId": "chat_multimodal_api_chat_multimodal_post",
+        "parameters": [
+          {
+            "name": "file-type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "auto",
+              "title": "File-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_chat_multimodal_api_chat_multimodal_post"
+              }
+            }
+          }
         },
         "responses": {
           "200": {
@@ -1558,7 +1644,6 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
                   "type": "object"
                 },
                 "type": "array"
@@ -1575,6 +1660,32 @@
           "documents"
         ],
         "title": "AddDocRequest"
+      },
+      "Body_chat_multimodal_api_chat_multimodal_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id",
+            "default": ""
+          },
+          "session_token": {
+            "type": "string",
+            "title": "Session Token",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "Body_chat_multimodal_api_chat_multimodal_post"
       },
       "Body_chat_with_file_api_chat_file_post": {
         "properties": {

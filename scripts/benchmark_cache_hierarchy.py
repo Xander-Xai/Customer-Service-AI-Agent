@@ -25,7 +25,12 @@ from pathlib import Path
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-EXACT_QUERIES = [
+# ── Load base queries from eval set ──
+from scripts._benchmark_utils import load_eval_queries
+
+_eval_queries = load_eval_queries()
+# Use first 25 eval-set queries as exact-match seed (more diverse than hardcoded)
+EXACT_QUERIES = _eval_queries[:25] if len(_eval_queries) >= 25 else [
     "烟酰胺有什么功效？",
     "敏感肌可以用视黄醇吗？",
     "透明质酸是什么？",
@@ -187,6 +192,11 @@ async def benchmark_cache_hierarchy():
     miss_rate = (misses / total * 100) if total > 0 else 0
     total_hit_rate = ((l1 + l2 + l3) / total * 100) if total > 0 else 0
 
+    # ── Validate against target ──
+    TARGET_HIT_RATE = 65.0  # Minimum acceptable total hit rate (%)
+    passed = total_hit_rate >= TARGET_HIT_RATE
+    status = "PASS ✅" if passed else "FAIL ❌"
+
     print()
     print("  ┌───────────────────────────────────────────────┐")
     print("  │          Cache Hierarchy Results              │")
@@ -198,8 +208,10 @@ async def benchmark_cache_hierarchy():
     print(f"  │  L3 (Jac)  │  {l3:>5d}  │  {l3_rate:>5.1f}%      │  {'Yes' if l3 > 0 else 'No'}       │")
     print(f"  │  Miss      │  {misses:>5d}  │  {miss_rate:>5.1f}%      │          │")
     print("  ├────────────┼─────────┼─────────────┼──────────┤")
-    print(f"  │  Total     │  {l1 + l2 + l3:>5d}  │  {total_hit_rate:>5.1f}%      │          │")
+    print(f"  │  Total     │  {l1 + l2 + l3:>5d}  │  {total_hit_rate:>5.1f}%      │  {status}  │")
     print("  └───────────────────────────────────────────────┘")
+    print()
+    print(f"  Target: total hit rate ≥ {TARGET_HIT_RATE:.0f}%  →  {status}")
     print()
 
     if l1 > 0 and l2 == 0 and l3 > 0:
@@ -233,6 +245,11 @@ async def benchmark_cache_hierarchy():
             "miss_rate_pct": round(miss_rate, 2),
             "total": total,
             "total_hit_rate_pct": round(total_hit_rate, 2),
+        },
+        "validation": {
+            "target_hit_rate_pct": TARGET_HIT_RATE,
+            "actual_hit_rate_pct": round(total_hit_rate, 2),
+            "passed": passed,
         },
         "notes": {
             "l1_performance": "exact_match",

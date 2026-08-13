@@ -83,6 +83,9 @@ Thumbs.db
 *~
 .claude/
 
+# ===== 密钥文件 =====
+secrets/
+
 # ===== 个人工具配置 =====
 CLAUDE.md
 

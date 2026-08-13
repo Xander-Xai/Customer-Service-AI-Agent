@@ -101,5 +101,9 @@ def seed_image_knowledge(kb, collection_name="image_knowledge"):
     image_paths = [item["image_path"] for item in items]
     metadatas = [item.get("metadata", {}) for item in items]
 
-    kb.add_image_documents(collection_name, image_paths, metadatas)
-    logger.info(f"图片种子数据加载完成: {collection_name} ({len(items)} 条)")
+    # v6.1: QdrantKnowledgeBase 可能不支持 add_image_documents，优雅降级
+    if hasattr(kb, "add_image_documents"):
+        kb.add_image_documents(collection_name, image_paths, metadatas)
+        logger.info(f"图片种子数据加载完成: {collection_name} ({len(items)} 条)")
+    else:
+        logger.warning(f"当前知识库不支持 add_image_documents（Qdrant 未实现 CLIP 多模态检索），跳过图片种子数据")

@@ -96,11 +96,12 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         query = state["customer_query"]
         session_id = state.get("session_id", "default")
 
-        await c.session_mgr.create_session(session_id)
-
-        # 确保 router 已初始化
+        # v6.3: 并行化独立的初始化操作 — session 创建、router 初始化、上下文获取
+        # session 创建 + router 初始化 互相独立，先并行执行
+        init_tasks = [c.session_mgr.create_session(session_id)]
         if c.router is None:
-            await c._init_router()
+            init_tasks.append(c._init_router())
+        await asyncio.gather(*init_tasks)
 
         context = await c.session_mgr.get_conversation_context(session_id)
         context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
@@ -162,15 +163,15 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             f"complexity={result.complexity} fast_path={result.fast_path}"
         )
 
-        # 写入黑板供下游使用
-        await c.bb.write(
+        # v6.3: 黑板写入 fire-and-forget（不阻塞主流程）
+        asyncio.create_task(c.bb.write(
             "last_routing",
             {
                 "query_type": result.query_type,
                 "agent": result.agent_name,
                 "complexity": result.complexity,
             },
-        )
+        ))
 
         await _emit_status(state, "classify", f"📋 分类结果: {result.query_type} (agent={result.agent_name})")
 

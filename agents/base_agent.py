@@ -345,11 +345,13 @@ class BaseAgent(ABC):
         n_results: int = KNOWLEDGE_DEFAULT_N_RESULTS,
         image_uri: str = None,
         state: dict | None = None,
+        scene: str = None,
     ) -> str:
         """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
         v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
         v5.2: 支持 Query Rewriting（LLM 改写查询）和 Reranker（重排序）。
         v5.4: 支持 RAG 预取（state["_rag_prefetch"]），命中时跳过知识库查询。
+        v6.1: 支持 scene 场景过滤（售前咨询/售后支持/技术答疑/投诉处理）。
         返回格式化字符串，可直接拼入 extra_context。
         知识库不可用时静默返回空字符串。
         """
@@ -376,6 +378,19 @@ class BaseAgent(ABC):
                     collections=collections,
                     n_results=n_results,
                 )
+            elif scene and hasattr(self.knowledge_base, "search"):
+                # v6.1: 场景过滤检索 — 使用 search(scene=...) 按 scene 过滤
+                fetch_n = (
+                    n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
+                )
+                results = await self.knowledge_base.search(
+                    effective_query,
+                    top_k=fetch_n,
+                    scene=scene,
+                    collection_name=collections[0] if collections else "product_knowledge",
+                )
+                if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
+                    results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
             elif collections:
                 # v5.2: 多检索一些结果用于重排序
                 fetch_n = (
@@ -409,20 +424,33 @@ class BaseAgent(ABC):
     async def _prepare_llm_messages(
         self, state: dict[str, Any], system_prompt: str, extra_context: str = "", mode: str = "llm"
     ) -> tuple:
-        """v3.6: 统一 LLM 消息构建（消除 _process_with_llm 和 _process_with_tools 重复）"""
+        """v3.6→v6.3: 统一 LLM 消息构建（并行化独立 I/O 操作，减少串行等待）
+
+        优化点：
+        - session 写入、上下文获取、漂移检测 三者独立，改为 asyncio.gather 并行
+        - 黑板 4 个前缀读取改为 asyncio.gather 并行
+        - 事件发布改为 fire-and-forget（不阻塞主流程）
+        """
         customer_query = state["customer_query"]
         session_id = state.get("session_id", "default")
 
+        # v6.3: session 写入需先于 context 读取（保证最新消息可查）
         await self._add_message_to_session(session_id, customer_query, is_user=True)
-        conversation_context = await self._get_conversation_context(session_id)
 
-        drift = await self._detect_drift(session_id, customer_query)
+        # 上下文获取和漂移检测互相独立，并行执行
+        conversation_context, drift = await asyncio.gather(
+            self._get_conversation_context(session_id),
+            self._detect_drift(session_id, customer_query),
+        )
+
         repair_context = self._handle_drift(customer_query, drift)
 
-        await self._publish_event(
-            "agent.processing",
-            {"agent": self.name, "query_type": state.get("query_type", ""), "mode": mode},
-        )
+        # v6.3: 事件发布 fire-and-forget，不阻塞主流程
+        if self.bus:
+            asyncio.create_task(self._publish_event(
+                "agent.processing",
+                {"agent": self.name, "query_type": state.get("query_type", ""), "mode": mode},
+            ))
 
         system_prompt_enhanced = self._enhance_system_prompt_with_context(system_prompt)
 
@@ -442,12 +470,19 @@ class BaseAgent(ABC):
         messages.append(SystemMessage(content=system_prompt_enhanced))
 
         user_content = f"<user_input>\n{customer_query}\n</user_input>"
-        # v5.2: 读取黑板上的其他 Agent 发现
+        # v6.3: 黑板 4 个前缀读取并行化
         if self.bb:
             try:
+                bb_results = await asyncio.gather(
+                    self.bb.read_prefix("product."),
+                    self.bb.read_prefix("tech."),
+                    self.bb.read_prefix("erp."),
+                    self.bb.read_prefix("complaint."),
+                )
                 bb_findings = []
-                for prefix in ["product.", "tech.", "erp.", "complaint."]:
-                    entries = await self.bb.read_prefix(prefix)
+                for prefix, entries in zip(
+                    ["product.", "tech.", "erp.", "complaint."], bb_results
+                ):
                     if entries:
                         for _key, val in entries.items():
                             if isinstance(val, dict):
@@ -708,15 +743,17 @@ class BaseAgent(ABC):
         if exp_name:
             state["ab_experiment"] = exp_name
 
-        await self._publish_event(
-            "agent.completed",
-            {
-                "agent": self.name,
-                "response_length": len(response_content),
-                "mode": "tools",
-                "ab_variant": variant,
-            },
-        )
+        # v6.3: 事件发布 fire-and-forget
+        if self.bus:
+            asyncio.create_task(self._publish_event(
+                "agent.completed",
+                {
+                    "agent": self.name,
+                    "response_length": len(response_content),
+                    "mode": "tools",
+                    "ab_variant": variant,
+                },
+            ))
 
         return state
 
@@ -831,14 +868,16 @@ class BaseAgent(ABC):
         if exp_name:
             state["ab_experiment"] = exp_name
 
-        await self._publish_event(
-            "agent.completed",
-            {
-                "agent": self.name,
-                "response_length": len(response_content),
-                "ab_variant": variant,
-            },
-        )
+        # v6.3: 事件发布 fire-and-forget
+        if self.bus:
+            asyncio.create_task(self._publish_event(
+                "agent.completed",
+                {
+                    "agent": self.name,
+                    "response_length": len(response_content),
+                    "ab_variant": variant,
+                },
+            ))
 
         return state
 

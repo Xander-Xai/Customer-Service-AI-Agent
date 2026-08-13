@@ -4,6 +4,110 @@
 
 ---
 
+## v6.3 (2026-06-25) — 前后端联调 + 生产就绪加固 + 文档同步
+
+### 前后端联调修复
+- **[CRITICAL]** Widget `X-File-Type` 头改为 `file_type`，与后端 `Header` 参数对齐（语音/图片上传原来无法工作）
+- **[CRITICAL]** Widget `currentSessionId`/`currentSessionToken` 未声明变量修复，新增 `sessionId`/`sessionToken` 状态追踪
+- **[CRITICAL]** Widget SSE 解析从 `\n` 分隔修正为 `\n\n`（SSE 规范），与主应用 sse.js 对齐
+- **[HIGH]** Widget SSE/REST 请求添加 `session_id`/`session_token`，响应中更新会话状态
+- **[MEDIUM]** `sendVoiceForm()`/`sendTTS()` 添加 `X-API-Key` 头，修复纯 API Key 认证时 401
+- **[MEDIUM]** `submitFeedback` 标记为 `@deprecated`，统一使用 `submitRating`
+- **[LOW]** `getSessions()` 添加 `offset`/`limit` 分页参数
+
+### 生产就绪加固
+- **[CRITICAL]** Token 刷新竞态修复：`_refreshPromise` 单次去重，并发 401 只触发一次刷新
+- **[CRITICAL]** CSP `frame-ancestors` 对 `widget.html` 改为 `'self'`（允许 iframe 嵌入），其他页面保持 `'none'`
+- **[HIGH]** Widget markdown 渲染添加 DOMPurify XSS 防护（CDN 加载）
+- **[HIGH]** Redis 限流 DoS 修复：`_redis_rate_limit` 返回三态（allow/deny/unavailable），连接异常不再 429 全部请求
+- **[MEDIUM]** ERP 同步操作添加确认对话框
+- **[MEDIUM]** `X-Frame-Options: DENY` 对 `widget.html` 页面跳过
+
+### 文档同步
+- CLAUDE.md: 8 agents → 10, 双层缓存 → 三层缓存, 测试文件数更新, auth 描述 PBKDF2 → Argon2id
+- docs/openapi.json: 版本 6.1 → 6.3
+- docs/design/architecture-design.md: Agent/缓存/测试数据同步, 7 领域专家 + ResponseAgent + ReAct + Evaluator
+- docs/reference/api-reference.md: file_type 头文档, Widget 认证说明
+- docs/checklists/production-readiness-checklist.md: v6.3 修复项标记为 Verified, 版本号同步 v6.3
+
+### 后续修复（同版本内）
+- **[CRITICAL]** Widget `file_type` header 从下划线改为连字符 `file-type`，对齐 FastAPI Header() 参数转换规则 — `web/widget.html`
+- **[MEDIUM]** `.env.example` 模型名 `Qwen/Qwen2.5-7B-Instruct` → `Qwen/Qwen3-8B`，版本描述 v4.1 → v6.3
+- **[MEDIUM]** `secrets/keys.json` 添加到 `.gitignore`，生产仓库不再跟踪密钥元数据
+- **[MEDIUM]** `web/admin.html` 和 `web/index.html` 版本号 v6.1 → v6.3
+- **[MEDIUM]** `docs/operations/production-operations-guide.md` 版本 v6.0 → v6.3，Qdrant 代码片段从旧 ChromaDB API 更新，缓存优化参数从废弃的 `CACHE_L1_MAX`/`CACHE_L2_MAX` 更新为 TTL 策略
+- **[LOW]** `docs/standards/conventions.md` 目录结构补全所有顶级目录，Agent 数 8 → 10
+- **[LOW]** `docs/README.md` Agent 数 8 → 10，版本标记 v6.2 → v6.3
+
+---
+
+## v6.2 (2026-06-25) — 全量前后端联调对齐 + 生产就绪修复 + 文档同步
+
+### 🔧 前后端代码修复
+- **版本号同步**：`web/index.html` 版本 `v6.0` → `v6.1`，与 `web/admin.html` 保持一致 — `web/index.html`
+- **README 测试计数修正**：前端测试 `56/56` → `60/60`（7 个测试文件），API 端点 `51` → `53` — `README.md`
+- **README Agent 表补齐**：新增 `SalesAgent`（售前推荐）+ `AftersalesAgent`（售后处理），总数 8 → 10 — `README.md`
+- **README 缓存架构重写**：从"双层缓存（L1 OrderedDict + L2 Jaccard）"更正为"三级缓存（L1 Redis + L2 Qdrant + L3 Jaccard）"— `README.md`
+
+### 🛡️ 生产就绪修复
+- **已吊销 JTI 集合容量限制**：`_revoked_jtis` 新增 `_MAX_REVOKED_JTIS = 10000` 上限，超出时淘汰 10% 旧记录，防止内存泄漏 — `auth/service.py`
+- **mypy 移到 dev 依赖**：从 `requirements.txt` 移除 `mypy`，加到 `requirements-dev.txt`，减小生产镜像攻击面 — `requirements.txt`, `requirements-dev.txt`
+- **config 启动校验增强**：非 DEV 模式下新增 4 项警告：`SESSION_STORAGE_BACKEND=memory`、`ERP_MODE=mock`、`SESSION_ENCRYPTION_KEY` 未设置 — `core/config.py`
+- **config print 改为日志**：`print(f"[config] ...")` 替换为 `logging.getLogger("config").info(...)` — `core/config.py`
+
+### 📝 文档同步
+- **架构设计文档更新**：Agent 数 8→10（+SalesAgent/AftersalesAgent）、缓存架构 L1 Redis/L2 Qdrant/L3 Jaccard、单元测试文件 25→26、测试计数 ~1044→1370、数据迁移模式 `parallel`→`qdrant_only` — `docs/design/architecture-design.md`
+- **生产检查清单更新**：移除已删除的 `admin-history.js` 死代码条目，补充 v6.2 修复项，更新最后复核日期 — `docs/checklists/production-readiness-checklist.md`
+- **API 参考文档修正**：确认 48 API + 5 页面 = 53 总 HTTP 路径 — `docs/reference/api-reference.md`
+- **文档索引更新**：最后更新日期刷新，plans 目录补全 v6.2 记录 — `docs/README.md`
+- **对齐记录**：新增本文件 — `docs/reports/plans/2026-06-25-v6.2-code-doc-alignment.md`
+
+### 🧹 代码清理
+- **config 兼容别名保留说明**：`CACHE_L1_MAX`/`CACHE_L2_MAX` 保留仅为避免 ImportError，实际已不再用于缓存控制
+
+---
+
+## v6.1.1 (2026-06-25) — 多模态统一入口 + Widget 增强 + Prometheus 防重注册
+
+### 🔧 联调修复
+- **统一多模态入口**：新增 `POST /api/chat/multimodal` 端点，自动检测文件类型（voice/image/document）并路由到对应处理器 — `api/routes/chat_multimodal.py`
+- **多模态端点认证加固**：`/api/chat/multimodal` 新增会话认证（先前缺少 `get_authenticated_session` 调用）— `api/routes/chat_multimodal.py`
+- **图片压缩保留 PNG Alpha**：Canvas 压缩时保留 PNG 透明通道，不扁平化为 JPEG — `web/widget.html`
+
+### 🎨 Widget 增强
+- **图片上传**：拖拽/点击 + Canvas 压缩 + 缩略图预览 — `web/widget.html`
+- **语音输入**：MediaRecorder + 波形动画 + 回填确认模式 — `web/widget.html`
+
+### 📊 Prometheus 防重注册
+- **安全指标注册**：使用 `not_started_unless_registered` 防止 `DuplicatedTimeseries` 错误 — `core/monitoring.py`
+- **新增 3 个指标**：`csai_rag_latency_ms`、`csai_agent_processing_time`、`csai_cache_write_throughput` — `core/monitoring.py`
+
+### 🧪 测试修复
+- **音频管道测试 fixture 修复**：修复 `test_client` fixture 在 audio_pipeline 测试中的数据库会话冲突 — `tests/integration/test_audio_pipeline.py`
+- **组件计数命令稳定性**：修复 Makefile `component-count` 命令在空目录下的异常处理
+- **Ruff lint 修复**：10+ 个 lint 错误（无用导入、f-string、SIM105、过时格式等）— `scripts/`
+
+### 🎯 Benchmark 对齐
+- **知识库 L3 补齐**：975→1000 条，总数达到 5000 条 — `scripts/generate_knowledge_base.py`
+- **基准预期文档 ID 对齐**：重新生成以匹配真实知识库 ID — `scripts/benchmark_cache.py`
+- **查询子集提取**：从基准测试中提取 3 个子集文件 — `scripts/`
+
+### 📝 文档更新
+- API 参考：HTTP 路径数 51→53，新增 `/api/cache/invalidate`、`/api/chat/multimodal` 端点说明
+- 生产准备度检查清单：更新日期至 2026-06-25，补充 v6.1.1 验证项
+- OpenAPI 重新生成：`docs/openapi.json` 导出 53 个 HTTP 路径（48 API + 5 页面）
+- admin.html 版本号同步：`v6.0` → `v6.1`
+- 前端测试计数更新：56→60（新增 `admin-settings.test.js`）
+
+### 🧹 代码清理
+- **死代码识别**：`web/src/admin-history.js` 模块无任何导入引用，建议后续移除
+
+### ✅ 后端路由验证
+- 全量 48 个 API 端点通过 OpenAPI 导出验证，前端 `api/rest.js` 封装覆盖率达 100%
+- 后端返回字段与前端消费字段全部对齐（`feedback/stats` 的 `rate`、`monitoring/tokens` 的 `by_agent`/`by_model` 等）
+
+---
+
 ## v6.1 证据缺口修复 (2026-06-24)
 
 ### 🔴 证据缺口修复（15 项缺口全部补齐）
@@ -27,7 +131,7 @@
 
 ### 🔍 监控增强
 - **15+ Prometheus 指标**：新增缓存分层/流式延迟/Trace/RAG/场景路由/组件计数 — `core/monitoring.py`
-- **Trace ID 全链路传播**：请求头传播 + `request.state.trace_id` + 响应头回显 — `api/middleware.py`
+- **Trace ID 全链路传播**：请求头传播 + `request.state.trace_id` + 响应头回显 — `api/middleware/__init__.py`
 - **场景端到端测试**：10 个用例覆盖四场景 + 通用 — `tests/e2e/test_scenarios.py`
 - **Trace ID 测试**：4 个测试用例 — `tests/e2e/test_trace.py`
 
@@ -45,11 +149,26 @@
 - `tests/eval/rag_benchmark.json` — 500+ 条 RAG 评测集
 
 ### 🏗️ 基础架构
+
+#### 目录与工具
 - `data/knowledge_base/` — 知识库数据目录
 - `tests/eval/` — 评测集目录
 - `reports/` — 基准测试报告输出目录
 - Makefile 新增：`benchmark` / `generate-knowledge-base` / `component-count`
-- `.gitignore` 新增知识库数据和报告排除规则
+- `.gitignore` 新增知识库数据和报告排除规则、worktrees 目录
+
+#### 三层缓存重写
+- **ResponseCache 完全重构**：从基于 OrderedDict 的双层缓存升级为 L1 Redis (MD5 精确匹配) + L2 Qdrant (BGE 向量语义搜索) + L3 Jaccard (jieba 分词回退) 的三层分布式架构 — `cache/response_cache.py`
+- **DI 容器集成**：Redis/Qdrant/Embedding 客户端通过 ServiceContainer 注入，消除模块级硬依赖 — `core/container.py`
+- **缓存元数据传递**：intent_type/user_role/product_id 传入缓存 get/put，支持多维度 Qdrant payload 过滤 — `cache/response_cache.py`
+- **向量维度对齐修复**：`_RANDOM_VECTOR_DIM` 384→768，对齐 bge-small-zh-v1.5 嵌入维度（原值导致 L2 缓存语义检索精度下降） — `cache/response_cache.py`
+- **缓存无效化 API**：`POST /api/cache/invalidate` 新增端点，支持精确 key / 语义检索 / 批量清除 — `api/routes/`
+- **配置向后兼容**：保留 `CACHE_L1_MAX`/`CACHE_L2_MAX` 配置别名避免 ImportError — `core/config.py`
+- **死代码清理**：移除 product_id 元数据残留、旧注入逻辑 — `cache/response_cache.py`, `core/container.py`
+
+#### LLM & 知识库增强
+- **LLM 指数退避重试**：全抖动指数退避算法，降低 LLM API 瞬时故障时的碰撞概率 — `llm/client.py`
+- **知识库单例重构**：QdrantKnowledgeBase 接受外部 embedding 单例注入，消除多次重复初始化 — `rag/qdrant_knowledge_base.py`
 
 ### 📝 文档
 - `docs/reports/evidence-gap-audit-report-2026-06-24.md` — 证据缺口审计报告

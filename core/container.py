@@ -59,8 +59,10 @@ class ServiceContainer:
         self.circuit_breaker = CircuitBreaker()
         self.sla_alert_mgr = SLAAlertManager(bus=self.bus)
 
-        # v6.1: ResponseCache 延迟初始化（embedding / Redis / Qdrant 在 initialize() 中注入）
-        self.cache = None
+        # v6.3: ResponseCache 基础实例（无 Redis/Qdrant），initialize() 中替换为完整版
+        from cache.response_cache import ResponseCache
+
+        self.cache = ResponseCache()
 
         # Session: 可选 Redis 持久化
         from core.session.session_manager import EnhancedSessionManager, default_session_manager
@@ -108,7 +110,6 @@ class ServiceContainer:
 
         # RAG & Tools
         self.knowledge_base: KnowledgeBaseProtocol | None = None
-        self._legacy_kb: Any = None  # v6.0: 并行运行时保留的 ChromaDB legacy 实例
         # v6.1: 容器级单例 Embedding 模型
         self.embedding_model: Any = None
         self.tool_registry: ToolRegistryProtocol | None = None
@@ -121,6 +122,9 @@ class ServiceContainer:
 
         # v4.1: LangGraph 应用实例
         self.graph_app: Any = None
+
+        # v6.1: 组件注册表（用于组件计数 + 服务发现）
+        self._services: dict[str, Any] = {}
 
     def _create_redis_client(self):
         """v6.1: 创建同步 Redis 客户端（可能失败返回 None）"""
@@ -195,7 +199,18 @@ class ServiceContainer:
             self._build_graph()
 
             self._initialized = True
-            logger.info(f"ServiceContainer 初始化完成 ({len(self.agents_dict)} agents)")
+            # v6.1: 构建组件注册表
+            self._rebuild_service_registry()
+            # v6.1: 设置活跃组件 Prometheus 指标
+            try:
+                from core.monitoring import active_components_total
+                active_components_total.set(len(self._services))
+            except Exception:
+                pass
+            logger.info(
+                f"ServiceContainer 初始化完成 ({len(self.agents_dict)} agents, "
+                f"{len(self._services)} services)"
+            )
 
     def _build_graph(self):
         """构建 LangGraph 工作流图（委托给 multi_agent_customer_service.build_graph）"""
@@ -330,7 +345,7 @@ class ServiceContainer:
         logger.info("Token 用量追踪器初始化完成")
 
     async def _init_rag_and_tools(self):
-        """初始化 RAG 知识库 + 工具注册（v6.0: 支持 Qdrant / ChromaDB 双模式）"""
+        """初始化 RAG 知识库 + 工具注册（v6.2: 仅 Qdrant）"""
         if self.knowledge_base is None:
             from core.config import (
                 CLIP_ENABLED,
@@ -340,7 +355,6 @@ class ServiceContainer:
                 QDRANT_PORT,
                 QDRANT_PREFER_GRPC,
                 RAG_PERSIST_DIRECTORY,
-                VECTOR_DB_MODE,
             )
             from rag.seed_data import (
                 seed_complaint_knowledge,
@@ -350,45 +364,37 @@ class ServiceContainer:
                 seed_tech_support,
             )
 
-            if VECTOR_DB_MODE in ("qdrant_only", "parallel"):
-                # v6.1: 加载容器级单例 Embedding 模型
-                if self.embedding_model is None:
-                    try:
-                        from sentence_transformers import SentenceTransformer
+            # v6.2: 加载容器级单例 Embedding 模型（API 调用）
+            if self.embedding_model is None:
+                try:
+                    from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
+                    from rag.api_embedding import ApiEmbedding
 
-                        self.embedding_model = SentenceTransformer("BAAI/bge-small-zh-v1.5")
-                        logger.info("容器级 Embedding 模型加载完成 (BAAI/bge-small-zh-v1.5)")
-                    except Exception as e:
-                        logger.warning(f"Embedding 模型加载失败: {e}")
-                        self.embedding_model = None
+                    self.embedding_model = ApiEmbedding(
+                        api_key=EMBEDDING_API_KEY,
+                        model=EMBEDDING_MODEL,
+                        base_url=EMBEDDING_BASE_URL,
+                    )
+                    logger.info(f"容器级 Embedding 模型加载完成 ({EMBEDDING_MODEL})")
+                except Exception as e:
+                    logger.warning(f"Embedding API 加载失败: {e}")
+                    self.embedding_model = None
 
-                # Qdrant 模式
-                from rag.qdrant_knowledge_base import QdrantKnowledgeBase
+            # Qdrant 知识库
+            from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
-                self.knowledge_base = QdrantKnowledgeBase(
-                    host=QDRANT_HOST,
-                    port=QDRANT_PORT,
-                    grpc_port=QDRANT_GRPC_PORT,
-                    prefer_grpc=QDRANT_PREFER_GRPC,
-                    api_key=QDRANT_API_KEY,
-                    clip_enabled=CLIP_ENABLED,
-                    embedding_model=self.embedding_model,  # v6.1
-                )
-                logger.info(
-                    f"Qdrant 知识库初始化完成 (host={QDRANT_HOST}, mode={VECTOR_DB_MODE})"
-                )
-
-                if VECTOR_DB_MODE == "parallel":
-                    from rag.legacy_chroma import ChromaKnowledgeBase
-
-                    self._legacy_kb = ChromaKnowledgeBase(clip_enabled=CLIP_ENABLED)
-                    logger.info("Legacy ChromaDB 知识库已初始化（并行模式）")
-            else:
-                # 兼容模式：使用 ChromaDB legacy
-                from rag.legacy_chroma import ChromaKnowledgeBase
-
-                self.knowledge_base = ChromaKnowledgeBase(clip_enabled=CLIP_ENABLED)
-                logger.info("ChromaDB (legacy) 知识库初始化完成 (mode=chroma_legacy)")
+            self.knowledge_base = QdrantKnowledgeBase(
+                host=QDRANT_HOST,
+                port=QDRANT_PORT,
+                grpc_port=QDRANT_GRPC_PORT,
+                prefer_grpc=QDRANT_PREFER_GRPC,
+                api_key=QDRANT_API_KEY,
+                clip_enabled=CLIP_ENABLED,
+                embedding_model=self.embedding_model,
+            )
+            logger.info(
+                f"Qdrant 知识库初始化完成 (host={QDRANT_HOST})"
+            )
 
             # 种子数据（所有模式通用）
             if RAG_PERSIST_DIRECTORY:
@@ -436,8 +442,6 @@ class ServiceContainer:
 
         redis_client = self._create_redis_client()
         qdrant_client = getattr(self.knowledge_base, "_client", None) if self.knowledge_base else None
-        if qdrant_client is None and hasattr(self, "_legacy_kb") and self._legacy_kb:
-            qdrant_client = getattr(self._legacy_kb, "_client", None)
 
         self.cache = ResponseCache(
             redis_client=redis_client,
@@ -558,6 +562,99 @@ class ServiceContainer:
             llm=self.llm,
             complexity_threshold=ROUTING_COMPLEXITY_THRESHOLD,
         )
+
+    def _rebuild_service_registry(self):
+        """v6.1: 构建显式组件注册表，替代 dir() 猜测。
+
+        注册所有核心服务到 _services 字典，支持组件计数和服务发现。
+        每次 initialize() 完成后调用以刷新注册表。
+        """
+        self._services = {}
+
+        # 核心基础设施
+        self._services["message_bus"] = self.bus
+        self._services["shared_blackboard"] = self.bb
+        self._services["metrics_collector"] = self.metrics
+        self._services["circuit_breaker"] = self.circuit_breaker
+        self._services["sla_alert_manager"] = self.sla_alert_mgr
+
+        # 会话管理
+        self._services["session_manager"] = self.session_mgr
+
+        # LLM
+        if self.llm is not None:
+            self._services["llm_client"] = self.llm
+            from llm.rule_based_llm import RuleBasedLLM
+            if isinstance(self.llm, RuleBasedLLM):
+                self._services["rule_llm"] = self.llm
+
+        # RAG 知识库
+        if self.knowledge_base is not None:
+            self._services["knowledge_base"] = self.knowledge_base
+
+        # 缓存
+        if self.cache is not None:
+            self._services["cache"] = self.cache
+
+        # ERP
+        if self.erp is not None:
+            self._services["erp_adapter"] = self.erp
+
+        # Agent 系统
+        if self.router is not None:
+            self._services["query_router"] = self.router
+        if self.orchestrator is not None:
+            self._services["orchestrator"] = self.orchestrator
+        if self.response_agent is not None:
+            self._services["response_agent"] = self.response_agent
+        self._services["total_agents"] = self.agents_dict  # len 穿透
+
+        # 工具
+        if self.tool_registry is not None:
+            self._services["tool_registry"] = self.tool_registry
+
+        # 其他 v6.1 注册组件
+        try:
+            from core.ab_testing import ABTestManager
+            ab_mgr = ABTestManager()
+            self._services["ab_test_manager"] = ab_mgr
+            self._services["ab_tester"] = ab_mgr  # 规范别名
+        except Exception:
+            pass  # ABTestManager 可选
+
+        # InputSanitizer 和 RateLimiter 由中间件层提供，容器内注册轻量代理
+        self._services["input_sanitizer"] = self._get_input_sanitizer()
+        self._services["rate_limiter"] = self._get_rate_limiter()
+
+        # 监控代理
+        if hasattr(self, "sla_alert_mgr"):
+            self._services["alert_manager"] = self.sla_alert_mgr
+
+        logger.info(f"组件注册表: {len(self._services)} 个服务")
+
+    def _get_input_sanitizer(self):
+        """v6.1: 返回输入净化模块的引用代理。"""
+        import types
+        sanitizer = types.ModuleType("input_sanitizer")
+        try:
+            from api.utils import sanitize_input
+            sanitizer.sanitize = sanitize_input
+        except ImportError:
+            sanitizer.sanitize = lambda x, **kw: x
+        return sanitizer
+
+    def _get_rate_limiter(self):
+        """v6.1: 返回限流器配置引用。"""
+        import types
+        limiter = types.ModuleType("rate_limiter")
+        try:
+            from core.config import RATE_LIMIT_MAX, RATE_LIMIT_WINDOW
+            limiter.max_requests = RATE_LIMIT_MAX
+            limiter.window_seconds = RATE_LIMIT_WINDOW
+        except ImportError:
+            limiter.max_requests = 60
+            limiter.window_seconds = 60
+        return limiter
 
     async def close(self):
         """P1-3: 优雅关闭，按依赖逆序释放资源"""

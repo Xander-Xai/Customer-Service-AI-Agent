@@ -385,3 +385,57 @@ export async function loadFeedbackStats() {
     // 忽略加载异常
   }
 }
+
+// ── 语音设置 ──
+
+const VOICE_STORAGE_KEYS = {
+  language: 'csai_voice_language',
+  autoSend: 'csai_voice_auto_send',
+  format: 'csai_audio_format',
+};
+
+/** 从 localStorage 加载语音设置并应用到页面控件 */
+export function loadVoiceSettings() {
+  const languageEl = document.getElementById('voiceLanguage');
+  const autoSendEl = document.getElementById('voiceAutoSend');
+  const formatEl = document.getElementById('audioFormat');
+
+  if (languageEl) {
+    languageEl.value = localStorage.getItem(VOICE_STORAGE_KEYS.language) || 'zh-CN';
+  }
+  if (autoSendEl) {
+    autoSendEl.checked = localStorage.getItem(VOICE_STORAGE_KEYS.autoSend) === 'true';
+  }
+  if (formatEl) {
+    formatEl.value = localStorage.getItem(VOICE_STORAGE_KEYS.format) || 'webm';
+  }
+}
+
+/** 将当前页面控件值保存到 localStorage */
+export function saveVoiceSettings() {
+  const languageEl = document.getElementById('voiceLanguage');
+  const autoSendEl = document.getElementById('voiceAutoSend');
+  const formatEl = document.getElementById('audioFormat');
+
+  if (languageEl) {
+    localStorage.setItem(VOICE_STORAGE_KEYS.language, languageEl.value);
+  }
+  if (autoSendEl) {
+    localStorage.setItem(VOICE_STORAGE_KEYS.autoSend, String(autoSendEl.checked));
+  }
+  if (formatEl) {
+    localStorage.setItem(VOICE_STORAGE_KEYS.format, formatEl.value);
+  }
+}
+
+/** 初始化语音设置：加载值 + 绑定变更事件 */
+export function initVoiceSettings() {
+  loadVoiceSettings();
+
+  ['voiceLanguage', 'voiceAutoSend', 'audioFormat'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('change', saveVoiceSettings);
+    }
+  });
+}

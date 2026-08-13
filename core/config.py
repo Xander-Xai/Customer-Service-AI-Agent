@@ -22,7 +22,7 @@ class ConfigurationError(Exception):
 # ===== v4.1: 环境标识（启动时输出）=====
 _DEV_MODE = os.getenv("DEV_MODE", "").lower() == "true"
 _ENV_LABEL = "DEV" if _DEV_MODE else "PROD"
-print(f"[config] 🔄 Environment: {_ENV_LABEL} (DEV_MODE={_DEV_MODE})", file=sys.stderr)
+logging.getLogger("config").info(f"Environment: {_ENV_LABEL} (DEV_MODE={_DEV_MODE})")
 
 
 def _int_env(key: str, default: int) -> int:
@@ -49,7 +49,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-8B")  # v6.0: 从 Qwen2.5-7
 LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
 
 # ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
-VERSION = os.getenv("APP_VERSION", "6.0")  # 可从环境变量覆盖，便于 CI/CD
+VERSION = os.getenv("APP_VERSION", "6.3")  # 可从环境变量覆盖，便于 CI/CD
 APP_NAME = os.getenv("APP_NAME", "药妆智多星 - Customer Service AI Agent")
 DESCRIPTION = os.getenv(
     "APP_DESCRIPTION",
@@ -161,6 +161,20 @@ TOKEN_QUOTA_ENABLED = os.getenv("TOKEN_QUOTA_ENABLED", "true").lower() == "true"
 TOKEN_QUOTA_REDIS_PREFIX = os.getenv("TOKEN_QUOTA_REDIS_PREFIX", "csai:quota:")  # Redis key 前缀
 
 
+# ===== v6.1: 限流配置（供组件注册表引用）=====
+RATE_LIMIT_MAX = _int_env("RATE_LIMIT_MAX", 60)  # 每分钟最大请求数
+RATE_LIMIT_WINDOW = _int_env("RATE_LIMIT_WINDOW", 60)  # 时间窗口（秒）
+
+
+# ===== v6.1: 基准测试 / 证据缺口修复配置 =====
+BENCHMARK_REPORT_DIR = os.getenv("BENCHMARK_REPORT_DIR", "reports")
+BENCHMARK_QUERY_COUNT = _int_env("BENCHMARK_QUERY_COUNT", 500)  # 默认评测集大小
+BENCHMARK_SEED = _int_env("BENCHMARK_SEED", 42)  # 可复现随机种子
+BENCHMARK_CACHE_WARMUP = _int_env("BENCHMARK_CACHE_WARMUP", 200)  # 缓存预热查询数
+BENCHMARK_TOP_K = _int_env("BENCHMARK_TOP_K", 3)  # RAG 评估 Top-K
+BENCHMARK_PREFETCH_ENABLED = os.getenv("BENCHMARK_PREFETCH_ENABLED", "true").lower() == "true"
+
+
 # ===== 日志配置 =====
 LOG_CONFIG = {
     "level": os.getenv("LOG_LEVEL", "INFO"),
@@ -205,6 +219,31 @@ RAG_QUERY_REWRITING = (
     os.getenv("RAG_QUERY_REWRITING", "false").lower() == "true"
 )  # v5.2: LLM 改写查询
 
+# ===== v6.2: Embedding & Reranker API 配置（替代本地 sentence-transformers）=====
+EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
+EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
+# v6.3: 当 EMBEDDING_API_KEY 未单独配置时，回退到 LLM 的 OPENAI_API_KEY
+if not EMBEDDING_API_KEY:
+    EMBEDDING_API_KEY = OPENAI_API_KEY
+    logging.getLogger("config").info(
+        "EMBEDDING_API_KEY 未配置，将复用 OPENAI_API_KEY。"
+        "生产环境建议配置独立的 Embedding 服务 API Key"
+    )
+EMBEDDING_DIM = _int_env("EMBEDDING_DIM", 1024)  # bge-large-zh-v1.5 输出维度
+
+RERANKER_BASE_URL = os.getenv("RERANKER_BASE_URL", "https://api.siliconflow.cn/v1")
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
+
+# ===== v7.0: 混合检索（向量 + BM25）配置 =====
+HYBRID_SEARCH_ENABLED = (
+    os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
+)  # 混合检索总开关
+HYBRID_RRF_K = _int_env("HYBRID_RRF_K", 60)  # RRF rank 平滑常数
+HYBRID_VECTOR_TOP_K = _int_env("HYBRID_VECTOR_TOP_K", 8)  # 向量通道每 collection top-K
+HYBRID_BM25_TOP_K = _int_env("HYBRID_BM25_TOP_K", 8)  # BM25 通道每 collection top-K
+
 # ===== v6.0: Qdrant 向量数据库配置 =====
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = _int_env("QDRANT_PORT", 6333)  # REST API 端口
@@ -212,12 +251,12 @@ QDRANT_GRPC_PORT = _int_env("QDRANT_GRPC_PORT", 6334)
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", "")
 QDRANT_PREFER_GRPC = os.getenv("QDRANT_PREFER_GRPC", "false").lower() == "true"
 QDRANT_COLLECTION_CONFIG = {
-    "vectors": {"size": 768, "distance": "Cosine"},
+    "vectors": {"size": 1024, "distance": "Cosine"},
     "optimizers_config": {"default_segment_number": 2},
     "hnsw_config": {"m": 16, "ef_construct": 100},
 }
-# 迁移模式：parallel（双写）| qdrant_only | chroma_legacy
-VECTOR_DB_MODE = os.getenv("VECTOR_DB_MODE", "chroma_legacy")
+# v6.2: 仅使用 Qdrant
+VECTOR_DB_MODE = os.getenv("VECTOR_DB_MODE", "qdrant_only")
 
 # ===== v3.5: ReAct 配置 =====
 REACT_MAX_ITERATIONS = _int_env("REACT_MAX_ITERATIONS", 3)  # v4.3: 从 5 降至 3，控制延迟在 20s 内
@@ -353,6 +392,8 @@ def validate_required_config():
 
     if not _DEV_MODE and "*" in CORS_ORIGINS:
         errors.append("Production CORS_ORIGINS must not contain wildcard *")
+    if not _DEV_MODE and not CORS_ORIGINS:
+        errors.append("Production CORS_ORIGINS is empty — frontend cross-origin requests will fail. Set CORS_ORIGINS or ALLOWED_ORIGINS")
 
     if not _DEV_MODE and not DATABASE_URL:
         errors.append("Production requires DATABASE_URL (PostgreSQL)")
@@ -369,6 +410,16 @@ def validate_required_config():
         warnings.append("RAG_PERSIST_DIRECTORY not set, vector DB will run in-memory")
     if not _DEV_MODE and not ALERT_WEBHOOKS and not SMTP_HOST:
         warnings.append("No alert notification channels configured")
+    if not _DEV_MODE and SESSION_STORAGE_BACKEND == "memory":
+        warnings.append("SESSION_STORAGE_BACKEND=memory: sessions lost on restart, use 'redis' for production")
+    if not _DEV_MODE and ERP_MODE == "mock":
+        warnings.append("ERP_MODE=mock: using fake ERP data, set to 'real' for production")
+    if not _DEV_MODE and not SESSION_ENCRYPTION_KEY:
+        warnings.append("SESSION_ENCRYPTION_KEY not set: session data stored in plaintext")
+    # v6.3: 当 EMBEDDING_API_KEY 为空（即从 OPENAI_API_KEY 回退）时发出警告
+    _embedding_raw = os.getenv("EMBEDDING_API_KEY", "")
+    if not _DEV_MODE and not _embedding_raw:
+        warnings.append("EMBEDDING_API_KEY not set, reusing OPENAI_API_KEY for embedding service — configure a dedicated key for production")
 
     for w in warnings:
         logging.getLogger("config").warning(f"[config] {w}")

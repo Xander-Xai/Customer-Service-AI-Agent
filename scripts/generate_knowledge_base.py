@@ -756,12 +756,16 @@ SCENE_DOC_TYPES = [
         "线下门店售后政策", "预售商品售后规则", "套装商品拆退规则",
         "开封商品退换说明", "节假日售后调整", "保价政策说明",
     ]),
-    ("投诉处理流程", 200, [
+    ("投诉处理流程", 180, [
         "投诉受理流程", "产品质量投诉处理", "客服服务投诉处理",
         "物流配送投诉处理", "产品过敏投诉处理", "虚假宣传投诉处理",
         "价格争议投诉处理", "升级投诉处理流程", "12315投诉对接流程",
         "争议调解机制", "赔偿标准说明", "投诉处理时效承诺",
         "投诉回访流程", "黑猫投诉平台对接", "消费者权益保护措施",
+    ]),
+    ("行业法规", 20, [
+        "化妆品监督管理条例", "化妆品标签管理办法", "化妆品生产许可工作规范",
+        "化妆品安全技术规范", "化妆品功效宣称评价规范",
     ]),
 ]
 
@@ -937,20 +941,23 @@ def _generate_l2(random_state: random.Random) -> list[dict[str, Any]]:
                 tags.append(primary_cat)
 
             doc_id = f"faq_{len(docs) + len(scenario_docs) + 1:05d}"
-            # Ensure unique content-ish by using positional uniqueness
-            title_prefixes = {
-                "售前咨询": "售前咨询：关于",
-                "售后支持": "售后支持：关于",
-                "技术答疑": "技术答疑：关于",
-                "投诉处理": "投诉处理：关于",
+            # v6.1 fix: Naturalize title — use the actual FAQ question as title
+            title = content[:60].rstrip("。？，！、") + "…" if len(content) > 60 else content
+
+            # Map scenario → category (v6.1 fix: scenario-appropriate categories)
+            _scenario_category_map = {
+                "售前咨询": "产品介绍",
+                "售后支持": "售后政策",
+                "技术答疑": "使用方法",
+                "投诉处理": "投诉处理",
             }
-            title = f"{title_prefixes.get(scenario, '咨询：')}{product}的{nickname}相关问题"
+            doc_category = _scenario_category_map.get(scenario, "产品介绍")
 
             scenario_docs.append({
                 "id": doc_id,
                 "title": title,
                 "content": content,
-                "category": "行业法规" if scenario == "投诉处理" else "产品介绍",
+                "category": doc_category,
                 "scene": [scenario],
                 "tags": tags[:5],
                 "source": "synthetic",
@@ -1008,6 +1015,13 @@ def _generate_scene_doc(
         lines.append(f"处理时效：{random_state.choice(['24小时', '48小时', '72小时'])}内首次回复，{random_state.choice(['3个工作日', '5个工作日', '7个工作日'])}内完成处理。")
         lines.append(f"投诉人需提供：产品信息{product}、购买凭证、问题描述及相关照片/视频证据。")
         lines.append(f"涉及{ing[0]}成分的效果争议时，建议提供皮肤科医生的专业诊断证明。")
+    elif doc_type == "行业法规":
+        lines.append(f"【{topic}】法规摘要")
+        lines.append(f"本文件依据《{topic}》整理，供内部合规参考。")
+        lines.append("适用范围：在中国境内生产、经营的化妆品及其相关活动。")
+        lines.append("关键条款：1) 化妆品注册备案管理；2) 功效宣称需有充分科学依据；3) 禁止标注虚假内容。")
+        lines.append("违规处罚：责令改正、没收违法所得、处以罚款，严重者吊销许可证。")
+        lines.append(f"本法规对含{ing[0]}等功效成分的产品宣称有具体约束要求。")
 
     # Always add at least a concluding line
     if len(lines) < 3:
@@ -1043,18 +1057,21 @@ def _generate_l3(random_state: random.Random) -> list[dict[str, Any]]:
         "使用指南": "使用方法",
         "售后政策": "售后政策",
         "投诉处理流程": "投诉处理",
+        "行业法规": "行业法规",
     }
     scene_tags_map: dict[str, list[str]] = {
         "产品介绍": ["产品介绍", "护肤品", "化妆品"],
         "使用指南": ["使用方法", "护肤流程", "护肤技巧"],
         "售后政策": ["售后政策", "退换货", "退款"],
         "投诉处理流程": ["投诉处理", "投诉流程", "客户服务"],
+        "行业法规": ["行业法规", "法规", "监管"],
     }
     scene_scenes_map: dict[str, list[str]] = {
         "产品介绍": ["售前咨询", "技术答疑"],
         "使用指南": ["技术答疑", "售前咨询"],
         "售后政策": ["售后支持"],
         "投诉处理流程": ["投诉处理", "售后支持"],
+        "行业法规": ["技术答疑", "投诉处理"],
     }
 
     for doc_type, target, subtopics in SCENE_DOC_TYPES:

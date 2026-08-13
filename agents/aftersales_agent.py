@@ -40,7 +40,7 @@ class AftersalesAgent(BaseAgent):
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         customer_query = state["customer_query"]
 
-        # 从 RAG 检索售后支持相关文档
+        # 从 RAG 检索售后支持相关文档（v6.1: 带 scene 过滤）
         rag_context = ""
         if self.knowledge_base:
             try:
@@ -48,6 +48,7 @@ class AftersalesAgent(BaseAgent):
                     customer_query,
                     collections=["faq", "complaint_knowledge"],
                     state=state,
+                    scene="售后支持",
                 )
             except Exception as e:
                 self.logger.warning(f"AftersalesAgent RAG 检索失败: {e}")

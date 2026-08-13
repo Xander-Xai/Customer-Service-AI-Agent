@@ -24,15 +24,15 @@ dev-docker: env-dev ## Docker 开发环境（自动加载 override）
 # ===== 测试 =====
 test: env-test ## 运行测试
 	@echo "🧪 运行测试..."
-	python -m pytest tests/ -x -v --tb=short
+	python3 -m pytest tests/ -x -v --tb=short
 
 test-cov: env-test ## 运行测试（带覆盖率）
 	@echo "🧪 运行测试（覆盖率）..."
-	python -m pytest tests/ -x -v --tb=short --cov=. --cov-report=term-missing --cov-report=html:htmlcov
+	python3 -m pytest tests/ -x -v --tb=short --cov=. --cov-report=term-missing --cov-report=html:htmlcov
 
 test-fast: env-test ## 快速测试（跳过慢测试）
 	@echo "⚡ 快速测试..."
-	python -m pytest tests/ -x -v --tb=short -m "not slow"
+	python3 -m pytest tests/ -x -v --tb=short -m "not slow"
 
 # ===== 代码质量 =====
 lint: ## 代码检查（ruff）
@@ -71,19 +71,7 @@ generate-knowledge-base:
 ## DI 容器组件计数
 component-count:
 	@echo "📊 DI 容器活跃组件数:"
-	@python3 -c "\
-	import os, sys; \
-	sys.path.insert(0, '.'); \
-	os.environ['DEV_MODE'] = 'true'; \
-	os.environ['QDRANT_HOST'] = 'localhost'; \
-	os.environ['REDIS_URL'] = 'redis://localhost:6379/0'; \
-	from core.container import ServiceContainer; \
-	c = ServiceContainer(); \
-	import asyncio; \
-	asyncio.run(c.initialize()); \
-	svc_count = sum(1 for _ in filter(lambda x: not x.startswith('_') and not callable(getattr(c, x, lambda: None)), dir(c))); \
-	print(f'  服务组件: {svc_count}'); \
-	" 2>/dev/null || echo "  ⚠️ 容器不可用（依赖服务未运行）"
+	@python3 scripts/_component_count.py 2>&1 | grep -v "WARNING\|INFO\|DEBUG\|^$$" || echo "  ⚠️ 容器不可用"
 
 # ===== 生产环境 =====
 prod: env-prod ## 生产部署

@@ -34,6 +34,19 @@
 | JWT Bearer Token | 终端用户 | PyJWT (HS256) + jti 黑名单 + Refresh Token |
 | Admin Token (`X-Admin-Token`) | 监控/管理端点 | 独立密钥，DEV_MODE 不跳过 |
 
+### 基于角色的访问控制（RBAC）
+
+4 级 RBAC 角色，权限从 `api/middleware/__init__.py` 的 `ROLE_PERMISSIONS` 映射：
+
+| 角色 | 权限范围 |
+|------|---------|
+| **customer** | 聊天、自有会话管理、反馈 |
+| **agent** | 聊天、全部会话查看、反馈 |
+| **supervisor** | 聊天 + 全部会话 + 反馈 + 监控仪表盘 + 告警管理 |
+| **admin** | 全部权限（用户管理、知识库管理、系统配置、监控、告警）|
+
+路由级保护通过 `auth_middleware` 中间件实现：管理端点（`/api/knowledge`、`/api/admin/prompts`、`/api/auth/users`）仅 `admin` 可访问；监控端点（`/api/metrics`、`/api/circuit-breaker`、`/api/alerts`）允许 `supervisor` 及以上角色。JWT payload 的 `role` 字段在登录时写入，中间件通过 `check_jwt_auth` 解码后校验。
+
 ### 密码哈希（v5.4 升级）
 
 v5.4 从 PBKDF2-SHA256 升级到 **Argon2id**（OWASP 2023 推荐标准）：
@@ -61,18 +74,19 @@ else:
 ### CSP 配置详情
 
 ```python
-# api/middleware.py:169-175
+# api/middleware/__init__.py — security_headers 中间件
 Content-Security-Policy:
   default-src 'self';
-  script-src 'self' 'nonce-{random}' 'unsafe-hashes';
-  style-src 'self' 'nonce-{random}';     # v5.4: 已从 unsafe-inline 升级为 nonce
+  script-src 'self' 'nonce-{random}';
+  style-src 'self' 'unsafe-inline';     # 动态样式需要，见已知限制
   connect-src 'self';
-  img-src 'self' data:;
-  frame-ancestors 'none'
+  img-src 'self' data: blob:;
+  frame-ancestors 'none'                # widget.html 动态切换为 'self'（v6.3）
 ```
 
 **script-src**：使用 nonce，无 `unsafe-inline`，每次请求生成随机 nonce。
-**style-src**：v5.4 已从 `unsafe-inline` 升级为 nonce，与 script-src 一致。前端内联样式已迁移为 CSS 类或通过 nonce 注入。
+**style-src**：当前仍使用 `unsafe-inline`（主题切换和动态样式注入需要）。理想方案是迁移到 CSS 自定义属性，但内联样式较分散，优先级较低。通过 CSP 报告收集违规情况，逐步迁移。
+**frame-ancestors**（v6.3）：动态切换 — 普通页面为 `'none'` 阻止 iframe 嵌入；`widget.html` 页面为 `'self'` 允许同源 iframe 嵌入，支撑三方网站 widget 部署。
 
 ### 前端 innerHTML 安全审计
 

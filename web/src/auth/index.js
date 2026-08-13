@@ -14,31 +14,42 @@ function parseJWT(token) {
   }
 }
 
-/** 尝试刷新 access token */
+/** 尝试刷新 access token（单次去重：并发 401 只触发一次刷新） */
+let _refreshPromise = null;
+
 async function refreshToken() {
+  // If a refresh is already in-flight, reuse that promise
+  if (_refreshPromise) return _refreshPromise;
+
   const rt = localStorage.getItem('refresh_token');
   if (!rt) return false;
 
-  try {
-    const resp = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: rt }),
-    });
-    if (!resp.ok) return false;
+  _refreshPromise = (async () => {
+    try {
+      const resp = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!resp.ok) return false;
 
-    const data = await resp.json();
-    if (data.access_token) {
-      localStorage.setItem('token', data.access_token);
-      // 如果返回了新的 refresh_token，也更新
-      if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-      scheduleTokenRefresh(); // 重新调度下一次刷新
-      return true;
+      const data = await resp.json();
+      if (data.access_token) {
+        localStorage.setItem('token', data.access_token);
+        // 如果返回了新的 refresh_token，也更新
+        if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+        scheduleTokenRefresh(); // 重新调度下一次刷新
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      _refreshPromise = null;
     }
-    return false;
-  } catch {
-    return false;
-  }
+  })();
+
+  return _refreshPromise;
 }
 
 /** 安排 Token 自动刷新（过期前 5 分钟） */
@@ -66,6 +77,12 @@ function scheduleTokenRefresh() {
   refreshTimer = setTimeout(() => refreshToken(), refreshAt);
 }
 
+/** 从 cookie 中读取 CSRF token */
+function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  return match ? match[1] : '';
+}
+
 /**
  * 全局 401 拦截器包装 fetch
  * 当请求返回 401 时，尝试刷新 token 后重试一次
@@ -74,6 +91,15 @@ export async function fetchWithAuth(url, options = {}) {
   const token = localStorage.getItem('token');
   if (token && !options.headers?.Authorization) {
     options.headers = { ...options.headers, Authorization: `Bearer ${token}` };
+  }
+
+  // 无 Bearer token 的请求（如页面初始加载）自动附加 CSRF token
+  const hasBearer = (options.headers?.Authorization || '').startsWith('Bearer ');
+  if (!hasBearer) {
+    const csrf = getCsrfToken();
+    if (csrf) {
+      options.headers = { ...options.headers, 'X-CSRF-Token': csrf };
+    }
   }
 
   let resp = await fetch(url, options);
@@ -88,6 +114,7 @@ export async function fetchWithAuth(url, options = {}) {
     }
   }
 
+  // Only force-logout on 401 when not already retrying (prevents double-logout)
   if (resp.status === 401 && !_isLoggingOut) {
     _isLoggingOut = true;
     window.dispatchEvent(new CustomEvent('auth:expired', { detail: '登录已过期，请重新登录' }));

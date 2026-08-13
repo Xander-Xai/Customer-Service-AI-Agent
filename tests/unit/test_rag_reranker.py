@@ -1,76 +1,23 @@
 """
-RAG Reranker + Query Rewriter 测试（v5.1）
+RAG Reranker + Query Rewriter 测试（v7.1）
+BM25Reranker 已在 v7.1 移除，生产环境始终使用 ApiReranker。
 """
 
 from rag.query_rewriter import QueryRewriter, create_query_rewriter
-from rag.reranker import BM25Reranker, CrossEncoderReranker, create_reranker
+from rag.reranker import ApiReranker, create_reranker
 
 
-class TestBM25Reranker:
-    """BM25 Reranker 测试"""
+class TestApiReranker:
+    """API Reranker 测试"""
 
-    def test_rerank_empty_results(self):
-        """空结果返回空列表"""
-        reranker = BM25Reranker()
-        result = reranker.rerank("测试查询", [], top_k=3)
-        assert result == []
-
-    def test_rerank_single_result(self):
-        """单个结果直接返回"""
-        reranker = BM25Reranker()
-        results = [{"content": "烟酰胺有美白功效", "distance": 0.5}]
-        result = reranker.rerank("烟酰胺功效", results, top_k=3)
-        assert len(result) == 1
-        assert "rerank_score" in result[0]
-
-    def test_rerank_relevant_doc_ranked_higher(self):
-        """相关文档排名更高"""
-        reranker = BM25Reranker()
-        results = [
-            {"content": "这是一个无关的文档内容", "distance": 0.3},
-            {"content": "烟酰胺有美白提亮功效，适合油性肌肤", "distance": 0.8},
-            {"content": "玻尿酸有保湿锁水功效", "distance": 0.5},
-        ]
-        result = reranker.rerank("烟酰胺功效", results, top_k=3)
-        # 烟酰胺相关文档应该排在第一
-        assert "烟酰胺" in result[0]["content"]
-
-    def test_rerank_respects_top_k(self):
-        """top_k 限制返回数量"""
-        reranker = BM25Reranker()
-        results = [{"content": f"文档{i}", "distance": float(i)} for i in range(10)]
-        result = reranker.rerank("测试", results, top_k=3)
-        assert len(result) == 3
-
-    def test_tokenize_chinese(self):
-        """中文分词"""
-        tokens = BM25Reranker._tokenize("烟酰胺精华好用吗")
-        # jieba 正确将"烟酰胺"作为整体词汇（niacinamide），不会拆成单字
-        assert "烟酰胺" in tokens
-        assert "精华" in tokens
-        assert "好用" in tokens
-
-    def test_tokenize_mixed(self):
-        """中英文混合分词"""
-        tokens = BM25Reranker._tokenize("VC精华 vitamin c")
-        assert "vc" in tokens
-        assert "vitamin" in tokens
-        # jieba 将"精华"作为整体词汇
-        assert "精华" in tokens
-
-
-class TestCrossEncoderReranker:
-    """CrossEncoder Reranker 测试"""
-
-    def test_init_without_sentence_transformers(self):
-        """sentence-transformers 不可用时 graceful 降级"""
-        # CrossEncoderReranker 在没有 sentence-transformers 时应设置 available=False
-        reranker = CrossEncoderReranker(model_name="nonexistent-model-12345")
+    def test_init_without_api_key(self):
+        """API Key 未配置时 available=False"""
+        reranker = ApiReranker(api_key="")
         assert reranker.available is False
 
     def test_rerank_fallback_when_unavailable(self):
         """不可用时返回原始结果"""
-        reranker = CrossEncoderReranker(model_name="nonexistent-model")
+        reranker = ApiReranker(api_key="")
         results = [{"content": "测试", "distance": 0.5}]
         result = reranker.rerank("查询", results, top_k=3)
         assert result == results
@@ -79,13 +26,13 @@ class TestCrossEncoderReranker:
 class TestRerankerFactory:
     """Reranker 工厂函数测试"""
 
-    def test_create_reranker_returns_bm25_fallback(self):
-        """sentence-transformers 不可用时返回 BM25"""
-        reranker = create_reranker(prefer_cross_encoder=False)
-        assert isinstance(reranker, BM25Reranker)
+    def test_create_reranker_returns_api(self):
+        """工厂函数返回 ApiReranker 实例"""
+        reranker = create_reranker()
+        assert isinstance(reranker, ApiReranker)
 
-    def test_create_reranker_returns_type(self):
-        """工厂函数返回 reranker 实例"""
+    def test_create_reranker_has_rerank_method(self):
+        """工厂函数返回的实例有 rerank 方法"""
         reranker = create_reranker()
         assert hasattr(reranker, "rerank")
 
@@ -153,14 +100,15 @@ class TestQueryRewriter:
 
 
 class TestKnowledgeBaseRerankerIntegration:
-    """知识库 + Reranker 集成测试"""
+    """知识库 + Reranker 集成测试（ApiReranker）"""
 
     def test_apply_reranker_with_results(self):
-        """_apply_reranker 对结果排序"""
+        """_apply_reranker 调用 ApiReranker 处理结果"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase.__new__(CosmeticsKnowledgeBase)
-        kb._reranker = BM25Reranker()
+        # 使用不可用的 ApiReranker（无 API Key），应返回原始排序
+        kb._reranker = ApiReranker(api_key="")
 
         results = [
             {"content": "无关文档", "distance": 0.3},
@@ -168,14 +116,13 @@ class TestKnowledgeBaseRerankerIntegration:
         ]
         reranked = kb._apply_reranker("烟酰胺功效", results, top_k=2)
         assert len(reranked) == 2
-        assert "rerank_score" in reranked[0]
 
     def test_apply_reranker_empty_results(self):
         """空结果不处理"""
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase.__new__(CosmeticsKnowledgeBase)
-        kb._reranker = BM25Reranker()
+        kb._reranker = ApiReranker(api_key="")
 
         result = kb._apply_reranker("查询", [], top_k=3)
         assert result == []
@@ -185,7 +132,7 @@ class TestKnowledgeBaseRerankerIntegration:
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
         kb = CosmeticsKnowledgeBase.__new__(CosmeticsKnowledgeBase)
-        kb._reranker = BM25Reranker()
+        kb._reranker = ApiReranker(api_key="")
 
         results = [{"content": "唯一结果", "distance": 0.5}]
         result = kb._apply_reranker("查询", results, top_k=3)

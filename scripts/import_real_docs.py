@@ -27,6 +27,13 @@ from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 SCENE_CHOICES = ["售前咨询", "售后支持", "技术答疑", "投诉处理"]
 
 
+def _scene_to_str(scene_val) -> str:
+    """将 scene 值转为字符串（统一 list→逗号分隔, str→原值）"""
+    if isinstance(scene_val, list):
+        return ",".join(scene_val)
+    return str(scene_val)
+
+
 async def import_from_csv(path: str, scene: str) -> int:
     """从 CSV 文件导入文档"""
     kb = QdrantKnowledgeBase(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -39,7 +46,7 @@ async def import_from_csv(path: str, scene: str) -> int:
                 "title": row.get("title", ""),
                 "content": row.get("content", ""),
                 "category": row.get("category", "unknown"),
-                "scene": scene,
+                "scene": [scene],
                 "tags": [t.strip() for t in row.get("tags", "").split(",") if t.strip()],
                 "source": "import",
                 "created_at": str(time.time()),
@@ -48,14 +55,14 @@ async def import_from_csv(path: str, scene: str) -> int:
 
     if docs:
         collection_name = f"scene_{scene}"
-        kb.add_documents(
+        await kb.add_documents(
             collection_name=collection_name,
             documents=[d["content"] for d in docs],
             metadatas=[{
                 "doc_id": d["id"],
                 "title": d["title"],
                 "category": d["category"],
-                "scene": d["scene"],
+                "scene": _scene_to_str(d["scene"]),
                 "tags": ",".join(d["tags"]),
                 "source": d["source"],
                 "created_at": d["created_at"],
@@ -78,26 +85,27 @@ async def import_from_json(path: str, scene: str) -> int:
 
     for doc in docs:
         doc.setdefault("id", str(uuid.uuid4()))
-        doc.setdefault("scene", scene)
+        doc.setdefault("scene", [scene])
         doc.setdefault("source", "import")
         doc.setdefault("created_at", str(time.time()))
         doc.setdefault("tags", [])
 
-    collection_name = f"scene_{scene}"
-    kb.add_documents(
-        collection_name=collection_name,
-        documents=[d["content"] for d in docs],
-        metadatas=[{
-            "doc_id": d["id"],
-            "title": d.get("title", ""),
-            "category": d.get("category", "unknown"),
-            "scene": d["scene"],
-            "tags": ",".join(d.get("tags", [])),
-            "source": d["source"],
-            "created_at": d["created_at"],
-        } for d in docs],
-        ids=[d["id"] for d in docs],
-    )
+    if docs:
+        collection_name = f"scene_{scene}"
+        await kb.add_documents(
+            collection_name=collection_name,
+            documents=[d["content"] for d in docs],
+            metadatas=[{
+                "doc_id": d["id"],
+                "title": d.get("title", ""),
+                "category": d.get("category", "unknown"),
+                "scene": _scene_to_str(d["scene"]),
+                "tags": ",".join(d.get("tags", [])),
+                "source": d["source"],
+                "created_at": d["created_at"],
+            } for d in docs],
+            ids=[d["id"] for d in docs],
+        )
     return len(docs)
 
 

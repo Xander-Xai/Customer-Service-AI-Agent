@@ -2091,5 +2091,512 @@
     "scene": "售后支持",
     "difficulty": "easy",
     "query_type": "single"
+  },
+  {
+    "query_id": "bench_0161",
+    "query": "烟酰胺安全吗？孕妇能用吗？",
+    "expected_doc_ids": [
+      "derm_001467",
+      "derm_000197",
+      "derm_000515"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0162",
+    "query": "视黄醇需要避光使用吗？",
+    "expected_doc_ids": [
+      "derm_000386",
+      "derm_000616",
+      "derm_000934"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0163",
+    "query": "透明质酸适合油性皮肤吗？",
+    "expected_doc_ids": [
+      "derm_000267",
+      "derm_000497",
+      "derm_000815"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0164",
+    "query": "水杨酸和什么成分冲突？",
+    "expected_doc_ids": [
+      "derm_000867",
+      "derm_001097",
+      "derm_001415"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0165",
+    "query": "维生素C的最佳使用浓度是多少？",
+    "expected_doc_ids": [
+      "derm_001359",
+      "derm_000089",
+      "derm_000407"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0166",
+    "query": "神经酰胺适合干性皮肤吗？",
+    "expected_doc_ids": [
+      "derm_000372",
+      "derm_000602",
+      "derm_000920"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0167",
+    "query": "角鲨烷怎么使用？",
+    "expected_doc_ids": [
+      "derm_001158",
+      "derm_001388",
+      "derm_000206"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0168",
+    "query": "果酸对敏感肌友好吗？",
+    "expected_doc_ids": [
+      "derm_000470",
+      "derm_000700",
+      "derm_001018"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0169",
+    "query": "传明酸需要建立耐受吗？",
+    "expected_doc_ids": [
+      "derm_000705",
+      "derm_000935",
+      "derm_001253"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0170",
+    "query": "熊果苷的INCI名是什么？",
+    "expected_doc_ids": [
+      "derm_000778",
+      "derm_001008",
+      "derm_001326"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0171",
+    "query": "泛醇能抗衰老吗？",
+    "expected_doc_ids": [
+      "derm_000404",
+      "derm_000634",
+      "derm_000952"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0172",
+    "query": "虾青素适合什么肤质？",
+    "expected_doc_ids": [
+      "derm_001190",
+      "derm_001420",
+      "derm_000238"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0173",
+    "query": "积雪草提取物有副作用吗？",
+    "expected_doc_ids": [
+      "derm_000351",
+      "derm_000581",
+      "derm_000899"
+    ],
+    "category": "成分知识",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0174",
+    "query": "甘草酸二钾能祛痘吗？",
+    "expected_doc_ids": [
+      "derm_000605",
+      "derm_000835",
+      "derm_001153"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0175",
+    "query": "尿囊素有什么功效？",
+    "expected_doc_ids": [
+      "derm_000220",
+      "derm_000450",
+      "derm_000768"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0176",
+    "query": "含依克多因的产品有哪些？",
+    "expected_doc_ids": [
+      "derm_001197",
+      "derm_001427",
+      "derm_000245"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0177",
+    "query": "含氨基酸表面活性剂的精华液效果怎么样？",
+    "expected_doc_ids": [
+      "derm_000873",
+      "derm_001103",
+      "derm_001421"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0178",
+    "query": "壬二酸能美白吗？",
+    "expected_doc_ids": [
+      "derm_000954",
+      "derm_001184",
+      "derm_000002"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0179",
+    "query": "辅酶Q10可以长期使用吗？",
+    "expected_doc_ids": [
+      "derm_001355",
+      "derm_000085",
+      "derm_000403"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0180",
+    "query": "白藜芦醇和烟酰胺能一起用吗？",
+    "expected_doc_ids": [
+      "derm_001417",
+      "derm_000147",
+      "derm_000465"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0181",
+    "query": "烟酰胺安全吗？孕妇能用吗？",
+    "expected_doc_ids": [
+      "derm_001467",
+      "derm_000197",
+      "derm_000515"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0182",
+    "query": "视黄醇需要避光使用吗？",
+    "expected_doc_ids": [
+      "derm_000386",
+      "derm_000616",
+      "derm_000934"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0183",
+    "query": "透明质酸适合油性皮肤吗？",
+    "expected_doc_ids": [
+      "derm_000267",
+      "derm_000497",
+      "derm_000815"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0184",
+    "query": "水杨酸和什么成分冲突？",
+    "expected_doc_ids": [
+      "derm_000867",
+      "derm_001097",
+      "derm_001415"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0185",
+    "query": "维生素C的最佳使用浓度是多少？",
+    "expected_doc_ids": [
+      "derm_001359",
+      "derm_000089",
+      "derm_000407"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0186",
+    "query": "神经酰胺适合干性皮肤吗？",
+    "expected_doc_ids": [
+      "derm_000372",
+      "derm_000602",
+      "derm_000920"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0187",
+    "query": "角鲨烷怎么使用？",
+    "expected_doc_ids": [
+      "derm_001158",
+      "derm_001388",
+      "derm_000206"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0188",
+    "query": "果酸对敏感肌友好吗？",
+    "expected_doc_ids": [
+      "derm_000470",
+      "derm_000700",
+      "derm_001018"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0189",
+    "query": "传明酸需要建立耐受吗？",
+    "expected_doc_ids": [
+      "derm_000705",
+      "derm_000935",
+      "derm_001253"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0190",
+    "query": "熊果苷的INCI名是什么？",
+    "expected_doc_ids": [
+      "derm_000778",
+      "derm_001008",
+      "derm_001326"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0191",
+    "query": "泛醇能抗衰老吗？",
+    "expected_doc_ids": [
+      "derm_000404",
+      "derm_000634",
+      "derm_000952"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0192",
+    "query": "虾青素适合什么肤质？",
+    "expected_doc_ids": [
+      "derm_001190",
+      "derm_001420",
+      "derm_000238"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0193",
+    "query": "积雪草提取物有副作用吗？",
+    "expected_doc_ids": [
+      "derm_000351",
+      "derm_000581",
+      "derm_000899"
+    ],
+    "category": "成分知识",
+    "scene": "售后支持",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0194",
+    "query": "甘草酸二钾能祛痘吗？",
+    "expected_doc_ids": [
+      "derm_000605",
+      "derm_000835",
+      "derm_001153"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0195",
+    "query": "尿囊素有什么功效？",
+    "expected_doc_ids": [
+      "derm_000220",
+      "derm_000450",
+      "derm_000768"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0196",
+    "query": "含依克多因的产品有哪些？",
+    "expected_doc_ids": [
+      "derm_001197",
+      "derm_001427",
+      "derm_000245"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0197",
+    "query": "含氨基酸表面活性剂的精华液效果怎么样？",
+    "expected_doc_ids": [
+      "derm_000873",
+      "derm_001103",
+      "derm_001421"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0198",
+    "query": "壬二酸能美白吗？",
+    "expected_doc_ids": [
+      "derm_000954",
+      "derm_001184",
+      "derm_000002"
+    ],
+    "category": "成分知识",
+    "scene": "技术答疑",
+    "difficulty": "easy",
+    "query_type": "single"
+  },
+  {
+    "query_id": "bench_0199",
+    "query": "辅酶Q10可以长期使用吗？",
+    "expected_doc_ids": [
+      "derm_001355",
+      "derm_000085",
+      "derm_000403"
+    ],
+    "category": "成分知识",
+    "scene": "售前咨询",
+    "difficulty": "easy",
+    "query_type": "single"
   }
 ]

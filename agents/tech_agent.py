@@ -1,5 +1,7 @@
 """
-技术支持专家智能体（v3.5: 增加 RAG 知识检索）
+技术支持专家智能体（v6.1 — 证据缺口修复: 场景上下文注入）
+v3.5: 增加 RAG 知识检索
+v6.1: 证据缺口修复 — 增强场景上下文传递，与售前/售后 Agent 对齐
 """
 
 from typing import Any
@@ -30,8 +32,12 @@ class TechAgent(BaseAgent):
     async def process(self, state: dict[str, Any]) -> dict[str, Any]:
         customer_query = state["customer_query"]
         # v3.6: RAG 知识库已覆盖硬编码知识，移除冗余 _knowledge
+        # v6.1: 带 scene 过滤检索技术答疑相关文档
         rag_context = await self._retrieve_knowledge(
-            customer_query, collections=["tech_support", "product_knowledge"], state=state
+            customer_query,
+            collections=["tech_support", "product_knowledge"],
+            state=state,
+            scene="技术答疑",
         )
 
         # 写入技术诊断信息到黑板

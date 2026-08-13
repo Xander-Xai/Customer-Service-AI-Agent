@@ -1,9 +1,9 @@
 {
   "name": "customer-service-ai-agent",
-  "version": "6.0",
+  "version": "6.1",
   "private": true,
   "type": "module",
-  "description": "药妆智多星多智能体客服系统 - v6.0（Qdrant 迁移 + SSE 真流式 + 前后端契约对齐）",
+  "description": "药妆智多星多智能体客服系统 - v6.1（证据缺口修复 + 三级缓存重构 + 多模态统一入口）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

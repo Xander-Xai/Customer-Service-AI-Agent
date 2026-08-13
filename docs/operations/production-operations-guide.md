@@ -1,7 +1,7 @@
 # 生产环境运维手册
 
-> **版本**: v6.0  
-> **最后更新**: 2026-06-20  
+> **版本**: v6.3
+> **最后更新**: 2026-06-27
 > **适用环境**: Production / Canary  
 
 ---
@@ -28,7 +28,7 @@
 | 缓存命中率低 | 查询多样性高/TTL过短 | 调整TTL，启用预热 | P1 |
 | 数据库连接池耗尽 | 并发过高/慢查询 | 增加连接数，优化查询 | P0 |
 | Redis连接失败 | Redis宕机/网络分区 | 检查Redis状态，重启服务 | P0 |
-| Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，或降级到 chroma_legacy 模式 | P0 |
+| Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，重建 Qdrant 集合 | P0 |
 | 会话数据丢失 | Session过期/Redis故障 | 检查TTL配置，验证Redis | P1 |
 | 响应时间过长 | LLM延迟/资源不足 | 检查SLA，扩容实例 | P0 |
 | 告警频繁触发 | 阈值过低/真实故障 | 调整阈值，排查根因 | P1 |
@@ -154,9 +154,10 @@ python3 scripts/warm_cache.py http://localhost:8000
 echo "CACHE_SEMANTIC_THRESHOLD_SHORT=0.7" >> .env.prod  # 降低阈值
 echo "CACHE_SEMANTIC_THRESHOLD_LONG=0.55" >> .env.prod
 
-# 方案D: 增加缓存容量
-echo "CACHE_L1_MAX=1000" >> .env.prod
-echo "CACHE_L2_MAX=5000" >> .env.prod
+# 方案D: 调整缓存 TTL 策略
+# 缓存按业务类型自动分级（v6.2+）：
+# knowledge_qa: 7天, pricing_stock: 5分钟, order_status: 5分钟
+echo "CACHE_TTL=3600" >> .env.prod  # 默认 1 小时
 docker compose restart app
 ```
 
@@ -298,8 +299,13 @@ for key in keys[:5]:
     print(f'{key.decode()}: {r.ttl(key)}s')
 "
 
-# 3. 检查黑板Session隔离
-grep BLACKBOARD_SESSION_ISOLATION .env.prod
+# 3. 验证黑板 Session 隔离（ContextVar 自动隔离，无需环境变量配置）
+python3 -c "
+import os, sys; sys.path.insert(0, '.')
+os.environ['OPENAI_API_KEY'] = 'test'; os.environ['LLM_PROVIDER'] = 'test'
+from core.graph_builder import MessageBus
+print(f'MessageBus 已加载，session_id 通过 ContextVar 自动隔离')
+"
 ```
 
 **解决方案**:
@@ -500,13 +506,11 @@ curl -s http://localhost:8000/api/health | jq '.components.qdrant'
 # 方案A: 重启 Qdrant 容器
 docker compose restart qdrant
 
-# 方案B: 切换回 ChromaDB 兼容模式（紧急降级）
-echo "VECTOR_DB_MODE=chroma_legacy" >> .env.prod
+# 方案B: 重建 Qdrant 集合（数据损坏时）
+# 注意：会清空现有数据，需重新导入种子数据
 docker compose restart app
 
-# 方案C: 重建 Qdrant 集合（数据损坏时）
-# 注意：会清空现有数据
-python3 scripts/migrate_chroma_to_qdrant.py --force-recreate
+# 方案C: 从备份恢复数据
 
 # 方案D: 检查 Qdrant 磁盘空间
 docker exec customer-service-qdrant df -h /qdrant/storage
@@ -517,7 +521,7 @@ docker exec customer-service-qdrant df -h /qdrant/storage
 - ✅ 定期备份 Qdrant 快照（`docker cp qdrant:/qdrant/storage ./backups/`）
 - ✅ 为 Qdrant 容器配置资源限制（CPU 2-4 核，内存 4-8GB）
 - ✅ 生产环境建议设置 `gRPC` 端口（6334）以提高性能
-- ✅ 配置 `VECTOR_DB_MODE=qdrant_only` 完全启用 Qdrant 模式
+- ✅ 配置 `VECTOR_DB_MODE=qdrant_only` 仅使用 Qdrant（生产推荐，v6.3 起 ChromaDB 完全移除）
 
 ---
 
@@ -736,21 +740,23 @@ docker compose exec redis redis-cli KEYS "csai:session:*" | xargs docker compose
 # command: ["redis-server", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
 ```
 
-#### 6. Qdrant 检索缓慢（v6.0 从 ChromaDB 迁移）
+#### 6. Qdrant 检索缓慢
 
 ```
-# 检查集合大小
-docker compose exec app python3 -c "
-from rag.knowledge_base import CosmeticsKnowledgeBase
-kb = CosmeticsKnowledgeBase(persist_directory='data/rag')
-for name in kb._collections:
-    print(f'{name}: {kb._collections[name].count()} documents')
-"
+# 检查集合大小（v6.0+ 使用 Qdrant REST API）
+curl -s http://localhost:6333/collections | jq '.result.collections[] | {name, vectors_count}'
+
+# 或通过项目健康端点
+curl -s http://localhost:8000/api/health | jq '.components.qdrant'
+
+# 检查具体集合详情
+curl -s http://localhost:6333/collections/product_knowledge | jq '.result.points_count'
 
 # 优化建议：
-# - 定期重建索引
+# - 定期优化 Qdrant 索引（curl -X POST http://localhost:6333/collections/{name}/index）
 # - 限制返回结果数量 (RAG_N_RESULTS=3)
-# - 启用查询缓存
+# - 启用查询改写 (RAG_QUERY_REWRITING=true)
+# - 使用 gRPC 端口（6334）替代 HTTP 端口（6333）以获得更高吞吐量
 ```
 
 ### 紧急恢复流程
@@ -808,14 +814,18 @@ GUNICORN_KEEPALIVE=5
 #### 缓存优化
 
 ```
-# 增大缓存容量
-CACHE_L1_MAX=1000
-CACHE_L2_MAX=5000
-CACHE_TTL=7200  # 2小时
+# 缓存 TTL 按业务类型自动分级（v6.2+）
+# knowledge_qa: 7天, pricing_stock: 5分钟, policy_rule: 24小时
+# order_status: 5分钟, after_sales: 1小时, chitchat: 10分钟
+CACHE_TTL=3600  # 默认 1 小时
 
 # 调整语义匹配阈值
 CACHE_SEMANTIC_THRESHOLD_SHORT=0.75
 CACHE_SEMANTIC_THRESHOLD_LONG=0.6
+
+# 注意：CACHE_L1_MAX / CACHE_L2_MAX 已废弃（v6.2）
+# L1 Redis 缓存容量由 Redis maxmemory 控制
+# L2 Qdrant 向量缓存容量由 Qdrant 集合配置控制
 ```
 
 #### 数据库优化

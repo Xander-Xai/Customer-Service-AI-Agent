@@ -104,20 +104,31 @@ class OpenAICompatibleClient:
         return formatted
 
     async def _get_async_client(self) -> httpx.AsyncClient:
-        """连接池并发安全（pool lock 保护）"""
+        """连接池并发安全（v6.3: 读写分离，读操作无需加锁）
+
+        优化：连接池在启动后几乎不变（按 base_url 最多 1-2 个池），
+        用乐观读路径避免每次请求都竞争锁。仅在需要创建新池时加写锁。
+        """
+        pool_key = self.base_url
+        client = OpenAICompatibleClient._client_pools.get(pool_key)
+        if client is not None and not client.is_closed:
+            return client  # 乐观读路径：池已存在，无需加锁
+
+        # 写路径：需要创建新池，加锁
         async with OpenAICompatibleClient._pool_lock:
-            pool_key = self.base_url
+            # double-check：其他协程可能已在锁内创建了
             client = OpenAICompatibleClient._client_pools.get(pool_key)
-            if client is None or client.is_closed:
-                client = httpx.AsyncClient(
-                    timeout=httpx.Timeout(self.timeout),
-                    limits=httpx.Limits(
-                        max_connections=HTTPX_MAX_CONNECTIONS,
-                        max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
-                    ),
-                    trust_env=False,  # 不读取系统代理，直连 LLM API
-                )
-                OpenAICompatibleClient._client_pools[pool_key] = client
+            if client is not None and not client.is_closed:
+                return client
+            client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout),
+                limits=httpx.Limits(
+                    max_connections=HTTPX_MAX_CONNECTIONS,
+                    max_keepalive_connections=HTTPX_KEEPALIVE_CONNECTIONS,
+                ),
+                trust_env=False,  # 不读取系统代理，直连 LLM API
+            )
+            OpenAICompatibleClient._client_pools[pool_key] = client
             return client
 
     @classmethod
