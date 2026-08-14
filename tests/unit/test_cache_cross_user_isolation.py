@@ -739,3 +739,212 @@ class TestBusInvalidationScope:
         assert cache.get(FAQ_QUERY) is None
         # 用户作用域条目不受无身份失效影响
         assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "A 订单"
+
+
+# ============================================================================
+# P0-02 Step 17 — 日志/指标隐私：fail-closed 路径日志不得泄露查询/响应正文
+# ============================================================================
+
+
+class TestCacheLogPrivacy:
+    """P0-02 Step 17：缓存日志不得泄露响应正文或查询中的客户/订单数据。
+
+    fail-closed（DISABLED）路径的日志只允许记录 scope / reason / cache tier
+    等安全字段，不得写入查询正文或响应正文（个性化查询前缀可能含订单号等
+    customer/order data）。
+    """
+
+    def test_fail_closed_log_excludes_query_and_response(self, redis):
+        """DISABLED 路径的 debug 日志不含查询正文与响应正文。
+
+        core.logger 设置 propagate=False，故 caplog（root handler）无法捕获
+        "cache" logger；此处直接向该 logger 挂载捕获 handler 以真实断言日志内容。
+        """
+        import logging
+
+        from cache.response_cache import logger as cache_logger
+
+        records: list[str] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler = _Capture()
+        handler.setLevel(logging.DEBUG)
+        cache_logger.addHandler(handler)
+        try:
+            cache = _cache(redis=redis, qdrant=None, fallback_enabled=False)
+            sensitive_query = "我的订单 ORD-SECRET-12345 状态"
+            sensitive_response = "PRIVATE-BODY-SHOULD-NEVER-LOG"
+            cache.set(
+                sensitive_query,
+                sensitive_response,
+                metadata={"intent_type": "order_status"},
+            )
+        finally:
+            cache_logger.removeHandler(handler)
+
+        joined = "\n".join(records)
+        # 响应正文绝不进日志（P0-02 Required Change #6：不得泄露响应正文）
+        assert "PRIVATE-BODY-SHOULD-NEVER-LOG" not in joined
+        # 查询中的订单号不进 fail-closed 日志（Step 17：不得记录 customer/order data）
+        assert "ORD-SECRET-12345" not in joined
+
+
+# ============================================================================
+# Operational branch coverage
+# ============================================================================
+
+
+class _BrokenRedis(FakeRedis):
+    """Exercise graceful degradation without a Redis server."""
+
+    def get(self, key):  # noqa: ARG002
+        raise RuntimeError("redis get unavailable")
+
+    def setex(self, key, ttl, value):  # noqa: ARG002
+        raise RuntimeError("redis set unavailable")
+
+    def delete(self, *keys):  # noqa: ARG002
+        raise RuntimeError("redis delete unavailable")
+
+    def scan_iter(self, pattern, count=100):  # noqa: ARG002
+        raise RuntimeError("redis scan unavailable")
+
+
+class _SearchErrorQdrant(FakeQdrant):
+    def __init__(self):
+        super().__init__()
+        self._collections.add("response_cache")
+
+    def search(self, *args, **kwargs):  # noqa: ARG002
+        raise RuntimeError("qdrant search unavailable")
+
+
+class _UpsertErrorQdrant(FakeQdrant):
+    def __init__(self):
+        super().__init__()
+        self._collections.add("response_cache")
+
+    def upsert(self, *args, **kwargs):  # noqa: ARG002
+        raise RuntimeError("qdrant upsert unavailable")
+
+
+class _DeleteErrorQdrant(FakeQdrant):
+    def delete(self, *args, **kwargs):  # noqa: ARG002
+        raise RuntimeError("qdrant delete unavailable")
+
+
+class _RecreateErrorQdrant(FakeQdrant):
+    def recreate_collection(self, *args, **kwargs):  # noqa: ARG002
+        raise RuntimeError("qdrant recreate unavailable")
+
+
+class _VectorWithToList:
+    def __init__(self, values):
+        self.values = values
+
+    def tolist(self):
+        return self.values
+
+
+class _ToListEmbedding:
+    def encode(self, query):  # noqa: ARG002
+        return _VectorWithToList([0.1, 0.2])
+
+
+class _ListEmbedding:
+    def encode(self, query):  # noqa: ARG002
+        return [0.3, 0.4]
+
+
+class _FailingEmbedding:
+    def encode(self, query):  # noqa: ARG002
+        raise RuntimeError("embedding unavailable")
+
+
+class TestResponseCacheOperationalBranches:
+    """Validate graceful degradation and maintenance branches of all layers."""
+
+    def test_redis_failures_degrade_without_raising(self):
+        cache = _cache(redis=_BrokenRedis(), qdrant=None, fallback_enabled=False)
+        metadata = {"intent_type": "chitchat"}
+
+        cache.put("redis failure", "response", metadata=metadata)
+        assert cache.get("redis failure") is None
+        cache.invalidate("redis failure")
+        cache.clear()
+        assert cache.get_stats()["l1_size"] == 0
+
+    def test_qdrant_success_maintenance_paths(self):
+        qdrant = FakeQdrant()
+        cache = _cache(redis=None, qdrant=qdrant, fallback_enabled=False)
+        cache.put("qdrant maintenance", "response", metadata={"intent_type": "chitchat"})
+
+        cache.invalidate_by_filter({"intent_type": "chitchat"})
+        assert cache.cleanup_expired() == 0
+        cache.clear()
+        assert qdrant._points == {}
+
+    def test_qdrant_failures_degrade_without_raising(self):
+        search_cache = _cache(
+            redis=None,
+            qdrant=_SearchErrorQdrant(),
+            fallback_enabled=False,
+        )
+        assert search_cache.get("qdrant search failure") is None
+
+        upsert_cache = _cache(
+            redis=None,
+            qdrant=_UpsertErrorQdrant(),
+            fallback_enabled=False,
+        )
+        upsert_cache.put(
+            "qdrant upsert failure",
+            "response",
+            metadata={"intent_type": "chitchat"},
+        )
+
+        delete_cache = _cache(
+            redis=None,
+            qdrant=_DeleteErrorQdrant(),
+            fallback_enabled=False,
+        )
+        delete_cache.invalidate_by_filter({"intent_type": "chitchat"})
+        assert delete_cache.cleanup_expired() == 0
+
+        recreate_cache = _cache(
+            redis=None,
+            qdrant=_RecreateErrorQdrant(),
+            fallback_enabled=False,
+        )
+        recreate_cache.clear()
+
+    def test_embedding_and_internal_edge_paths(self):
+        from cache.cache_policy import resolve_cache_policy
+
+        no_qdrant = ResponseCache(fallback_enabled=False)
+        assert no_qdrant._ensure_l2_collection() is False
+        assert no_qdrant._embed_query("fallback")
+
+        assert ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1, 0.2]
+        assert ResponseCache(embedding_model=_ListEmbedding())._embed_query("list") == [0.3, 0.4]
+        assert len(ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")) == 1024
+
+        cache = _cache(redis=None, qdrant=None)
+        cache._l1 = {"ignored": "value"}
+        assert cache._l1 == cache._l3_cache
+        cache._l3_evict_key("missing")
+        policy = resolve_cache_policy("chitchat")
+        cache._jaccard_set("", "ignored", time.time(), policy)
+        assert cache._jaccard_search("", ["shared"], cache._version) is None
+
+        cache._jaccard_set("versioned query", "response", time.time(), policy)
+        assert cache._jaccard_search("versioned query", ["shared"], "stale") is None
+        cache._l3_evict_query("versioned query", None)
+
+        cache._metrics_flush_ops = 100
+        cache._metrics_last_flush = time.monotonic()
+        cache._schedule_metrics_flush()
+        assert cache._metrics_pending == 1
