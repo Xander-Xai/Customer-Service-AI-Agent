@@ -237,9 +237,11 @@ class ResponseAgent(BaseAgent):
             if resolution_status == RESOLUTION_RESOLVED:
                 try:
                     # v6.1: 写入缓存时携带 Graph State metadata
+                    # P0-02: 携带可信 user_id，个性化回答进入用户作用域；
+                    #        无身份的个性化回答由 CachePolicy fail closed（不写入）。
                     cache_meta = {
                         "intent_type": state.get("query_type", "default"),
-                        "user_role": state.get("user_role", "default"),
+                        "user_id": state.get("user_id"),
                     }
                     self.cache.put(query, response, metadata=cache_meta)
                     self.logger.debug(f"缓存写入: {query[:30]}...")

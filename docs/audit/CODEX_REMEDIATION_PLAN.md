@@ -45,7 +45,7 @@
 | Issue | 当前判定 | 当前代码事实 | 关键证据 |
 |---|---|---|---|
 | P0-01 CI 假绿 | CONFIRMED；历史覆盖率数值 UNVERIFIED | CI 将 pytest 输出接到 tail，未启用 pipefail；后续命令可能以 tail 成功码结束 | .github/workflows/ci.yml、pyproject.toml |
-| P0-02 Cache 跨用户污染 | CONFIRMED | L1、L3 不使用用户作用域；L2 只有 user_role 过滤；图节点未传 user_id | cache/response_cache.py、core/graph_builder.py |
+| P0-02 Cache 跨用户污染 | RESOLVED（见 P0_02_COMPLETION_REPORT.md） | 三层统一 CachePolicy：个性化回答写入用户作用域（u:hash(user_id)），无身份 fail closed；公开回答 shared；读取端 OR 探测 shared+调用方作用域 | cache/cache_policy.py、cache/response_cache.py、core/graph_builder.py、agents/response_agent.py |
 | P0-03 ERP IDOR/AuthZ | CONFIRMED 为缺少资源归属授权；具体可利用性仍需新增端到端测试 | Billing/Aftersales 和 ERP tools 可接受模型或查询字符串提供的订单/客户标识，未执行 ownership check | agents/billing_agent.py、agents/aftersales_agent.py、tools/erp_tools.py |
 | P0-04 SSE Identity Context | CONFIRMED，但仅 SSE 入口 | REST 和 WebSocket 传 user_id；共享 SSE helper 创建 graph task 时未传 user_id | api/routes/chat.py、api/routes/chat_multimodal.py、api/routes/ws.py |
 | P0-05 Random Embedding Fallback | CONFIRMED | Qdrant 无 embedding 时生成 random vectors；ResponseCache 还有 deterministic-random fallback；现有测试明确接受随机向量 | rag/qdrant_knowledge_base.py、cache/response_cache.py、tests/unit/test_qdrant_knowledge_base.py |

@@ -118,6 +118,8 @@ class BaseAgent(ABC):
 
 **防缓存雪崩**：淘汰时只清除 5% 的低热度条目，避免一次性清除大量缓存导致大量查询同时穿透到 LLM。
 
+**跨用户隔离 / CachePolicy（P0-02）**：所有响应在写入缓存前先经统一 `CachePolicy`（`cache/cache_policy.py`）决定 `cacheable / scope / ttl / sensitivity / version`。个性化回答（订单状态、退款、投诉、售后、消费信息）默认 **不可进入共享缓存**：存在可信 `user_id`（P0-04 在请求边界写入 `state["user_id"]`）时写入用户作用域（`scope_key = u:hash(user_id)`），仅本人可命中；无身份时 fail closed（不写、不读共享槽）。公开回答（FAQ、成分功效、政策、产品信息）写入 `shared` 作用域，所有用户共享。三层（L1 Redis key / L2 Qdrant payload+filter / L3 Jaccard 元组）使用同一 `scope_key` 与 `version`，任一层不得绕过。读取发生在路由分类之前（intent 未知），因此读取端同时探测 `shared` 与调用方身份作用域——因个性化数据永不落入 `shared`，OR 探测不会泄漏。`CACHE_CONTENT_VERSION` 提升即可整体失效旧条目（版本不匹配）。
+
 **Reranker 二次重排（v6.3）**：检索结果进入 Agent 前经重排序器（Reranker）优化。`ApiReranker` 调用 SiliconFlow / OpenAI 兼容的 CrossEncoder API（`BAAI/bge-reranker-v2-m3`），按相关性分数降序排列，提升 Top-K 精度。API 不可用时自动降级到 `BM25Reranker`（关键词重叠 BM25 公式 + jieba 分词，零外部依赖），确保检索质量不依赖外部服务。
 
 ### 3.2 ReAct 推理引擎
