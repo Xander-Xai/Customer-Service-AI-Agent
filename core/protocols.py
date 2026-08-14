@@ -53,6 +53,20 @@ class ERPProtocol(Protocol):
         """查询客户信息。"""
         ...
 
+    async def get_order_owner(self, order_id: str) -> str | None:
+        """P0-03: 最小归属元数据 — 仅返回订单归属 customer_id（不取完整正文）。
+
+        缺失/不存在/查询失败时返回 None（fail closed）。
+        """
+        ...
+
+    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+        """P0-03: 将可信 authenticated user_id 解析为 ERP customer_id。
+
+        映射必须来自服务端权威数据；缺失时返回 None（fail closed）。
+        """
+        ...
+
 
 @runtime_checkable
 class KnowledgeBaseProtocol(Protocol):

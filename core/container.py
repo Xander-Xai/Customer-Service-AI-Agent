@@ -86,6 +86,9 @@ class ServiceContainer:
 
         # ERP
         self.erp: ERPProtocol | None = None
+        # P0-03: ERP 授权边界（包装 self.erp）。Agent / Tool 经此访问私人 ERP 资源。
+        self._erp_authz: Any = None
+        self._erp_authz_source: Any = None  # 已包装的原始 adapter（identity 校验）
 
         # Agents
         self.agents_dict: dict[str, Any] = {}
@@ -422,7 +425,7 @@ class ServiceContainer:
                 from erp.factory import create_erp_adapter
 
                 self.erp = create_erp_adapter()
-            self.tool_registry = create_erp_tools(self.erp)
+            self.tool_registry = create_erp_tools(self._get_erp_authz())
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
 
     async def _init_cache(self):
@@ -478,6 +481,27 @@ class ServiceContainer:
         self.prompt_manager = init_prompt_manager()
         logger.info("Prompt 版本管理器初始化完成")
 
+    def _get_erp_authz(self):
+        """P0-03: 用授权边界（ErpAuthorizationService）包装原始 ERP 适配器，
+        供 Agent 与 ERP Tool 使用。授权在 Service/Tool 层强制执行，不依赖
+        prompt 或模型参数。
+
+        - self.erp 为 None 时返回 None（保留未初始化 ERP 的既有行为，避免
+          影响不调用 initialize() 的测试）。
+        - self.erp 已是 ErpAuthorizationService 时原样返回。
+        - self.erp 被替换时按 identity 重新包装，避免缓存陈旧引用。
+        """
+        if self.erp is None:
+            return None
+        from erp.authorization import ErpAuthorizationService
+
+        if isinstance(self.erp, ErpAuthorizationService):
+            return self.erp
+        if self._erp_authz_source is not self.erp:
+            self._erp_authz = ErpAuthorizationService(self.erp)
+            self._erp_authz_source = self.erp
+        return self._erp_authz
+
     async def _init_agents(self):
         """初始化所有 Agent 实例"""
         if self.agents_dict:
@@ -510,7 +534,7 @@ class ServiceContainer:
             agent.set_session_manager(self.session_mgr)
             agent.set_bus(self.bus)
             agent.set_blackboard(self.bb)
-            agent.set_erp(self.erp)
+            agent.set_erp(self._get_erp_authz())
             if self.vision_llm:  # v5.1: 注入 Vision LLM
                 agent.set_vision_llm(self.vision_llm)
             if self.prompt_manager:  # v5.1: 注入 Prompt 版本管理器
@@ -527,7 +551,7 @@ class ServiceContainer:
         react_agent.set_session_manager(self.session_mgr)
         react_agent.set_bus(self.bus)
         react_agent.set_blackboard(self.bb)
-        react_agent.set_erp(self.erp)
+        react_agent.set_erp(self._get_erp_authz())
         react_agent.set_knowledge_base(self.knowledge_base)
         react_agent.set_tool_registry(self.tool_registry)
         if self.vision_llm:  # v5.1: 注入 Vision LLM

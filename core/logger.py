@@ -83,10 +83,16 @@ class _JSONFormatter(logging.Formatter):
 
 
 class _TraceFilter(logging.Filter):
-    """自动注入 trace_id 到每条日志记录"""
+    """自动注入 trace_id 到每条日志记录。
+
+    仅当记录未携带显式 trace_id（空）时才从 ContextVar 注入，避免覆盖
+    调用方通过 extra={"trace_id": ...} 显式提供的值（如安全事件在无请求
+    上下文的直接调用场景下回退的 "no-trace"）。P0-03 AC16。
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.trace_id = _trace_id_var.get()
+        if not getattr(record, "trace_id", ""):
+            record.trace_id = _trace_id_var.get()
         return True
 
 
