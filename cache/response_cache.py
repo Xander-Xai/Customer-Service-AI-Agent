@@ -14,12 +14,21 @@ v6.0 重写：
 - L2: Jaccard 误标为语义 -> Qdrant 向量搜索 (BGE 嵌入 + Filter)
 - L3: 保留 Jaccard 作为最终回退层，提升容错率
 
+P0-02 (Cache Cross-User Leakage):
+- 三层统一遵守 CachePolicy（cacheable/scope/ttl/sensitivity/version）。
+- 个性化回答（订单/退款/投诉/售后）写入用户作用域，跨用户隔离；
+  无身份时 fail closed（不写共享槽）。
+- 读取端在路由分类前执行，同时探测 SHARED 与调用方身份作用域；
+  因个性化数据永不落入 SHARED，OR 探测不会泄漏。
+
 缓存策略：
 - L1 过期：TTL 按意图类型配置（Redis EXPIRE 自动处理）
 - L2 过期：expires_at 时间戳过滤（Qdrant Range 条件）
 - L3 淘汰：FIFO 每次淘汰 5%（最大 500 条）
 - 降级路径：Redis 失败 -> Qdrant -> Jaccard -> LLM 调用
 """
+
+from __future__ import annotations
 
 import contextlib
 import hashlib
@@ -28,6 +37,11 @@ import random
 import time
 from collections import defaultdict, deque
 
+from cache.cache_policy import (
+    CACHE_PAYLOAD_VERSION,
+    read_scope_keys,
+    resolve_cache_policy,
+)
 from core.logger import get_logger
 from core.session.token_counter import _tokenize_chinese as _tokenize
 
@@ -193,6 +207,7 @@ class ResponseCache:
         l2_max_points: int = 10000,
         fallback_enabled: bool = True,
         fallback_threshold: float = 0.6,
+        content_version: str = "1",
         # v6.3: 向后兼容参数（旧测试使用 l1_max/l2_max/default_ttl）
         l1_max: int | None = None,
         l2_max: int | None = None,
@@ -211,6 +226,7 @@ class ResponseCache:
             l2_max_points: Qdrant 集合最大点数
             fallback_enabled: 是否启用 L3 Jaccard 回退
             fallback_threshold: Jaccard 相似度匹配阈值（默认 0.6）
+            content_version: P0-02 内容版本，提升即整体失效旧缓存条目
             l1_max: 向后兼容 — 无 Redis 时设置内存缓存最大条目数
             l2_max: 向后兼容 — 设置 Qdrant 最大点数（映射到 l2_max_points）
             default_ttl: 向后兼容 — 设置默认 TTL（映射到 l1_ttl_policy["default"])
@@ -232,8 +248,14 @@ class ResponseCache:
         # v6.3: l1_max 控制无 Redis 时内存缓存上限
         self._l3_max_size = l1_max if l1_max is not None else _L3_MAX_SIZE
 
+        # P0-02: 统一缓存版本（payload schema 版本 + 内容版本）。
+        # 三层写入与读取均以该版本为匹配条件，提升版本即可整体失效旧条目。
+        self._content_version = content_version
+        self._version = f"{CACHE_PAYLOAD_VERSION}:{content_version}"
+
         # L3: Jaccard 内存缓存（继承原 L2 逻辑）
-        self._l3_cache: dict[str, tuple[frozenset, str, float]] = {}
+        # P0-02: 元组增加 scope_key / version，实现跨用户隔离与版本失效。
+        self._l3_cache: dict[str, tuple[frozenset, str, float, str, str]] = {}
         self._l3_order: deque = deque()
         self._l3_counter = 0
         self._l3_inverted_index: dict[str, set] = defaultdict(set)
@@ -267,14 +289,20 @@ class ResponseCache:
 
     def get(self, query: str, metadata: dict | None = None) -> str | None:
         """
-        从缓存中获取响应（v6.3: L1/L3 并行探测，减少串行延迟）
+        从缓存中获取响应（v6.3: L1/L3 并行探测，减少串行延迟；P0-02: 跨用户隔离）
 
-        尝试顺序: L1 (Redis) + L3 (Jaccard) 并行 -> L2 (Qdrant) 仅在 L1/L3 未命中时
+        读取发生在路由分类之前，此时 intent 未知，无法判断本次查询是公开还是
+        个性化。因此读取端同时探测 SHARED 与调用方身份对应的作用域。安全性
+        保证：个性化数据写入时永远不会落入 SHARED 槽位（见 _set），故 OR 探测
+        不会造成跨用户泄漏。
+
+        尝试顺序: L1 (Redis, 逐作用域键) -> L3 (Jaccard, 作用域过滤) -> L2 (Qdrant, 作用域 OR)
         全部未命中则返回 None。
 
         Args:
             query: 用户查询文本
-            metadata: 可选元数据（intent_type, user_role, product_id 等）
+            metadata: 可选元数据（intent_type, user_id, tenant_id, product_id 等）。
+                读取端仅使用 user_id/tenant_id 决定可探测的作用域集合。
 
         Returns:
             缓存的响应字符串，未命中返回 None
@@ -282,34 +310,32 @@ class ResponseCache:
         start = time.time()
         normalized = self._normalize(query)
 
-        # v6.3: L1 和 L3 并行探测 — L1 是精确匹配（最快），L3 是内存计算（也很快）
-        # L2（Qdrant + embedding）较慢，只在 L1/L3 都未命中时才查
-        l1_result = None
-        l3_result = None
+        md = metadata or {}
+        read_keys = read_scope_keys(md.get("user_id"), md.get("tenant_id"))
+        version = self._version
 
-        # ----- L1: Redis 精确匹配 -----
+        # ----- L1: Redis 精确匹配（按可探测作用域键逐一探测）-----
         if self._redis is not None:
-            try:
-                t0 = time.time()
-                md5_key = self._l1_prefix + self._md5(normalized)
-                data = self._redis.get(md5_key)
-                cache_redis_latency.observe(time.time() - t0)
-                if data is not None:
-                    entry = json.loads(data)
-                    self._stats["l1_hits"] += 1
-                    cache_l1_hits.inc()
-                    cache_operation_duration.observe(time.time() - start)
-                    self._schedule_metrics_flush()
-                    return entry["response"]
-            except Exception as e:
-                logger.warning(f"L1 Redis get 失败，降级到 L2: {e}")
+            for scope_key in read_keys:
+                try:
+                    t0 = time.time()
+                    md5_key = self._l1_key(normalized, scope_key, version)
+                    data = self._redis.get(md5_key)
+                    cache_redis_latency.observe(time.time() - t0)
+                    if data is not None:
+                        entry = json.loads(data)
+                        self._stats["l1_hits"] += 1
+                        cache_l1_hits.inc()
+                        cache_operation_duration.observe(time.time() - start)
+                        self._schedule_metrics_flush()
+                        return entry["response"]
+                except Exception as e:
+                    logger.warning(f"L1 Redis get 失败，降级到 L2/L3: {e}")
 
-        # v6.3: L1 未命中，L3 和 L2 并行探测（L3 内存计算极快，与 L2 同时启动避免额外等待）
-        l3_task_done = False
+        # ----- L3: Jaccard 内存匹配（按可探测作用域键过滤）-----
         if self._fallback_enabled:
             try:
-                l3_result = self._jaccard_search(normalized)
-                l3_task_done = True
+                l3_result = self._jaccard_search(normalized, read_keys, version)
                 if l3_result is not None:
                     self._stats["fallback_hits"] += 1
                     cache_fallback_hits.inc()
@@ -317,13 +343,13 @@ class ResponseCache:
                     self._schedule_metrics_flush()
                     return l3_result
             except Exception:
-                l3_task_done = True
+                logger.debug("L3 Jaccard 搜索失败")
 
-        # ----- L2: Qdrant 向量搜索（仅 L1 和 L3 都未命中时） -----
+        # ----- L2: Qdrant 向量搜索（按作用域 OR 过滤）-----
         if self._qdrant is not None:
             try:
                 t0 = time.time()
-                result = self._qdrant_get(normalized, metadata)
+                result = self._qdrant_get(normalized, read_keys, version, md)
                 cache_qdrant_latency.observe(time.time() - t0)
                 if result is not None:
                     self._stats["l2_hits"] += 1
@@ -335,19 +361,6 @@ class ResponseCache:
                 logger.warning(f"L2 Qdrant get 失败: {e}")
                 cache_qdrant_fallback_total.inc()
 
-        # L3 如果之前没执行（fallback 未启用），再尝试一次
-        if not l3_task_done and self._fallback_enabled:
-            try:
-                result = self._jaccard_search(normalized)
-                if result is not None:
-                    self._stats["fallback_hits"] += 1
-                    cache_fallback_hits.inc()
-                    cache_operation_duration.observe(time.time() - start)
-                    self._schedule_metrics_flush()
-                    return result
-            except Exception:
-                pass
-
         # ----- 全部未命中 -----
         self._stats["misses"] += 1
         cache_misses.inc()
@@ -355,43 +368,77 @@ class ResponseCache:
         self._schedule_metrics_flush()
         return None
 
-    def set(self, query: str, response: str, metadata: dict | None = None):
+    def set(
+        self,
+        query: str,
+        response: str,
+        metadata: dict | None = None,
+        policy=None,
+    ):
         """
         写入三级缓存
 
         同时写入 L1 (Redis)、L2 (Qdrant)、L3 (Jaccard)。
-        元数据中的 intent_type 决定 TTL 策略。
+        P0-02: 写入前经统一 CachePolicy 决定 cacheable/scope/ttl/version。
+        个性化回答（订单/退款/投诉/售后）仅在存在可信身份时写入用户作用域；
+        无身份时 fail closed（不写入任何层），绝不进入共享缓存。
 
         Args:
             query: 用户查询文本
             response: 要缓存的响应
-            metadata: 可选元数据字典（intent_type, user_role, product_id 等）
+            metadata: 可选元数据字典（intent_type, user_id, tenant_id, product_id 等）
+            policy: 可选显式 CachePolicy；None 时由 metadata 解析
         """
-        self._set(query, response, metadata)
+        self._set(query, response, metadata, policy)
 
-    def put(self, query: str, response: str, metadata: dict | None = None):
+    def put(
+        self,
+        query: str,
+        response: str,
+        metadata: dict | None = None,
+        policy=None,
+    ):
         """
         set() 的别名，兼容旧 API
         """
-        self._set(query, response, metadata)
+        self._set(query, response, metadata, policy)
 
-    def invalidate(self, query: str):
+    def invalidate(
+        self,
+        query: str,
+        metadata: dict | None = None,
+        policy=None,
+    ):
         """
-        按查询文本删除 L1 缓存条目
+        按查询文本与作用域删除缓存条目（P0-02: 作用域精确失效）
+
+        仅失效调用方可达作用域的条目，避免跨用户误删。
+        - 传入 policy：仅失效 policy.scope_key 对应条目。
+        - 传入 metadata：失效 read_scope_keys(user_id, tenant_id) 对应条目（含 shared）。
+        - 都不传：仅失效 shared 条目（向后兼容；用于公开知识更新的消息总线）。
 
         Args:
             query: 要失效的查询文本
+            metadata: 可选元数据（user_id / tenant_id）
+            policy: 可选显式 CachePolicy
         """
         normalized = self._normalize(query)
-        md5_key = self._l1_prefix + self._md5(normalized)
-        if self._redis is not None:
-            try:
-                self._redis.delete(md5_key)
-            except Exception as e:
-                logger.warning(f"L1 Redis invalidate 失败: {e}")
+        version = self._version
+        if policy is not None:
+            scope_keys = [policy.scope_key]
+        else:
+            md = metadata or {}
+            scope_keys = read_scope_keys(md.get("user_id"), md.get("tenant_id"))
 
-        # Also invalidate L3 Jaccard fallback
-        self._l3_evict_query(normalized)
+        if self._redis is not None:
+            for sk in scope_keys:
+                try:
+                    self._redis.delete(self._l1_key(normalized, sk, version))
+                except Exception as e:
+                    logger.warning(f"L1 Redis invalidate 失败: {e}")
+
+        # L3: 按作用域精确失效（不跨用户误删）
+        self._l3_evict_query(normalized, set(scope_keys))
 
     def invalidate_by_filter(self, filter_dict: dict):
         """
@@ -580,6 +627,34 @@ class ResponseCache:
         """MD5 哈希（仅用于缓存键，非安全用途）"""
         return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
+    def _l1_key(self, normalized: str, scope_key: str, version: str) -> str:
+        """
+        P0-02: 构造带作用域与版本的 L1 Redis 键。
+
+        key = prefix + version + ":" + scope_key + ":" + md5(normalized)
+        不同用户产生不同 scope_key，互不覆盖；版本变更后键不匹配，旧条目自然失效。
+        """
+        return f"{self._l1_prefix}{version}:{scope_key}:{self._md5(normalized)}"
+
+    def _resolve_policy(self, metadata: dict | None, policy):
+        """
+        P0-02: 解析写入端 CachePolicy。
+
+        传入显式 policy 时直接使用；否则由 metadata（intent_type + user_id +
+        tenant_id）解析。ttl_policy 与 content_version 由本缓存实例提供，
+        保证三层使用同一策略源。
+        """
+        if policy is not None:
+            return policy
+        md = metadata or {}
+        return resolve_cache_policy(
+            intent_type=md.get("intent_type"),
+            user_id=md.get("user_id"),
+            tenant_id=md.get("tenant_id"),
+            ttl_policy=self._l1_ttl_policy,
+            content_version=self._content_version,
+        )
+
     # ==================================================================
     # L2: Qdrant 操作
     # ==================================================================
@@ -638,17 +713,28 @@ class ResponseCache:
         rng = random.Random(query)
         return [rng.random() for _ in range(_RANDOM_VECTOR_DIM)]
 
-    def _qdrant_get(self, query: str, metadata: dict | None = None) -> str | None:
+    def _qdrant_get(
+        self,
+        query: str,
+        read_keys: list[str],
+        version: str,
+        metadata: dict | None = None,  # noqa: ARG002
+    ) -> str | None:
         """
-        从 Qdrant 搜索缓存
+        从 Qdrant 搜索缓存（P0-02: 按作用域键严格匹配）
 
-        Filter 条件：
-        - expires_at >= now（未过期）
-        - user_role == metadata.user_role（如果提供）
+        对每个可探测作用域键发起一次独立搜索，filter 为严格 must：
+        - expires_at >= now
+        - version == 当前版本
+        - scope_key == 该作用域键
+        任一命中即返回。使用严格 must（而非 should/min_should）避免依赖
+        Qdrant server 的 min_should 默认值——在版本间行为可变，对安全隔离
+        不可接受。共享作用域优先（公开 FAQ 命中即返回，无需再查用户作用域）。
 
         Args:
             query: 标准化查询文本
-            metadata: 可选元数据
+            read_keys: 读取端可探测的作用域键集合（shared + 调用方身份）
+            version: 当前缓存版本
 
         Returns:
             缓存的响应，未命中返回 None
@@ -659,54 +745,53 @@ class ResponseCache:
         from qdrant_client.http import models as qmodels
 
         now = time.time()
-        must_conditions = [
-            qmodels.FieldCondition(
-                key="expires_at",
-                range=qmodels.Range(gte=now),
-            ),
-        ]
-        if metadata is not None and "user_role" in metadata:
-            must_conditions.append(
-                qmodels.FieldCondition(
-                    key="user_role",
-                    match=qmodels.MatchValue(value=metadata["user_role"]),
-                )
-            )
-
         vector = self._embed_query(query)
-        results = self._qdrant.search(
-            collection_name=self._l2_collection,
-            query_vector=vector,
-            limit=1,
-            score_threshold=self._l2_threshold,
-            query_filter=qmodels.Filter(must=must_conditions),
-        )
 
-        if results:
-            return results[0].payload["response"]
+        for scope_key in read_keys:
+            must_conditions = [
+                qmodels.FieldCondition(
+                    key="expires_at",
+                    range=qmodels.Range(gte=now),
+                ),
+                qmodels.FieldCondition(
+                    key="version",
+                    match=qmodels.MatchValue(value=version),
+                ),
+                qmodels.FieldCondition(
+                    key="scope_key",
+                    match=qmodels.MatchValue(value=scope_key),
+                ),
+            ]
+            results = self._qdrant.search(
+                collection_name=self._l2_collection,
+                query_vector=vector,
+                limit=1,
+                score_threshold=self._l2_threshold,
+                query_filter=qmodels.Filter(must=must_conditions),
+            )
+            if results:
+                return results[0].payload["response"]
         return None
 
     def _qdrant_set(
         self,
         query: str,
         response: str,
-        intent_type: str,
-        user_role: str,
-        product_id: str,
+        policy,
+        metadata: dict | None,
         expires_at: float,
     ):
         """
-        写入 Qdrant 缓存
+        写入 Qdrant 缓存（P0-02: 作用域隔离）
 
-        Point ID = MD5(query + user_role + intent_type)[:16] 作为 int，
-        确保相同查询+角色+意图的缓存被覆盖更新。
+        Point ID = MD5(query + scope_key + intent_type)[:16] 作为 int，
+        确保相同查询 + 不同作用域的缓存不会被互相覆盖。
 
         Args:
             query: 标准化查询文本
             response: 响应内容
-            intent_type: 意图类型
-            user_role: 用户角色
-            product_id: 产品 ID
+            policy: 写入端 CachePolicy（提供 scope/scope_key/version/sensitivity）
+            metadata: 可选元数据（intent_type, product_id, user_role 等）
             expires_at: 过期时间戳
         """
         if not self._ensure_l2_collection():
@@ -714,16 +799,24 @@ class ResponseCache:
 
         from qdrant_client.http import models as qmodels
 
+        md = metadata or {}
+        intent_type = md.get("intent_type", "default")
         vector = self._embed_query(query)
-        point_id = int(self._md5(query + user_role + intent_type)[:16], 16)
+        # P0-02: point_id 含 scope_key，避免不同用户互相覆盖
+        point_id = int(self._md5(query + policy.scope_key + intent_type)[:16], 16)
 
         now = time.time()
         payload = {
             "response": response,
             "query_text": query,
             "intent_type": intent_type,
-            "user_role": user_role,
-            "product_id": product_id,
+            "scope": policy.scope.value,
+            "scope_key": policy.scope_key,
+            "version": policy.version,
+            "sensitivity": policy.sensitivity.value,
+            "product_id": md.get("product_id", ""),
+            # 保留 user_role 字段以向后兼容旧的管理面过滤；不作为隔离依据
+            "user_role": md.get("user_role", ""),
             "created_at": now,
             "expires_at": expires_at,
         }
@@ -737,12 +830,22 @@ class ResponseCache:
     # L3: Jaccard 内存缓存（继承原 L2 的 Jaccard 逻辑）
     # ==================================================================
 
-    def _jaccard_search(self, query: str) -> str | None:
+    def _jaccard_search(
+        self,
+        query: str,
+        read_keys: list[str],
+        version: str,
+    ) -> str | None:
         """
-        使用 Jaccard 相似度 + 倒排索引搜索 L3 内存缓存
+        使用 Jaccard 相似度 + 倒排索引搜索 L3 内存缓存（P0-02: 作用域隔离）
+
+        仅匹配作用域键属于 read_keys 且版本一致的条目。个性化数据因 scope_key
+        为用户级，跨用户读取时被自然过滤。
 
         Args:
             query: 标准化查询文本
+            read_keys: 读取端可探测的作用域键集合
+            version: 当前缓存版本
 
         Returns:
             最佳匹配的响应，未命中返回 None
@@ -751,6 +854,7 @@ class ResponseCache:
         if not tokens:
             return None
 
+        read_keys_set = set(read_keys)
         candidate_keys: set = set()
         for t in tokens:
             candidate_keys.update(self._l3_inverted_index.get(t, set()))
@@ -758,13 +862,18 @@ class ResponseCache:
         best_score = 0.0
         best_response = None
         now = time.time()
+        default_ttl = self._l1_ttl_policy.get("default", 3600)
 
         for ck in candidate_keys:
             if ck not in self._l3_cache:
                 continue
-            cached_tokens, response, ts = self._l3_cache[ck]
+            cached_tokens, response, ts, scope_key, ver = self._l3_cache[ck]
+            # P0-02: 作用域隔离 — 仅匹配调用方可达的作用域
+            if scope_key not in read_keys_set:
+                continue
+            if ver != version:
+                continue
             # TTL 检查（使用 default TTL 作为 L3 过期时间）
-            default_ttl = self._l1_ttl_policy.get("default", 3600)
             if now - ts >= default_ttl:
                 self._l3_evict_key(ck)
                 continue
@@ -775,14 +884,15 @@ class ResponseCache:
 
         return best_response
 
-    def _jaccard_set(self, query: str, response: str, now: float):
+    def _jaccard_set(self, query: str, response: str, now: float, policy):
         """
-        写入 L3 内存缓存
+        写入 L3 内存缓存（P0-02: 携带作用域键与版本）
 
         Args:
             query: 标准化查询文本
             response: 响应内容
             now: 当前时间戳（由 _set 统一传入）
+            policy: 写入端 CachePolicy
         """
         tokens = _tokenize(query)
         if not tokens:
@@ -793,7 +903,13 @@ class ResponseCache:
 
         self._l3_counter += 1
         key = f"l3:{self._l3_counter}"
-        self._l3_cache[key] = (tokens, response, now)
+        self._l3_cache[key] = (
+            tokens,
+            response,
+            now,
+            policy.scope_key,
+            policy.version,
+        )
         self._l3_order.append(key)
         for t in tokens:
             self._l3_inverted_index[t].add(key)
@@ -856,14 +972,27 @@ class ResponseCache:
                 del self._l3_inverted_index[t]
         del self._l3_cache[key]
 
-    def _l3_evict_query(self, query: str):
-        """从 L3 Jaccard 缓存中移除匹配查询的条目（模糊匹配所有条目）"""
+    def _l3_evict_query(self, query: str, scope_keys: set | None = None):
+        """
+        从 L3 Jaccard 缓存中移除匹配查询且属于给定作用域的条目。
+
+        P0-02: 作用域精确失效。scope_keys 为 None 时（向后兼容的消息总线路径）
+        仅失效 shared 条目；否则仅失效 scope_keys 内的条目，绝不跨用户误删。
+
+        Args:
+            query: 要失效的查询文本（已标准化或原文本，内部会再标准化）
+            scope_keys: 允许失效的作用域键集合
+        """
         normalized = self._normalize(query)
         tokens = _tokenize(normalized)
+        if scope_keys is None:
+            scope_keys = {"shared"}
         keys_to_remove = []
-        for key, (cached_tokens, _, _) in self._l3_cache.items():
-            # Remove entries that share tokens with the query
-            if tokens & cached_tokens:
+        for key, entry in self._l3_cache.items():
+            cached_tokens = entry[0]
+            scope_key = entry[3]
+            # 仅当作用域允许且共享 token 时才失效
+            if scope_key in scope_keys and (tokens & cached_tokens):
                 keys_to_remove.append(key)
         for key in keys_to_remove:
             self._l3_evict_key(key)
@@ -872,44 +1001,61 @@ class ResponseCache:
     # 内部辅助方法
     # ==================================================================
 
-    def _set(self, query: str, response: str, metadata: dict | None = None):
+    def _set(
+        self,
+        query: str,
+        response: str,
+        metadata: dict | None = None,
+        policy=None,
+    ):
         """
-        set/put 的内部实现
+        set/put 的内部实现（P0-02: 统一 CachePolicy）
+
+        写入前先解析 CachePolicy：
+        - cacheable=False（个性化 + 无身份）→ fail closed，不写入任何层。
+        - USER/TENANT 作用域 → 三层均写入对应 scope_key，跨用户隔离。
+        - SHARED 作用域 → 三层均写入 shared，所有用户共享。
+
+        三层使用同一 scope_key / version / ttl，保证层间一致。
 
         Args:
             query: 用户查询文本
             response: 要缓存的响应
             metadata: 可选元数据
+            policy: 可选显式 CachePolicy
         """
-        now = time.time()
-        metadata = metadata or {}
-        normalized = self._normalize(query)
+        policy = self._resolve_policy(metadata, policy)
+        if not policy.cacheable:
+            # fail closed：个性化回答缺少可信身份，绝不进入共享缓存。
+            logger.debug(
+                f"跳过缓存写入（policy disabled, scope={policy.scope.value}）: "
+                f"{query[:30]}..."
+            )
+            return
 
-        # 确定 TTL
-        intent_type = metadata.get("intent_type", "default")
-        ttl = self._l1_ttl_policy.get(intent_type, self._l1_ttl_policy["default"])
+        now = time.time()
+        normalized = self._normalize(query)
 
         # ----- L1: Redis -----
         if self._redis is not None:
             try:
                 t0 = time.time()
-                md5_key = self._l1_prefix + self._md5(normalized)
+                md5_key = self._l1_key(normalized, policy.scope_key, policy.version)
                 value = json.dumps({"response": response, "created_at": now})
-                self._redis.setex(md5_key, ttl, value)
+                self._redis.setex(md5_key, policy.ttl, value)
                 cache_redis_latency.observe(time.time() - t0)
             except Exception as e:
                 logger.warning(f"L1 Redis set 失败: {e}")
 
         # ----- L2: Qdrant -----
         if self._qdrant is not None:
-            expires_at = now + ttl
+            expires_at = now + policy.ttl
             try:
                 self._qdrant_set(
                     query=normalized,
                     response=response,
-                    intent_type=intent_type,
-                    user_role=metadata.get("user_role", ""),
-                    product_id=metadata.get("product_id", ""),
+                    policy=policy,
+                    metadata=metadata,
                     expires_at=expires_at,
                 )
             except Exception as e:
@@ -918,7 +1064,7 @@ class ResponseCache:
         # ----- L3: Jaccard 内存回退 -----
         if self._fallback_enabled:
             with contextlib.suppress(Exception):
-                self._jaccard_set(normalized, response, now)
+                self._jaccard_set(normalized, response, now, policy)
 
         self._update_metrics(force=True)
 
@@ -987,13 +1133,26 @@ class ResponseCache:
 
         监听 "cache:invalidate" 主题，收到消息后按 payload 中的 query 失效对应缓存条目。
 
+        P0-02 作用域语义：本处理器调用 `invalidate(query)`（无 metadata），因此
+        仅失效 **shared 作用域** 的条目。这适用于公开知识更新（FAQ/政策/产品信息
+        变更 → shared 缓存失效）。个性化（用户/租户作用域）条目不随公开知识更新
+        失效——它们不源于知识库，无需随其更新失效。若未来需要按身份定向失效，
+        应在消息 payload 中携带 user_id/tenant_id 并传给 `invalidate(query, metadata=...)`。
+
         Args:
             bus: MessageBus 实例
         """
         async def _handle_invalidation(message):
-            query = message.payload.get("query") if isinstance(message.payload, dict) else None
+            payload = message.payload if isinstance(message.payload, dict) else {}
+            query = payload.get("query")
             if query:
-                self.invalidate(query)
+                # 若 payload 携带身份则定向失效，否则仅 shared（公开知识更新场景）
+                meta = {
+                    k: payload[k]
+                    for k in ("user_id", "tenant_id")
+                    if k in payload
+                } or None
+                self.invalidate(query, metadata=meta)
 
         await bus.subscribe("cache:invalidate", _handle_invalidation)
         logger.info("已订阅缓存失效事件 (topic=cache:invalidate)")

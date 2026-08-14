@@ -233,7 +233,7 @@ class TestCache:
         from cache.response_cache import ResponseCache
 
         c = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
-        c.put("test", "result")
+        c.put("test", "result", metadata={"intent_type": "chitchat"})
         assert c.get("test") == "result"
 
     def test_l3_fallback_miss(self):
@@ -1225,7 +1225,11 @@ class TestChineseCacheOptimization:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(l1_max=50, l2_max=200, default_ttl=3600)
-        cache.put("这款玫瑰精华液有什么成分", "含有玫瑰精油和透明质酸")
+        cache.put(
+            "这款玫瑰精华液有什么成分",
+            "含有玫瑰精油和透明质酸",
+            metadata={"intent_type": "knowledge_qa"},
+        )
         result = cache.get("玫瑰精华液的成分是什么")
         assert result == "含有玫瑰精油和透明质酸"
 
@@ -1234,9 +1238,13 @@ class TestChineseCacheOptimization:
 
         cache = ResponseCache(l1_max=20, l2_max=20, default_ttl=3600)
         for i in range(20):
-            cache.put(f"问题_{i}_完全不同的话题", f"回答_{i}")
+            cache.put(
+                f"问题_{i}_完全不同的话题",
+                f"回答_{i}",
+                metadata={"intent_type": "chitchat"},
+            )
         size_before = len(cache._l1)
-        cache.put("新问题触发淘汰", "新回答")
+        cache.put("新问题触发淘汰", "新回答", metadata={"intent_type": "chitchat"})
         size_after = len(cache._l1)
         assert size_after >= size_before - 2
 
@@ -1517,7 +1525,7 @@ class TestPerformance:
 
         c = ResponseCache(l1_max=100, l2_max=500, default_ttl=60)
         for i in range(200):
-            c.put(f"stress_q_{i}", f"stress_a_{i}")
+            c.put(f"stress_q_{i}", f"stress_a_{i}", metadata={"intent_type": "chitchat"})
         hits = sum(1 for i in range(100, 200) if c.get(f"stress_q_{i}") is not None)
         assert hits >= 50
 
@@ -1553,7 +1561,7 @@ class TestPerformance:
         from cache.response_cache import ResponseCache
 
         c = ResponseCache(l1_max=50, l2_max=200)
-        c.put("test", "result")
+        c.put("test", "result", metadata={"intent_type": "chitchat"})
         c.get("test")
         stats = c.get_stats()
         assert stats["l1_hits"] >= 1
@@ -1591,7 +1599,7 @@ class TestPerformance:
         c = ResponseCache(l1_max=100, l2_max=500, default_ttl=3600)
         common_queries = ["玫瑰精华液", "产品推荐", "退款"]
         for q in common_queries:
-            c.put(q, f"回答: {q}")
+            c.put(q, f"回答: {q}", metadata={"intent_type": "product_info"})
         random.seed(42)
         hits = sum(
             1

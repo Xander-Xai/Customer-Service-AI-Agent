@@ -330,7 +330,7 @@ class TestResponseCacheModule:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
-        cache.put("你好", "您好！")
+        cache.put("你好", "您好！", metadata={"intent_type": "chitchat"})
         assert cache.get("你好") == "您好！"
 
     def test_l1_miss(self):
@@ -345,7 +345,7 @@ class TestResponseCacheModule:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
-        cache.put(" 烟酰胺能美白吗 ", "可以")
+        cache.put(" 烟酰胺能美白吗 ", "可以", metadata={"intent_type": "knowledge_qa"})
         assert cache.get("烟酰胺能美白吗") == "可以"
 
     def test_cache_stats(self):
@@ -367,7 +367,7 @@ class TestResponseCacheModule:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
-        cache.put("烟酰胺美白", "烟酰胺可以抑制黑色素")
+        cache.put("烟酰胺美白", "烟酰胺可以抑制黑色素", metadata={"intent_type": "knowledge_qa"})
         result = cache.get("烟酰胺美白效果")
         assert result == "烟酰胺可以抑制黑色素"
 
@@ -2609,7 +2609,11 @@ class TestResponseCacheFallback:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
-        cache.put("red lipstick recommendation", "Product A is great")
+        cache.put(
+            "red lipstick recommendation",
+            "Product A is great",
+            metadata={"intent_type": "recommendation"},
+        )
         result = cache.get("red lipstick recommendation")
         assert result == "Product A is great"
 
@@ -2618,7 +2622,11 @@ class TestResponseCacheFallback:
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
         for i in range(600):
-            cache.put(f"unique_query_{i}_abc", f"response_{i}")
+            cache.put(
+                f"unique_query_{i}_abc",
+                f"response_{i}",
+                metadata={"intent_type": "chitchat"},
+            )
         stats = cache.get_stats()
         assert stats["l3_size"] <= 500
 

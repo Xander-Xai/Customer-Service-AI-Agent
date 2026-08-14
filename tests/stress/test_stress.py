@@ -18,10 +18,12 @@ class TestCachePressure:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
+        # P0-02: 显式公开 intent，走 SHARED 路径以真实测吞吐
+        meta = {"intent_type": "chitchat"}
 
         start = time.time()
         for i in range(2000):
-            cache.put(f"query_{i}", f"response_{i}")
+            cache.put(f"query_{i}", f"response_{i}", metadata=meta)
         for i in range(2000):
             cache.get(f"query_{i}")
         elapsed = time.time() - start
@@ -32,9 +34,10 @@ class TestCachePressure:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
+        meta = {"intent_type": "chitchat"}
 
         for i in range(500):
-            cache.put(f"query_{i}", f"response_{i}")
+            cache.put(f"query_{i}", f"response_{i}", metadata=meta)
 
         stats = cache.get_stats()
         assert stats["l3_size"] <= 500
@@ -43,9 +46,10 @@ class TestCachePressure:
         from cache.response_cache import ResponseCache
 
         cache = ResponseCache(fallback_enabled=True, fallback_threshold=0.1)
+        meta = {"intent_type": "chitchat"}
 
         for i in range(500):
-            cache.put(f"q{i}", f"r{i}")
+            cache.put(f"q{i}", f"r{i}", metadata=meta)
         for i in range(500):
             cache.get(f"q{i}")
 
