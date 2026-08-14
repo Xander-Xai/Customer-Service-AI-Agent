@@ -56,7 +56,7 @@ class KingdeeAdapterBase(ABC):
         """
         return None
 
-    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+    async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """P0-03: 将可信的 authenticated user_id 解析为 ERP customer_id。
 
         默认 fail-closed（返回 None）：当适配器未提供可信 user→customer 映射时，

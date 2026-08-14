@@ -74,6 +74,11 @@ class TestRealAdapterUserMapping:
         adapter = self._adapter({"user_001": "C001"})
         assert await adapter.resolve_customer_by_user("user_001") == "C001"
 
+    async def test_resolves_numeric_authenticated_user_id(self):
+        """JWT sub may decode as int; JSON mapping keys are canonical strings."""
+        adapter = self._adapter({"1": "C001"})
+        assert await adapter.resolve_customer_by_user(1) == "C001"
+
     async def test_fail_closed_when_map_empty(self):
         adapter = self._adapter({})
         assert await adapter.resolve_customer_by_user("user_001") is None

@@ -199,8 +199,8 @@ class KingdeeMockAdapter(KingdeeAdapterBase):
         order = self._orders.get(order_id)
         return order.get("customer_id") if order else None
 
-    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+    async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """P0-03: 权威 user_id → customer_id 解析（mock 测试环境映射）。"""
-        if not user_id:
+        if user_id is None or user_id == "":
             return None
-        return self._user_customer_map.get(user_id)
+        return self._user_customer_map.get(str(user_id))
