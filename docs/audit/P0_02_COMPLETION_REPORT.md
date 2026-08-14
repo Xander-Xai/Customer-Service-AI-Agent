@@ -297,4 +297,101 @@ allowlist 修正后，原"依赖路由准确率"的残余假设**已闭合**：�
 | Stress suite | PASS（12 passed，re-review #2 修复 test_cache_concurrent_access） |
 | Coverage gate | PASS（80.04% / 80.13%） |
 
+---
+
+## 15. Independent Re-Verification Addendum (2026-08-15)
+
+> 本节为独立再验证（不信任前文 Claim 与会话记忆，以当前代码为事实源）。
+> 复现 → 失败测试 → 最小修复 → 回归 → diff review 全流程重跑。
+
+### 15.1 跨用户泄漏复现（独立 probe，非借用既有测试）
+
+独立编写 `/tmp/p02_probe.py`（自写 FakeRedis/FakeQdrant，非复用本仓测试夹具），
+对当前代码发起 18 项攻击向量，逐层判定 LEAK/SAFE：
+
+| 攻击 | 层 | 结果 |
+|---|---|---|
+| A 精确同句私有查询、异用户 | L1/L2/L3 | SAFE（B=None，A 自命中） |
+| B 语义相似私有查询、异用户 | L2 | SAFE（scope_key must 过滤排除语义近邻） |
+| C 词法相似私有查询、异用户 | L3 Jaccard | SAFE（scope_key 过滤排除高重叠 token） |
+| D 同 user_role、异 user_id | ALL | SAFE |
+| E 同 product_id、异 user_id | ALL | SAFE |
+| F 缺 user_id + 个性化意图 | L1/L2/L3 | SAFE（fail-closed，不写、anon/other 均 None） |
+| G 旧条目无 scope_key/version | L2 | SAFE（version must 不匹配 → 过滤） |
+| H P0-03 composition：A 缓存 ERP 订单，B 检索 | ALL | SAFE（B=None，A 自命中） |
+| I A 私有后匿名/公开读同句 | ALL | SAFE（anon=None） |
+| J prompt 伪造身份影响 scope | POLICY | SAFE（scope 仅由 user_id 入参派生） |
+| 正向：公开 FAQ 跨用户共享 | L1/L2/L3 | SHARED-OK（未过度收紧） |
+| 同用户私有缓存自命中 | ALL | HIT-OK |
+
+**结论：LEAK 0 / BROKEN 0 / SAFE 18。**「User A 的订单回答绝不可能由 User B 命中」TRUE。
+
+### 15.2 实际查找顺序（Step 5 要求以代码确认，不信历史 L1→L2→L3 描述）
+
+`ResponseCache.get()` 实际顺序为 **L1（Redis）→ L3（Jaccard 内存）→ L2（Qdrant 网络）**，
+非历史文档的 L1→L2→L3。内存 L3 先于网络 Qdrant 探测以降低延迟。三层均消费同一
+`read_scope_keys(user_id)` 与 `self._version`，故顺序差异不影响隔离（个性化数据永不落 shared）。
+
+### 15.3 Step 17 日志隐私 — 发现并修复 1 项 in-scope 缺口（TDD）
+
+独立审计 `cache/response_cache.py` 全部 17 处 `logger.*` 调用：响应正文从不入日志；
+原始 `user_id` 从不入日志（仅 `hash_identity` 12 字符哈希经 `scope_key`）。
+
+**但发现**：P0-02 引入的 fail-closed（DISABLED）路径 debug 日志（`_set` 早返回处）原为
+`logger.debug(f"...scope={policy.scope.value}）: {query[:30]}...")` —— 在个性化查询上
+`query[:30]` 可含订单号（customer/order data），与 spec Step 17 / Required Change #6
+相悖，且与本报告 §11.2/#9「日志仅记 scope 枚举值」的 Claim 不一致（该 Claim 此前不实）。
+
+**TDD 修复**：
+- RED：新增 `TestCacheLogPrivacy::test_fail_closed_log_excludes_query_and_response`
+  （`core/logger.py` `propagate=False`，故 caplog 无法捕获；测试直接向 "cache" logger
+  挂载 capture handler 真实断言）。对修复前代码确认 FAIL（日志含 `ORD-SECRET-12345`）。
+- GREEN：`response_cache.py` 移除 `{query[:30]}...`，日志仅记 `scope` 枚举值 + reason。
+- 验证：cache 套件 78 passed（77 + 新增 1），独立 probe 仍 18/18 SAFE，ruff PASS。
+
+**范围边界**：`core/graph_builder.py` 既存的 `[Cache] HIT/MISS: {query[:30]...}` INFO 日志
+与 `agents/response_agent.py` 既存的 `缓存写入: {query[:30]...}` DEBUG 日志（均 v6.0、
+P0-02 未改动其日志文本，仅改动相邻 cache_meta）为 P0-02 之前引入，属更广泛的日志治理，
+**记为 Remaining Problem，不在本 Issue 扩大处理**（见 §20）。
+
+### 15.4 诚实测试数字（独立复跑 CI canonical 命令）
+
+复跑 `.github/workflows/ci.yml` 的 coverage 步骤原命令（`PYTHONPATH=scripts`、显式
+`--cov=<dir>`、`-m "not real_llm and not stress"`、`--ignore=tests/e2e/test_e2e_real_llm.py`，
+pytest 7.4.4 = CI pin）：
+
+```
+collected 1588 items / 1 deselected / 1587 selected
+1587 passed, 0 failed, 1 deselected, 20 warnings in 165.97s
+TOTAL 8868 1745   80%   →  Coverage 80.32%, fail_under=80 gate PASS, exit 0
+```
+
+**与本报告 §10 既载「1592 passed / 6 deselected / 80.04%」不一致**：独立复跑得
+**1587 passed / 1 deselected / 80.32%**。deselected 差异经核实：作用域内仅 1 个
+`@pytest.mark.stress`（`tests/e2e/test_all.py:1643`）+ `test_e2e_real_llm.py`（已 --ignore），
+故 1 deselected 为真；§10 的「6 deselected」无法复现。**以本节复跑数字为准**（遵循
+honest-verification 原则：不报告不可复现的数字）。gate 仍 PASS、0 failed，结论不变。
+
+专项：cache policy + cross-user isolation + 新增 log-privacy = **78 passed**；
+P0-03 + identity 定向套件（erp_authorization / erp_user_mapping / sse_identity / api_routes）
+= **232 passed**。
+
+### 15.5 16 点 diff review（Step 27）
+
+仅处理 P0-02（日志隐私属 Step 17）；未只修 L1（修在共享 `_set` 写入门槛，三层同效）；
+未只修 read（修在 write DISABLED 早返回）；无 USER→GLOBAL fallback；未关全部 cache；
+private 不入 shared；semantic/L3 过滤完整；legacy 被 version 挡；未破坏公开 FAQ；
+未改 Router 算法；未开始 P0-05；敏感日志已修；测试为新增（强化非弱化）；未破坏
+P0-03（232 passed）/P0-04（sse_identity passed）。16/16 PASS。
+
+### 15.6 5 项 CACHE 不不变式（独立代码审计 + probe 佐证）
+
+- CACHE-1 GLOBAL：SHARED 仅 allowlist 公开意图，非公开永不写 shared。**PASS**
+- CACHE-2 USER：USER 条目 `scope_key=u:hash(user_id)`，异用户 read_keys 不含 → 不命中。**PASS**
+- CACHE-3 NONE：非公开 + 无身份 → `cacheable=False`/DISABLED，三层均不写。**PASS**
+- CACHE-4 Fail Closed：`resolve_cache_policy` 非 allowlist + 无身份 → DISABLED，**不退化 GLOBAL**。**PASS**
+- CACHE-5 Layer Parity：三层同消费单一 `_resolve_policy` 的 scope_key/version/ttl。**PASS**
+
+---
+
 `NEXT_ELIGIBLE_ISSUE = P0-05 Random Embedding Fallback`
