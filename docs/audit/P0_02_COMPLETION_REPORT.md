@@ -374,7 +374,25 @@ honest-verification 原则：不报告不可复现的数字）。gate 仍 PASS�
 
 专项：cache policy + cross-user isolation + 新增 log-privacy = **78 passed**；
 P0-03 + identity 定向套件（erp_authorization / erp_user_mapping / sse_identity / api_routes）
-= **232 passed**。
+  = **232 passed**。
+
+**log-privacy 修复后权威复跑（同命令，含新增 1 测试）**：
+```
+collected 1589 items / 1 deselected / 1588 selected
+1588 passed, 0 failed, 1 deselected, 20 warnings in 160.25s
+TOTAL 8868 1685   81%   →  Coverage 81.00%, fail_under=80 gate PASS, exit 0
+```
+即 pre-fix 1587 + 新增 1 = **1588 passed**；覆盖率因新增测试覆盖 DISABLED 早返回路径由
+80.32% 升至 **81.00%**。log 修复为纯日志文本改动（DISABLED 早返回处），行为中性，
+1587 项既有测试全数仍 PASS。
+
+**运维分支覆盖补充后的最终本地 CI-equivalent 复跑**：
+```
+1592 passed, 0 failed, 1 deselected, 20 warnings in 163.61s
+TOTAL 8868 1693   81%   →  Coverage 80.91%, fail_under=80 gate PASS, exit 0
+```
+新增测试只覆盖 Redis/Qdrant 降级、集合维护、嵌入回退、L3 边界和指标路径，未改变
+生产授权或缓存隔离语义。
 
 ### 15.5 16 点 diff review（Step 27）
 
