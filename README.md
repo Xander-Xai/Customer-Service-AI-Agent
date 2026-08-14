@@ -272,7 +272,7 @@ graph TB
 
 | 层级 | 节点 | 职责 | 关键实现 |
 |------|------|------|----------|
-| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（<10ms） | [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
+| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（<10ms）；P0-02 三层统一 CachePolicy 跨用户隔离（个性化回答按 user_id 作用域，公开 FAQ 共享） | [cache_policy.py](cache/cache_policy.py) + [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
 | **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | [query_router.py](router/query_router.py)：7 种意图分类 + 熔断器降级 |
 | **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | [orchestrator.py](collaboration/orchestrator.py) + [modes.py](collaboration/modes.py) |
 | **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | [response_agent.py](agents/response_agent.py) + [evaluator.py](agents/evaluator.py) |

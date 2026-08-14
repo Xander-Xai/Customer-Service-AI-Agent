@@ -1,0 +1,741 @@
+"""
+P0-02: Cache Cross-User Leakage 跨用户隔离测试。
+
+验证三层缓存（L1 Redis / L2 Qdrant / L3 Jaccard）遵守统一 CachePolicy：
+- User A 的订单/退款/投诉回答绝不可能被 User B 命中。
+- 公开 FAQ 仍可跨用户共享。
+- 个性化回答在无身份时 fail closed（不缓存、不读共享槽）。
+- 三层 scope/TTL/version 一致。
+
+使用内存 FakeRedis / FakeQdrant，无需外部依赖。
+"""
+
+from __future__ import annotations
+
+import time
+from collections import namedtuple
+
+import pytest
+
+from cache.cache_policy import (
+    CACHE_PAYLOAD_VERSION,
+    CacheScope,
+    hash_identity,
+    resolve_cache_policy,
+)
+from cache.response_cache import ResponseCache
+
+# ============================================================================
+# 内存 FakeRedis / FakeQdrant
+# ============================================================================
+
+
+class FakeRedis:
+    """最小化 Redis 内存实现：get/setex/delete/scan_iter，支持 TTL 过期。"""
+
+    def __init__(self):
+        self._store: dict[str, tuple[str, float, int]] = {}  # key -> (value, set_at, ttl)
+
+    def get(self, key):
+        item = self._store.get(key)
+        if item is None:
+            return None
+        value, set_at, ttl = item
+        if ttl > 0 and (time.time() - set_at) >= ttl:
+            del self._store[key]
+            return None
+        return value
+
+    def setex(self, key, ttl, value):
+        self._store[key] = (value, time.time(), int(ttl))
+
+    def delete(self, *keys):
+        removed = 0
+        for k in keys:
+            if k in self._store:
+                del self._store[k]
+                removed += 1
+        return removed
+
+    def scan_iter(self, pattern, count=100):  # noqa: ARG002
+        prefix = pattern.rstrip("*")
+        for k in list(self._store.keys()):
+            if k.startswith(prefix):
+                yield k
+
+
+_SearchHit = namedtuple("_SearchHit", ["id", "score", "payload"])
+_Collection = namedtuple("_Collection", "collections")
+_Col = namedtuple("_Col", "name")
+
+
+class FakeQdrant:
+    """
+    最小化 Qdrant 内存实现，支持 search/upsert/delete 与 must/should 过滤。
+    仅覆盖 ResponseCache 实际使用的字段与算子（match / range gte,lt）。
+    """
+
+    def __init__(self):
+        self._collections: set[str] = set()
+        self._points: dict[int, dict] = {}  # point_id -> {"vector":..., "payload":...}
+
+    def get_collections(self):
+        return _Collection(collections=[_Col(name=n) for n in self._collections])
+
+    def create_collection(self, collection_name, vectors_config=None):  # noqa: ARG002
+        self._collections.add(collection_name)
+
+    def recreate_collection(self, collection_name, vectors_config=None):  # noqa: ARG002
+        self._collections.add(collection_name)
+        self._points.clear()
+
+    def upsert(self, collection_name, points):  # noqa: ARG002
+        for p in points:
+            self._points[int(p.id)] = {
+                "vector": list(p.vector),
+                "payload": dict(p.payload),
+            }
+
+    def delete(self, collection_name, points_selector):  # noqa: ARG002
+        # points_selector may be a Filter (must/should) — best-effort remove matching
+        if hasattr(points_selector, "must") or hasattr(points_selector, "should"):
+            must = getattr(points_selector, "must", None) or []
+            should = getattr(points_selector, "should", None) or []
+            to_remove = []
+            for pid, rec in self._points.items():
+                if self._match(rec["payload"], must, should):
+                    to_remove.append(pid)
+            for pid in to_remove:
+                del self._points[pid]
+        return namedtuple("_DelResult", ["count"])(count=len(self._points))
+
+    def search(self, collection_name, query_vector, limit=1, score_threshold=0.0, query_filter=None):  # noqa: ARG002
+        must = getattr(query_filter, "must", None) or [] if query_filter else []
+        should = getattr(query_filter, "should", None) or [] if query_filter else []
+        results = []
+        for pid, rec in self._points.items():
+            payload = rec["payload"]
+            if not self._match(payload, must, should):
+                continue
+            # 简化评分：完全相同的 query_text → 1.0；否则基于向量内积近似（测试够用）
+            score = self._score(query_vector, rec["vector"])
+            if score >= score_threshold:
+                results.append(_SearchHit(id=pid, score=score, payload=payload))
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results[:limit]
+
+    # ---- 过滤求值 ----
+    @staticmethod
+    def _eval_field(payload, cond):
+        key = cond.key
+        if hasattr(cond, "match") and cond.match is not None:
+            return payload.get(key) == cond.match.value
+        rng = getattr(cond, "range", None)
+        if rng is None:
+            return True
+        val = payload.get(key)
+        if val is None:
+            return False
+        if rng.gte is not None and val < rng.gte:
+            return False
+        if rng.lte is not None and val > rng.lte:
+            return False
+        if rng.lt is not None and val >= rng.lt:
+            return False
+        return not (rng.gt is not None and val <= rng.gt)
+
+    def _match(self, payload, must, should):
+        for cond in must:
+            if not self._eval_field(payload, cond):
+                return False
+        # 至少一条 should 满足（server 默认 min_should=1）
+        return not (should and not any(self._eval_field(payload, cond) for cond in should))
+
+    @staticmethod
+    def _score(a, b):
+        # 测试向量由 ResponseCache._embed_query 产生；同 query_text 相同向量 → 1.0
+        if a == b:
+            return 1.0
+        # 余弦近似（仅用于排序）
+        try:
+            dot = sum(x * y for x, y in zip(a, b, strict=False))
+            na = sum(x * x for x in a) ** 0.5
+            nb = sum(y * y for y in b) ** 0.5
+            return dot / (na * nb) if na and nb else 0.0
+        except Exception:
+            return 0.0
+
+
+# ============================================================================
+# Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def redis():
+    return FakeRedis()
+
+
+@pytest.fixture
+def qdrant():
+    return FakeQdrant()
+
+
+def _cache(redis=None, qdrant=None, **kw):
+    """构造启用全部三层的 ResponseCache（embedding_model=None 走确定性随机回退）。"""
+    defaults = {
+        "fallback_enabled": True,
+        "fallback_threshold": 0.1,
+    }
+    defaults.update(kw)
+    return ResponseCache(
+        redis_client=redis,
+        qdrant_client=qdrant,
+        embedding_model=None,
+        **defaults,
+    )
+
+
+ORDER_QUERY = "我的订单 ORD20260530001 的物流状态"
+FAQ_QUERY = "烟酰胺能美白吗"
+
+
+# ============================================================================
+# 1. test_cross_user_cache_isolation  (核心 AC)
+# ============================================================================
+
+
+class TestCrossUserCacheIsolation:
+    """User A 的订单回答绝不可能由 User B 命中（三层分别验证）。"""
+
+    def test_l1_user_a_order_not_served_to_user_b(self, redis, qdrant):
+        """L1 Redis: User A 写入订单回答，User B 查同句不得命中。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            ORDER_QUERY,
+            "User A 的私有订单物流：已发货",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # User B 查同句 → 不得返回 A 的私有回答
+        got = cache.get(ORDER_QUERY, metadata={"user_id": "user_B"})
+        assert got != "User A 的私有订单物流：已发货"
+        assert got is None
+
+    def test_l1_user_a_can_hit_own_order(self, redis):
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            ORDER_QUERY,
+            "User A 的私有订单物流：已发货",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == (
+            "User A 的私有订单物流：已发货"
+        )
+
+    def test_l3_jaccard_user_isolation(self, qdrant):
+        """L3 Jaccard: 即使查询文本高度相似，跨用户也不得命中。"""
+        cache = _cache(redis=None, qdrant=None)
+        cache.put(
+            "查询我的退款进度 RD001",
+            "User A 退款 50 元",
+            metadata={"intent_type": "refund", "user_id": "user_A"},
+        )
+        # User B 用相似句查询 → 不得命中 A 的退款
+        got = cache.get(
+            "查询我的退款进度 RD001",
+            metadata={"user_id": "user_B"},
+        )
+        assert got is None
+        # User A 本人可命中
+        got_a = cache.get(
+            "查询我的退款进度 RD001",
+            metadata={"user_id": "user_A"},
+        )
+        assert got_a == "User A 退款 50 元"
+
+    def test_l2_qdrant_user_isolation(self, qdrant):
+        """L2 Qdrant: User A 的订单 payload 不得被 User B 命中。"""
+        cache = _cache(redis=None, qdrant=qdrant, fallback_enabled=False)
+        cache.put(
+            ORDER_QUERY,
+            "User A 的私有订单物流：已发货",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # 关闭 L3 后仅 L2 生效；User B 查同句不得命中
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) is None
+        # User A 本人可命中
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == (
+            "User A 的私有订单物流：已发货"
+        )
+
+    def test_unknown_intent_personal_response_not_leaked(self, redis):
+        """未知/缺失 intent_type 的个人响应不得进入 SHARED（reviewer 攻击向量）。
+
+        场景：路由误分类或 LLM 返回未知意图，但响应含个人数据。allowlist 语义
+        要求未知意图退化为用户作用域，User B 不得命中。
+        """
+        cache = _cache(redis=redis, qdrant=None)
+        # 未知 intent_type + user_A 写入
+        cache.put(
+            ORDER_QUERY,
+            "PRIVATE-A",
+            metadata={"intent_type": "unknown_intent", "user_id": "user_A"},
+        )
+        # User B 查同句 → 不得命中 A 的私有回答
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) is None
+        # User A 本人可命中（USER 作用域）
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "PRIVATE-A"
+        # shared 槽位不应存在该条目
+        for k in redis.scan_iter("cache:resp:*"):
+            assert "shared" not in k
+
+    def test_missing_intent_personal_response_not_leaked(self, redis):
+        """intent_type 完全缺失（None）的个人响应不得进入 SHARED。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            ORDER_QUERY,
+            "PRIVATE-A-missing-intent",
+            metadata={"user_id": "user_A"},  # 无 intent_type
+        )
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) is None
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == (
+            "PRIVATE-A-missing-intent"
+        )
+
+    def test_unknown_intent_no_identity_fail_closed(self, redis):
+        """未知/缺失 intent + 无身份 → fail closed（不写、不读）。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            ORDER_QUERY,
+            "不应缓存",
+            metadata={"intent_type": "unknown_intent"},  # 无 user_id
+        )
+        assert list(redis.scan_iter("cache:resp:*")) == []
+        assert cache.get(ORDER_QUERY) is None
+
+
+# ============================================================================
+# 2. test_personalized_response_not_shared
+# ============================================================================
+
+
+class TestPersonalizedResponseNotShared:
+    """个性化回答绝不进入共享作用域。"""
+
+    @pytest.mark.parametrize(
+        "intent",
+        ["order_status", "refund", "complaint", "after_sales", "billing"],
+    )
+    def test_personalized_not_in_shared_slot(self, intent, redis):
+        """写入个性化回答后，shared 作用域键不得存在该回答。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            f"{intent} 查询 ABC123",
+            "私有回答",
+            metadata={"intent_type": intent, "user_id": "user_A"},
+        )
+        # 无身份读取只能探测 shared 槽位 → 不得命中个性化回答
+        assert cache.get(f"{intent} 查询 ABC123") is None
+
+    def test_complaint_does_not_leak_between_users(self, redis):
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            "我的投诉 CP001 处理进度",
+            "User A 投诉已升级",
+            metadata={"intent_type": "complaint", "user_id": "user_A"},
+        )
+        assert cache.get(
+            "我的投诉 CP001 处理进度", metadata={"user_id": "user_B"}
+        ) is None
+
+
+# ============================================================================
+# 3. test_public_faq_can_be_shared
+# ============================================================================
+
+
+class TestPublicFaqCanBeShared:
+    """公开 FAQ 可跨用户共享缓存。"""
+
+    def test_faq_written_by_a_hit_by_b(self, redis):
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            FAQ_QUERY,
+            "烟酰胺可抑制黑色素转移",
+            metadata={"intent_type": "knowledge_qa", "user_id": "user_A"},
+        )
+        # User B 无需提供身份也能命中公开 FAQ
+        assert cache.get(FAQ_QUERY) == "烟酰胺可抑制黑色素转移"
+        assert cache.get(FAQ_QUERY, metadata={"user_id": "user_B"}) == (
+            "烟酰胺可抑制黑色素转移"
+        )
+
+    def test_public_jaccard_shared_across_users(self, qdrant):
+        cache = _cache(redis=None, qdrant=None)
+        cache.put(
+            "玫瑰精华液成分",
+            "含玫瑰精油与透明质酸",
+            metadata={"intent_type": "product_info", "user_id": "user_A"},
+        )
+        # User B 用相似句也能命中（L3 共享作用域）
+        got = cache.get(
+            "玫瑰精华液的成分是什么", metadata={"user_id": "user_B"}
+        )
+        assert got == "含玫瑰精油与透明质酸"
+
+
+# ============================================================================
+# 4. test_cache_ttl_policy
+# ============================================================================
+
+
+class TestCacheTTLPolicy:
+    """TTL 按 intent_type 生效；DISABLED 不写入。"""
+
+    def test_personalized_ttl_shorter_than_public(self):
+        order = resolve_cache_policy("order_status", user_id="u1")
+        faq = resolve_cache_policy("knowledge_qa", user_id="u1")
+        assert order.ttl < faq.ttl
+
+    def test_disabled_not_cached(self, redis):
+        """无身份的个性化意图 → DISABLED → 不写 L1。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            ORDER_QUERY,
+            "不应被缓存",
+            metadata={"intent_type": "order_status"},  # 无 user_id
+        )
+        # L1 不应存在任何键
+        keys = list(redis.scan_iter("cache:resp:*"))
+        assert keys == []
+        assert cache.get(ORDER_QUERY) is None
+
+    def test_ttl_applied_to_l1_setex(self, redis):
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            FAQ_QUERY,
+            "公开回答",
+            metadata={"intent_type": "knowledge_qa", "user_id": "user_A"},
+        )
+        # 验证 setex 的 TTL 与策略一致（knowledge_qa=604800）
+        items = list(redis._store.values())
+        assert items, "L1 should have one entry"
+        assert items[0][2] == 604800
+
+
+# ============================================================================
+# 5. test_cache_scope_consistency
+# ============================================================================
+
+
+class TestCacheScopeConsistency:
+    """相同查询文本、不同用户 → 不同 L1 键 / L3 条目。"""
+
+    def test_l1_keys_differ_per_user(self, redis):
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(ORDER_QUERY, "A", metadata={"intent_type": "order_status", "user_id": "user_A"})
+        cache.put(ORDER_QUERY, "B", metadata={"intent_type": "order_status", "user_id": "user_B"})
+        keys = sorted(redis.scan_iter("cache:resp:*"))
+        assert len(keys) == 2
+        # 键含不同用户作用域哈希
+        k_a = [k for k in keys if hash_identity("user_A") in k][0]
+        k_b = [k for k in keys if hash_identity("user_B") in k][0]
+        assert k_a != k_b
+
+    def test_same_query_different_users_no_collision(self, redis):
+        """User A/B 各写各的订单回答，互不覆盖。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(ORDER_QUERY, "A-order", metadata={"intent_type": "order_status", "user_id": "user_A"})
+        cache.put(ORDER_QUERY, "B-order", metadata={"intent_type": "order_status", "user_id": "user_B"})
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "A-order"
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) == "B-order"
+
+    def test_public_query_single_shared_key(self, redis):
+        """公开查询无论多少用户只产生一个 shared 键。"""
+        cache = _cache(redis=redis, qdrant=None)
+        for u in ["user_A", "user_B", "user_C"]:
+            cache.put(FAQ_QUERY, "faq", metadata={"intent_type": "knowledge_qa", "user_id": u})
+        keys = list(redis.scan_iter("cache:resp:*"))
+        assert len(keys) == 1
+
+
+# ============================================================================
+# 6. test_l1_l2_l3_apply_same_cache_policy  (三层 parity)
+# ============================================================================
+
+
+class TestLayerPolicyParity:
+    """三层缓存遵守相同 scope / version / fail-closed 语义。"""
+
+    def test_all_three_layers_isolate_personalized(self, redis, qdrant):
+        """User A 个性化回答在 L1/L2/L3 三层均不可被 User B 命中。"""
+        cache = _cache(redis=redis, qdrant=qdrant)
+        cache.put(
+            ORDER_QUERY,
+            "User A 私有",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # User B 在三层均不得命中
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) is None
+        # 直接检查 L1/L2/L3 内部存储均无 B 可达的条目
+        # L1: 无 shared 键，无 user_B 键
+        for k in redis.scan_iter("cache:resp:*"):
+            assert "shared" not in k or hash_identity("user_A") in k
+        # L2: 所有 payload scope != shared（均为 user 作用域，scope_key=hash(A)）
+        for rec in qdrant._points.values():
+            assert rec["payload"]["scope"] == CacheScope.USER.value
+            assert rec["payload"]["scope_key"] == "u:" + hash_identity("user_A")
+
+    def test_all_three_layers_share_public(self, redis, qdrant):
+        cache = _cache(redis=redis, qdrant=qdrant)
+        cache.put(
+            FAQ_QUERY,
+            "公开 FAQ",
+            metadata={"intent_type": "knowledge_qa", "user_id": "user_A"},
+        )
+        # 任意用户可命中（探测 shared + 自身作用域）
+        assert cache.get(FAQ_QUERY, metadata={"user_id": "user_B"}) == "公开 FAQ"
+        assert cache.get(FAQ_QUERY) == "公开 FAQ"
+        # L2 payload 为 shared
+        for rec in qdrant._points.values():
+            assert rec["payload"]["scope"] == CacheScope.SHARED.value
+
+    def test_version_in_all_payloads(self, redis, qdrant):
+        cache = _cache(redis=redis, qdrant=qdrant)
+        cache.put(FAQ_QUERY, "v", metadata={"intent_type": "knowledge_qa", "user_id": "user_A"})
+        expected = f"{CACHE_PAYLOAD_VERSION}:1"
+        # L1 key 含 version
+        for k in redis.scan_iter("cache:resp:*"):
+            assert expected in k
+        # L2 payload 含 version
+        for rec in qdrant._points.values():
+            assert rec["payload"]["version"] == expected
+
+    def test_version_mismatch_blocks_stale_entry(self, redis, qdrant):
+        """版本号变更后，旧条目不可被读取（整体失效）。"""
+        cache = _cache(redis=redis, qdrant=qdrant, content_version="1")
+        cache.put(FAQ_QUERY, "旧版本回答", metadata={"intent_type": "knowledge_qa", "user_id": "u"})
+        # 切换 content_version → 旧条目 version 不匹配，不得命中
+        cache2 = _cache(redis=redis, qdrant=qdrant, content_version="2")
+        assert cache2.get(FAQ_QUERY) is None
+
+
+# ============================================================================
+# Backward compatibility
+# ============================================================================
+
+
+class TestCacheAPIBackwardCompat:
+    """现有 Cache API 不被无计划破坏（AC）。"""
+
+    def test_no_metadata_no_identity_fails_closed(self, redis):
+        """无 metadata 且无身份 → 非公开意图 → fail closed（不缓存）。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put("你好", "您好！")  # 无 intent_type，无 user_id
+        assert cache.get("你好") is None
+
+    def test_explicit_public_intent_shared_without_identity(self, redis):
+        """显式公开意图（chitchat）即使无身份也可共享缓存（向后兼容公开 FAQ）。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put("你好", "您好！", metadata={"intent_type": "chitchat"})
+        assert cache.get("你好") == "您好！"
+
+    def test_public_intent_metadata_still_works(self, redis):
+        """旧式 metadata（intent_type=公开意图 + user_role）仍工作。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put("test", "result", metadata={"intent_type": "knowledge_qa", "user_role": "vip"})
+        assert cache.get("test") == "result"
+        assert cache.get("test", metadata={"user_role": "vip"}) == "result"
+
+    def test_invalidate_does_not_leak_across_users(self, redis):
+        """invalidate(query) 不应错误地跨用户失效（应按作用域精确失效）。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(ORDER_QUERY, "A", metadata={"intent_type": "order_status", "user_id": "user_A"})
+        cache.put(ORDER_QUERY, "B", metadata={"intent_type": "order_status", "user_id": "user_B"})
+        # 失效 A 的条目
+        cache.invalidate(ORDER_QUERY, metadata={"intent_type": "order_status", "user_id": "user_A"})
+        # B 的条目应仍存在
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) == "B"
+
+
+class TestExplicitPolicyAndTenantScope:
+    """显式 CachePolicy 写入路径与租户作用域隔离（补充覆盖）。"""
+
+    def test_set_with_explicit_policy_user_scope(self, redis):
+        """set/put 接受显式 policy，绕过 metadata 解析，按 policy 作用域写入。"""
+        from cache.cache_policy import resolve_cache_policy
+
+        cache = _cache(redis=redis, qdrant=None)
+        policy = resolve_cache_policy("order_status", user_id="user_X")
+        cache.put(ORDER_QUERY, "X 的订单", policy=policy)
+        # 仅 user_X 可命中
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_X"}) == "X 的订单"
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_Y"}) is None
+
+    def test_set_with_explicit_disabled_policy_skips_write(self, redis):
+        """显式 DISABLED policy 不写入任何层。"""
+        from cache.cache_policy import resolve_cache_policy
+
+        cache = _cache(redis=redis, qdrant=None)
+        policy = resolve_cache_policy("complaint")  # 无身份 → DISABLED
+        assert not policy.cacheable
+        cache.put(ORDER_QUERY, "不应缓存", policy=policy)
+        assert list(redis.scan_iter("cache:resp:*")) == []
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_X"}) is None
+
+    def test_invalidate_with_explicit_policy_only_removes_that_scope(self, redis):
+        """invalidate(policy=...) 仅失效该作用域条目，不影响其他用户。"""
+        from cache.cache_policy import resolve_cache_policy
+
+        cache = _cache(redis=redis, qdrant=None)
+        pa = resolve_cache_policy("order_status", user_id="user_A")
+        pb = resolve_cache_policy("order_status", user_id="user_B")
+        cache.put(ORDER_QUERY, "A", policy=pa)
+        cache.put(ORDER_QUERY, "B", policy=pb)
+        cache.invalidate(ORDER_QUERY, policy=pa)
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) is None
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) == "B"
+
+    def test_tenant_scope_isolation(self, redis):
+        """租户作用域：tenant_A 的投诉不得被 tenant_B 命中。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            "我的投诉 CP001",
+            "tenant_A 投诉",
+            metadata={"intent_type": "complaint", "tenant_id": "tenant_A"},
+        )
+        assert cache.get(
+            "我的投诉 CP001", metadata={"tenant_id": "tenant_A"}
+        ) == "tenant_A 投诉"
+        assert cache.get(
+            "我的投诉 CP001", metadata={"tenant_id": "tenant_B"}
+        ) is None
+
+    def test_invalidate_with_tenant_metadata_is_scoped(self, redis):
+        """invalidate(query, metadata={tenant_id}) 仅失效该租户作用域条目。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            "我的投诉 CP001",
+            "A",
+            metadata={"intent_type": "complaint", "tenant_id": "tenant_A"},
+        )
+        cache.put(
+            "我的投诉 CP001",
+            "B",
+            metadata={"intent_type": "complaint", "tenant_id": "tenant_B"},
+        )
+        cache.invalidate(
+            "我的投诉 CP001",
+            metadata={"intent_type": "complaint", "tenant_id": "tenant_A"},
+        )
+        # tenant_A 失效，tenant_B 仍存在
+        assert cache.get(
+            "我的投诉 CP001", metadata={"tenant_id": "tenant_A"}
+        ) is None
+        assert cache.get(
+            "我的投诉 CP001", metadata={"tenant_id": "tenant_B"}
+        ) == "B"
+
+    def test_l3_scoped_invalidate_preserves_other_scope(self, qdrant):
+        """L3 Jaccard 按作用域失效：失效 shared 不影响用户作用域条目。"""
+        cache = _cache(redis=None, qdrant=None)
+        # 用户作用域条目
+        cache.put(
+            "退款进度 RD001",
+            "User A 退款",
+            metadata={"intent_type": "refund", "user_id": "user_A"},
+        )
+        # 失效 shared 作用域（消息总线风格，无身份）
+        cache.invalidate("退款进度 RD001")
+        # 用户作用域条目仍存在
+        assert cache.get(
+            "退款进度 RD001", metadata={"user_id": "user_A"}
+        ) == "User A 退款"
+
+    def test_personalized_disabled_does_not_pollute_shared_l3(self, qdrant):
+        """无身份的个性化回答不写入 L3 shared 槽，后续无身份读取不得命中。"""
+        cache = _cache(redis=None, qdrant=None)
+        cache.put(
+            "我的订单 ORD002 状态",
+            "私有",
+            metadata={"intent_type": "order_status"},  # 无 user_id → DISABLED
+        )
+        # 无身份读取 → 仅探测 shared → 不应命中
+        assert cache.get("我的订单 ORD002 状态") is None
+
+    def test_l3_ttl_expiry_evicts_entry(self, qdrant):
+        """L3 条目超过 default TTL 后应被淘汰且不再命中（真实过期行为）。"""
+        # default TTL=0 → 写入即过期
+        cache = _cache(
+            redis=None, qdrant=None, l1_ttl_policy={"default": 0, "knowledge_qa": 0}
+        )
+        cache.put(
+            FAQ_QUERY,
+            "已过期",
+            metadata={"intent_type": "knowledge_qa", "user_id": "user_A"},
+        )
+        # 写入后立即读取 → TTL=0 触发淘汰分支 → 不命中
+        assert cache.get(FAQ_QUERY, metadata={"user_id": "user_A"}) is None
+        # 条目应已被 _l3_evict_key 移除
+        assert all(entry[3] != "shared" for entry in cache._l3_cache.values())
+
+
+class TestBusInvalidationScope:
+    """消息总线失效事件的作用域语义（subscribe_to_bus）。"""
+
+    async def test_bus_invalidate_with_identity_is_user_scoped(self, redis):
+        """携带 user_id 的失效消息只失效该用户作用域，不影响 shared 与其他用户。"""
+        from core.message_bus import Message, MessageBus
+
+        bus = MessageBus()
+        cache = _cache(redis=redis, qdrant=None)
+        await cache.subscribe_to_bus(bus)
+
+        # shared 公开条目 + 两个用户的个性化条目
+        cache.put(FAQ_QUERY, "公开", metadata={"intent_type": "knowledge_qa", "user_id": "uA"})
+        cache.put(
+            ORDER_QUERY,
+            "A 订单",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        cache.put(
+            ORDER_QUERY,
+            "B 订单",
+            metadata={"intent_type": "order_status", "user_id": "user_B"},
+        )
+
+        # 发布携带 user_A 的失效事件
+        await bus.publish(
+            Message(
+                topic="cache:invalidate",
+                payload={"query": ORDER_QUERY, "user_id": "user_A"},
+            )
+        )
+
+        # user_A 的订单失效；user_B 的订单与公开 FAQ 不受影响
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) is None
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) == "B 订单"
+        assert cache.get(FAQ_QUERY) == "公开"
+
+    async def test_bus_invalidate_without_identity_is_shared_only(self, redis):
+        """无身份的失效消息只失效 shared 作用域（公开知识更新场景）。"""
+        from core.message_bus import Message, MessageBus
+
+        bus = MessageBus()
+        cache = _cache(redis=redis, qdrant=None)
+        await cache.subscribe_to_bus(bus)
+
+        cache.put(FAQ_QUERY, "公开", metadata={"intent_type": "knowledge_qa", "user_id": "uA"})
+        cache.put(
+            ORDER_QUERY,
+            "A 订单",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+
+        # 无身份失效事件 → 只清 shared
+        await bus.publish(
+            Message(topic="cache:invalidate", payload={"query": FAQ_QUERY})
+        )
+        assert cache.get(FAQ_QUERY) is None
+        # 用户作用域条目不受无身份失效影响
+        assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "A 订单"

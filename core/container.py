@@ -435,6 +435,7 @@ class ServiceContainer:
         from cache.response_cache import ResponseCache
         from core.config import (
             CACHE_CLEANUP_INTERVAL,
+            CACHE_CONTENT_VERSION,
             CACHE_FALLBACK_ENABLED,
             CACHE_FALLBACK_THRESHOLD,
             CACHE_QDRANT_COLLECTION,
@@ -456,6 +457,7 @@ class ServiceContainer:
             l2_max_points=CACHE_QDRANT_MAX_POINTS,
             fallback_enabled=CACHE_FALLBACK_ENABLED,
             fallback_threshold=CACHE_FALLBACK_THRESHOLD,
+            content_version=CACHE_CONTENT_VERSION,
         )
 
         # 后台缓存清理任务

@@ -88,6 +88,11 @@ CACHE_TTL_POLICY = {
 CACHE_FALLBACK_ENABLED = os.getenv("CACHE_FALLBACK_ENABLED", "true").lower() == "true"
 CACHE_FALLBACK_THRESHOLD = _float_env("CACHE_FALLBACK_THRESHOLD", 0.6)
 
+# P0-02: 缓存内容版本。当知识库/提示词/产品目录发生大规模变更需要整体失效
+# 旧缓存时，提升该版本即可使三层旧条目因版本不匹配而无法命中（无需显式迁移）。
+# 注意：提升版本会使所有现有缓存条目失效（命中率短暂下降），属预期行为。
+CACHE_CONTENT_VERSION = os.getenv("CACHE_CONTENT_VERSION", "1")
+
 # 后台清理
 CACHE_CLEANUP_INTERVAL = _int_env("CACHE_CLEANUP_INTERVAL", 3600)  # 秒
 
