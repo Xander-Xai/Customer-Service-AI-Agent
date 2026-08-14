@@ -94,7 +94,9 @@ async def chat_with_image(
     query = sanitize_input(query[:MAX_QUERY_LENGTH]) or "请分析这张图片"
     run_graph = request.app.state.run_graph
     start = time.time()
-    result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
+    result = await run_graph(
+        auth.sid, query, multimodal_content=multimodal_content, user_id=auth.user_id
+    )
     elapsed = time.time() - start
 
     return {
@@ -134,10 +136,15 @@ async def stream_multimodal_chat(
     from .chat import SSEStreamContext, _build_sse_stream_context, _sse_stream_generator
 
     graph_task, chunk_queue = _build_sse_stream_context(
-        request, auth.sid, query, auth.session_manager, auth.client_provided_sid, multimodal_content
+        request,
+        auth.sid,
+        query,
+        auth.session_manager,
+        auth.client_provided_sid,
+        multimodal_content,
+        user_id=auth.user_id,
     )
 
-    token = auth.session_manager.generate_session_token(auth.sid) if auth.session_manager else ""
     ctx = SSEStreamContext(
         graph_task=graph_task,
         chunk_queue=chunk_queue,
