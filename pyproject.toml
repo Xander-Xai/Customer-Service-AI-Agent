@@ -37,6 +37,8 @@ markers = [
     "real_llm: 真实 LLM 端到端测试（需要真实 API Key，默认跳过）",
     "stress: 压力测试（耗时较长）",
     "xdist_group: 组隔离执行标识",
+    "unit: 单元测试（快速、隔离、无外部依赖）",
+    "slow: 慢测试（通过 -m 'not slow' 跳过）",
 ]
 asyncio_mode = "auto"
 addopts = "--cov-report=term-missing --cov-report=html"

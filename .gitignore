@@ -40,6 +40,9 @@ env/
 .coverage
 htmlcov/
 .coverage.*
+coverage.xml
+pytest-report.xml
+pytest-counts.json
 
 # ===== 运行时数据 =====
 *.db
