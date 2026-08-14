@@ -82,6 +82,7 @@ class AuthenticatedSession:
     session_manager: object
     client_provided_sid: bool
     request: Request
+    user_id: str | None = None
 
 
 async def get_authenticated_session(
@@ -92,6 +93,11 @@ async def get_authenticated_session(
     """
     共享依赖：验证 session_id 格式、检查会话令牌、设置 user_id。
     所有需要会话的端点调用此函数，失败时抛出 _SessionValidationError。
+
+    P0-04: user_id 在此可信请求边界一次性提取（extract_user_id 从 JWT sub
+    字段取得），并通过返回的 AuthenticatedSession.user_id 暴露给所有
+    transport。路由必须使用 session.user_id 传入 run_graph，不得从
+    request body / query / prompt 重新解析身份。
     """
     state = request.app.state
     session_manager = state.session_manager
@@ -115,6 +121,7 @@ async def get_authenticated_session(
         session_manager=session_manager,
         client_provided_sid=client_provided_sid,
         request=request,
+        user_id=user_id,
     )
 
 
@@ -141,15 +148,20 @@ def _build_sse_stream_context(
     session_manager: object,
     client_provided_sid: bool,
     multimodal_content: list | None = None,
+    user_id: str | None = None,
 ) -> tuple[asyncio.Task, asyncio.Queue]:
-    """构建 SSE 流式任务和队列，返回 (graph_task, chunk_queue)。"""
+    """构建 SSE 流式任务和队列，返回 (graph_task, chunk_queue)。
+
+    P0-04: 必须显式传递 user_id（来自可信请求边界），禁止 client body
+    或 prompt 覆盖身份。
+    """
     run_graph = request.app.state.run_graph
     chunk_queue: asyncio.Queue = asyncio.Queue()
 
     async def stream_callback(event: dict):
         await chunk_queue.put(event)
 
-    kwargs = {"stream_callback": stream_callback}
+    kwargs: dict = {"stream_callback": stream_callback, "user_id": user_id}
     if multimodal_content is not None:
         kwargs["multimodal_content"] = multimodal_content
     graph_task = asyncio.create_task(run_graph(sid, query, **kwargs))
@@ -290,6 +302,7 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
         query,
         session.session_manager,
         session.client_provided_sid,
+        user_id=session.user_id,
     )
     ctx = SSEStreamContext(
         graph_task=graph_task,

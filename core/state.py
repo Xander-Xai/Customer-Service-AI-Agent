@@ -22,3 +22,6 @@ class AgentState(TypedDict, total=False):
         list  # OpenAI 多模态消息内容列表 [{"type":"text",...}, {"type":"image_url",...}]
     )
     has_multimodal: bool  # 是否包含多模态内容（用于快速判断）
+    # P0-04: 认证用户身份 — 由 _run_graph 在可信请求边界写入，供下游
+    # Cache / Quota / Tool AuthZ / Audit 消费。所有 transport 必须一致传递。
+    user_id: str | None
