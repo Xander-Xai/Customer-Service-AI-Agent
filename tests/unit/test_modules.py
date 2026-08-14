@@ -2612,7 +2612,9 @@ class TestResponseCacheFallback:
         cache.put(
             "red lipstick recommendation",
             "Product A is great",
-            metadata={"intent_type": "recommendation"},
+            # 该测试验证公开缓存的 L3 fallback；推荐回答可能依赖会话上下文，
+            # 因此使用明确的无上下文公开产品意图。
+            metadata={"intent_type": "product_info"},
         )
         result = cache.get("red lipstick recommendation")
         assert result == "Product A is great"
@@ -2759,4 +2761,3 @@ class TestResponseCacheFallback:
             for f in os.listdir(dir_name):
                 if f.startswith(base_name + ".bak."):
                     os.remove(os.path.join(dir_name, f))
-

@@ -60,7 +60,7 @@ class ERPProtocol(Protocol):
         """
         ...
 
-    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+    async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """P0-03: 将可信 authenticated user_id 解析为 ERP customer_id。
 
         映射必须来自服务端权威数据；缺失时返回 None（fail closed）。
