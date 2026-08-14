@@ -33,7 +33,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install argon2-cffi  # 确保 Argon2id 可用 (OS-level dep conflict)
-          pip install pytest==7.4.4 pytest-asyncio==0.21.1 pytest-cov
+          # P0-01 AC8 reproducibility: the ENTIRE coverage toolchain is pinned,
+          # not just pytest/pytest-asyncio. pytest-cov and coverage are what
+          # actually compute the coverage number — leaving them floating made
+          # the gate irreproducible (78.08% / 78.65% / 78.72% were three
+          # different toolchains: local pytest 8.4.2 vs CI 7.4.4, and
+          # coverage floating between 7.4.4 and 7.14.x). A contract test
+          # (test_install_step_pins_full_coverage_toolchain) enforces that all
+          # four packages stay pinned.
+          pip install pytest==7.4.4 pytest-asyncio==0.21.1 pytest-cov==5.0.0 coverage==7.4.4
 
       - name: Debug - Check Python and packages
         run: |
@@ -56,21 +64,80 @@ jobs:
         run: |
           python -m pytest tests/stress/ -v --tb=short --cache-clear
 
+      # Lane classification (P0-01 Required Change #4):
+      # - real_llm: informational (excluded via `-m "not real_llm"`; needs OPENAI_API_KEY)
+      # - stress: blocking (runs in CI; make informational only if it becomes flaky)
+      # - unit / integration / e2e(mock): blocking
       - name: Run coverage report
+        # `set -o pipefail` makes the `| tail` display-layer only: pytest's exit
+        # code (incl. coverage.py's `fail_under=80` gate) propagates instead of
+        # being masked by tail's success. Without it a shell override (sh/cmd/
+        # pwsh) or running outside GitHub Actions would silently false-green.
+        # `--junit-xml` emits a machine-readable JUnit report (passed/failed/
+        # skipped/executed); the local `-p pytest_counts` plugin writes a
+        # pytest-counts.json sidecar with the `collected`/`deselected` counts
+        # that JUnit does not record (AC4: report must distinguish passed,
+        # collected, skipped, failed). PYTHONPATH=scripts makes the plugin
+        # importable without a dependency.
+        # `--cov` (no path) measures ONLY the modules in pyproject.toml's
+        # `[tool.coverage.run] source = [...]` (business code), NOT `.` which
+        # would also measure tests/* — restoring the project's original coverage
+        # scope. coverage 7.4.4's `omit = ["tests/*"]` is not reliably applied
+        # under `--cov=.`, so `--cov` + the explicit source list is the robust
+        # form (AC8 scope consistency).
+        # IMPORTANT: `--cov` (no path) is NOT reliable either — coverage 7.4.4
+        # then measures every imported file (sitecustomize.py, chardet/*,
+        # _pytest/*, scripts/*) because the `source` config is not consistently
+        # honored. The ONLY form proven to scope to business modules is EXPLICIT
+        # `--cov=<dir>` for every source directory. This is verified by the
+        # contract test test_cov_command_lists_all_source_dirs + a scope
+        # assertion test in test_ci_summary.py that runs coverage and checks the
+        # XML contains no system/third-party files.
+        env:
+          PYTHONPATH: scripts
+          PYTEST_COUNTS_FILE: pytest-counts.json
+          # AC8 reproducibility: record the EXACT pytest command run below so
+          # ci_summary can surface it in the provenance line — a coverage figure
+          # is only meaningful if the command (and toolchain, captured separately
+          # via importlib.metadata versions) that produced it is recorded. This
+          # must stay byte-identical to the `python -m pytest …` line in `run:`
+          # below (minus the `2>&1 | tail` display layer, which is not part of
+          # the pytest invocation). A contract test
+          # (test_invocation_matches_run_command) enforces the two stay in sync.
+          PYTEST_INVOCATION: >-
+            python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear
         run: |
-          python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=. --cov-report=term-missing --cov-report=html --cov-report=xml -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
+          set -o pipefail
+          python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
 
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: coverage-report-${{ matrix.python-version }}
-          path: htmlcov/
+          path: |
+            htmlcov/
+            coverage.xml
+            pytest-report.xml
+            pytest-counts.json
           retention-days: 14
+
+      # Machine-readable test & coverage summary (P0-01 Required Change #5 / AC4).
+      # ci_summary.py parses pytest-report.xml (JUnit: passed/failed/skipped/
+      # executed), pytest-counts.json (collected/deselected), and coverage.xml
+      # (coverage % + gate), surfacing all to the job/PR summary with a
+      # provenance line (Python version + git SHA). Informational: never fails
+      # the job (the blocking gates live in the pytest/coverage steps).
+      - name: Test and coverage summary
+        if: always()
+        continue-on-error: true
+        run: |
+          python scripts/ci_summary.py pytest-report.xml coverage.xml pytest-counts.json >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summary
         if: always()
         run: |
+          set -o pipefail
           echo "=== Test Summary ==="
           python -m pytest tests/ --co -q 2>&1 | tail -5
 
@@ -102,9 +169,14 @@ jobs:
         run: |
           python -m mypy agents/ cache/ collaboration/ core/ rag/ router/ tools/ api/ auth/ db/ erp/ knowledge/ session_manager.py token_counter.py drift_detector.py --ignore-missing-imports
 
+      # pip-audit is informational: a finding surfaces as a ⚠️ step result
+      # (visible in the run UI) but does not block the job. `continue-on-error`
+      # replaces the old `|| true`, which hid findings behind a green check.
+      # To make dependency vulnerabilities blocking, drop continue-on-error.
       - name: Dependency vulnerability scan (pip-audit)
+        continue-on-error: true
         run: |
-          pip-audit --requirement requirements.txt --desc || true
+          pip-audit --requirement requirements.txt --desc
 
       - name: Static security analysis (bandit)
         run: |
