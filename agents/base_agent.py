@@ -184,30 +184,41 @@ class BaseAgent(ABC):
     async def process_with_retry(self, state: dict[str, Any]) -> dict[str, Any]:
         """带指数退避重试的 async process 包装（v3.4: 仅重试瞬态错误）"""
         from core.shared_blackboard import set_blackboard_session_id
+        from erp.authorization import bound_erp_request
+
+        # P0-03: 把 P0-04 建立的 authenticated principal 传入 ERP AuthZ 边界。
+        # ErpAuthorizationService 通过 erp_principal ContextVar 取得可信主体，
+        # 不依赖 prompt / 模型参数中的身份声明。P0-04 保证 state["user_id"]
+        # 在 REST/SSE/WebSocket/多模态入口一致写入。entrypoint 标识当前 Agent
+        # 用于安全事件审计。
+        # Remaining Risk #3: principal + entrypoint 绑定在 bound_erp_request 上下
+        # 文中，请求结束（成功/异常/重试耗尽）后 token-reset，杜绝跨请求身份
+        # 泄漏 -> 后续无 authenticated identity 的调用一律 fail closed。
         session_id = state.get("session_id", "default")
         set_blackboard_session_id(session_id)
 
-        last_exception = None
-        for attempt in range(RETRY_MAX_ATTEMPTS):
-            try:
-                return await self.process(state)
-            except (ConnectionError, TimeoutError, OSError) as e:
-                # v3.4: 仅重试网络/超时等瞬态错误
-                last_exception = e
-                delay = min(RETRY_BASE_DELAY * (RETRY_BACKOFF_FACTOR**attempt), RETRY_MAX_DELAY)
-                self.logger.warning(
-                    f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (transient): {e}, wait {delay:.1f}s"
-                )
-                if attempt < RETRY_MAX_ATTEMPTS - 1:
-                    await asyncio.sleep(delay)
-            except Exception as e:
-                # 非瞬态错误（ValueError、TypeError 等）直接抛出
-                self.logger.error(
-                    f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (permanent): {e}",
-                    exc_info=True,
-                )
-                raise
-        raise last_exception
+        with bound_erp_request(state.get("user_id"), self.name):
+            last_exception = None
+            for attempt in range(RETRY_MAX_ATTEMPTS):
+                try:
+                    return await self.process(state)
+                except (ConnectionError, TimeoutError, OSError) as e:
+                    # v3.4: 仅重试网络/超时等瞬态错误
+                    last_exception = e
+                    delay = min(RETRY_BASE_DELAY * (RETRY_BACKOFF_FACTOR**attempt), RETRY_MAX_DELAY)
+                    self.logger.warning(
+                        f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (transient): {e}, wait {delay:.1f}s"
+                    )
+                    if attempt < RETRY_MAX_ATTEMPTS - 1:
+                        await asyncio.sleep(delay)
+                except Exception as e:
+                    # 非瞬态错误（ValueError、TypeError 等）直接抛出
+                    self.logger.error(
+                        f"attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} failed (permanent): {e}",
+                        exc_info=True,
+                    )
+                    raise
+            raise last_exception
 
     async def _get_conversation_context(
         self, session_id: str, max_messages: int = CONTEXT_MAX_MESSAGES

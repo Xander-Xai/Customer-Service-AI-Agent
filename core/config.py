@@ -3,6 +3,7 @@
 支持 DEV / PROD / TEST 三套配置，通过 .env 文件切换
 """
 
+import json
 import logging
 import os
 import sys
@@ -198,6 +199,34 @@ ERP_BASE_URL = os.getenv("ERP_BASE_URL", "")
 ERP_APP_ID = os.getenv("ERP_APP_ID", "")
 ERP_APP_SECRET = os.getenv("ERP_APP_SECRET", "")
 ERP_DB_ID = os.getenv("ERP_DB_ID", "")
+
+# P0-03 Remaining Risk #4: 权威 user_id → customer_id 映射（真实 ERP 模式）。
+# 生产环境由认证系统 / ERP 客户绑定提供；此处通过环境变量配置 JSON 映射，
+# 例如 ERP_USER_CUSTOMER_MAP='{"user_001":"C001","user_002":"C002"}'。
+# 映射必须来自服务端可信数据，绝不来自 prompt / LLM / 资源自声明。
+# 缺失 / 无效 / 非法时返回空 dict -> ErpAuthorizationService fail closed。
+ERP_USER_CUSTOMER_MAP_RAW = os.getenv("ERP_USER_CUSTOMER_MAP", "")
+
+
+def load_erp_user_customer_map(raw: str = ERP_USER_CUSTOMER_MAP_RAW) -> dict[str, str]:
+    """解析 ERP_USER_CUSTOMER_MAP JSON 为 {user_id: customer_id} 映射。
+
+    任何输入异常（空、非法 JSON、非 dict）一律返回空 dict（fail closed），
+    绝不抛异常影响启动。值非字符串时强制转 str；null 值跳过。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if v is not None}
+
+
+ERP_USER_CUSTOMER_MAP: dict[str, str] = load_erp_user_customer_map()
 
 # ===== Redis 配置（v3.0 新增） =====
 _redis_url_env = os.getenv("REDIS_URL", "").strip()
