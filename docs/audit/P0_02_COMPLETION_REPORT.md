@@ -32,7 +32,8 @@ Response → CachePolicy(cacheable, scope, ttl, sensitivity, version)
 
 **安全边界是公开意图 allowlist，而非个性化意图 blocklist**（re-review 后修正，见 §11.5）：
 
-- **公开意图**（显式 allowlist：`product_info` / `recommendation` / `technical_support` / `usage_guide` / `knowledge_qa` / `pricing_stock` / `policy_rule` / `chitchat` / `greeting` / `general` / `general_inquiry` / `cosmetic_advice`）→ `scope=SHARED`，与身份无关。
+- **公开意图**（显式 allowlist：`product_info` / `usage_guide` / `knowledge_qa` / `pricing_stock` / `policy_rule` / `chitchat` / `greeting` / `general` / `general_inquiry` / `cosmetic_advice`）→ `scope=SHARED`，与身份无关。
+- `recommendation` / `technical_support` 不在默认 shared allowlist：两者可能将会话历史中的预算、过敏或健康上下文带入回答，因此有身份时使用 `USER` 作用域、无身份时 `DISABLED`。这条边界不依赖上游路由始终准确。
 - **非 allowlist 意图**（含个性化意图 `order_status` / `order_query` / `billing` / `refund` / `return_policy` / `complaint` / `negative_feedback` / `after_sales`，以及**未知 / 空 / 非法 / 缺失** `intent_type`）→ **不进入 SHARED**：
   - 有可信 `user_id` → `scope=USER`，`scope_key = u:hash(user_id)`，可缓存（仅本人可命中）。
   - 仅 `tenant_id` → `scope=TENANT`，`scope_key = t:hash(tenant_id)`。
@@ -251,6 +252,15 @@ allowlist 修正后，原"依赖路由准确率"的残余假设**已闭合**：�
 5. 未删除兼容测试、未放宽 gate；仅将编码旧行为的测试输入更正为显式公开 intent。
 
 **再验证：** 全量回归 1592 passed / 0 failed / coverage 80.04%（gate 绿）；77 cache tests passed；现场 probe `unknown_intent`+user_A → User B None / User A `PRIVATE-A`。攻击 #12 PASS。
+
+### 11.6 PR re-review follow-up（上下文隔离与身份类型规范化）
+
+PR review 进一步指出两项边界问题，均已修复并由回归测试锁定：
+
+1. `recommendation` / `technical_support` 会经过 `BaseAgent._prepare_llm_messages` 注入会话历史，不再默认进入 SHARED；有身份使用 USER 作用域，无身份 DISABLED。新增跨用户隔离测试确认 User B 不可命中 User A 的回答。
+2. ERP user→customer 映射在 mock/real adapter 边界将 decoded numeric JWT subject 规范化为字符串，再查 JSON 配置 key；`1` 与 `"1"` 可一致解析，缺失身份仍 fail closed。
+
+**再验证：** canonical 回归 **1595 passed / 0 failed / 1 deselected / coverage 81.00%**（fail_under=80 PASS）；stress **12 passed**；Ruff 与 `git diff --check` PASS。
 
 ---
 

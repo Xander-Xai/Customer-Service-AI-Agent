@@ -313,6 +313,21 @@ class TestCrossUserCacheIsolation:
         assert list(redis.scan_iter("cache:resp:*")) == []
         assert cache.get(ORDER_QUERY) is None
 
+    @pytest.mark.parametrize("intent", ["recommendation", "technical_support"])
+    def test_context_dependent_response_is_not_shared(self, intent, redis):
+        """带会话历史生成的推荐/技术回答必须保持用户作用域。"""
+        cache = _cache(redis=redis, qdrant=None)
+        cache.put(
+            "请继续根据我的情况回答",
+            f"User A 的 {intent} 私人回答",
+            metadata={"intent_type": intent, "user_id": "user_A"},
+        )
+
+        assert cache.get("请继续根据我的情况回答", metadata={"user_id": "user_B"}) is None
+        assert cache.get("请继续根据我的情况回答", metadata={"user_id": "user_A"}) == (
+            f"User A 的 {intent} 私人回答"
+        )
+
 
 # ============================================================================
 # 2. test_personalized_response_not_shared

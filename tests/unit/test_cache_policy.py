@@ -55,8 +55,6 @@ class TestResolveCachePolicy:
         "intent",
         [
             "product_info",
-            "recommendation",
-            "technical_support",
             "usage_guide",
             "knowledge_qa",
             "pricing_stock",
@@ -70,6 +68,17 @@ class TestResolveCachePolicy:
         p = resolve_cache_policy(intent, user_id="u1")
         assert p.scope is CacheScope.SHARED
         assert p.sensitivity is CacheSensitivity.PUBLIC
+
+    @pytest.mark.parametrize("intent", ["recommendation", "technical_support"])
+    def test_context_dependent_intents_are_user_scoped(self, intent):
+        """会话上下文参与生成的回答不得进入跨用户 shared cache。"""
+        with_identity = resolve_cache_policy(intent, user_id="u1")
+        without_identity = resolve_cache_policy(intent)
+
+        assert with_identity.scope is CacheScope.USER
+        assert with_identity.sensitivity is CacheSensitivity.PERSONAL
+        assert without_identity.scope is CacheScope.DISABLED
+        assert without_identity.cacheable is False
 
     def test_unknown_or_missing_intent_is_not_shared(self):
         """None/空/未知/非法 intent 一律不进入 SHARED（allowlist fail-closed）。"""

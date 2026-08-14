@@ -217,7 +217,7 @@ class ErpAuthorizationService:
     def __init__(self, adapter: ERPProtocol):
         self._adapter = adapter
 
-    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+    async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """委托权威映射解析 trusted customer_id。"""
         return await self._adapter.resolve_customer_by_user(user_id)
 

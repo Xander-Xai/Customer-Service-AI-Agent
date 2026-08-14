@@ -100,7 +100,10 @@ exercised.
   `api/utils.extract_user_id`, threaded into the graph as `state["user_id"]`
   by P0-04 for REST/SSE/WebSocket/multimodal.
 - **user_id → customer_id**: a new authoritative resolver
-  `ERPProtocol.resolve_customer_by_user(user_id) -> str | None`.
+  `ERPProtocol.resolve_customer_by_user(user_id) -> str | None`. The adapter
+  boundary canonicalizes a decoded numeric JWT subject with `str(user_id)`
+  before looking up JSON-configured string keys, so `1` and `"1"` resolve
+  identically; missing values still fail closed.
   - Mock (`KingdeeMockAdapter._user_customer_map`): a server-trusted
     `{"user_001":"C001","user_002":"C002"}` mapping stored on the adapter
     (the authoritative ERP data owner in the test environment).

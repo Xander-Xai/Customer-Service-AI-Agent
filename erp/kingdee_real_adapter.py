@@ -431,7 +431,7 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             logger.warning(f"客户查询失败: {e}")
             return None
 
-    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+    async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """P0-03 Remaining Risk #4: 权威 user_id → customer_id 解析。
 
         映射取自服务端可验证配置 ERP_USER_CUSTOMER_MAP（环境变量 JSON），
@@ -439,9 +439,10 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         身份缺失时返回 None（fail closed）-> ErpAuthorizationService 拒绝
         任何私人 ERP 资源。
         """
-        if not user_id:
+        if user_id is None or user_id == "":
             return None
-        return self._user_customer_map.get(user_id)
+        # JWT sub may be decoded as int while JSON object keys are strings.
+        return self._user_customer_map.get(str(user_id))
 
     async def get_order_owner(self, order_id: str) -> str | None:
         """P0-03: 最小归属元数据查询 — 仅向金蝶请求订单归属 customer_id

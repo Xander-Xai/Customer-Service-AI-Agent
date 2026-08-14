@@ -127,7 +127,9 @@ class TestGraphEndToEnd:
         app = build_graph(self.container)
 
         # 先跑一次，让响应被缓存
-        query = "产品保质期是多久？"
+        # technical_support 可能依赖会话上下文，属于用户作用域；这里验证
+        # 路由前的公开缓存命中，使用明确的 product_info 意图查询。
+        query = "这款精华液多少钱？"
         state1 = _make_state(query, session_id="s1")
         result1 = await app.ainvoke(state1)
         assert result1["response"]

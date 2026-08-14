@@ -62,8 +62,7 @@ _DEFAULT_PUBLIC_INTENTS = frozenset(
     {
         # 售前 / 产品 / 技术 / 通用（router INTENT_CLASSES 中的公开意图）
         "product_info",
-        "recommendation",
-        "technical_support",
+        # recommendation / technical_support 可能使用会话历史，必须用户作用域。
         "usage_guide",
         "greeting",
         "general",
