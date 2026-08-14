@@ -1027,9 +1027,10 @@ class ResponseCache:
         policy = self._resolve_policy(metadata, policy)
         if not policy.cacheable:
             # fail closed：个性化回答缺少可信身份，绝不进入共享缓存。
+            # P0-02 Step 17：日志只记 scope/reason，不写查询正文（可能含订单号等
+            # customer/order data）或响应正文。
             logger.debug(
-                f"跳过缓存写入（policy disabled, scope={policy.scope.value}）: "
-                f"{query[:30]}..."
+                f"跳过缓存写入（policy disabled, scope={policy.scope.value}）"
             )
             return
 
