@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 
 from core.config import (
+    ERP_USER_CUSTOMER_MAP,
     HTTP_TIMEOUT,
     HTTPX_KEEPALIVE_CONNECTIONS,
     HTTPX_MAX_CONNECTIONS,
@@ -24,6 +25,7 @@ from core.config import (
 )
 from core.logger import get_logger
 from erp import KingdeeAdapterBase, sanitize_erp_input
+from erp.authorization import sanitize_resource_id
 
 logger = get_logger("erp.kingdee_real")
 
@@ -93,11 +95,24 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
         """清理 FilterString 中的用户输入，防止注入攻击"""
         return cls._SAFE_FILTER_RE.sub("", value)
 
-    def __init__(self, base_url: str, app_id: str, app_secret: str, db_id: str):
+    def __init__(
+        self,
+        base_url: str,
+        app_id: str,
+        app_secret: str,
+        db_id: str,
+        user_customer_map: dict[str, str] | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.app_id = app_id
         self.app_secret = app_secret
         self.db_id = db_id
+        # P0-03 Remaining Risk #4: 权威 user_id → customer_id 映射。默认取自
+        # 可验证的服务端配置 ERP_USER_CUSTOMER_MAP（环境变量 JSON）；测试或
+        # 特殊部署可显式注入。缺失/未配置时为空 dict -> resolve fail closed。
+        self._user_customer_map = (
+            user_customer_map if user_customer_map is not None else ERP_USER_CUSTOMER_MAP
+        )
         self._token: str | None = None
         self._token_obtained_at: float = 0
         self._token_expires: float = 0
@@ -414,6 +429,55 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             return self._map_customer(rows[0])
         except Exception as e:
             logger.warning(f"客户查询失败: {e}")
+            return None
+
+    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+        """P0-03 Remaining Risk #4: 权威 user_id → customer_id 解析。
+
+        映射取自服务端可验证配置 ERP_USER_CUSTOMER_MAP（环境变量 JSON），
+        绝不来自 prompt / LLM / 资源自声明。未配置 / 用户不在映射中 /
+        身份缺失时返回 None（fail closed）-> ErpAuthorizationService 拒绝
+        任何私人 ERP 资源。
+        """
+        if not user_id:
+            return None
+        return self._user_customer_map.get(user_id)
+
+    async def get_order_owner(self, order_id: str) -> str | None:
+        """P0-03: 最小归属元数据查询 — 仅向金蝶请求订单归属 customer_id
+        （FCUSTID.FNumber），不取完整订单正文。
+
+        供 ErpAuthorizationService 在披露完整 payload 前做 ownership 判定
+        （AUTHZ-6）：拒绝时完整订单 payload 不进入 authz / Agent / LLM 内存。
+        订单不存在、查询失败或字段缺失时返回 None（fail closed）。
+        """
+        if not order_id:
+            return None
+        try:
+            safe_oid = sanitize_erp_input(order_id)
+            rows = await self._paged_query(
+                "SAL_ORDER",
+                f"FBillNo='{safe_oid}'",
+                field_names=["FCUSTID.FNumber"],
+                top_row_count=1,
+            )
+            if not rows:
+                return None
+            first = rows[0]
+            # Kingdee 通常以嵌套对象返回 FCUSTID；兼容扁平字段名。
+            cust = first.get("FCUSTID", first.get("FCUSTID_FNumber", ""))
+            if isinstance(cust, dict):
+                return cust.get("FNumber", "") or None
+            return cust or None
+        except Exception as e:
+            # AC16: sanitize the resource id before logging — the Aftersales
+            # path passes a natural-language query as order_id, which may
+            # carry PII (e.g. a phone number, or "tel"+digits). Reuse the
+            # shared AuthZ policy: only a provably-valid ERP ORDER id
+            # (^ORD\d+$, ≤64 chars) is logged verbatim; everything else is
+            # hashed, so no raw prompt/PII enters any erp.* log.
+            safe_oid = sanitize_resource_id(order_id, "order")
+            logger.warning(f"get_order_owner 失败 (order_id={safe_oid}): {e}")
             return None
 
     # -------------------------------------------------------------------

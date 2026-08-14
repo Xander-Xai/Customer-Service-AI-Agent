@@ -141,6 +141,13 @@ class KingdeeMockAdapter(KingdeeAdapterBase):
                 "address": "北京市朝阳区",
             },
         }
+        # P0-03: 权威 user_id → customer_id 映射（服务端可信数据，非来自 prompt/LLM）。
+        # 用于 ErpAuthorizationService 做 ERP 资源归属校验。生产环境应由真实 ERP/
+        # 认证系统提供；此处为 mock 测试环境的最小可信映射。
+        self._user_customer_map = {
+            "user_001": "C001",
+            "user_002": "C002",
+        }
 
     async def query_product(self, keyword: str) -> list[dict[str, Any]]:
         await asyncio.sleep(0.1)
@@ -184,3 +191,16 @@ class KingdeeMockAdapter(KingdeeAdapterBase):
     async def query_customer(self, customer_id: str) -> dict[str, Any] | None:
         await asyncio.sleep(0.1)
         return self._customers.get(customer_id)
+
+    async def get_order_owner(self, order_id: str) -> str | None:
+        """P0-03: 最小归属元数据 — 仅返回订单的 customer_id，不暴露完整正文。"""
+        if not order_id:
+            return None
+        order = self._orders.get(order_id)
+        return order.get("customer_id") if order else None
+
+    async def resolve_customer_by_user(self, user_id: str | None) -> str | None:
+        """P0-03: 权威 user_id → customer_id 解析（mock 测试环境映射）。"""
+        if not user_id:
+            return None
+        return self._user_customer_map.get(user_id)
