@@ -33,7 +33,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
-import random
 import time
 from collections import defaultdict, deque
 
@@ -44,6 +43,11 @@ from cache.cache_policy import (
 )
 from core.logger import get_logger
 from core.session.token_counter import _tokenize_chinese as _tokenize
+from rag.embedding_status import (
+    EmbeddingDimensionError,
+    EmbeddingUnavailableError,
+    validate_embedding_vector,
+)
 
 logger = get_logger("cache")
 
@@ -94,11 +98,17 @@ try:
     try:
         from core.monitoring import cache_l1_hits_total as _l1
         from core.monitoring import cache_l2_hits_total as _l2
+        from core.monitoring import semantic_cache_embedding_failures_total as _sem_fail
         cache_l1_hits = _l1
         cache_l2_hits = _l2
+        semantic_cache_embedding_failures = _sem_fail
     except (ImportError, AttributeError):
         cache_l1_hits = _counter("cache_l1_hits_total", "L1 Redis exact match cache hits")
         cache_l2_hits = _counter("cache_l2_hits_total", "L2 Qdrant vector cache hits")
+        semantic_cache_embedding_failures = _counter(
+            "semantic_cache_embedding_failures_total",
+            "Semantic cache (L2) tiers skipped due to embedding failure",
+        )
     cache_misses = _counter("cache_misses_total", "Cache misses")
 
     # v6.0 新指标
@@ -153,6 +163,7 @@ except ImportError:
     cache_l1_hits = cache_l2_hits = cache_misses = _NoopMetric()
     cache_fallback_hits = _NoopMetric()
     cache_qdrant_fallback_total = _NoopMetric()
+    semantic_cache_embedding_failures = _NoopMetric()
     cache_l1_size = cache_l2_size = cache_hit_rate = _NoopMetric()
     cache_operation_duration = _NoopMetric()
     cache_qdrant_latency = _NoopMetric()
@@ -173,7 +184,7 @@ _DEFAULT_TTL_POLICY: dict[str, int] = {
 
 # ===== L3 常量 =====
 _L3_MAX_SIZE = 500
-_RANDOM_VECTOR_DIM = 1024
+_L2_VECTOR_DIM = 1024
 
 
 class ResponseCache:
@@ -486,7 +497,7 @@ class ResponseCache:
                 self._qdrant.recreate_collection(
                     collection_name=self._l2_collection,
                     vectors_config={
-                        "size": _RANDOM_VECTOR_DIM,
+                        "size": _L2_VECTOR_DIM,
                         "distance": "Cosine",
                     },
                 )
@@ -677,7 +688,7 @@ class ResponseCache:
                 self._qdrant.create_collection(
                     collection_name=self._l2_collection,
                     vectors_config={
-                        "size": _RANDOM_VECTOR_DIM,
+                        "size": _L2_VECTOR_DIM,
                         "distance": "Cosine",
                     },
                 )
@@ -689,29 +700,49 @@ class ResponseCache:
             return False
 
     def _embed_query(self, query: str) -> list[float]:
-        """
-        将查询文本编码为向量
+        """将查询文本编码为向量。
 
-        使用 self._embed_fn.encode()（SentenceTransformer），
-        如果未提供编码模型则使用确定性随机向量回退。
+        P0-05: NEVER fabricates a deterministic-random vector. If the embed_fn
+        is missing or encode() raises, raises EmbeddingUnavailableError so the
+        caller skips the L2 semantic tier entirely (no fake-vector lookup).
+        The returned vector is validated via the shared ``validate_embedding_vector``
+        — empty / wrong-dimension / non-finite (NaN/Inf) / non-numeric vectors
+        raise EmbeddingDimensionError and are never used to query or upsert
+        Qdrant. L1/L3 (non-embedding) tiers are unaffected.
 
         Args:
             query: 查询文本
 
         Returns:
-            float 向量列表（维度 _RANDOM_VECTOR_DIM）
+            float 向量列表（维度 _L2_VECTOR_DIM）
+
+        Raises:
+            EmbeddingUnavailableError: embed_fn missing or encode() failed.
+            EmbeddingDimensionError: returned vector is empty / wrong-dimension
+                / non-finite / non-numeric.
         """
-        if self._embed_fn is not None:
-            try:
-                vec = self._embed_fn.encode(query)
-                if hasattr(vec, "tolist"):
-                    return vec.tolist()
-                return list(vec)
-            except Exception as e:
-                logger.warning(f"嵌入模型 encode 失败，使用随机回退: {e}")
-        # 确定性随机回退：同一 query 始终产生同一向量
-        rng = random.Random(query)
-        return [rng.random() for _ in range(_RANDOM_VECTOR_DIM)]
+        if self._embed_fn is None:
+            semantic_cache_embedding_failures.inc()
+            raise EmbeddingUnavailableError(reason="provider_unavailable")
+        try:
+            vec = self._embed_fn.encode(query)
+            vec = vec.tolist() if hasattr(vec, "tolist") else list(vec)
+        except Exception as e:
+            semantic_cache_embedding_failures.inc()
+            logger.warning(f"嵌入模型 encode 失败，跳过 L2 语义缓存: {e}")
+            raise EmbeddingUnavailableError(reason="encode_failed") from e
+        # P0-05: full validation via the shared validator (same one the KB uses).
+        # Rejects empty / wrong-dimension / NaN / Inf / non-numeric — never
+        # query_points or upsert Qdrant with a malformed vector.
+        try:
+            validate_embedding_vector(vec, _L2_VECTOR_DIM, model=type(self._embed_fn).__name__)
+        except EmbeddingDimensionError:
+            semantic_cache_embedding_failures.inc()
+            logger.warning(
+                f"嵌入向量非法，跳过 L2 语义缓存: vec_len={len(vec)}"
+            )
+            raise
+        return vec
 
     def _qdrant_get(
         self,
@@ -744,8 +775,16 @@ class ResponseCache:
 
         from qdrant_client.http import models as qmodels
 
+        # P0-05: skip the L2 semantic tier on embedding failure — never query
+        # Qdrant with a deterministic-random / fake vector. Returns None (miss)
+        # so get() falls through to a clean miss; L1/L3 tiers still run and
+        # preserve P0-02 scope isolation (they are embedding-independent).
+        try:
+            vector = self._embed_query(query)
+        except (EmbeddingUnavailableError, EmbeddingDimensionError):
+            return None
+
         now = time.time()
-        vector = self._embed_query(query)
 
         for scope_key in read_keys:
             must_conditions = [
@@ -805,7 +844,14 @@ class ResponseCache:
 
         md = metadata or {}
         intent_type = md.get("intent_type", "default")
-        vector = self._embed_query(query)
+        # P0-05: never persist a fake vector. Skip the L2 write on embedding
+        # failure — L1 (Redis exact) and L3 (Jaccard) writes still proceed in
+        # _set(), so caching continues via the non-embedding tiers without
+        # breaking P0-02 scope isolation.
+        try:
+            vector = self._embed_query(query)
+        except (EmbeddingUnavailableError, EmbeddingDimensionError):
+            return
         # P0-02: point_id 含 scope_key，避免不同用户互相覆盖
         point_id = int(self._md5(query + policy.scope_key + intent_type)[:16], 16)
 

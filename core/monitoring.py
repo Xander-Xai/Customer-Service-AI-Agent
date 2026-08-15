@@ -172,6 +172,37 @@ try:
         "Total number of cache write operations",
     )
 
+    # P0-05: Embedding dependency-failure observability.
+    # These distinguish "embedding provider down" from "low recall" so a
+    # degraded run is never mistaken for a normal vector run. Labels carry
+    # only reason codes / provider / model name — never query text, API key,
+    # or cached response content (P0-02 privacy boundary preserved).
+    embedding_provider_failures_total = _counter(
+        "embedding_provider_failures_total",
+        "Embedding provider unavailable events (vector channel disabled)",
+        ["reason"],
+    )
+    embedding_dimension_errors_total = _counter(
+        "embedding_dimension_errors_total",
+        "Embedding vectors rejected for wrong dimension / non-finite values",
+    )
+    vector_channel_disabled_total = _counter(
+        "vector_channel_disabled_total",
+        "Retrieval runs where the vector channel was disabled due to embedding failure",
+    )
+    bm25_fallback_used_total = _counter(
+        "bm25_fallback_used_total",
+        "Retrieval runs that fell back to BM25-only (lexical) due to embedding failure",
+    )
+    retrieval_no_channel_total = _counter(
+        "retrieval_no_channel_total",
+        "Retrieval runs with no usable channel (vector down + BM25 unavailable)",
+    )
+    semantic_cache_embedding_failures_total = _counter(
+        "semantic_cache_embedding_failures_total",
+        "Semantic cache (L2) tiers skipped due to embedding failure",
+    )
+
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
     # Prometheus 未安装，降级为无操作
@@ -201,6 +232,12 @@ except ImportError:
     rag_search_latency_seconds = _NoopMetric()
     agent_process_time_seconds = _NoopMetric()
     cache_writes_total = _NoopMetric()
+    embedding_provider_failures_total = _NoopMetric()
+    embedding_dimension_errors_total = _NoopMetric()
+    vector_channel_disabled_total = _NoopMetric()
+    bm25_fallback_used_total = _NoopMetric()
+    retrieval_no_channel_total = _NoopMetric()
+    semantic_cache_embedding_failures_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 # ===== 性能指标常量 =====

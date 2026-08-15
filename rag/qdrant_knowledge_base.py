@@ -16,8 +16,10 @@ v7.0 混合检索升级：
 """
 
 import asyncio
-import uuid
 from typing import Any
+
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
 
 from core.config import (
     HYBRID_BM25_TOP_K,
@@ -26,8 +28,21 @@ from core.config import (
     HYBRID_VECTOR_TOP_K,
 )
 from core.logger import get_logger
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
+from core.monitoring import (
+    bm25_fallback_used_total,
+    embedding_dimension_errors_total,
+    embedding_provider_failures_total,
+    retrieval_no_channel_total,
+    vector_channel_disabled_total,
+)
+from rag.embedding_status import (
+    EmbeddingDimensionError,
+    EmbeddingStatus,
+    EmbeddingUnavailableError,
+    RetrievalResultList,
+    degraded_reason_for,
+    validate_embedding_vector,
+)
 
 logger = get_logger("rag.qdrant_knowledge_base")
 
@@ -102,6 +117,17 @@ class QdrantKnowledgeBase:
         self._clip_embed_fn = None
         self._reranker = None
         self._embed_fn = embedding_model or self._create_embedding_function()
+        # P0-05: provider/model metadata for degraded-result observability.
+        # Derive a stable string name; never expose the embed_fn object itself.
+        _model_name = getattr(self._embed_fn, "model", None)
+        self._embedding_model_name: str = (
+            _model_name
+            if isinstance(_model_name, str)
+            else (QdrantKnowledgeBase._embed_fn_name if self._embed_fn is not None else "unavailable")
+        )
+        self._embedding_provider: str = (
+            type(self._embed_fn).__name__ if self._embed_fn is not None else "unavailable"
+        )
         self._collection_cache: dict[str, bool] = {}
         # v7.0: BM25 词法检索 + 混合检索开关
         self._bm25 = None
@@ -131,7 +157,10 @@ class QdrantKnowledgeBase:
             from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
 
             if not EMBEDDING_API_KEY:
-                logger.warning("EMBEDDING_API_KEY 未配置，中文 embedding 不可用，回退到随机向量")
+                logger.warning(
+                    "EMBEDDING_API_KEY 未配置，embedding 不可用（向量通道将被禁用，"
+                    "不生成随机向量）"
+                )
                 return None
 
             from rag.api_embedding import ApiEmbedding
@@ -145,18 +174,89 @@ class QdrantKnowledgeBase:
             logger.info(f"API Embedding 客户端创建成功: {EMBEDDING_MODEL}")
             return model
         except Exception as e:
-            QdrantKnowledgeBase._embed_fn_name = "default(fallback)"
-            logger.warning(f"API Embedding 创建失败: {e}，回退到随机向量")
+            QdrantKnowledgeBase._embed_fn_name = "default(unavailable)"
+            logger.warning(
+                f"API Embedding 创建失败: {e}（embedding 不可用，向量通道将被禁用，"
+                "不生成随机向量）"
+            )
             return None
 
     _embed_fn_name: str = "unknown"
 
-    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
-        if self._embed_fn is None:
-            import random
+    # ---- P0-05: embedding channel state & typed failure contract ----
 
-            return [[random.random() for _ in range(_EMBEDDING_DIM)] for _ in texts]
-        return self._embed_fn.encode(texts).tolist()
+    @property
+    def embedding_available(self) -> bool:
+        """Whether the vector embedding channel is usable (embed_fn configured).
+
+        Callers pre-check this to explicitly DISABLE the vector channel on
+        dependency failure — never to fabricate a vector.
+        """
+        return self._embed_fn is not None
+
+    def embedding_status(self) -> EmbeddingStatus:
+        """Typed embedding channel state for callers/metrics."""
+        return EmbeddingStatus.AVAILABLE if self._embed_fn is not None else EmbeddingStatus.UNAVAILABLE
+
+    def _record_embedding_failure(self, reason: str) -> None:
+        """Increment the embedding-provider-failure counter (label = reason only)."""
+        embedding_provider_failures_total.labels(reason=reason).inc()
+
+    def _degraded_meta(
+        self, reason: str, *, vector_used: bool, lexical_used: bool
+    ) -> dict[str, Any]:
+        """Per-query degraded metadata attached to a RetrievalResultList."""
+        return {
+            "retrieval_degraded": True,
+            "degraded_reason": reason,
+            "vector_channel_used": vector_used,
+            "lexical_channel_used": lexical_used,
+            "embedding_provider": self._embedding_provider,
+            "embedding_model": self._embedding_model_name,
+        }
+
+    def _degraded_result(
+        self, reason: str, *, vector_used: bool, lexical_used: bool
+    ) -> RetrievalResultList:
+        return RetrievalResultList(
+            [], meta=self._degraded_meta(reason, vector_used=vector_used, lexical_used=lexical_used)
+        )
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts into vectors.
+
+        P0-05: NEVER fabricates a vector on dependency failure. When the
+        embedding provider is unavailable (no embed_fn) or encode() raises,
+        raises EmbeddingUnavailableError so the caller disables the vector
+        channel. Wrong-dimension / non-finite vectors raise
+        EmbeddingDimensionError and are never padded, truncated, or random-filled.
+        """
+        if self._embed_fn is None:
+            self._record_embedding_failure("provider_unavailable")
+            raise EmbeddingUnavailableError(
+                reason="provider_unavailable",
+                provider=self._embedding_provider,
+                model=self._embedding_model_name,
+            )
+        try:
+            vectors = self._embed_fn.encode(texts)
+            vectors = vectors.tolist() if hasattr(vectors, "tolist") else list(vectors)
+        except Exception as e:
+            self._record_embedding_failure("encode_failed")
+            logger.warning(f"Embedding encode 失败，禁用向量通道: {e}")
+            raise EmbeddingUnavailableError(
+                reason="encode_failed",
+                provider=self._embedding_provider,
+                model=self._embedding_model_name,
+            ) from e
+        # Dimension + finiteness validation — reject, do not silently reshape.
+        for v in vectors:
+            try:
+                validate_embedding_vector(v, _EMBEDDING_DIM, model=self._embedding_model_name)
+            except EmbeddingDimensionError:
+                embedding_dimension_errors_total.inc()
+                raise
+        return vectors
 
     @property
     def available(self) -> bool:
@@ -215,6 +315,25 @@ class QdrantKnowledgeBase:
         if metadatas is None:
             metadatas = [{}] * len(documents)
         cleaned_metadatas = [{k: v for k, v in m.items() if v is not None} if m else {} for m in metadatas]
+
+        # P0-05: fail closed on embedding unavailability — NEVER persist a fake
+        # (random/pseudo) vector. Skip the Qdrant vector upsert; the lexical
+        # (BM25) channel is embedding-independent and may still be indexed.
+        if not self.embedding_available:
+            vector_channel_disabled_total.inc()
+            logger.warning(
+                "Embedding 不可用，跳过向量写入（拒绝持久化伪造向量），仅索引词法通道: "
+                f"collection={collection_name} docs={len(documents)} "
+                f"model={self._embedding_model_name}"
+            )
+            if self._hybrid_enabled:
+                self._ensure_bm25().add_documents(
+                    documents,
+                    collection=collection_name,
+                    ids=ids,
+                    metadatas=cleaned_metadatas,
+                )
+            return
 
         vectors = self._embed_texts(documents)
 
@@ -300,6 +419,18 @@ class QdrantKnowledgeBase:
     ) -> list[dict[str, Any]]:
         if not self._ensure_collection(collection_name):
             return []
+        # P0-05: disable the vector channel when embedding is unavailable — never
+        # query Qdrant with a random/pseudo vector. query() is vector-only, so
+        # there is no BM25 fallback here; return an explicit degraded empty result.
+        if not self.embedding_available:
+            vector_channel_disabled_total.inc()
+            logger.warning(
+                f"向量检索通道禁用（embedding 不可用），query 返回空降级结果: "
+                f"collection={collection_name} model={self._embedding_model_name}"
+            )
+            return self._degraded_result(
+                "embedding_unavailable", vector_used=False, lexical_used=False
+            )
         try:
             loop = asyncio.get_running_loop()
             query_vector = self._embed_texts([query_text])[0]
@@ -314,6 +445,13 @@ class QdrantKnowledgeBase:
                 ),
             )
             return self._parse_query_result(result)
+        except (EmbeddingUnavailableError, EmbeddingDimensionError) as e:
+            self._record_embedding_failure(getattr(e, "reason", "encode_failed"))
+            vector_channel_disabled_total.inc()
+            logger.warning(f"向量检索通道禁用（{degraded_reason_for(e)}）: {e}")
+            return self._degraded_result(
+                degraded_reason_for(e), vector_used=False, lexical_used=False
+            )
         except Exception as e:
             logger.error(f"Qdrant 查询失败 [{collection_name}]: {e}", exc_info=True)
             return []
@@ -339,6 +477,16 @@ class QdrantKnowledgeBase:
         """
         if not self._ensure_collection(collection_name):
             return []
+        # P0-05: disable the vector channel when embedding is unavailable.
+        if not self.embedding_available:
+            vector_channel_disabled_total.inc()
+            logger.warning(
+                f"向量检索通道禁用（embedding 不可用），search 返回空降级结果: "
+                f"collection={collection_name} model={self._embedding_model_name}"
+            )
+            return self._degraded_result(
+                "embedding_unavailable", vector_used=False, lexical_used=False
+            )
         try:
             from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
@@ -371,17 +519,29 @@ class QdrantKnowledgeBase:
                 ),
             )
             return self._parse_query_result(result)
+        except (EmbeddingUnavailableError, EmbeddingDimensionError) as e:
+            self._record_embedding_failure(getattr(e, "reason", "encode_failed"))
+            vector_channel_disabled_total.inc()
+            logger.warning(f"向量检索通道禁用（{degraded_reason_for(e)}）: {e}")
+            return self._degraded_result(
+                degraded_reason_for(e), vector_used=False, lexical_used=False
+            )
         except Exception as e:
             logger.error(f"Qdrant search 失败 [{collection_name}]: {e}", exc_info=True)
             return []
 
     async def query_multiple(
         self, collection_names: list[str], query_text: str, n_results: int = 3
-    ) -> list[dict[str, Any]]:
+    ) -> RetrievalResultList:
         """v7.0: 混合检索 — 向量 + BM25 双通道并行 → RRF 融合 → 重排序
 
+        P0-05: embedding 不可用时**禁用向量通道**（绝不生成随机向量查询
+        Qdrant）。若 BM25 词法通道就绪，退化为 BM25-only 显式降级检索；
+        若 BM25 也不可用，返回 no_retrieval_channel 降级空结果，由上层决定
+        安全回答/拒绝/升级。降级元数据随 RetrievalResultList.meta 到达调用者。
+
         1. 同义词扩展（query rewrite）
-        2. 向量检索 + BM25 检索并行执行（asyncio.gather）
+        2. 向量检索 + BM25 检索并行执行（embedding 可用时）
         3. RRF 融合两个通道的结果
         4. bge-reranker-v2-m3 / BM25 二次重排
         """
@@ -395,15 +555,7 @@ class QdrantKnowledgeBase:
 
         loop = asyncio.get_running_loop()
 
-        # ---- 向量检索通道 ----
-        query_vector = await loop.run_in_executor(None, lambda: self._embed_texts([query_text])[0])
-        vector_top_k = max(n_results * 2, HYBRID_VECTOR_TOP_K)
-        vector_tasks = [
-            self.query_with_vector(name, query_vector, vector_top_k)
-            for name in collection_names
-        ]
-
-        # ---- BM25 检索通道（混合检索开启且索引非空时） ----
+        # ---- BM25 词法通道（先调度，与向量通道并行；embedding 无关）----
         bm25_task = None
         if self._hybrid_enabled:
             bm25_top_k = max(n_results * 2, HYBRID_BM25_TOP_K)
@@ -412,18 +564,69 @@ class QdrantKnowledgeBase:
                 lambda: self._bm25_search(query_text, collection_names, top_k=bm25_top_k),
             )
 
-        # ---- 并行执行 ----
-        if bm25_task:
-            vector_results_list, bm25_results = await asyncio.gather(
-                asyncio.gather(*vector_tasks, return_exceptions=True),
-                bm25_task,
-            )
-        else:
-            vector_results_list = await asyncio.gather(*vector_tasks, return_exceptions=True)
-            bm25_results = []
+        # ---- 向量检索通道（embedding 不可用时整体跳过，不查询 Qdrant）----
+        vector_results_list: list[list[dict[str, Any]]] = []
+        embedding_down = not self.embedding_available
+        # Distinguish unavailable (no embed_fn / encode raised) from invalid
+        # (wrong dim / non-finite / non-numeric) in the degraded metadata.
+        embedding_down_reason = "embedding_unavailable"
+        if not embedding_down:
+            try:
+                query_vector = await loop.run_in_executor(
+                    None, lambda: self._embed_texts([query_text])[0]
+                )
+                vector_top_k = max(n_results * 2, HYBRID_VECTOR_TOP_K)
+                vector_tasks = [
+                    self.query_with_vector(name, query_vector, vector_top_k)
+                    for name in collection_names
+                ]
+                vector_results_list = await asyncio.gather(*vector_tasks, return_exceptions=True)
+            except (EmbeddingUnavailableError, EmbeddingDimensionError) as e:
+                self._record_embedding_failure(getattr(e, "reason", "encode_failed"))
+                embedding_down = True
+                embedding_down_reason = degraded_reason_for(e)
+                vector_results_list = []
 
-        # 聚合向量结果
-        all_vector_results = []
+        if embedding_down:
+            vector_channel_disabled_total.inc()
+            logger.warning(
+                f"向量检索通道禁用（{embedding_down_reason}），降级为词法检索: "
+                f"model={self._embedding_model_name}"
+            )
+
+        # ---- 收口 BM25 任务 ----
+        bm25_results: list[dict[str, Any]] = []
+        if bm25_task is not None:
+            try:
+                bm25_results = await bm25_task
+            except Exception as e:
+                logger.debug(f"BM25 检索异常: {e}")
+                bm25_results = []
+
+        # ---- 降级路径：向量通道禁用 → BM25-only 或无通道 ----
+        if embedding_down:
+            if bm25_results:
+                bm25_fallback_used_total.inc()
+                reranked = self._apply_reranker(query_text, bm25_results, top_k=n_results)
+                return RetrievalResultList(
+                    reranked[:n_results],
+                    meta=self._degraded_meta(
+                        embedding_down_reason, vector_used=False, lexical_used=True
+                    ),
+                )
+            retrieval_no_channel_total.inc()
+            logger.warning(
+                "无可用检索通道（向量禁用 + BM25 空），返回降级空结果"
+            )
+            return RetrievalResultList(
+                [],
+                meta=self._degraded_meta(
+                    "no_retrieval_channel", vector_used=False, lexical_used=False
+                ),
+            )
+
+        # ---- 正常混合检索路径（embedding 可用）----
+        all_vector_results: list[dict[str, Any]] = []
         for results in vector_results_list:
             if isinstance(results, list):
                 all_vector_results.extend(results)
@@ -452,7 +655,17 @@ class QdrantKnowledgeBase:
 
         # ---- 重排序 ----
         reranked = self._apply_reranker(query_text, fused, top_k=n_results)
-        return reranked[:n_results]
+        return RetrievalResultList(
+            reranked[:n_results],
+            meta={
+                "retrieval_degraded": False,
+                "degraded_reason": "",
+                "vector_channel_used": True,
+                "lexical_channel_used": bool(bm25_results),
+                "embedding_provider": self._embedding_provider,
+                "embedding_model": self._embedding_model_name,
+            },
+        )
 
     def _ensure_bm25(self):
         """懒初始化 BM25 检索器"""

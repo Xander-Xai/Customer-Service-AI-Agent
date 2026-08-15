@@ -25,6 +25,11 @@ jieba>=0.42.1
 # ===== Redis 持久化后端（Session + Cache）=====
 redis>=5.0.0
 
+# ===== Prometheus 监控指标（core/monitoring.py + cache/response_cache.py）=====
+# P0-05: embedding 降级/检索通道禁用等可观测性依赖 prometheus_client；
+# 未安装时 core.monitoring 降级为 NoopMetric，但 P0-05 observability 测试将 skip。
+prometheus-client>=0.18.0
+
 # ===== v4.0: 用户认证 + 数据库 =====
 # SQLAlchemy 已在上面（用于 ORM）
 

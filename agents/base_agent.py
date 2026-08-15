@@ -382,6 +382,7 @@ class BaseAgent(ABC):
                 effective_query = await self.knowledge_base.rewrite_query(query, self.llm)
 
             # v5.1: 多模态融合检索
+            retrieval_meta = {}
             if image_uri and hasattr(self.knowledge_base, "query_multimodal"):
                 results = await self.knowledge_base.query_multimodal(
                     effective_query,
@@ -389,6 +390,7 @@ class BaseAgent(ABC):
                     collections=collections,
                     n_results=n_results,
                 )
+                retrieval_meta = getattr(results, "meta", {})
             elif scene and hasattr(self.knowledge_base, "search"):
                 # v6.1: 场景过滤检索 — 使用 search(scene=...) 按 scene 过滤
                 fetch_n = (
@@ -400,6 +402,7 @@ class BaseAgent(ABC):
                     scene=scene,
                     collection_name=collections[0] if collections else "product_knowledge",
                 )
+                retrieval_meta = getattr(results, "meta", {})
                 if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
                     results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
             elif collections:
@@ -410,6 +413,7 @@ class BaseAgent(ABC):
                 results = await self.knowledge_base.query_multiple(
                     collections, effective_query, fetch_n
                 )
+                retrieval_meta = getattr(results, "meta", {})
                 # v5.2: Reranker — 基于关键词匹配度重排序
                 if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
                     results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
@@ -417,6 +421,18 @@ class BaseAgent(ABC):
                 results = await self.knowledge_base.query(
                     "product_knowledge", effective_query, n_results
                 )
+                retrieval_meta = getattr(results, "meta", {})
+
+            # P0-05: surface embedding-degraded state to the graph/agent so the
+            # upper layer can decide safe-answer / refusal / escalation. This
+            # only writes the flag + reason — it does not change retrieval
+            # behavior, and it carries no query text or cached content.
+            if state is not None and retrieval_meta.get("retrieval_degraded"):
+                state["retrieval_degraded"] = True
+                state["degraded_reason"] = retrieval_meta.get(
+                    "degraded_reason", "embedding_unavailable"
+                )
+
             if not results:
                 return ""
             parts = []

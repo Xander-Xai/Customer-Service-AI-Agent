@@ -8,10 +8,11 @@ QdrantKnowledgeBase 单元测试（v6.0）
 - 测试 _parse_query_result 转换逻辑
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from rag.qdrant_knowledge_base import QdrantKnowledgeBase, _EMBEDDING_DIM
+import pytest
+
+from rag.qdrant_knowledge_base import _EMBEDDING_DIM, QdrantKnowledgeBase
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def mock_qdrant_client():
     """创建 mock Qdrant 客户端"""
     with (
         patch("rag.qdrant_knowledge_base.QdrantClient") as mock_client_cls,
-        patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()) as mock_ef,
+        patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()),
     ):
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -130,12 +131,14 @@ class TestQdrantKnowledgeBase:
         reranked = kb.simple_rerank("测试", results, top_k=2)
         assert len(reranked) == 2
 
-    def test_embed_texts_fallback(self, kb):
-        """embedding 不可用时返回随机向量（不崩溃）"""
+    def test_embed_texts_fails_closed_when_unavailable(self, kb):
+        """P0-05: embedding 不可用时必须 fail closed（抛 EmbeddingUnavailableError），
+        而不是生成随机向量继续检索。旧行为（返回 random.random 向量）已被替换。"""
+        from rag.embedding_status import EmbeddingUnavailableError
+
         kb._embed_fn = None
-        vectors = kb._embed_texts(["test"])
-        assert len(vectors) == 1
-        assert len(vectors[0]) == _EMBEDDING_DIM
+        with pytest.raises(EmbeddingUnavailableError):
+            kb._embed_texts(["test"])
 
     def test_ensure_collection_creates(self, kb, mock_qdrant_client):
         """不存在的 collection 自动创建"""

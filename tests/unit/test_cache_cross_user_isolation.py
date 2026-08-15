@@ -24,6 +24,7 @@ from cache.cache_policy import (
     resolve_cache_policy,
 )
 from cache.response_cache import ResponseCache
+from rag.embedding_status import EmbeddingDimensionError, EmbeddingUnavailableError
 
 # ============================================================================
 # 内存 FakeRedis / FakeQdrant
@@ -188,7 +189,12 @@ def qdrant():
 
 
 def _cache(redis=None, qdrant=None, **kw):
-    """构造启用全部三层的 ResponseCache（embedding_model=None 走确定性随机回退）。"""
+    """构造启用全部三层的 ResponseCache。
+
+    P0-05: 注入真实（mock）embedding (_SemanticEmbedding)，不再依赖
+    deterministic-random 回退——该回退已被删除。同一查询产生同一向量，
+    供 L2 语义层验证 scope_key 隔离。
+    """
     defaults = {
         "fallback_enabled": True,
         "fallback_threshold": 0.1,
@@ -197,7 +203,7 @@ def _cache(redis=None, qdrant=None, **kw):
     return ResponseCache(
         redis_client=redis,
         qdrant_client=qdrant,
-        embedding_model=None,
+        embedding_model=_SemanticEmbedding(),
         **defaults,
     )
 
@@ -982,11 +988,17 @@ class TestResponseCacheOperationalBranches:
 
         no_qdrant = ResponseCache(fallback_enabled=False)
         assert no_qdrant._ensure_l2_collection() is False
-        assert no_qdrant._embed_query("fallback")
-
-        assert ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1, 0.2]
-        assert ResponseCache(embedding_model=_ListEmbedding())._embed_query("list") == [0.3, 0.4]
-        assert len(ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")) == 1024
+        # P0-05: _embed_query fails closed — no embed_fn → EmbeddingUnavailableError
+        # (no deterministic-random fallback). Wrong-dimension vectors are rejected
+        # (EMB-6), not padded/truncated; runtime encode failure raises too.
+        with pytest.raises(EmbeddingUnavailableError):
+            no_qdrant._embed_query("fallback")
+        with pytest.raises(EmbeddingDimensionError):
+            ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist")
+        with pytest.raises(EmbeddingDimensionError):
+            ResponseCache(embedding_model=_ListEmbedding())._embed_query("list")
+        with pytest.raises(EmbeddingUnavailableError):
+            ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")
 
         cache = _cache(redis=None, qdrant=None)
         cache._l1 = {"ignored": "value"}
