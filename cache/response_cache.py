@@ -254,8 +254,8 @@ class ResponseCache:
         self._version = f"{CACHE_PAYLOAD_VERSION}:{content_version}"
 
         # L3: Jaccard 内存缓存（继承原 L2 逻辑）
-        # P0-02: 元组增加 scope_key / version，实现跨用户隔离与版本失效。
-        self._l3_cache: dict[str, tuple[frozenset, str, float, str, str]] = {}
+        # P0-02: 元组增加 scope_key / version / ttl，实现跨用户隔离、版本失效与 TTL parity。
+        self._l3_cache: dict[str, tuple[frozenset, str, float, str, str, int]] = {}
         self._l3_order: deque = deque()
         self._l3_counter = 0
         self._l3_inverted_index: dict[str, set] = defaultdict(set)
@@ -762,15 +762,19 @@ class ResponseCache:
                     match=qmodels.MatchValue(value=scope_key),
                 ),
             ]
-            results = self._qdrant.search(
+            # P0-02 / Codex re-review AC3/AC9：qdrant-client 1.18.0 移除了 .search()，
+            # 改用 query_points()（返回 QueryResponse，命中在 .points）。向量入参由
+            # query_vector 改为 query；filter 仍为 query_filter。
+            resp = self._qdrant.query_points(
                 collection_name=self._l2_collection,
-                query_vector=vector,
+                query=vector,
                 limit=1,
                 score_threshold=self._l2_threshold,
                 query_filter=qmodels.Filter(must=must_conditions),
             )
-            if results:
-                return results[0].payload["response"]
+            points = getattr(resp, "points", None) if resp is not None else None
+            if points:
+                return points[0].payload["response"]
         return None
 
     def _qdrant_set(
@@ -862,19 +866,19 @@ class ResponseCache:
         best_score = 0.0
         best_response = None
         now = time.time()
-        default_ttl = self._l1_ttl_policy.get("default", 3600)
 
         for ck in candidate_keys:
             if ck not in self._l3_cache:
                 continue
-            cached_tokens, response, ts, scope_key, ver = self._l3_cache[ck]
+            cached_tokens, response, ts, scope_key, ver, ttl = self._l3_cache[ck]
             # P0-02: 作用域隔离 — 仅匹配调用方可达的作用域
             if scope_key not in read_keys_set:
                 continue
             if ver != version:
                 continue
-            # TTL 检查（使用 default TTL 作为 L3 过期时间）
-            if now - ts >= default_ttl:
+            # P0-02 CACHE-5: L3 按 policy TTL 过期（与 L1 setex(policy.ttl) /
+            # L2 expires_at=now+policy.ttl 一致；Codex re-review AC18 修复）。
+            if now - ts >= ttl:
                 self._l3_evict_key(ck)
                 continue
             score = self._jaccard(tokens, cached_tokens)
@@ -909,6 +913,7 @@ class ResponseCache:
             now,
             policy.scope_key,
             policy.version,
+            policy.ttl,
         )
         self._l3_order.append(key)
         for t in tokens:

@@ -67,6 +67,8 @@ class FakeRedis:
 _SearchHit = namedtuple("_SearchHit", ["id", "score", "payload"])
 _Collection = namedtuple("_Collection", "collections")
 _Col = namedtuple("_Col", "name")
+# 模拟 qdrant-client 1.18.0 QueryResponse（命中在 .points）— 与真实 API 形状一致
+_QueryResp = namedtuple("_QueryResp", ["points"])
 
 
 class FakeQdrant:
@@ -109,7 +111,11 @@ class FakeQdrant:
                 del self._points[pid]
         return namedtuple("_DelResult", ["count"])(count=len(self._points))
 
-    def search(self, collection_name, query_vector, limit=1, score_threshold=0.0, query_filter=None):  # noqa: ARG002
+    def query_points(self, collection_name, query, limit=1, score_threshold=0.0, query_filter=None):  # noqa: ARG002
+        """模拟 qdrant-client 1.18.0 query_points()：返回 QueryResponse 形状（.points）。
+
+        与真实 API 一致：向量入参 query，filter 为 query_filter，命中在 .points。
+        """
         must = getattr(query_filter, "must", None) or [] if query_filter else []
         should = getattr(query_filter, "should", None) or [] if query_filter else []
         results = []
@@ -118,11 +124,11 @@ class FakeQdrant:
             if not self._match(payload, must, should):
                 continue
             # 简化评分：完全相同的 query_text → 1.0；否则基于向量内积近似（测试够用）
-            score = self._score(query_vector, rec["vector"])
+            score = self._score(query, rec["vector"])
             if score >= score_threshold:
                 results.append(_SearchHit(id=pid, score=score, payload=payload))
         results.sort(key=lambda r: r.score, reverse=True)
-        return results[:limit]
+        return _QueryResp(points=results[:limit])
 
     # ---- 过滤求值 ----
     @staticmethod
@@ -694,6 +700,30 @@ class TestExplicitPolicyAndTenantScope:
         # 条目应已被 _l3_evict_key 移除
         assert all(entry[3] != "shared" for entry in cache._l3_cache.values())
 
+    def test_l3_expires_by_policy_ttl_not_default(self, monkeypatch):
+        """L3 必须按 policy TTL 过期，与 L1/L2 一致（CACHE-5 TTL parity）。
+
+        order_status policy TTL=300s，default TTL=3600s。写入后推进时间到 >300s 且
+        <3600s：L3 应已按 policy TTL 过期（None）；若 L3 误用 default TTL 则仍命中
+        （即 parity bug —— L1/L2 用 policy.ttl，L3 用 default）。Codex re-review AC18。
+        """
+        import cache.response_cache as rcm
+
+        cache = _cache(redis=None, qdrant=None)  # 仅 L3 路径
+        base = 1000.0
+        # 写入 order_status（policy.ttl=300）于 t=base
+        monkeypatch.setattr(rcm.time, "time", lambda: base)
+        cache.put(
+            "我的订单 ORD-PARITY 状态",
+            "A 的私有订单",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # 推进到 base+400：> policy 300，< default 3600
+        monkeypatch.setattr(rcm.time, "time", lambda: base + 400)
+        got = cache.get("我的订单 ORD-PARITY 状态", metadata={"user_id": "user_A"})
+        # L3 应按 policy TTL 过期 → None；用 default 则仍返回私有回答（bug）
+        assert got is None, "L3 must expire by policy TTL (300s), not default (3600s)"
+
 
 class TestBusInvalidationScope:
     """消息总线失效事件的作用域语义（subscribe_to_bus）。"""
@@ -833,8 +863,10 @@ class _SearchErrorQdrant(FakeQdrant):
         super().__init__()
         self._collections.add("response_cache")
 
-    def search(self, *args, **kwargs):  # noqa: ARG002
-        raise RuntimeError("qdrant search unavailable")
+    def query_points(self, *args, **kwargs):  # noqa: ARG002
+        # qdrant-client 1.18.0 L2 read path is query_points() (not .search());
+        # 模拟真实 query_points() 失败，验证 get() 降级不抛异常。
+        raise RuntimeError("qdrant query_points unavailable")
 
 
 class _UpsertErrorQdrant(FakeQdrant):
@@ -908,7 +940,16 @@ class TestResponseCacheOperationalBranches:
             qdrant=_SearchErrorQdrant(),
             fallback_enabled=False,
         )
-        assert search_cache.get("qdrant search failure") is None
+        # 先写入一条 shared 公开条目：非失败场景下 query_points() 会命中。
+        # 此处断言 None 的唯一原因是 query_points() 抛错被降级（非空结果），避免
+        # “空库即 None” 的空断言（Codex re-review：勿弱化既有验收测试）。
+        search_cache.put(
+            "present shared query",
+            "resp",
+            metadata={"intent_type": "knowledge_qa", "user_id": "uA"},
+        )
+        assert search_cache.get("present shared query", metadata={"user_id": "uB"}) is None
+        assert search_cache.get("present shared query", metadata={"user_id": "uA"}) is None
 
         upsert_cache = _cache(
             redis=None,
@@ -963,3 +1004,84 @@ class TestResponseCacheOperationalBranches:
         cache._metrics_last_flush = time.monotonic()
         cache._schedule_metrics_flush()
         assert cache._metrics_pending == 1
+
+
+# ============================================================================
+# P0-02 re-review AC3/AC9 — L2 语义缓存隔离（真实 query_points API + 注入向量）
+# ============================================================================
+
+
+class _SemanticEmbedding:
+    """注入式 embedding：同一簇内不同文本返回同一向量（cosine 1.0 = 语义命中）。
+
+    模拟真实语义相似（不同查询文本、相同语义向量），用以验证 L2 语义缓存的
+    scope_key 隔离：即使向量本会命中，scope_key must 过滤仍排除异用户条目。
+    """
+
+    _CLUSTERS = {
+        "我的订单什么时候到": "order",  # 与下一句语义相似 → 同向量
+        "我的订单大概几时能送到": "order",
+        "烟酰胺能美白吗": "faq",
+    }
+
+    def __init__(self, dim: int = 1024):
+        self._dim = dim
+
+    def encode(self, query):
+        cluster = self._CLUSTERS.get(query)
+        if cluster == "order":
+            return [1.0] + [0.0] * (self._dim - 1)
+        if cluster == "faq":
+            return [0.0, 1.0] + [0.0] * (self._dim - 2)
+        return [0.0] * self._dim  # 未知查询 → 零向量，不产生语义命中
+
+
+class TestL2SemanticIsolation:
+    """L2 语义缓存隔离（Codex re-review AC3/AC9）—— query_points() 真实 API 路径。
+
+    使用 API-faithful FakeQdrant（query_points/.points）+ 注入向量证明：
+    - AC9  semantic positive：同用户、不同文本、语义相似 → 命中。
+    - AC3  scope_key 强制过滤：异用户、语义相似（同向量）→ 仍 None。
+    """
+
+    @staticmethod
+    def _l2(qdrant):
+        return ResponseCache(
+            redis_client=None,
+            qdrant_client=qdrant,
+            embedding_model=_SemanticEmbedding(),
+            fallback_enabled=False,
+            fallback_threshold=0.1,
+        )
+
+    def test_l2_semantic_same_user_hit(self, qdrant):
+        """同用户、不同文本、语义相似（同向量 cosine 1.0）→ L2 命中（AC9 正向）。"""
+        cache = self._l2(qdrant)
+        cache.put(
+            "我的订单什么时候到",
+            "A 的订单回答",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # 不同文本、同向量 → 语义命中；同用户 scope → 命中
+        got = cache.get("我的订单大概几时能送到", metadata={"user_id": "user_A"})
+        assert got == "A 的订单回答"
+
+    def test_l2_semantic_cross_user_miss(self, qdrant):
+        """异用户、语义相似（同向量）→ scope_key must 过滤排除 → None（AC3）。
+
+        证明 scope_key 是强制 Qdrant 过滤：向量本会命中，但 scope_key=u:hash(A)
+        ∉ B 的探测集 [shared, u:hash(B)] → 不返回。没有该过滤则此处会跨用户泄漏。
+        """
+        cache = self._l2(qdrant)
+        cache.put(
+            "我的订单什么时候到",
+            "A 的私有订单",
+            metadata={"intent_type": "order_status", "user_id": "user_A"},
+        )
+        # 异用户、同向量 → 语义本会命中，但 scope 过滤排除
+        assert cache.get("我的订单大概几时能送到", metadata={"user_id": "user_B"}) is None
+        # 同用户仍可命中 → 证明隔离由 scope_key 决定，而非向量不匹配
+        assert (
+            cache.get("我的订单大概几时能送到", metadata={"user_id": "user_A"})
+            == "A 的私有订单"
+        )
