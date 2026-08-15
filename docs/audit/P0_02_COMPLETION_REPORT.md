@@ -422,4 +422,81 @@ P0-03（232 passed）/P0-04（sse_identity passed）。16/16 PASS。
 
 ---
 
+## 16. Re-Review #3 Closure（Codex PARTIAL → 修复 → 待独立验收）
+
+> 独立安全验收 #2 判定 **PARTIAL**（3 项必修）。本节记录修复与证据；**最终 ACCEPTED 由
+> 独立验收者判定，不由本报告自评。**
+
+### 16.1 Finding 1 / AC18 — L3 TTL parity（CACHE-5）
+
+**根因**：`_jaccard_search` 用 `self._l1_ttl_policy["default"]`（3600s）作为所有 L3 条目的
+过期阈值，而 L1（`setex(key, policy.ttl)`）与 L2（`expires_at=now+policy.ttl`）均按 policy TTL。
+→ order_status(300s) 在 L3 存活 3600s；knowledge_qa(604800s) 在 L3 仅存活 3600s。CACHE-5 TTL 不一致。
+
+**修复（TDD）**：
+- RED：`test_l3_expires_by_policy_ttl_not_default` — 写 order_status(300s) 后推进时间到 +400s
+  （>300、<3600），断言 L3 已过期（None）。对修复前代码确认 FAIL（仍返回私有回答）。
+- GREEN：`_jaccard_set` 写入 6-tuple `(tokens,response,ts,scope_key,version,policy.ttl)`；
+  `_jaccard_search` 解包 `ttl` 并 `if now-ts >= ttl` 过期（与 L1/L2 同源 policy.ttl）。
+  `_l3_cache` 类型注解更新为 6-tuple。其余按索引读取点（`_l3_evict*` 用 [0]/[3]）不变。
+
+### 16.2 Finding 2 / AC3 / AC9 — qdrant-client 1.18.0 `.search()` 已移除
+
+**根因**：`qdrant-client==1.18.0` 移除 `QdrantClient.search()`（实测 `has .search: False`，
+`has .query_points: True`）。`_qdrant_get` 调 `self._qdrant.search(...)` → 运行时 AttributeError →
+被 `get()` except 捕获 → L2 静默降级为 miss（**不泄漏**，但 L2 语义缓存实际不工作，无法验收）。
+
+**修复**：`_qdrant_get` 改用 `query_points(collection_name, query=vector, limit, score_threshold,
+query_filter=Filter(must=...))` 并读 `resp.points[0].payload["response"]`（向量入参 `query_vector`→`query`，
+filter 仍 `query_filter`，命中 `list`→`.points`）。FakeQdrant 同步为 API-faithful（`query_points`→`_QueryResp(points=...)`）。
+`_SearchErrorQdrant` 失败模拟从 `.search()` 迁到 `.query_points()`（避免既有降级测试空断言弱化），
+并强化该测试为「先写后读 → None 因 query_points 抛错而非空库」。
+
+**真实 qdrant-client 1.18.0 验证（本地 file-mode QdrantClient，无需服务器）** — `/tmp/p02_qdrant_real_probe.py`：
+
+| 检查 | 结果 |
+|---|---|
+| AC9/AC12 公开 FAQ 跨用户共享 HIT | PASS |
+| AC3 个性化跨用户隔离（精确） | PASS |
+| AC9 真实语义同用户 HIT（不同文本/同向量） | PASS |
+| AC3/AC5 真实语义跨用户 MISS（scope_key 强制过滤） | PASS |
+| AC17 version 强制过滤（stale 版本被 must[version==cur] 排除） | PASS |
+
+5/5 PASS，0 failure —— 证明 `query_points()` 真实路径端到端可用，且 **scope_key 与 version 均为强制
+Qdrant must 过滤**（语义命中但异 scope 仍 None；stale 版本被排除）。
+
+### 16.3 Finding 3 / AC25 — commit 边界（d872148 混入 P0-02+P0-03）
+
+d872148「close cache and ERP mapping findings」单 commit 同时含 `cache/cache_policy.py`（P0-02）
+与 `erp/*`+`core/protocols.py`（P0-03）。按用户授权 + 安全要求，以独立 worktree 重写历史：
+- 备份 tag `p0-02-resplit-backup` 指向重写前 HEAD。
+- **不读/不改/stage/reset/overwrite secrets/keys.json**（全程在独立 worktree 操作）。
+- d872148 拆为：P0-02 cache/security commit（6 文件）+ P0-03 ERP mapping commit（7 文件），
+  保留原作者/日期。
+- cherry-pick 本轮 P0-02 修复（L3 TTL + qdrant + 语义测试）于其上 → M'。
+- `git diff <备份> M'` 为空（最终代码状态逐字节不变）。
+- `git push --force-with-lease`（非 `--force`）；远端不符预期则中止。
+- SHA 映射见 §16.5。
+
+### 16.4 验收 AC 闭环
+
+| AC | 项 | 证据 | 状态 |
+|---|---|---|---|
+| AC3 | L2 跨用户隔离 | 真实 probe semantic cross-user MISS；FakeQdrant `test_l2_semantic_cross_user_miss` | **闭合** |
+| AC5 | scope_key 强制过滤 | 真实 probe（向量命中但异 scope→None）；语义 MISS 测试 | **闭合** |
+| AC9 | L2 语义正向命中 | 真实 probe semantic same-user HIT；`test_l2_semantic_same_user_hit` | **闭合** |
+| AC18 | L3 TTL 与 policy 一致 | `test_l3_expires_by_policy_ttl_not_default`；6-tuple policy.ttl | **闭合** |
+| AC17 | version 强制过滤 | 真实 probe stale-version 排除；`test_version_mismatch_blocks_stale_entry` | 闭合 |
+
+### 16.5 测试结果与 SHA 映射
+
+- 本轮（重写前 worktree）：canonical **1598 passed / 0 failed / 1 deselected / coverage 81.00% /
+  exit 0**；stress **12 passed**；targeted P0-02 cache **262 passed**；ruff clean；real probe 5/5。
+- SHA 映射（force-with-lease 后）：
+  - `d872148` → `<P0-02-split SHA>` + `<P0-03-split SHA>`
+  - `<pre-resplit HEAD w/ 本轮修复>` → `<M' SHA>`
+  （具体 SHA 在执行后填入；备份 tag = `p0-02-resplit-backup`。）
+
+---
+
 `NEXT_ELIGIBLE_ISSUE = P0-05 Random Embedding Fallback`
