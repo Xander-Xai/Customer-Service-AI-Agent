@@ -118,6 +118,32 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
 # ── WebSocket 实时对话 ──
 
 
+def derive_ws_user_id(ws_jwt_payload: dict | None) -> str:
+    """Derive the trusted WS identity from the authenticated JWT subject,
+    independent of the optional session-storage dependency (BF-01).
+
+    - No JWT payload (api-key / DEV_MODE anonymous path): ``''`` — an allowed
+      anonymous (system-auth) identity, not a failure.
+    - Authenticated JWT with a usable ``sub``: the subject string.
+    - Authenticated JWT with no usable subject: raise ``ValueError`` (fail
+      closed). A presented token must identify a user; it must not silently
+      run as a phantom/anonymous identity. The caller closes the connection.
+
+    This decouples identity derivation from ``session_manager``: the prior
+    ``if session_manager and ws_jwt_payload:`` guard dropped a valid subject
+    to ``user_id=""`` whenever ``session_manager`` was ``None`` (a supported
+    ``create_app(..., session_manager=None)`` construction).
+    """
+    if ws_jwt_payload is None:
+        # No JWT was presented (api-key / DEV_MODE anonymous path): an allowed
+        # anonymous (system-auth) identity, not a failure.
+        return ""
+    sub = ws_jwt_payload.get("sub", "")
+    if not sub:
+        raise ValueError("authenticated JWT has no usable subject")
+    return sub
+
+
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
     global _ws_conn_counter
@@ -154,11 +180,23 @@ async def websocket_chat(ws: WebSocket):
 
     # v5.3: H-1 修复 — 把 JWT 里的 user_id 提到外层，确保 run_graph() 与 quota 检查能拿到
     # （审计 v2 P0 H-1：WS 路径未注入 user_id 导致钱包枯竭攻击防护失效）
-    ws_uid = ""
-    if session_manager and ws_jwt_payload:
-        ws_uid = ws_jwt_payload.get("sub", "")
-        if ws_uid:
-            session_manager.set_user_id(session_id, ws_uid)
+    # P0-04 BF-01 (Phase 1 Gate re-review): the trusted WS identity is derived
+    # from the authenticated JWT subject INDEPENDENTLY of the optional
+    # session-storage dependency. create_app(..., session_manager=None) is a
+    # supported construction; the prior ``if session_manager and
+    # ws_jwt_payload:`` guard dropped a valid subject to user_id="" whenever
+    # session_manager was None. An authenticated JWT with no usable subject
+    # fails closed (connection rejected) rather than running as anonymous.
+    try:
+        ws_uid = derive_ws_user_id(ws_jwt_payload)
+    except ValueError:
+        await ws.send_json({"type": "error", "message": "认证失败: 无有效身份"})
+        await ws.close(code=4001, reason="No subject in token")
+        async with _ws_lock:
+            _ws_connections[client_ip] = max(0, _ws_connections[client_ip] - 1)
+        return
+    if session_manager and ws_uid:
+        session_manager.set_user_id(session_id, ws_uid)
 
     status_messages = []
 

@@ -449,3 +449,91 @@ class TestWSIdentityPropagation:
         assert rest_user == sse_user == ws_user, (
             f"Identity parity broken: REST={rest_user}, SSE={sse_user}, WS={ws_user}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BF-01 (Phase 1 Gate re-review): trusted WS identity must be independent of the
+# optional session-storage dependency. create_app(..., session_manager=None) is a
+# supported construction; the JWT subject must still reach run_graph.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestWSIdentityIndependentOfSessionManager:
+    """BF-01: an authenticated JWT subject must reach run_graph even when the
+    optional session_manager dependency is absent (session_manager=None)."""
+
+    def test_ws_authenticated_jwt_identity_reaches_graph_without_session_manager(self):
+        """Valid JWT sub + session_manager=None -> run_graph(user_id=<sub>).
+
+        Regression for the Phase 1 gate finding: the prior condition
+        ``if session_manager and ws_jwt_payload:`` coupled JWT-sub extraction to
+        the optional session_manager, so a valid authenticated identity was
+        silently dropped to user_id="" when session_manager was None.
+        """
+        from api.routes.ws import router as ws_router
+
+        run_graph = _make_mock_run_graph()
+        app = FastAPI()
+        app.include_router(ws_router)
+        # Supported construction: create_app(..., session_manager=None)
+        app.state.session_manager = None
+        app.state.run_graph = run_graph
+        app.state.message_bus = _make_mock_bus()
+        app.state.dev_mode = True
+
+        async def _mock_auth(ws, ws_api_key):
+            return ("", "", {"sub": "jwt-user-without-session-manager"})
+
+        with (
+            patch("api.routes.ws._ws_authenticate", new_callable=AsyncMock, side_effect=_mock_auth),
+            TestClient(app) as client,
+            client.websocket_connect("/ws/chat") as ws,
+        ):
+            ws.send_json({"query": "hello"})
+            for _ in range(30):
+                msg = ws.receive_json()
+                if msg.get("type") == "response":
+                    break
+
+        assert run_graph.called, "run_graph was not called via WebSocket"
+        call_kwargs = run_graph.call_args.kwargs
+        assert "user_id" in call_kwargs, f"WebSocket kwargs missing user_id. Got: {call_kwargs}"
+        assert call_kwargs["user_id"] == "jwt-user-without-session-manager", (
+            f"Expected user_id='jwt-user-without-session-manager' from JWT sub "
+            f"(independent of session_manager), got: {call_kwargs['user_id']!r}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BF-01 (cont.): the trusted-identity derivation is a pure function so the
+# missing-sub fail-closed behavior is unit-testable without a flaky/hanging WS
+# integration test. The WS route calls derive_ws_user_id() and fail-closes (closes
+# the connection) when it raises.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDeriveWsUserId:
+    """Pure identity-derivation logic, independent of session storage (BF-01)."""
+
+    def test_extracts_subject_from_authenticated_jwt(self):
+        from api.routes.ws import derive_ws_user_id
+
+        assert derive_ws_user_id({"sub": "jwt-user-42"}) == "jwt-user-42"
+
+    def test_no_jwt_payload_is_anonymous_allowed(self):
+        """api-key / DEV_MODE paths carry no JWT payload -> anonymous ('')
+        is an allowed, non-failing identity (system auth, not a user)."""
+        from api.routes.ws import derive_ws_user_id
+
+        assert derive_ws_user_id(None) == ""
+
+    def test_authenticated_jwt_without_subject_fails_closed(self):
+        """An authenticated JWT that carries no usable subject must fail closed
+        (raise) — never silently run as a phantom/anonymous identity. Defines
+        the missing-sub behavior required by the BF-01 remediation."""
+        from api.routes.ws import derive_ws_user_id
+
+        with pytest.raises(ValueError):
+            derive_ws_user_id({"sub": ""})
+        with pytest.raises(ValueError):
+            derive_ws_user_id({})  # no sub key at all
