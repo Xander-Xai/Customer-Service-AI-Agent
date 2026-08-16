@@ -6,6 +6,7 @@ ERP 工具注册（v3.5）
 from typing import Any
 
 from core.logger import get_logger
+from erp.authorization import ErpAuthorizationService
 
 from .tool_registry import ToolRegistry
 
@@ -87,6 +88,20 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     async def _query_order(args: dict[str, Any]) -> str:
         order_id = args.get("order_id", "")
         customer_id = args.get("customer_id", "")
+        # P0-03 BF-02 (Phase 1 Gate re-review): private ERP resources (orders,
+        # customers) must only flow through the ErpAuthorizationService boundary.
+        # ``core.container`` wires the AuthZ-wrapped adapter, but the tool
+        # factory itself must enforce that boundary — a caller passing a raw
+        # adapter must NOT bypass ownership checks and disclose another user's
+        # data. Fail closed (safe not-found, indistinguishable from not_found /
+        # non-owner per AUTHZ-5). Public tools (product/inventory) remain
+        # separately scoped and accept a raw adapter.
+        if not isinstance(erp_adapter, ErpAuthorizationService):
+            logger.warning(
+                "query_order 拒绝: ERP 适配器未经过 ErpAuthorizationService 包装"
+                "（私有资源不允许通过原始适配器访问）"
+            )
+            return "未找到订单信息"
         results = await erp_adapter.query_order(order_id=order_id, customer_id=customer_id)
         if not results:
             return "未找到订单信息"
@@ -121,6 +136,14 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     # ---- query_customer ----
     async def _query_customer(args: dict[str, Any]) -> str:
         customer_id = args.get("customer_id", "")
+        # P0-03 BF-02: see _query_order — private resources require the
+        # ErpAuthorizationService boundary; a raw adapter fails closed.
+        if not isinstance(erp_adapter, ErpAuthorizationService):
+            logger.warning(
+                "query_customer 拒绝: ERP 适配器未经过 ErpAuthorizationService 包装"
+                "（私有资源不允许通过原始适配器访问）"
+            )
+            return f"未找到客户 '{customer_id}' 的信息"
         result = await erp_adapter.query_customer(customer_id)
         if not result:
             return f"未找到客户 '{customer_id}' 的信息"

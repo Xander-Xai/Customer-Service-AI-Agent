@@ -763,3 +763,35 @@ class TestPrincipalLifecycle:
         result = await registry.execute("query_order", {"order_id": ORDER_B})
         assert ORDER_B not in result
         assert "李女士" not in result
+
+
+# ============================================================================
+# BF-02 (Phase 1 Gate re-review): the AuthZ boundary must be an invariant of the
+# tool factory itself, not just of container wiring. A raw ERP adapter passed to
+# create_erp_tools must NOT bypass ErpAuthorizationService for private resources.
+# ============================================================================
+
+
+class TestRawAdapterBypassDenied:
+    """Private ERP tools must refuse to disclose data through a raw adapter.
+
+    ``core.container`` correctly wires ``create_erp_tools(self._get_erp_authz())``
+    (an ``ErpAuthorizationService``), but the factory itself accepted and used
+    ANY adapter with the right methods — so ``create_erp_tools(KingdeeMockAdapter())``
+    disclosed another user's order with no ownership check.
+    """
+
+    async def test_create_erp_tools_raw_adapter_denies_private_order(self, mock_adapter):
+        """Raw adapter (not AuthZ-wrapped) must NOT disclose ORDER_B's owner."""
+        registry = create_erp_tools(mock_adapter)  # raw, not ErpAuthorizationService
+        result = await registry.execute("query_order", {"order_id": ORDER_B})
+        # Must fail closed — no disclosure of 李女士's order.
+        assert "李女士" not in result, f"Raw adapter leaked private order: {result}"
+        assert "486" not in result, f"Raw adapter leaked order amount: {result}"
+        assert ORDER_B not in result
+
+    async def test_create_erp_tools_raw_adapter_denies_private_customer(self, mock_adapter):
+        """Raw adapter must NOT disclose C002's customer profile via query_customer."""
+        registry = create_erp_tools(mock_adapter)
+        result = await registry.execute("query_customer", {"customer_id": "C002"})
+        assert "李女士" not in result, f"Raw adapter leaked private customer: {result}"

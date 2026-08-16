@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from erp.authorization import ErpAuthorizationService, erp_principal
+
 # ─── auth.service ───────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
@@ -467,7 +469,20 @@ class TestERPTools:
     def registry(self, mock_erp):
         from tools.erp_tools import create_erp_tools
 
-        return create_erp_tools(mock_erp)
+        # P0-03 BF-02: private ERP tools require the ErpAuthorizationService
+        # boundary. The registry is built from the AuthZ-wrapped adapter (the
+        # container's wiring); public tools still delegate through it.
+        return create_erp_tools(ErpAuthorizationService(mock_erp))
+
+    @pytest.fixture
+    def principal(self, mock_erp):
+        """Authenticated principal + a passing ownership mapping so the
+        private-tool tests exercise the authorized path (not the deny path):
+        user_001 -> C001 owns the queried orders/customer."""
+        mock_erp.resolve_customer_by_user.return_value = "C001"
+        mock_erp.get_order_owner.return_value = "C001"
+        with erp_principal("user_001"):
+            yield
 
     @pytest.mark.asyncio
     async def test_query_product_found(self, registry, mock_erp):
@@ -509,10 +524,11 @@ class TestERPTools:
         assert "未找到" in result
 
     @pytest.mark.asyncio
-    async def test_query_order_found(self, registry, mock_erp):
+    async def test_query_order_found(self, registry, mock_erp, principal):
         mock_erp.query_order.return_value = [
             {
                 "order_id": "ORD001",
+                "customer_id": "C001",
                 "customer_name": "张三",
                 "status": "已发货",
                 "total": 599,
@@ -525,13 +541,13 @@ class TestERPTools:
         assert "已发货" in result
 
     @pytest.mark.asyncio
-    async def test_query_order_empty(self, registry, mock_erp):
+    async def test_query_order_empty(self, registry, mock_erp, principal):
         mock_erp.query_order.return_value = []
         result = await registry.execute("query_order", {"order_id": "NONE", "customer_id": ""})
         assert "未找到" in result
 
     @pytest.mark.asyncio
-    async def test_query_order_limit_5(self, registry, mock_erp):
+    async def test_query_order_limit_5(self, registry, mock_erp, principal):
         mock_erp.query_order.return_value = [
             {"order_id": f"ORD{i}", "customer_name": "C", "status": "S", "total": 100}
             for i in range(10)
@@ -541,7 +557,7 @@ class TestERPTools:
         assert result.count("ORD") == 5
 
     @pytest.mark.asyncio
-    async def test_query_customer_found(self, registry, mock_erp):
+    async def test_query_customer_found(self, registry, mock_erp, principal):
         mock_erp.query_customer.return_value = {
             "name": "李四",
             "phone": "13800000000",
@@ -555,9 +571,11 @@ class TestERPTools:
         assert "VIP" in result
 
     @pytest.mark.asyncio
-    async def test_query_customer_not_found(self, registry, mock_erp):
+    async def test_query_customer_not_found(self, registry, mock_erp, principal):
         mock_erp.query_customer.return_value = None
-        result = await registry.execute("query_customer", {"customer_id": "C999"})
+        # Query the owner's own customer id (C001 == trusted) with no record ->
+        # real not-found path (not the deny path).
+        result = await registry.execute("query_customer", {"customer_id": "C001"})
         assert "未找到" in result
 
     def test_registry_has_4_tools(self, registry):
