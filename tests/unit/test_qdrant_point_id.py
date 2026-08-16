@@ -298,16 +298,86 @@ class TestCollisionGuardAdversarial:
             kb.add_documents("product_knowledge", ["docA", "docB"], ids=["idA", "idB"])
         assert not mock_qdrant_client.upsert.called
 
-    def test_mapping_does_not_alias_across_delimiter(self):
-        """ID-7 boundary hardening: ("a:b","c") and ("a","b:c") must NOT hash
-        to the same byte string. The `"{coll}:{doc}"` framing is ambiguous
-        for arbitrary colon-bearing inputs; the mapping must not let two
-        distinct (collection, doc_id) pairs collide via the delimiter."""
+    def test_mapping_rejects_colon_bearing_inputs(self):
+        """ID-7 boundary hardening: a ':' in collection or doc_id would make
+        the `"{coll}:{doc}"` framing ambiguous ((`"a:b","c")` vs
+        `("a","b:c")`). Rather than silently encoding them differently
+        (which would change every ordinary ID — see BF-P1-03-04), the
+        mapping rejects ':' outright. No configured collection/doc_id uses
+        ':'. This keeps the accepted df328b5 mapping byte-stable while
+        removing the ambiguity."""
         from rag.point_id import document_id_to_point_id
 
-        a = document_id_to_point_id("a:b", "c")
-        b = document_id_to_point_id("a", "b:c")
-        assert a != b, "delimiter aliasing: ('a:b','c') == ('a','b:c')"
+        for coll, doc in [("a:b", "c"), ("a", "b:c"), ("pre:post", "x"), ("x", "y:z")]:
+            with pytest.raises(ValueError):
+                document_id_to_point_id(coll, doc)
+
+    def test_mapping_is_byte_identical_to_accepted_df328b5_mapping(self):
+        """BF-P1-03-04 regression guard: the stable mapping MUST stay
+        byte-identical to the accepted `df328b5` mapping
+        (`SHA256(f"{coll}:{doc}")[:8] & 0x7FFFFFFFFFFFFFFF`) for ordinary
+        inputs. A re-framing (e.g. length-prefixed encoding) changes every
+        Point ID and recreates ghost duplicates on rolling re-import. This
+        locks the accepted mapping's exact bytes against drift."""
+        import hashlib
+
+        from rag.point_id import document_id_to_point_id
+
+        def accepted_df328b5(coll, doc):
+            return (
+                int.from_bytes(hashlib.sha256(f"{coll}:{doc}".encode()).digest()[:8], "big")
+                & 0x7FFFFFFFFFFFFFFF
+            )
+
+        for coll, doc in [
+            ("product_knowledge", "pr_000"),
+            ("faq", "faq_000"),
+            ("tech_support", "tech_000"),
+            ("complaint_knowledge", "co_000"),
+            ("image_knowledge", "img_000"),
+            ("product_knowledge", "derm_001310"),
+        ]:
+            assert document_id_to_point_id(coll, doc) == accepted_df328b5(coll, doc), (
+                f"mapping drifted from df328b5 for {coll}/{doc}"
+            )
+
+    def test_reimport_after_df328b5_collection_does_not_create_ghost_duplicate(
+        self, kb, mock_qdrant_client
+    ):
+        """BF-P1-03-04 cross-commit regression: a collection written under
+        the accepted df328b5 mapping holds a point at the df328b5 ID. A
+        normal re-import under the current mapping MUST target the SAME
+        Point ID (so Qdrant overwrites in place) — NOT a new ID that leaves
+        the old point as a ghost duplicate. This is the exact failure mode
+        a length-prefixed re-framing reintroduced during rolling deploy."""
+        import hashlib
+
+        def df328b5(coll, doc):
+            return (
+                int.from_bytes(hashlib.sha256(f"{coll}:{doc}".encode()).digest()[:8], "big")
+                & 0x7FFFFFFFFFFFFFFF
+            )
+
+        old_id = df328b5("product_knowledge", "pr_000")
+        # The collection still holds the df328b5-era point at old_id.
+        existing = MagicMock()
+        existing.id = old_id
+        existing.payload = {"doc_id": "pr_000", "content": "old"}
+        # The guard retrieves at the CURRENT mapping's id — which must equal
+        # old_id, so it sees the existing point (idempotent re-upsert, no ghost).
+        mock_qdrant_client.retrieve.return_value = [existing]
+
+        kb._embed_texts = MagicMock(return_value=[[0.1] * _EMBEDDING_DIM])
+        kb.add_documents("product_knowledge", ["doc1"], ids=["pr_000"])
+
+        upserted_id = _upserted_points(mock_qdrant_client, 0)[0].id
+        assert upserted_id == old_id, (
+            f"current mapping ({upserted_id}) != df328b5 id ({old_id}): "
+            "re-import would leave a ghost duplicate"
+        )
+        # guard retrieved at the same id as the persisted point
+        retrieved_ids = mock_qdrant_client.retrieve.call_args.kwargs["ids"]
+        assert retrieved_ids == [old_id]
 
 
 # ====================================================================

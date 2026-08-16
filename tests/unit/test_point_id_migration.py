@@ -322,3 +322,27 @@ class TestMigrateCliSafety:
 
         rc = m.main(["--collection", "c", "--dry-run"])
         assert rc == 0
+
+    def test_abort_blocks_are_exposed_in_cli_json(self, monkeypatch, capsys):
+        """Section-6 observability: when execute aborts on a blocking
+        conflict, the JSON report must expose `aborted` and the blocking
+        IDs (not just the non-zero exit code) so an operator/CI can see
+        WHAT blocked the migration."""
+        import scripts.migrate_point_ids as m
+
+        # Force a duplicate-logical-id conflict so execute aborts.
+        dup_a = _rec(222, "dup_doc", vector=[0.1])
+        dup_b = _rec(333, "dup_doc", vector=[0.2])
+        client = MagicMock()
+        client.get_collections.return_value = MagicMock(collections=[])
+        client.scroll.return_value = ([dup_a, dup_b], None)
+        monkeypatch.setattr(m, "_connect_client", lambda: client)
+
+        rc = m.main(
+            ["--collection", "c", "--execute", "--i-understand-this-is-destructive", "--json"]
+        )
+        assert rc != 0
+        out = capsys.readouterr().out
+        assert '"aborted": true' in out
+        assert '"dup_doc"' in out  # blocking_duplicates exposed
+        assert '"blocking_duplicates"' in out

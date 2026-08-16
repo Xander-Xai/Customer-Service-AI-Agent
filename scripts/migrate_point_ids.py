@@ -134,6 +134,13 @@ def _serialize_report(report) -> dict:
         "upserted": getattr(report, "upserted", 0),
         "deleted_legacy": getattr(report, "deleted_legacy", 0),
         "skipped_unmappable": getattr(report, "skipped_unmappable", 0),
+        # BF-P1-03-02/04: surface the execute-preflight blockers so an
+        # operator/CI can see WHAT blocked the migration, not just that it
+        # aborted (the exit code already reflects the failure).
+        "aborted": getattr(report, "aborted", False),
+        "blocking_duplicates": getattr(report, "blocking_duplicates", []),
+        "blocking_conflicts": getattr(report, "blocking_conflicts", []),
+        "blocking_unmappable_occupied": getattr(report, "blocking_unmappable_occupied", []),
     }
 
 

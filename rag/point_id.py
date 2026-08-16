@@ -57,18 +57,7 @@ __all__ = [
 POINT_ID_MASK = 0x7FFFFFFFFFFFFFFF
 
 
-def _encode_mapping_key(collection_name: str, doc_id: object) -> bytes:
-    """Length-prefixed encoding of (collection, doc_id) for the hash.
-
-    A naive ``f"{coll}:{doc}"`` is ambiguous: ``("a:b","c")`` and
-    ``("a","b:c")`` hash to the same byte string. Prefixing each field with
-    its length makes the encoding unambiguous without restricting the input
-    domain, so two distinct (collection, doc_id) pairs never collide via the
-    delimiter (ID-7 boundary hardening).
-    """
-    coll_b = str(collection_name).encode()
-    doc_b = str(doc_id).encode()
-    return b"%d:%s|%d:%s" % (len(coll_b), coll_b, len(doc_b), doc_b)
+_DELIMITER = ":"
 
 
 def document_id_to_point_id(collection_name: str, doc_id: object) -> int:
@@ -77,6 +66,25 @@ def document_id_to_point_id(collection_name: str, doc_id: object) -> int:
     Deterministic across processes, restarts and ``PYTHONHASHSEED`` — the
     inverse of the old ``hash(id_) & 0x7FFFFFFFFFFFFFFF``: same output type
     and mask, but seed-independent.
+
+    Algorithm (locked, byte-stable — BF-P1-03-04):
+
+        SHA-256(f"{collection_name}:{doc_id}")[:8] & 0x7FFFFFFFFFFFFFFF
+
+    This is the exact mapping accepted under ``df328b5``. It MUST NOT be
+    re-framed (e.g. length-prefixed) — any change to the hash input bytes
+    changes every ordinary Point ID and recreates ghost duplicates during a
+    rolling re-import against a collection written by a prior accepted
+    commit, because the collision guard retrieves only the *current* id and
+    cannot see points stored under the old id.
+
+    Boundary hardening (ID-7): the ``:`` delimiter makes the framing
+    ambiguous for arbitrary inputs (``("a:b","c")`` vs ``("a","b:c")``).
+    Rather than re-encode (which would drift the IDs), the mapping **rejects**
+    a ``:`` in either input. No configured project collection or doc_id uses
+    ``:`` (collections are ``product_knowledge``/``faq``/...; doc_ids are
+    ``pr_000``/``faq_00001``/``derm_000001``/...), so this rejects no real
+    data while removing the ambiguity.
 
     Args:
         collection_name: Qdrant collection (participates in the namespace so
@@ -88,13 +96,22 @@ def document_id_to_point_id(collection_name: str, doc_id: object) -> int:
         int in ``[0, 0x7FFFFFFFFFFFFFFF]`` — a valid Qdrant uint64 point id.
 
     Raises:
-        ValueError: if either input is empty/None.
+        ValueError: if either input is empty/None, or if either input
+            contains ``:`` (ambiguous framing — see ID-7).
     """
     if not collection_name:
         raise ValueError("collection_name must be a non-empty string")
     if not doc_id:
         raise ValueError("doc_id must be a non-empty value")
-    digest = hashlib.sha256(_encode_mapping_key(collection_name, doc_id)).digest()
+    coll_s = str(collection_name)
+    doc_s = str(doc_id)
+    if _DELIMITER in coll_s or _DELIMITER in doc_s:
+        raise ValueError(
+            "collection_name and doc_id must not contain ':' — it would "
+            "make the mapping framing ambiguous (ID-7)"
+        )
+    key = f"{coll_s}{_DELIMITER}{doc_s}".encode()
+    digest = hashlib.sha256(key).digest()
     return int.from_bytes(digest[:8], "big") & POINT_ID_MASK
 
 
