@@ -43,6 +43,7 @@ from rag.embedding_status import (
     degraded_reason_for,
     validate_embedding_vector,
 )
+from rag.point_id import assert_no_point_id_collision, document_id_to_point_id
 
 logger = get_logger("rag.qdrant_knowledge_base")
 
@@ -337,13 +338,28 @@ class QdrantKnowledgeBase:
 
         vectors = self._embed_texts(documents)
 
+        # P1-03: stable, deterministic Qdrant Point IDs. The previous
+        # `hash(id_) & 0x7FFFFFFFFFFFFFFF` was randomized per Python process
+        # via PYTHONHASHSEED, so the same logical doc_id mapped to a different
+        # storage Point ID on every restart — breaking idempotent upsert
+        # (ghost duplicates) and any cross-process Point-ID reference. All
+        # Point ID generation MUST go through this single boundary; business
+        # code may not call hash() for a persistent id.
+        point_ids = [document_id_to_point_id(collection_name, id_) for id_ in ids]
+        # ID-5: refuse to silently overwrite a different document stored at
+        # the same stable Point ID (SHA-256 truncation collision / legacy
+        # contamination). Fails closed — never upsert when we cannot verify.
+        assert_no_point_id_collision(self._client, collection_name, point_ids, ids)
+
         points = [
             models.PointStruct(
-                id=hash(id_) & 0x7FFFFFFFFFFFFFFF,
+                id=pid,
                 vector=vector,
                 payload={"doc_id": id_, "content": doc, **meta},
             )
-            for id_, doc, vector, meta in zip(ids, documents, vectors, cleaned_metadatas)
+            for pid, id_, doc, vector, meta in zip(  # noqa: B905 - preserve ingestion semantics
+                point_ids, ids, documents, vectors, cleaned_metadatas
+            )
         ]
 
         self._client.upsert(collection_name=collection_name, points=points)
