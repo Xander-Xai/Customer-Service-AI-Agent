@@ -167,6 +167,91 @@ class TestRebuildCollectionPointIds:
 
 
 # ====================================================================
+# BF-P1-03-01 (migration) / BF-P1-03-02 : adversarial migration contracts
+# (reproduced by independent acceptance review; must FAIL before the fix)
+# ====================================================================
+
+
+class TestMigrationExecuteAdversarial:
+    def test_execute_aborts_when_stable_id_already_occupied_by_unmappable_point(self):
+        """BF-P1-03-01 (migration): a mappable document being rebuilt whose
+        stable ID is already occupied by an UNMAPPABLE legacy point (no
+        doc_id) must not be overwritten. Execute aborts (structured report,
+        no raise) before any upsert/delete, surfacing the blocking id for
+        manual resolution."""
+        target = document_id_to_point_id("c", "docX")
+        # unmappable legacy point sitting AT docX's stable id
+        orphan = _rec(target, None, vector=[0.9])
+        # docX itself, present as a legacy point at a different (wrong) id,
+        # being rebuilt onto its stable id == `target` (collides with orphan)
+        docx_legacy = _rec(22222, "docX", vector=[0.1])
+        client = _client_returning([orphan, docx_legacy])
+        report = rebuild_collection_point_ids(client, "c", dry_run=False)
+        assert report.aborted is True
+        assert target in report.blocking_unmappable_occupied
+        assert not client.upsert.called
+        assert not client.delete.called
+
+    def test_execute_aborts_on_duplicate_logical_ids_collapsing_to_one_stable_id(self):
+        """BF-P1-03-02: two legacy points carrying the SAME logical doc_id
+        collapse to the same stable ID. Execute must not silently last-wins
+        upsert them. It must either deterministically pick a winner and
+        verify, or fail closed. Either way: exactly one upserted point at
+        that stable id, no ambiguity, and no legacy delete before resolution."""
+        dup_a = _rec(222, "dup_doc", vector=[0.1])
+        dup_b = _rec(333, "dup_doc", vector=[0.2])
+        client = _client_returning([dup_a, dup_b])
+        report = rebuild_collection_point_ids(client, "c", dry_run=True)
+        # dry-run must SURFACE the unresolved duplicate as a blocking signal
+        assert "dup_doc" in report.blocking_duplicates
+
+    def test_execute_aborts_on_distinct_doc_ids_mapping_to_same_stable_id(self):
+        """BF-P1-03-02 (forced collision): two DISTINCT doc_ids mapping to the
+        same stable ID (astronomically rare via SHA-256; forced here) must
+        abort execute before any upsert. The collision must be surfaced, not
+        silently last-wins-clobbered. Aborts via structured report (no raise)
+        so the CLI can surface it and return non-zero."""
+        legacy_a = _rec(444, "docA", vector=[0.1])
+        legacy_b = _rec(555, "docB", vector=[0.2])
+        client = _client_returning([legacy_a, legacy_b])
+
+        import rag.point_id_migration as mig
+
+        def fake_map(coll, doc_id):
+            # force docA and docB to the same stable id
+            return 0x999 if doc_id in ("docA", "docB") else document_id_to_point_id(coll, doc_id)
+
+        with _patched(mig, "document_id_to_point_id", fake_map):
+            report = rebuild_collection_point_ids(client, "c", dry_run=False)
+        assert report.aborted is True
+        assert len(report.blocking_conflicts) == 1
+        _sid, dids = report.blocking_conflicts[0]
+        assert set(dids) == {"docA", "docB"}
+        assert not client.upsert.called
+        assert not client.delete.called
+
+
+class _MonkeyPatch:
+    """Minimal contextmanager-free monkeypatch helper (test self-contained)."""
+
+    def __init__(self, target, name, value):
+        self.target, self.name, self.value = target, name, value
+        self._orig = None
+
+    def __enter__(self):
+        self._orig = getattr(self.target, self.name)
+        setattr(self.target, self.name, self.value)
+        return self
+
+    def __exit__(self, *exc):
+        setattr(self.target, self.name, self._orig)
+
+
+def _patched(target, name, value):
+    return _MonkeyPatch(target, name, value)
+
+
+# ====================================================================
 # CLI safety contract (Step 15) — dry-run default, refuse unack'd execute
 # ====================================================================
 
@@ -207,3 +292,33 @@ class TestMigrateCliSafety:
 
         with pytest.raises(SystemExit):
             build_parser().parse_args([])
+
+    def test_per_collection_failure_returns_nonzero_exit(self, monkeypatch, capsys):
+        """BF-P1-03-03: when a selected collection raises during processing,
+        the CLI must return a NON-zero exit code (no migration false-green),
+        while still emitting the structured error report."""
+        import scripts.migrate_point_ids as m
+
+        # mock a connected client; the rebuild call raises per-collection
+        client = MagicMock()
+        client.get_collections.return_value = MagicMock(collections=[])
+        client.scroll.side_effect = RuntimeError("scroll blew up")
+        monkeypatch.setattr(m, "_connect_client", lambda: client)
+
+        rc = m.main(["--collection", "c", "--execute", "--i-understand-this-is-destructive"])
+        assert rc != 0, "per-collection failure must not return exit 0"
+        out = capsys.readouterr()
+        assert "error" in (out.out + out.err).lower()
+
+    def test_all_collections_succeed_returns_zero_exit(self, monkeypatch):
+        """BF-P1-03-03 inverse: a fully-successful run returns 0 (no
+        over-broad failure)."""
+        import scripts.migrate_point_ids as m
+
+        client = MagicMock()
+        client.get_collections.return_value = MagicMock(collections=[])
+        client.scroll.return_value = ([], None)  # empty collection -> clean
+        monkeypatch.setattr(m, "_connect_client", lambda: client)
+
+        rc = m.main(["--collection", "c", "--dry-run"])
+        assert rc == 0

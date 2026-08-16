@@ -57,6 +57,20 @@ __all__ = [
 POINT_ID_MASK = 0x7FFFFFFFFFFFFFFF
 
 
+def _encode_mapping_key(collection_name: str, doc_id: object) -> bytes:
+    """Length-prefixed encoding of (collection, doc_id) for the hash.
+
+    A naive ``f"{coll}:{doc}"`` is ambiguous: ``("a:b","c")`` and
+    ``("a","b:c")`` hash to the same byte string. Prefixing each field with
+    its length makes the encoding unambiguous without restricting the input
+    domain, so two distinct (collection, doc_id) pairs never collide via the
+    delimiter (ID-7 boundary hardening).
+    """
+    coll_b = str(collection_name).encode()
+    doc_b = str(doc_id).encode()
+    return b"%d:%s|%d:%s" % (len(coll_b), coll_b, len(doc_b), doc_b)
+
+
 def document_id_to_point_id(collection_name: str, doc_id: object) -> int:
     """Map a logical document id to a stable Qdrant Point ID.
 
@@ -80,8 +94,7 @@ def document_id_to_point_id(collection_name: str, doc_id: object) -> int:
         raise ValueError("collection_name must be a non-empty string")
     if not doc_id:
         raise ValueError("doc_id must be a non-empty value")
-    key = f"{collection_name}:{doc_id}".encode()
-    digest = hashlib.sha256(key).digest()
+    digest = hashlib.sha256(_encode_mapping_key(collection_name, doc_id)).digest()
     return int.from_bytes(digest[:8], "big") & POINT_ID_MASK
 
 
@@ -120,21 +133,32 @@ def assert_no_point_id_collision(
     """ID-5 (storage layer): refuse to silently overwrite a different document.
 
     Before upserting, retrieve any existing points at the computed stable
-    Point IDs. If an existing point's ``payload.doc_id`` differs from the
-    doc_id being written for the same Point ID, raise
-    :class:`PointIdCollisionError`. This catches the astronomically-rare
-    SHA-256 truncation collision and any legacy contamination.
+    Point IDs. Fail closed whenever a target Point ID is **occupied** but the
+    write cannot be proven safe:
 
-    Idempotent re-upsert (same Point ID, same stored doc_id) is allowed:
-    Qdrant overwrites the existing point in place. A retrieval failure
-    fails closed — the exception propagates and no upsert is performed,
-    consistent with the P0-05 fail-closed philosophy: never upsert when we
-    cannot verify there is no collision.
+    * the stored ``payload.doc_id`` differs from the doc_id being written
+      (a genuine collision / legacy contamination), OR
+    * the point exists but has no readable ``doc_id`` (owner unverifiable —
+      an orphaned legacy point from a different schema). BF-P1-03-01: this
+      is treated as occupied, NOT as "free to overwrite".
+
+    Only two states allow the upsert to proceed: the Point ID is absent
+    (truly empty), or it is present with the *same* ``doc_id`` (idempotent
+    re-upsert — Qdrant overwrites in place).
+
+    A retrieval failure fails closed — the exception propagates and no
+    upsert is performed, consistent with the P0-05 fail-closed philosophy:
+    never upsert when we cannot verify there is no collision.
+
+    Also checks the batch itself (BF-P1-03 intra-batch): two distinct
+    doc_ids in this call mapping to the same Point ID are rejected rather
+    than sent to Qdrant as a last-wins clobber.
 
     Designed to degrade cleanly under a bare ``MagicMock`` client: a mock
     ``retrieve()`` returns a ``MagicMock`` whose ``list()`` is ``[]`` (no
-    existing points), so the check is a no-op and the upsert proceeds —
-    existing unit tests that mock the Qdrant client are unaffected.
+    existing points), so the storage check is a no-op and the upsert
+    proceeds — existing unit tests that mock the Qdrant client are
+    unaffected.
 
     Args:
         client: QdrantClient (real or mock).
@@ -144,6 +168,23 @@ def assert_no_point_id_collision(
     """
     if not point_ids:
         return
+
+    # Intra-batch collision: two distinct doc_ids mapping to one Point ID.
+    # (A same-doc_id appearing twice at one Point ID is an idempotent
+    # re-upsert and is allowed.)
+    seen_pairs: dict[int, object] = {}
+    for pid, new_doc_id in zip(point_ids, doc_ids, strict=True):
+        prior = seen_pairs.get(pid)
+        if prior is None:
+            seen_pairs[pid] = new_doc_id
+        elif prior != new_doc_id:
+            raise PointIdCollisionError(
+                collection=collection_name,
+                point_id=pid,
+                existing_doc_id=prior,
+                new_doc_id=new_doc_id,
+            )
+
     # Fail closed on retrieval error: propagate rather than upsert blindly.
     existing = client.retrieve(
         collection_name=collection_name,
@@ -152,20 +193,36 @@ def assert_no_point_id_collision(
         with_vectors=False,
     )
     existing_records = list(existing) if existing else []
+    # Map each occupied Point ID to its stored doc_id, or _UNVERIFIABLE when
+    # the point exists but its owner cannot be read. Absent ids are simply
+    # not in the map — that is the only state we treat as "free to write".
     stored_doc_by_pid: dict[int, object] = {}
     for rec in existing_records:
         try:
             pid = rec.id
-            payload = getattr(rec, "payload", None) or {}
-            stored_doc_by_pid[pid] = payload.get("doc_id")
-        except Exception:  # noqa: BLE001 - skip unparseable record, do not block
+            payload = getattr(rec, "payload", None)
+            if not isinstance(payload, dict):
+                stored_doc_by_pid[pid] = _UNVERIFIABLE
+            else:
+                doc_id = payload.get("doc_id")
+                stored_doc_by_pid[pid] = _UNVERIFIABLE if doc_id is None else doc_id
+        except Exception:  # noqa: BLE001 - unreadable record -> occupied, fail closed
+            stored_doc_by_pid[pid] = _UNVERIFIABLE
             continue
     for pid, new_doc_id in zip(point_ids, doc_ids, strict=True):
         stored = stored_doc_by_pid.get(pid)
-        if stored is not None and stored != new_doc_id:
+        if stored is None:
+            continue  # absent — free to write
+        if stored is _UNVERIFIABLE or stored != new_doc_id:
             raise PointIdCollisionError(
                 collection=collection_name,
                 point_id=pid,
                 existing_doc_id=stored,
                 new_doc_id=new_doc_id,
             )
+
+
+# Sentinel marking an occupied Point ID whose owner cannot be verified
+# (missing/unreadable payload.doc_id). Distinct from None, which means the
+# Point ID was absent from the retrieve response (free to write).
+_UNVERIFIABLE = object()

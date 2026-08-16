@@ -156,6 +156,18 @@ class RebuildReport:
     deleted_legacy: int = 0
     skipped_unmappable: int = 0
     legacy_point_ids: list[int] = field(default_factory=list)
+    # BF-P1-03-02: blocking conflicts surfaced by the execute preflight.
+    # Unresolved duplicate logical doc_ids and forced stable-ID collisions
+    # must be resolved before any upsert/delete; execute aborts when these
+    # are non-empty. Populated in dry_run too, so an operator can see the
+    # blockers before committing to --execute.
+    blocking_duplicates: list[str] = field(default_factory=list)
+    blocking_conflicts: list[tuple[int, list[str]]] = field(default_factory=list)
+    # BF-P1-03-01 (migration): legacy points that occupy a stable ID but
+    # cannot be mapped (no doc_id) and therefore cannot be safely rebuilt
+    # in place. Execute aborts when these collide with a new stable id.
+    blocking_unmappable_occupied: list[int] = field(default_factory=list)
+    aborted: bool = False
 
 
 def rebuild_collection_point_ids(
@@ -170,14 +182,28 @@ def rebuild_collection_point_ids(
     — **reusing the stored vector, no re-embedding** — then deletes the
     orphaned legacy points.
 
-    * ``dry_run=True`` (default): read-only; reports what *would* happen.
-    * ``dry_run=False``: performs the rebuild.
+    * ``dry_run=True`` (default): read-only; reports what *would* happen,
+      including any blocking conflicts that would abort an execute.
+    * ``dry_run=False``: performs the rebuild, **unless** the preflight finds
+      blocking conflicts — in which case it aborts before any write and sets
+      ``report.aborted = True``.
+
+    Preflight (BF-P1-03-02): before any upsert, execute detects and refuses:
+
+    * **blocking_duplicates** — two legacy points with the SAME logical
+      doc_id (they collapse to one stable id; a naive last-wins upsert would
+      silently drop one document's vector). Must be resolved manually
+      (deterministic winner selection is a future enhancement).
+    * **blocking_conflicts** — two DISTINCT doc_ids mapping to the same
+      stable ID (a SHA-256 truncation collision). Must be resolved manually.
+    * **blocking_unmappable_occupied** (BF-P1-03-01) — a legacy point with
+      no ``doc_id`` already sitting at a stable ID we want to write. Its
+      owner cannot be verified, so overwriting it is refused.
 
     Safety: a legacy point's old id is only deleted when it is NOT also a
     stable id for some other document in the same batch — so a rare
     truncation collision (legacy id == another doc's stable id) is never
-    silently turned into data loss. Collisions are surfaced by
-    :func:`discover_legacy_points` for manual resolution.
+    silently turned into data loss.
 
     The rebuild is idempotent: re-running it after a partial failure leaves
     the collection with both stable and legacy points present (no loss);
@@ -192,11 +218,23 @@ def rebuild_collection_point_ids(
     to_upsert: list[models.PointStruct] = []
     stable_ids_set: set[int] = set()
     legacy_to_delete: list[int] = []
+    # doc_id -> list of records carrying it (detect duplicates)
+    doc_id_records: dict[Any, list[Any]] = {}
+    # stable_id -> list of distinct doc_ids mapping to it (detect conflicts)
+    stable_id_doc_ids: dict[int, list[Any]] = {}
+    # stable ids we intend to write, that are already occupied by an
+    # unmappable legacy point (no doc_id) — refused overwrite.
+    unmappable_occupied: set[int] = set()
+
     for rec in records:
         payload = getattr(rec, "payload", None) or {}
-        doc_id = payload.get("doc_id")
+        doc_id = payload.get("doc_id") if isinstance(payload, dict) else None
         if not doc_id:
             report.skipped_unmappable += 1
+            # An unmappable point may sit at a stable id we want to write
+            # for a *different* document. Record its stored id so the
+            # preflight can refuse to overwrite it.
+            unmappable_occupied.add(rec.id)
             continue
         stable_id = document_id_to_point_id(collection_name, doc_id)
         stable_ids_set.add(stable_id)
@@ -204,11 +242,36 @@ def rebuild_collection_point_ids(
         to_upsert.append(models.PointStruct(id=stable_id, vector=vector, payload=payload))
         if rec.id != stable_id:
             legacy_to_delete.append(rec.id)
+        doc_id_records.setdefault(doc_id, []).append(rec)
+        stable_id_doc_ids.setdefault(stable_id, []).append(doc_id)
+
+    # Preflight: surface blocking conflicts.
+    report.blocking_duplicates = sorted(
+        str(d) for d, recs in doc_id_records.items() if len(recs) > 1
+    )
+    report.blocking_conflicts = [
+        (sid, sorted(str(x) for x in set(dids)))
+        for sid, dids in stable_id_doc_ids.items()
+        if len(set(dids)) > 1
+    ]
+    # An unmappable point occupies a stable id we are about to (re)write.
+    report.blocking_unmappable_occupied = sorted(
+        pid for pid in unmappable_occupied if pid in stable_ids_set
+    )
 
     if dry_run:
         report.upserted = len(to_upsert)
         report.deleted_legacy = len(legacy_to_delete)
         report.legacy_point_ids = legacy_to_delete
+        return report
+
+    # Execute preflight: abort before any write if blocking conflicts exist.
+    if (
+        report.blocking_duplicates
+        or report.blocking_conflicts
+        or report.blocking_unmappable_occupied
+    ):
+        report.aborted = True
         return report
 
     if to_upsert:

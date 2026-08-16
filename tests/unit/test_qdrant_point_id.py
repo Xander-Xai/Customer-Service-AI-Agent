@@ -239,6 +239,78 @@ class TestCollisionPolicy:
 
 
 # ====================================================================
+# BF-P1-03-01 / intra-batch / delimiter : adversarial negative contracts
+# (reproduced by independent acceptance review; must FAIL before the fix)
+# ====================================================================
+
+
+class TestCollisionGuardAdversarial:
+    def test_refuses_overwrite_when_existing_point_has_no_doc_id(self, kb, mock_qdrant_client):
+        """BF-P1-03-01: an existing point at the target ID whose owner CANNOT
+        be verified (empty {} payload, or unreadable payload) must NOT be
+        treated as "unoccupied". Fail closed — refuse the upsert rather than
+        silently overwriting an owner we cannot identify."""
+        from rag.point_id import PointIdCollisionError, document_id_to_point_id
+
+        pid = document_id_to_point_id("product_knowledge", "pr_000")
+        existing = MagicMock()
+        existing.id = pid
+        existing.payload = {}  # occupied, owner unverifiable
+        mock_qdrant_client.retrieve.return_value = [existing]
+
+        kb._embed_texts = MagicMock(return_value=[[0.1] * _EMBEDDING_DIM])
+        with pytest.raises(PointIdCollisionError):
+            kb.add_documents("product_knowledge", ["doc1"], ids=["pr_000"])
+        assert not mock_qdrant_client.upsert.called
+
+    def test_refuses_overwrite_when_payload_doc_id_is_missing_key(self, kb, mock_qdrant_client):
+        """BF-P1-03-01 variant: payload present but has no `doc_id` key at all
+        (e.g. legacy point from a different schema). Must fail closed."""
+        from rag.point_id import PointIdCollisionError, document_id_to_point_id
+
+        pid = document_id_to_point_id("product_knowledge", "pr_000")
+        existing = MagicMock()
+        existing.id = pid
+        existing.payload = {"content": "orphan", "source": "legacy"}  # no doc_id key
+        mock_qdrant_client.retrieve.return_value = [existing]
+
+        kb._embed_texts = MagicMock(return_value=[[0.1] * _EMBEDDING_DIM])
+        with pytest.raises(PointIdCollisionError):
+            kb.add_documents("product_knowledge", ["doc1"], ids=["pr_000"])
+        assert not mock_qdrant_client.upsert.called
+
+    def test_refuses_intra_batch_collision_between_two_distinct_doc_ids(
+        self, kb, mock_qdrant_client
+    ):
+        """BF-P1-03 (intra-batch): two distinct doc_ids in ONE add_documents
+        call that map to the same stable Point ID must not both be sent to
+        Qdrant (last-wins silent clobber). The guard must reject the batch."""
+        from rag.point_id import PointIdCollisionError
+
+        # Force a same-stable-id collision within the batch by monkeypatching
+        # the mapping (SHA-256 makes this astronomically rare naturally).
+        kb._embed_texts = MagicMock(return_value=[[0.1] * _EMBEDDING_DIM, [0.2] * _EMBEDDING_DIM])
+
+        with (
+            patch("rag.qdrant_knowledge_base.document_id_to_point_id", return_value=777),
+            pytest.raises(PointIdCollisionError),
+        ):
+            kb.add_documents("product_knowledge", ["docA", "docB"], ids=["idA", "idB"])
+        assert not mock_qdrant_client.upsert.called
+
+    def test_mapping_does_not_alias_across_delimiter(self):
+        """ID-7 boundary hardening: ("a:b","c") and ("a","b:c") must NOT hash
+        to the same byte string. The `"{coll}:{doc}"` framing is ambiguous
+        for arbitrary colon-bearing inputs; the mapping must not let two
+        distinct (collection, doc_id) pairs collide via the delimiter."""
+        from rag.point_id import document_id_to_point_id
+
+        a = document_id_to_point_id("a:b", "c")
+        b = document_id_to_point_id("a", "b:c")
+        assert a != b, "delimiter aliasing: ('a:b','c') == ('a','b:c')"
+
+
+# ====================================================================
 # ID-3 : delete contract (regression guard — preserved behavior)
 # ====================================================================
 

@@ -153,14 +153,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     reports = []
+    failed = 0
     for name in _target_collections(args):
         try:
             if args.execute:
                 report = rebuild_collection_point_ids(client, name, dry_run=False)
+                # BF-P1-03-02: a blocking-conflict abort is a failure, not a
+                # silent skip — surface it and propagate a non-zero exit.
+                if getattr(report, "aborted", False):
+                    failed += 1
+                    reports.append(_serialize_report(report))
+                    print(
+                        f"migrate_point_ids: {name}: aborted — blocking conflicts "
+                        f"(see report). Resolve before re-running.",
+                        file=sys.stderr,
+                    )
+                    continue
             else:
                 report = discover_legacy_points(client, name)
             reports.append(_serialize_report(report))
         except Exception as e:  # noqa: BLE001 - per-collection isolation
+            failed += 1
             print(f"migrate_point_ids: {name}: {e}", file=sys.stderr)
             reports.append({"collection": name, "error": str(e)})
 
@@ -169,7 +182,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         for r in reports:
             print(json.dumps(r, indent=2, default=str, ensure_ascii=False))
-    return 0
+    # BF-P1-03-03: any per-collection failure (exception OR blocking-conflict
+    # abort) must return non-zero — no migration false-green for CI/operators.
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
