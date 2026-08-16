@@ -395,6 +395,16 @@ class QdrantKnowledgeBase:
         self, collection_name: str, query_vector: list[float], n_results: int = 3
     ) -> list[dict[str, Any]]:
         """v6.3: 使用预计算的向量查询（避免 query_multiple 中重复 embedding）"""
+        # P0-05 BF-03 (Phase 1 Gate re-review): validate the caller-supplied
+        # precomputed vector BEFORE Qdrant dispatch — never send a
+        # wrong-dimension / non-finite / non-numeric vector to Qdrant. The
+        # internal caller (query_multiple) pre-validates via _embed_texts, so
+        # this is a no-op on that path; it closes the external precomputed-vector
+        # bypass. Invalid input raises EmbeddingDimensionError (consistent with
+        # _embed_texts); the caller decides degrade/error handling.
+        validate_embedding_vector(
+            query_vector, _EMBEDDING_DIM, model=self._embedding_model_name
+        )
         if not self._ensure_collection(collection_name):
             return []
         try:

@@ -573,3 +573,34 @@ class TestRuntimeEncodeFailure:
         # Every run is degraded; no run ever produced a (fake) vector.
         assert all(m.get("retrieval_degraded") is True for m in metas)
         assert all(m.get("vector_channel_used") is False for m in metas)
+
+
+# ---------------------------------------------------------------------------
+# BF-03 (Phase 1 Gate re-review): query_with_vector must validate the
+# caller-supplied precomputed vector before Qdrant dispatch. A wrong-dimension
+# vector must be rejected (EmbeddingDimensionError), never sent to Qdrant.
+# ---------------------------------------------------------------------------
+
+
+class TestQueryWithVectorValidatesPrecomputedVector:
+    """The public ``query_with_vector`` path accepted any list and dispatched it
+    to ``self._client.search`` without calling ``validate_embedding_vector`` —
+    so a wrong-dimension vector reached Qdrant. The internal caller
+    (``query_multiple``) pre-validates via ``_embed_texts``, so this validation
+    is a no-op there and only closes the external bypass.
+    """
+
+    @pytest.mark.asyncio
+    async def test_query_with_vector_rejects_wrong_dimension(self):
+        kb, mock_client = _make_kb()
+        # Bypass the collection-existence guard so the pre-fix dispatch path is
+        # exercised (proving the bypass), not short-circuited by "no collection".
+        with (
+            patch.object(kb, "_ensure_collection", return_value=True),
+            pytest.raises(EmbeddingDimensionError),
+        ):
+            await kb.query_with_vector("c", [0.1, 0.2], n_results=1)
+        # The invalid 2-dim vector must never reach Qdrant.
+        assert mock_client.search.call_count == 0, (
+            "query_with_vector dispatched a wrong-dimension vector to Qdrant"
+        )
