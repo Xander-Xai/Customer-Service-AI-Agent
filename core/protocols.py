@@ -105,6 +105,10 @@ class ToolRegistryProtocol(Protocol):
         """执行指定工具。"""
         ...
 
+    async def execute_raw(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+        """执行工具并保留结构化结果（可选的 Context Engineering 路径）。"""
+        ...
+
 
 @runtime_checkable
 class SessionManagerProtocol(Protocol):
