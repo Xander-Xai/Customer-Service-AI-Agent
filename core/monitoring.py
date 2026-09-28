@@ -171,6 +171,10 @@ try:
         "cache_writes_total",
         "Total number of cache write operations",
     )
+    semantic_cache_embedding_failures_total = _counter(
+        "semantic_cache_embedding_failures_total",
+        "Semantic cache (L2) tiers skipped due to embedding failure",
+    )
     tool_result_raw_bytes = _histogram(
         "tool_result_raw_bytes", "Raw serialized tool result size in bytes", buckets=[100, 500, 1000, 5000, 10000, 50000]
     )
@@ -234,6 +238,7 @@ except ImportError:
     rag_search_latency_seconds = _NoopMetric()
     agent_process_time_seconds = _NoopMetric()
     cache_writes_total = _NoopMetric()
+    semantic_cache_embedding_failures_total = _NoopMetric()
     tool_result_raw_bytes = _NoopMetric()
     tool_result_optimized_bytes = _NoopMetric()
     tool_result_tokens_before = _NoopMetric()
