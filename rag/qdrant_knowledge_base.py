@@ -28,6 +28,7 @@ from core.config import (
 from core.logger import get_logger
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
+from rag.point_id import assert_no_point_id_collision, document_id_to_point_id
 
 logger = get_logger("rag.qdrant_knowledge_base")
 
@@ -218,13 +219,17 @@ class QdrantKnowledgeBase:
 
         vectors = self._embed_texts(documents)
 
+        point_ids = [document_id_to_point_id(collection_name, id_) for id_ in ids]
+        assert_no_point_id_collision(self._client, collection_name, point_ids, ids)
         points = [
             models.PointStruct(
-                id=hash(id_) & 0x7FFFFFFFFFFFFFFF,
+                id=point_id,
                 vector=vector,
                 payload={"doc_id": id_, "content": doc, **meta},
             )
-            for id_, doc, vector, meta in zip(ids, documents, vectors, cleaned_metadatas)
+            for point_id, id_, doc, vector, meta in zip(
+                point_ids, ids, documents, vectors, cleaned_metadatas
+            )
         ]
 
         self._client.upsert(collection_name=collection_name, points=points)
