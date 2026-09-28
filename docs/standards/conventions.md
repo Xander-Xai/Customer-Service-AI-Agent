@@ -47,6 +47,30 @@ customer-service-ai-agent/
 ├── tests/                # 后端自动化测试（unit/integration/e2e/stress/eval 共 5000+ 条）
 ```
 
+## 工程执行闭环
+
+复杂度超过简单文案或机械修改的任务，遵循 [事实驱动的工程执行闭环](evidence-driven-engineering-loop.md)：
+
+```text
+事实 / 现象
+→ 问题拆解
+→ 可证伪假设
+→ Baseline
+→ 最小实现 / 实验
+→ 验证证据
+→ 结果验收
+→ 复盘沉淀
+```
+
+至少保持：
+
+- 事实、未知、假设和决策分开；
+- `Code Complete != Problem Solved`；
+- Benchmark 优化前后保持可比较口径；
+- 未实测指标显式标为 `UNKNOWN / NOT_MEASURED`；
+- Bug 修复优先留下最小复现与回归测试；
+- RAG / Agent / 性能优化同时记录质量、时延、成本或失败模式中的相关权衡。
+
 ## 编码规范 (前端)
 * **单文件代码限制**：单文件代码 ≤ 400 行，超出必须拆分（特别针对 UI 模块）。
 * **单函数代码限制**：单函数代码 ≤ 50 行，超出必须重构拆分。
