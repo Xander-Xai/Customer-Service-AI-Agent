@@ -19,6 +19,7 @@ fabricating vectors.
 from __future__ import annotations
 
 from enum import Enum
+from numbers import Real
 from typing import Any
 
 
@@ -111,12 +112,11 @@ def validate_embedding_vector(
     # Non-numeric elements (string/None/...) are wrapped into the typed
     # INVALID contract rather than propagating a bare ValueError.
     for v in vector:
-        try:
-            f = float(v)
-        except (ValueError, TypeError) as e:
+        if isinstance(v, bool) or not isinstance(v, Real):
             raise EmbeddingDimensionError(
                 expected_dim, "non_numeric", model=model, reason="non_numeric"
-            ) from e
+            )
+        f = float(v)
         if f != f or f in (float("inf"), float("-inf")):  # NaN or Inf
             raise EmbeddingDimensionError(
                 expected_dim, "non_finite", model=model, reason="non_finite"

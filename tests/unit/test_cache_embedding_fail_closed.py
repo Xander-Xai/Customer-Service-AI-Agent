@@ -43,7 +43,10 @@ def test_provider_exception_is_unavailable():
         assert after == before + 1
 
 
-@pytest.mark.parametrize("vector", [[], [float("nan")] * 1024, [float("inf")] * 1024, [None] * 1024])
+@pytest.mark.parametrize(
+    "vector",
+    [[], [float("nan")] * 1024, [float("inf")] * 1024, [None] * 1024, ["0.1"] * 1024],
+)
 def test_invalid_embedding_is_rejected(vector):
     model = MagicMock()
     model.encode.return_value = vector
