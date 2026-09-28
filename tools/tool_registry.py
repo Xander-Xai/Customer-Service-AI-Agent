@@ -63,6 +63,13 @@ class ToolRegistry:
         stream_callback: Callable | None = None,  # v6.0: 转发给工具 handler
     ) -> str:
         """执行指定工具，返回字符串结果"""
+        result = await self.execute_raw(name, arguments, stream_callback=stream_callback)
+        return str(result) if result is not None else "查询完成，无结果"
+
+    async def execute_raw(
+        self, name: str, arguments: dict[str, Any], stream_callback: Callable | None = None
+    ) -> Any:
+        """执行工具并保留结构化返回值，供 Context Engineering 使用。"""
         tool = self._tools.get(name)
         if not tool:
             return f"错误：工具 '{name}' 不存在"
@@ -76,7 +83,7 @@ class ToolRegistry:
                     result = await tool.handler(arguments)
             else:
                 result = await tool.handler(arguments)
-            return str(result) if result is not None else "查询完成，无结果"
+            return result if result is not None else "查询完成，无结果"
         except Exception as e:
             logger.error(f"工具执行失败 [{name}]: {e}", exc_info=True)
             return f"工具 '{name}' 执行失败，请稍后重试"

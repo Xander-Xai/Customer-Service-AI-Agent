@@ -20,18 +20,12 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     registry = ToolRegistry()
 
     # ---- query_product ----
-    async def _query_product(args: dict[str, Any]) -> str:
+    async def _query_product(args: dict[str, Any]) -> Any:
         keyword = args.get("keyword", "")
         results = await erp_adapter.query_product(keyword)
         if not results:
             return f"未找到与 '{keyword}' 相关的产品"
-        lines = []
-        for p in results:
-            lines.append(
-                f"产品: {p['name']} | 类别: {p['category']} | 价格: {p['price']}元 "
-                f"| 规格: {p['specs']} | 成分: {p['ingredients']} | 适用: {p['suitable']}"
-            )
-        return "\n".join(lines)
+        return results
 
     registry.register(
         name="query_product",
@@ -50,19 +44,13 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_inventory ----
-    async def _query_inventory(args: dict[str, Any]) -> str:
+    async def _query_inventory(args: dict[str, Any]) -> Any:
         product_id = args.get("product_id", "")
         keyword = args.get("keyword", "")
         results = await erp_adapter.query_inventory(product_id=product_id, keyword=keyword)
         if not results:
             return "未找到库存信息"
-        lines = []
-        for inv in results:
-            lines.append(
-                f"产品: {inv['product_name']} | 余量: {inv['stock']}件 "
-                f"| 仓库: {inv['warehouse']} | 更新: {inv.get('updated', 'N/A')}"
-            )
-        return "\n".join(lines)
+        return results
 
     registry.register(
         name="query_inventory",
@@ -84,20 +72,13 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_order ----
-    async def _query_order(args: dict[str, Any]) -> str:
+    async def _query_order(args: dict[str, Any]) -> Any:
         order_id = args.get("order_id", "")
         customer_id = args.get("customer_id", "")
         results = await erp_adapter.query_order(order_id=order_id, customer_id=customer_id)
         if not results:
             return "未找到订单信息"
-        lines = []
-        for o in results[:5]:
-            lines.append(
-                f"订单: {o.get('order_id', '')} | 客户: {o.get('customer_name', '')} "
-                f"| 状态: {o['status']} | 金额: {o['total']}元 "
-                f"| 物流: {o.get('tracking', '无')} | 日期: {o.get('created', '')}"
-            )
-        return "\n".join(lines)
+        return results[:5]
 
     registry.register(
         name="query_order",
@@ -119,16 +100,12 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
     )
 
     # ---- query_customer ----
-    async def _query_customer(args: dict[str, Any]) -> str:
+    async def _query_customer(args: dict[str, Any]) -> Any:
         customer_id = args.get("customer_id", "")
         result = await erp_adapter.query_customer(customer_id)
         if not result:
             return f"未找到客户 '{customer_id}' 的信息"
-        return (
-            f"客户: {result.get('name', '')} | 电话: {result.get('phone', '')} "
-            f"| 等级: {result.get('level', '')} | 累计消费: {result.get('total_spent', 0)}元 "
-            f"| 订单数: {result.get('total_orders', 0)} | 地址: {result.get('address', '')}"
-        )
+        return {"customer_id": customer_id, **result}
 
     registry.register(
         name="query_customer",
