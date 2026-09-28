@@ -46,6 +46,7 @@ from core.shared_blackboard import SharedBlackboard
 from core.tool_result_cache import cacheable_result
 from core.tool_result_optimizer import ToolResultOptimizer, compact_old_tool_messages
 from llm.client import LLMServiceError
+from rag.retrieval_contract import RetrievalRequest
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3  # 最大重试次数
@@ -403,79 +404,88 @@ class BaseAgent(ABC):
         state: dict | None = None,
         scene: str = None,
     ) -> str:
-        """v3.5: RAG 知识检索。从向量知识库中检索相关文档。
-        v5.1: 支持多模态检索（当 image_uri 非空时走 CLIP 融合检索）。
-        v5.2: 支持 Query Rewriting（LLM 改写查询）和 Reranker（重排序）。
-        v5.4: 支持 RAG 预取（state["_rag_prefetch"]），命中时跳过知识库查询。
-        v6.1: 支持 scene 场景过滤（售前咨询/售后支持/技术答疑/投诉处理）。
-        返回格式化字符串，可直接拼入 extra_context。
-        知识库不可用时静默返回空字符串。
+        """P1-01: RAG retrieval via the unified KnowledgeBase.retrieve() contract.
+
+        The pipeline (``retrieve``) owns query rewrite, scene/metadata filter,
+        dense + BM25, RRF, and a single canonical rerank. The agent supplies
+        only its scene/collections and (optionally) its LLM for the canonical
+        rewrite. Prefetch is consumed as **reusable computation** (rewritten
+        query / embedding) — never as final evidence — so scene/filter are
+        never bypassed (spec step 18). Knowledge base unavailable → empty
+        string (unchanged).
         """
-        # v5.4: RAG 预取捷径 — 路由阶段已并行检索，直接使用
-        if state and state.get("_rag_prefetch"):
-            self.logger.debug("RAG 预取命中，跳过知识库查询")
-            return state["_rag_prefetch"]
+        # Prefetch = reusable computation, NOT final evidence (spec step 18).
+        # retrieve() reuses the rewritten query / embedding to avoid duplicate
+        # work, but STILL applies this request's scene/collections/filter and
+        # runs the full pipeline.
+        prefetched = state.get("_rag_prefetch") if state else None
+        prefetched_rewritten: str | None = None
+        prefetched_embedding: list[float] | None = None
+        prefetched_embedding_status = None
+        if isinstance(prefetched, dict):
+            prefetched_rewritten = prefetched.get("rewritten_query")
+            prefetched_embedding = prefetched.get("embedding")
+            prefetched_embedding_status = prefetched.get("embedding_status")
 
         if not self.knowledge_base or not self.knowledge_base.available:
             return ""
-        try:
-            # v5.2: Query Rewriting — 用 LLM 改写口语化查询
-            from core.config import RAG_QUERY_REWRITING
 
-            effective_query = query
-            if RAG_QUERY_REWRITING and self.llm:
-                effective_query = await self.knowledge_base.rewrite_query(query, self.llm)
-
-            # v5.1: 多模态融合检索
-            if image_uri and hasattr(self.knowledge_base, "query_multimodal"):
+        # Multimodal (CLIP) hook — out of P1-01 text-unification scope; kept
+        # for an optional query_multimodal implementation. Not the text path.
+        if image_uri and hasattr(self.knowledge_base, "query_multimodal"):
+            try:
                 results = await self.knowledge_base.query_multimodal(
-                    effective_query,
+                    query,
                     image_uri=image_uri,
                     collections=collections,
                     n_results=n_results,
                 )
-            elif scene and hasattr(self.knowledge_base, "search"):
-                # v6.1: 场景过滤检索 — 使用 search(scene=...) 按 scene 过滤
-                fetch_n = (
-                    n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
-                )
-                results = await self.knowledge_base.search(
-                    effective_query,
-                    top_k=fetch_n,
-                    scene=scene,
-                    collection_name=collections[0] if collections else "product_knowledge",
-                )
-                if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
-                    results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
-            elif collections:
-                # v5.2: 多检索一些结果用于重排序
-                fetch_n = (
-                    n_results * 3 if hasattr(self.knowledge_base, "simple_rerank") else n_results
-                )
-                results = await self.knowledge_base.query_multiple(
-                    collections, effective_query, fetch_n
-                )
-                # v5.2: Reranker — 基于关键词匹配度重排序
-                if hasattr(self.knowledge_base, "simple_rerank") and len(results) > n_results:
-                    results = self.knowledge_base.simple_rerank(effective_query, results, n_results)
-            else:
-                results = await self.knowledge_base.query(
-                    "product_knowledge", effective_query, n_results
-                )
-            if not results:
+                retrieval_meta = getattr(results, "meta", {})
+                if state is not None and retrieval_meta.get("retrieval_degraded"):
+                    state["retrieval_degraded"] = True
+                    state["degraded_reason"] = retrieval_meta.get(
+                        "degraded_reason", "embedding_unavailable"
+                    )
+                return self._format_evidence(results)
+            except Exception as e:
+                self.logger.warning(f"RAG 多模态检索失败: {e}")
                 return ""
-            parts = []
-            for r in results:
-                content = r.get("content", "")
-                if content:
-                    # 截断过长的文档（保留足够信息供 LLM 生成完整回复）
-                    if len(content) > KNOWLEDGE_CONTENT_TRUNCATE:
-                        content = content[:KNOWLEDGE_CONTENT_TRUNCATE] + "..."
-                    parts.append(f"[知识库] {content}")
-            return "\n".join(parts)
+
+        target_collections = list(collections) if collections else ["product_knowledge"]
+        request = RetrievalRequest(
+            query=query,
+            collections=target_collections,
+            scene=scene,
+            top_k=n_results,
+            rewrite=True,  # pipeline owns the canonical rewrite (spec step 10)
+            rerank=True,  # pipeline owns the single canonical rerank (spec step 15)
+            llm=self.llm,
+            state=state,
+            prefetched_rewritten_query=prefetched_rewritten,
+            prefetched_embedding=prefetched_embedding,
+            prefetched_embedding_status=prefetched_embedding_status,
+        )
+        try:
+            result = await self.knowledge_base.retrieve(request)
         except Exception as e:
             self.logger.warning(f"RAG 检索失败: {e}")
             return ""
+        # P0-05: retrieve() surfaces retrieval_degraded into request.state.
+        return self._format_evidence(result)
+
+    def _format_evidence(self, results) -> str:
+        """Format retrieval results into the ``[知识库]`` context string."""
+        if not results:
+            return ""
+        parts = []
+        for r in results:
+            content = r.get("content", "") if isinstance(r, dict) else ""
+            if content:
+                # 截断过长的文档（保留足够信息供 LLM 生成完整回复）
+                if len(content) > KNOWLEDGE_CONTENT_TRUNCATE:
+                    content = content[:KNOWLEDGE_CONTENT_TRUNCATE] + "..."
+                parts.append(f"[知识库] {content}")
+        return "\n".join(parts)
 
     async def _prepare_llm_messages(
         self, state: dict[str, Any], system_prompt: str, extra_context: str = "", mode: str = "llm"

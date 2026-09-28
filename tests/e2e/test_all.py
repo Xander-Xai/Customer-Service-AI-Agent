@@ -1433,9 +1433,9 @@ class TestKnowledgeBase:
         mock_client = MagicMock()
         mock_client.get_collections.return_value = MagicMock(collections=[])
         mock_client.count.return_value = MagicMock(count=2)
-        mock_client.search.return_value = [
+        mock_client.query_points.return_value = MagicMock(points=[
             MagicMock(id=1, score=0.95, payload={"content": "保湿产品推荐"})
-        ]
+        ])
 
         # v6.3: Mock embedding 避免调用真实 API
         mock_embedding = MagicMock()

@@ -177,7 +177,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         return state
 
-    async def _rag_prefetch(query: str) -> str | None:
+    async def _rag_prefetch(query: str) -> dict | None:
         """RAG 预取：用原始查询提前检索知识库，与路由并行执行
 
         返回检索到的上下文文本，供 Agent 直接使用（跳过 Agent 内部的 RAG 检索）。
@@ -186,17 +186,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         if not c.knowledge_base:
             return None
         try:
-            results = await asyncio.wait_for(
-                c.knowledge_base.query("product_knowledge", query, n_results=3),
+            return await asyncio.wait_for(
+                c.knowledge_base.prefetch_reusable(query, c.llm),
                 timeout=2.0,
             )
-            if results:
-                context_parts = []
-                for doc in results:
-                    content = doc.get("content", doc.get("text", ""))
-                    if content:
-                        context_parts.append(f"[知识库] {content}")
-                return "\n".join(context_parts) if context_parts else None
         except Exception as e:
             logger.debug(f"[RAG预取] 失败（Agent 将自行检索）: {e}")
         return None

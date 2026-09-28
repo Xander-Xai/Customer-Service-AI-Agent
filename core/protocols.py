@@ -72,6 +72,14 @@ class ERPProtocol(Protocol):
 class KnowledgeBaseProtocol(Protocol):
     """RAG 知识库协议：所有知识库实现必须满足此接口。"""
 
+    async def retrieve(self, request: Any) -> Any:
+        """Unified retrieval contract; concrete types live in rag."""
+        ...
+
+    async def prefetch_reusable(self, query: str, llm: Any = None) -> dict:
+        """Compute reusable query/embedding inputs, never final evidence."""
+        ...
+
     async def query(
         self, text: str, collection: str = "", n_results: int = 3
     ) -> list[dict[str, Any]]:
