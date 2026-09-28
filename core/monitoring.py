@@ -189,6 +189,14 @@ try:
     tool_result_truncated_total = _counter(
         "tool_result_truncated_total", "Tool results truncated by the context optimizer", ["tool_name"]
     )
+    tool_result_offloaded_total = _counter("tool_result_offloaded_total", "Tool results offloaded to external storage")
+    tool_result_recovered_total = _counter("tool_result_recovered_total", "Tool results recovered from external storage")
+    tool_result_recovery_failed_total = _counter("tool_result_recovery_failed_total", "Tool result recovery failures")
+    tool_result_store_latency_seconds = _histogram("tool_result_store_latency_seconds", "Tool result store latency")
+    tool_result_store_errors_total = _counter("tool_result_store_errors_total", "Tool result store errors")
+    tool_result_summary_total = _counter("tool_result_summary_total", "Tool result summaries attempted")
+    tool_result_summary_failed_total = _counter("tool_result_summary_failed_total", "Tool result summary failures")
+    tool_result_compressor_total = _counter("tool_result_compressor_total", "Tool result compressor strategies", ["strategy"])
 
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
@@ -225,6 +233,14 @@ except ImportError:
     tool_result_tokens_after = _NoopMetric()
     tool_result_optimized_total = _NoopMetric()
     tool_result_truncated_total = _NoopMetric()
+    tool_result_offloaded_total = _NoopMetric()
+    tool_result_recovered_total = _NoopMetric()
+    tool_result_recovery_failed_total = _NoopMetric()
+    tool_result_store_latency_seconds = _NoopMetric()
+    tool_result_store_errors_total = _NoopMetric()
+    tool_result_summary_total = _NoopMetric()
+    tool_result_summary_failed_total = _NoopMetric()
+    tool_result_compressor_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 
@@ -239,6 +255,27 @@ def record_tool_result_optimization(
     tool_result_optimized_total.labels(tool_name=tool_name).inc()
     if truncated:
         tool_result_truncated_total.labels(tool_name=tool_name).inc()
+
+
+def record_tool_result_event(event: str, *, latency_seconds: float | None = None, strategy: str | None = None) -> None:
+    """Record content-free V2 events; failures in metrics never escape."""
+    try:
+        metric = {
+            "offloaded": tool_result_offloaded_total,
+            "recovered": tool_result_recovered_total,
+            "recovery_failed": tool_result_recovery_failed_total,
+            "store_error": tool_result_store_errors_total,
+            "summary": tool_result_summary_total,
+            "summary_failed": tool_result_summary_failed_total,
+        }.get(event)
+        if metric:
+            metric.inc()
+        if latency_seconds is not None:
+            tool_result_store_latency_seconds.observe(latency_seconds)
+        if strategy:
+            tool_result_compressor_total.labels(strategy=strategy).inc()
+    except Exception:
+        return
 
 # ===== 性能指标常量 =====
 RESPONSE_TIMES_MAXLEN = 200  # 响应时间 deque 最大长度

@@ -22,8 +22,12 @@ from core.config import (
     TOOL_MAX_ROUNDS,
     TOOL_RESULT_MAX_ITEMS,
     TOOL_RESULT_MAX_TOKENS,
+    TOOL_RESULT_OFFLOAD_ENABLED,
+    TOOL_RESULT_OFFLOAD_MIN_TOKENS,
     TOOL_RESULT_OPTIMIZATION_ENABLED,
     TOOL_RESULT_PRESERVE_RECENT,
+    TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
+    TOOL_RESULT_STORE_TTL_SECONDS,
 )
 from core.logger import get_logger, get_trace_id
 from core.message_bus import Message, MessageBus, MessageType
@@ -98,7 +102,13 @@ class BaseAgent(ABC):
         self.prompt_variants: dict[str, str] = {}
         # v5.1: Prompt 版本管理器（可选，从 DB 加载 Prompt）
         self.prompt_manager = None
-        self.tool_result_optimizer = ToolResultOptimizer(enabled=TOOL_RESULT_OPTIMIZATION_ENABLED)
+        self.tool_result_optimizer = ToolResultOptimizer(
+            enabled=TOOL_RESULT_OPTIMIZATION_ENABLED,
+            offload_enabled=TOOL_RESULT_OFFLOAD_ENABLED,
+            offload_min_tokens=TOOL_RESULT_OFFLOAD_MIN_TOKENS,
+            store_ttl_seconds=TOOL_RESULT_STORE_TTL_SECONDS,
+            semantic_summary_enabled=TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
+        )
 
     def set_llm(self, llm: LLMProtocol):
         self.llm = llm
@@ -136,6 +146,18 @@ class BaseAgent(ABC):
     def set_tool_result_optimizer(self, optimizer: ToolResultOptimizer):
         """Inject a context optimizer, primarily for tests and controlled rollouts."""
         self.tool_result_optimizer = optimizer
+
+    def set_tool_result_store(self, store) -> None:
+        """Inject the shared store without coupling the optimizer to Redis."""
+        self.tool_result_optimizer.store = store
+
+    @staticmethod
+    def _tool_result_scope(state: dict[str, Any]) -> dict[str, str]:
+        return {key: str(state[key]) for key in ("user_id", "session_id") if state.get(key) not in (None, "")}
+
+    async def recover_tool_result(self, reference_id: str, state: dict[str, Any]) -> Any | None:
+        """Controlled application-layer recovery; models never access the store."""
+        return await self.tool_result_optimizer.recover(reference_id, scope=self._tool_result_scope(state))
 
     def set_ab_test_manager(self, ab_manager):
         """v4.1: 注入 A/B 测试管理器"""
@@ -670,7 +692,7 @@ class BaseAgent(ABC):
                         if tool_policy.max_items is not None
                         else TOOL_RESULT_MAX_ITEMS
                     )
-                    optimized = self.tool_result_optimizer.optimize(
+                    optimized = await self.tool_result_optimizer.optimize_async(
                         p["name"],
                         result,
                         replace(
@@ -679,6 +701,7 @@ class BaseAgent(ABC):
                             max_items=configured_max_items,
                             preserve_recent=TOOL_RESULT_PRESERVE_RECENT,
                         ),
+                        scope=self._tool_result_scope(state),
                     )
                     result_content = optimized.content
 

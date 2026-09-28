@@ -107,9 +107,11 @@
 
 ReAct/Function Calling 的 Tool Result Context Budget 管理已提供可关闭的
 结构化字段裁剪、Top-K、token estimate、历史 Observation compaction 和
-Prometheus 指标。设计说明见
+Prometheus 指标。V2 另外提供可选的 TTL Store offload/recovery、search/HTML
+专用 compressor 与默认关闭的 semantic summary。设计说明见
 [docs/design/context-engineering.md](docs/design/context-engineering.md)，本地
-benchmark 使用：`python scripts/benchmark_tool_result_context.py`。
+benchmark 使用：`python3 scripts/benchmark_tool_result_context.py`。外部 API
+latency 没有测量时统一标记为 `NOT_MEASURED`。
 
 > 建议先按当前 HEAD 的可复现实测来验证，而不是直接相信历史里程碑分数。
 
@@ -956,6 +958,12 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `RAG_N_RESULTS` | 3 | RAG 检索返回文档数 |
 | `RAG_QUERY_REWRITING` | false | 查询改写开关（同义词扩展 + 多问题拆分） |
 | `REACT_SELF_REFLECTION` | false | ReAct 自反思开关（工具调用后 LLM 质量自检） |
+| **Tool Result Context V2** | | |
+| `TOOL_RESULT_OPTIMIZATION_ENABLED` | false | V1/V2 确定性 Tool Result 压缩开关 |
+| `TOOL_RESULT_OFFLOAD_ENABLED` | false | 大结果 TTL Store offload 开关 |
+| `TOOL_RESULT_OFFLOAD_MIN_TOKENS` | 1200 | 触发 offload 的本地估算 token 阈值 |
+| `TOOL_RESULT_STORE_TTL_SECONDS` | 900 | 外部 Tool Result 最大存活时间 |
+| `TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED` | false | 可选 semantic summary fallback，默认关闭 |
 | **Redis 键前缀** | | |
 | `REDIS_JWT_PREFIX` | csai:jwt:blacklist: | JWT 黑名单键前缀 |
 | `REDIS_RATE_PREFIX` | csai:rate: | 限流键前缀 |

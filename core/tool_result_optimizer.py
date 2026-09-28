@@ -8,7 +8,10 @@ made here, so optimization is deterministic and rollback-safe.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -39,6 +42,7 @@ class OptimizedToolResult:
     item_count_before: int | None = None
     item_count_after: int | None = None
     reference_id: str | None = None
+    strategy: str = "json"
 
 
 DEFAULT_TOOL_POLICIES: dict[str, ToolResultPolicy] = {
@@ -164,9 +168,18 @@ def _fit_structured(value: Any, policy: ToolResultPolicy) -> tuple[Any, bool]:
 class ToolResultOptimizer:
     """Apply a per-tool or caller-supplied deterministic result policy."""
 
-    def __init__(self, enabled: bool = True, policies: dict[str, ToolResultPolicy] | None = None):
+    def __init__(self, enabled: bool = True, policies: dict[str, ToolResultPolicy] | None = None,
+                 store=None, offload_enabled: bool = False, offload_min_tokens: int = 1200,
+                 store_ttl_seconds: int = 900, semantic_summary_enabled: bool = False,
+                 summarizer=None):
         self.enabled = enabled
         self.policies = policies or DEFAULT_TOOL_POLICIES
+        self.store = store
+        self.offload_enabled = offload_enabled
+        self.offload_min_tokens = offload_min_tokens
+        self.store_ttl_seconds = store_ttl_seconds
+        self.semantic_summary_enabled = semantic_summary_enabled
+        self.summarizer = summarizer
 
     def policy_for(self, tool_name: str, default: ToolResultPolicy | None = None) -> ToolResultPolicy:
         return self.policies.get(tool_name, default or ToolResultPolicy(strategy="conservative"))
@@ -178,6 +191,8 @@ class ToolResultOptimizer:
         policy: ToolResultPolicy | None = None,
     ) -> OptimizedToolResult:
         policy = policy or self.policy_for(tool_name)
+        from core.tool_result_compressors import compressor_for
+
         raw_content = _json_content(result)
         structured_result = result
         if isinstance(result, str) and result.strip()[:1] in {"{", "["}:
@@ -192,13 +207,15 @@ class ToolResultOptimizer:
             truncated = False
         else:
             structured = structured_result
-            filtered = _filter_value(structured, policy) if isinstance(structured, (dict, list)) else structured
+            compressor = compressor_for(tool_name, structured)
+            compressed = compressor.compress(structured, max_tokens=policy.max_tokens, max_items=policy.max_items)
+            filtered = _filter_value(compressed.value, policy) if isinstance(compressed.value, (dict, list)) else compressed.value
             filtered_items = len(filtered) if isinstance(filtered, list) else (1 if isinstance(filtered, dict) else None)
             if isinstance(filtered, list) and policy.max_items is not None:
                 filtered = filtered[: max(0, policy.max_items)]
             fitted, budget_truncated = _fit_structured(filtered, policy) if isinstance(filtered, (dict, list)) else (filtered, False)
             content = _json_content(fitted)
-            truncated = (
+            truncated = compressed.truncated or (
                 content != raw_content
                 or budget_truncated
                 or (policy.max_items is not None and isinstance(filtered, list) and len(filtered) > policy.max_items)
@@ -211,6 +228,10 @@ class ToolResultOptimizer:
         raw_tokens = _count_tokens(raw_content)
         optimized_tokens = _count_tokens(content)
         _record_metrics(tool_name, len(raw_content), len(content), raw_tokens, optimized_tokens, truncated)
+        strategy_name = getattr(compressor_for(tool_name, structured_result), "__class__", type(None)).__name__.replace("ResultCompressor", "").lower() or "json"
+        with suppress(Exception):
+            from core.monitoring import record_tool_result_event
+            record_tool_result_event("compressor", strategy=strategy_name)
         return OptimizedToolResult(
             content=content,
             raw_size=len(raw_content),
@@ -221,7 +242,64 @@ class ToolResultOptimizer:
             truncated=truncated,
             item_count_before=raw_items,
             item_count_after=optimized_items,
+            strategy=strategy_name,
         )
+
+    async def optimize_async(self, tool_name: str, result: Any, policy: ToolResultPolicy | None = None,
+                             *, scope: dict[str, str] | None = None) -> OptimizedToolResult:
+        optimized = self.optimize(tool_name, result, policy)
+        if not (self.enabled and self.offload_enabled and self.store and scope and optimized.raw_token_estimate >= self.offload_min_tokens):
+            return optimized
+        started = time.perf_counter()
+        try:
+            reference_id = await self.store.put(tool_name, result, scope=scope, ttl_seconds=self.store_ttl_seconds,
+                                                metadata={"content_type": "tool_result", "schema": "v1"})
+            summary = optimized.content
+            if self.semantic_summary_enabled and self.summarizer:
+                try:
+                    from core.monitoring import record_tool_result_event
+                    record_tool_result_event("summary")
+                    summary = await asyncio.wait_for(self.summarizer.summarize(optimized.content), timeout=2.0)
+                except Exception:
+                    from core.monitoring import record_tool_result_event
+                    record_tool_result_event("summary_failed")
+                    summary = optimized.content
+            available_fields: list[str] = []
+            source = result if isinstance(result, list) else [result]
+            if source and all(isinstance(item, dict) for item in source):
+                available_fields = sorted({key for item in source for key in item})[:32]
+            preview = {"status": "result_offloaded", "reference_id": reference_id,
+                       "summary": str(summary)[:600], "item_count": optimized.item_count_before,
+                       "available_fields": available_fields, "recoverable": True}
+            optimized.content = _json_content(preview)
+            optimized.optimized_size = len(optimized.content)
+            optimized.optimized_token_estimate = _count_tokens(optimized.content)
+            optimized.compression_ratio = optimized.optimized_token_estimate / optimized.raw_token_estimate if optimized.raw_token_estimate else 1.0
+            optimized.reference_id = reference_id
+            from core.monitoring import record_tool_result_event
+            record_tool_result_event("offloaded", latency_seconds=time.perf_counter() - started)
+        except Exception:
+            from core.monitoring import record_tool_result_event
+            record_tool_result_event("store_error", latency_seconds=time.perf_counter() - started)
+        return optimized
+
+    async def recover(self, reference_id: str, *, scope: dict[str, str]) -> Any | None:
+        if not self.store:
+            return None
+        started = time.perf_counter()
+        try:
+            record = await self.store.get(reference_id, scope=scope)
+            if record is None:
+                from core.monitoring import record_tool_result_event
+                record_tool_result_event("recovery_failed", latency_seconds=time.perf_counter() - started)
+                return None
+            from core.monitoring import record_tool_result_event
+            record_tool_result_event("recovered", latency_seconds=time.perf_counter() - started)
+            return record.payload
+        except Exception:
+            from core.monitoring import record_tool_result_event
+            record_tool_result_event("recovery_failed", latency_seconds=time.perf_counter() - started)
+            return None
 
 
 def compact_old_tool_messages(messages: list[Any], preserve_recent: int) -> list[Any]:
