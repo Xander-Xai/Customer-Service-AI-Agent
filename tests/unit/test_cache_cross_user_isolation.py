@@ -24,6 +24,7 @@ from cache.cache_policy import (
     resolve_cache_policy,
 )
 from cache.response_cache import ResponseCache
+from rag.embedding_status import EmbeddingUnavailableError
 
 # ============================================================================
 # 内存 FakeRedis / FakeQdrant
@@ -261,7 +262,15 @@ class TestCrossUserCacheIsolation:
 
     def test_l2_qdrant_user_isolation(self, qdrant):
         """L2 Qdrant: User A 的订单 payload 不得被 User B 命中。"""
-        cache = _cache(redis=None, qdrant=qdrant, fallback_enabled=False)
+        # L2 semantic cache requires an explicit valid embedding provider.
+        # This test verifies scope isolation with the semantic tier enabled;
+        # provider-unavailable behavior is covered separately.
+        cache = ResponseCache(
+            redis_client=None,
+            qdrant_client=qdrant,
+            embedding_model=_SemanticEmbedding(),
+            fallback_enabled=False,
+        )
         cache.put(
             ORDER_QUERY,
             "User A 的私有订单物流：已发货",
@@ -898,12 +907,12 @@ class _VectorWithToList:
 
 class _ToListEmbedding:
     def encode(self, query):  # noqa: ARG002
-        return _VectorWithToList([0.1, 0.2])
+        return _VectorWithToList([0.1] * 1024)
 
 
 class _ListEmbedding:
     def encode(self, query):  # noqa: ARG002
-        return [0.3, 0.4]
+        return [0.3] * 1024
 
 
 class _FailingEmbedding:
@@ -982,11 +991,15 @@ class TestResponseCacheOperationalBranches:
 
         no_qdrant = ResponseCache(fallback_enabled=False)
         assert no_qdrant._ensure_l2_collection() is False
-        assert no_qdrant._embed_query("fallback")
+        with pytest.raises(EmbeddingUnavailableError) as exc_info:
+            no_qdrant._embed_query("fallback")
+        assert exc_info.value.reason == "provider_unavailable"
 
-        assert ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1, 0.2]
-        assert ResponseCache(embedding_model=_ListEmbedding())._embed_query("list") == [0.3, 0.4]
-        assert len(ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")) == 1024
+        assert ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1] * 1024
+        assert ResponseCache(embedding_model=_ListEmbedding())._embed_query("list") == [0.3] * 1024
+        with pytest.raises(EmbeddingUnavailableError) as exc_info:
+            ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")
+        assert exc_info.value.reason == "encode_failed"
 
         cache = _cache(redis=None, qdrant=None)
         cache._l1 = {"ignored": "value"}
