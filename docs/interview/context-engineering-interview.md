@@ -1,84 +1,47 @@
-# Context Engineering Interview Notes
+# Tool Result Context Engineering V2 面试材料
 
-## Why optimize Tool Result tokens?
+## 30 秒版
 
-Every ReAct observation can be sent again in later rounds. The cost is not only
-the result itself: it increases every subsequent input, context noise, and
-latency. This repository now applies a deterministic budget before appending a
-ToolMessage.
+这个项目的 ReAct 工具结果会进入 ToolMessage，并在后续轮次重复携带。我
+在工具边界做了可回滚的确定性压缩：结构化字段裁剪、去重、Top-K、预算和
+历史 compaction；结果太大时可选地放进带 TTL、作用域隔离的 Store，只把
+opaque reference 和 bounded preview 给模型。恢复由应用层完成，Redis 故障
+回退到本地压缩。所有 benchmark 都是本地估算，不冒充生产 token 或 API
+latency 数据。
 
-## Why not `result[:2000]`?
+## 60–90 秒版
 
-Character slicing ignores structure, can cut an ID or JSON syntax in half, and
-does not distinguish a continuation field from debug payload. The optimizer
-filters structured records, deduplicates, applies top-k, preserves semantic
-fields, then enforces a token estimate.
+我先审计了真实链路：`execute_raw → ToolResultOptimizer → ToolMessage →
+old-result compaction → next LLM call`。V1 保留 function-calling 配对关系，
+不删除 ToolMessage，只替换旧内容；V2 增加了 Store protocol、内存实现和
+复用现有 Redis URL 的实现。大结果超过阈值后保存原始 payload，ToolMessage
+只保留状态、opaque reference、摘要、条数和可恢复标记。恢复接口在 agent
+运行时执行，严格比较 user/session scope，过期、未知、损坏或 Redis 不可用
+都安全降级。JSON、search、HTML 使用不同 compressor；semantic summary 是
+带 timeout 的可选 fallback，默认关闭。ERP pagination 与 Agent Top-K 是
+数据源层和上下文层两个不同问题。测试和 benchmark 只报告 estimated tokens
+与 local latency，外部 API latency 是 `NOT_MEASURED`。
 
-## Field filtering, Top-K, and truncation
+## 3 分钟深挖：15 个问题
 
-Field filtering decides *which attributes* survive. Top-K/max-items decides
-*how many records* survive. Truncation is the final size guard. They solve
-different failure modes and are deliberately composed.
+1. **为什么膨胀？** 每轮 observation 进入历史，后续输入重复携带，增长是多轮累积而不是单条结果大小。
+2. **为什么不是 `result[:2000]`？** 字符切片会破坏 JSON、截断 ID，也无法区分 continuation field 与 debug payload。
+3. **Top-K 和 pagination？** Pagination 在数据源减少一次返回；Top-K 在 context 边界减少进入模型的记录。
+4. **为什么不删除旧 ToolMessage？** 删除会破坏消息历史语义和 tool-call 配对；这里替换 content，保留位置。
+5. **为什么保留 tool_call_id？** Function Calling 协议需要 AI tool call 与 ToolMessage 一一对应。
+6. **Reference-based context 是什么？** 模型看到 bounded preview 和 opaque reference，应用层按受控接口恢复原始结果。
+7. **为什么 Redis offload？** 让大 payload 离开 active context，并支持多实例共享；它是可选依赖且有 TTL。
+8. **Redis 挂了？** 当前结果不伪造 reference，回退到 deterministic compact result；恢复失败返回 unavailable。
+9. **如何防跨用户？** record 保存 scope，恢复必须 exact match；reference 本身不是授权凭证。
+10. **为何 summary 默认关闭？** 额外 LLM call 会增加 token、latency、cost 和 hallucination risk。
+11. **和 RAG compression 区别？** Tool Result compression 服务于 action loop 和可恢复协议；RAG compression 服务于证据相关性。
+12. **和 Prompt Engineering 区别？** Prompt 改指令；Context Engineering 决定信息何时进入、保留、压缩或恢复。
+13. **benchmark 测了什么？** 本地结构化/search/HTML/offload/recovery 的字符、token estimate、处理耗时和 golden outcome；没有测真实 provider API latency。
+14. **最大 trade-off？** 节省 context 的同时会丢失细节，故保留 continuation fields、preview、TTL recovery，并让 feature flag 可回滚。
+15. **为何是 runtime engineering？** 它涉及协议合法性、状态生命周期、权限、故障降级、观测和成本边界，不只是改 prompt。
 
-## Why not delete old ToolMessages?
+## 证据边界
 
-LangChain/OpenAI tool calling requires the `AIMessage.tool_calls` and matching
-`ToolMessage.tool_call_id` relationship. Deleting a message can make the next
-request protocol-invalid. This implementation replaces old content while
-keeping message count, order, and IDs.
-
-## How is information loss controlled?
-
-Policies are per tool. ERP policies retain IDs and fields needed by downstream
-calls; the golden tests check products, inventory, orders, customers, and
-multi-round protocol pairing. A too-small budget prioritizes valid semantic
-fields over an invalid JSON slice. The benchmark checks task outcome as well as
-estimated token reduction.
-
-## Why no default LLM summary in V1?
-
-An LLM summary adds another call, tokens, latency, and hallucination risk.
-V1 uses deterministic filtering, deduplication, top-k, and compaction. A future
-semantic summarizer can implement the same interface behind a separate flag.
-
-## What did the local benchmark actually measure?
-
-Command: `scripts/benchmark_tool_result_context.py`. It used the repository
-token counter with tiktoken available and covered seven local scenarios. In the
-recorded run, estimated input tokens changed as follows:
-
-| Scenario | Baseline | Optimized | Estimated reduction | Outcome |
-|---|---:|---:|---:|---|
-| single tool call | 48 | 36 | 25.00% | PASS/PASS |
-| three rounds | 766 | 284 | 62.92% | PASS/PASS |
-| five rounds | 2796 | 386 | 86.19% | PASS/PASS |
-| large list | 4703 | 38 | 99.19% | PASS/PASS |
-| large JSON | 2253 | 168 | 92.54% | PASS/PASS |
-| Chinese text | 1683 | 38 | 97.74% | PASS/PASS |
-| multi-agent/ReAct-shaped | 1785 | 376 | 78.94% | PASS/PASS |
-
-These are estimated local benchmark values, not production claims. API latency
-was `NOT_MEASURED`; only local optimization processing time was measured.
-
-## Compression vs RAG context compression
-
-Tool Result Compression shapes operational observations produced during an
-action loop and must preserve tool-call recoverability. RAG compression shapes
-retrieved evidence before generation and is primarily about relevance/ranking.
-They can share token estimation but have different correctness contracts.
-
-## Relationship to Memory and SharedBlackboard
-
-Session memory manages conversation history; SharedBlackboard shares bounded
-agent findings. The optimizer is a boundary layer for tool observations before
-they enter the active LLM context. It does not replace either store.
-
-## Context Engineering vs Prompt Engineering
-
-Prompt Engineering changes instructions and formatting. Context Engineering
-controls what information is admitted, retained, compacted, or recovered over
-time. This feature is mainly the latter.
-
-## 60–90 second project answer
-
-“这个项目的问题是 ReAct 多轮调用里，Tool Result 会作为 ToolMessage 原样回灌，后续每轮都重复携带，造成上下文膨胀。我先审计了现有链路，确认它确实是 ToolRegistry.execute 到 ToolMessage 再到下一轮 LLM，并复用了仓库已有 token counter，而不是再造 tokenizer。实现上增加了可关闭的 ToolResultOptimizer：对 dict、list 和 JSON 做字段白名单/黑名单、去重、Top-K 和 token budget；ERP 工具保留 order、product、customer 等下游需要的 ID。旧 ToolMessage 不删除，只压缩 content，保留 tool_call_id 和消息顺序，避免破坏 OpenAI/LangChain 协议。V1 没有默认使用 LLM 摘要，因为那会增加一次模型调用、延迟和幻觉风险，也没有虚构 reference store。我们用本地可重复 benchmark 对 baseline 和 optimized 做了七类场景对比，估算 input token reduction 从单次调用的 25.00% 到大列表的 99.19%，所有 golden outcome 都是 PASS；但外部 API latency 没有测量，所以不会把这些结果写成生产性能承诺。”
+可以说“本地 benchmark 的 estimated token reduction”和“本地 compressor
+latency”；不能说“生产 token cost reduction”“真实 API latency reduction”
+或“真实 ERP 已支持分页”，除非另有独立、可复现的生产证据。
