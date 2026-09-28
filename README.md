@@ -103,6 +103,14 @@
 
 ## ⚡ 当前验证入口
 
+### Agent Context Engineering
+
+ReAct/Function Calling 的 Tool Result Context Budget 管理已提供可关闭的
+结构化字段裁剪、Top-K、token estimate、历史 Observation compaction 和
+Prometheus 指标。设计说明见
+[docs/design/context-engineering.md](docs/design/context-engineering.md)，本地
+benchmark 使用：`python scripts/benchmark_tool_result_context.py`。
+
 > 建议先按当前 HEAD 的可复现实测来验证，而不是直接相信历史里程碑分数。
 
 | 验证项 | 入口 | 预期结果 |
