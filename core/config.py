@@ -300,6 +300,13 @@ REACT_SELF_REFLECTION = os.getenv("REACT_SELF_REFLECTION", "false").lower() == "
 # ===== v3.5: 工具调用配置 =====
 TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
 
+# Agent Context Engineering: deterministic Tool Result Context Budget.
+TOOL_RESULT_OPTIMIZATION_ENABLED = os.getenv("TOOL_RESULT_OPTIMIZATION_ENABLED", "false").lower() == "true"
+TOOL_RESULT_MAX_TOKENS = _int_env("TOOL_RESULT_MAX_TOKENS", 800)
+TOOL_RESULT_MAX_ITEMS = _int_env("TOOL_RESULT_MAX_ITEMS", 5)
+TOOL_RESULT_PRESERVE_RECENT = _int_env("TOOL_RESULT_PRESERVE_RECENT", 2)
+TOOL_RESULT_OFFLOAD_ENABLED = os.getenv("TOOL_RESULT_OFFLOAD_ENABLED", "false").lower() == "true"
+
 # ===== v4.0: 用户认证配置 =====
 JWT_SECRET = os.getenv("JWT_SECRET", "")
 JWT_EXPIRE_HOURS = _int_env("JWT_EXPIRE_HOURS", 72)
@@ -477,6 +484,10 @@ class FeatureFlags:
     MODE_UPGRADE_ENABLED = MODE_UPGRADE_ENABLED
     # Function Calling
     TOOL_MAX_ROUNDS = TOOL_MAX_ROUNDS
+    TOOL_RESULT_OPTIMIZATION_ENABLED = TOOL_RESULT_OPTIMIZATION_ENABLED
+    TOOL_RESULT_MAX_TOKENS = TOOL_RESULT_MAX_TOKENS
+    TOOL_RESULT_MAX_ITEMS = TOOL_RESULT_MAX_ITEMS
+    TOOL_RESULT_PRESERVE_RECENT = TOOL_RESULT_PRESERVE_RECENT
     # ReAct 推理
     REACT_COMPLEXITY_THRESHOLD = REACT_COMPLEXITY_THRESHOLD
 
@@ -490,5 +501,9 @@ class FeatureFlags:
             "eval_retry": cls.EVAL_RETRY_ENABLED,
             "mode_upgrade": cls.MODE_UPGRADE_ENABLED,
             "tool_max_rounds": cls.TOOL_MAX_ROUNDS,
+            "tool_result_optimization": cls.TOOL_RESULT_OPTIMIZATION_ENABLED,
+            "tool_result_max_tokens": cls.TOOL_RESULT_MAX_TOKENS,
+            "tool_result_max_items": cls.TOOL_RESULT_MAX_ITEMS,
+            "tool_result_preserve_recent": cls.TOOL_RESULT_PRESERVE_RECENT,
             "react_complexity_threshold": cls.REACT_COMPLEXITY_THRESHOLD,
         }

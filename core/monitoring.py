@@ -171,6 +171,24 @@ try:
         "cache_writes_total",
         "Total number of cache write operations",
     )
+    tool_result_raw_bytes = _histogram(
+        "tool_result_raw_bytes", "Raw serialized tool result size in bytes", buckets=[100, 500, 1000, 5000, 10000, 50000]
+    )
+    tool_result_optimized_bytes = _histogram(
+        "tool_result_optimized_bytes", "Optimized serialized tool result size in bytes", buckets=[100, 500, 1000, 5000, 10000, 50000]
+    )
+    tool_result_tokens_before = _histogram(
+        "tool_result_tokens_before", "Estimated tool result tokens before optimization", buckets=[10, 50, 100, 500, 1000, 5000]
+    )
+    tool_result_tokens_after = _histogram(
+        "tool_result_tokens_after", "Estimated tool result tokens after optimization", buckets=[10, 50, 100, 500, 1000, 5000]
+    )
+    tool_result_optimized_total = _counter(
+        "tool_result_optimized_total", "Tool results processed by the context optimizer", ["tool_name"]
+    )
+    tool_result_truncated_total = _counter(
+        "tool_result_truncated_total", "Tool results truncated by the context optimizer", ["tool_name"]
+    )
 
     # P0-05: Embedding dependency-failure observability.
     # These distinguish "embedding provider down" from "low recall" so a
@@ -232,6 +250,12 @@ except ImportError:
     rag_search_latency_seconds = _NoopMetric()
     agent_process_time_seconds = _NoopMetric()
     cache_writes_total = _NoopMetric()
+    tool_result_raw_bytes = _NoopMetric()
+    tool_result_optimized_bytes = _NoopMetric()
+    tool_result_tokens_before = _NoopMetric()
+    tool_result_tokens_after = _NoopMetric()
+    tool_result_optimized_total = _NoopMetric()
+    tool_result_truncated_total = _NoopMetric()
     embedding_provider_failures_total = _NoopMetric()
     embedding_dimension_errors_total = _NoopMetric()
     vector_channel_disabled_total = _NoopMetric()
@@ -239,6 +263,19 @@ except ImportError:
     retrieval_no_channel_total = _NoopMetric()
     semantic_cache_embedding_failures_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
+
+
+def record_tool_result_optimization(
+    tool_name: str, raw_size: int, optimized_size: int, raw_tokens: int, optimized_tokens: int, truncated: bool
+) -> None:
+    """Record bounded, content-free Tool Result optimization metrics."""
+    tool_result_raw_bytes.observe(raw_size)
+    tool_result_optimized_bytes.observe(optimized_size)
+    tool_result_tokens_before.observe(raw_tokens)
+    tool_result_tokens_after.observe(optimized_tokens)
+    tool_result_optimized_total.labels(tool_name=tool_name).inc()
+    if truncated:
+        tool_result_truncated_total.labels(tool_name=tool_name).inc()
 
 # ===== 性能指标常量 =====
 RESPONSE_TIMES_MAXLEN = 200  # 响应时间 deque 最大长度
