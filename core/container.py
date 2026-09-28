@@ -519,12 +519,23 @@ class ServiceContainer:
             SalesAgent,
             TechAgent,
         )
-        from core.config import ERP_MODE, REDIS_URL, TOOL_RESULT_OFFLOAD_ENABLED
+        from core.config import (
+            ERP_MODE,
+            REDIS_URL,
+            TOOL_RESULT_CACHE_ENABLED,
+            TOOL_RESULT_OFFLOAD_ENABLED,
+        )
+        from core.tool_result_cache import RedisToolResultCache
         from core.tool_result_store import RedisToolResultStore
 
         tool_result_store = None
         if TOOL_RESULT_OFFLOAD_ENABLED:
             tool_result_store = RedisToolResultStore(
+                redis_client=getattr(self.cache, "_redis", None), redis_url=REDIS_URL
+            )
+        tool_result_cache = None
+        if TOOL_RESULT_CACHE_ENABLED:
+            tool_result_cache = RedisToolResultCache(
                 redis_client=getattr(self.cache, "_redis", None), redis_url=REDIS_URL
             )
 
@@ -550,6 +561,8 @@ class ServiceContainer:
                 agent.set_prompt_manager(self.prompt_manager)
             if tool_result_store:
                 agent.set_tool_result_store(tool_result_store)
+            if tool_result_cache:
+                agent.set_tool_result_cache(tool_result_cache)
             self.agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
@@ -571,6 +584,8 @@ class ServiceContainer:
             react_agent.set_prompt_manager(self.prompt_manager)
         if tool_result_store:
             react_agent.set_tool_result_store(tool_result_store)
+        if tool_result_cache:
+            react_agent.set_tool_result_cache(tool_result_cache)
         self.agents_dict["react_agent"] = react_agent
 
         # ResponseAgent

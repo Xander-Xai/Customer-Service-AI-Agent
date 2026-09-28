@@ -197,6 +197,13 @@ try:
     tool_result_summary_total = _counter("tool_result_summary_total", "Tool result summaries attempted")
     tool_result_summary_failed_total = _counter("tool_result_summary_failed_total", "Tool result summary failures")
     tool_result_compressor_total = _counter("tool_result_compressor_total", "Tool result compressor strategies", ["strategy"])
+    tool_result_cache_requests_total = _counter("tool_result_cache_requests_total", "Tool result cache requests", ["tool_name", "outcome"])
+    tool_result_cache_hits_total = _counter("tool_result_cache_hits_total", "Tool result cache hits", ["tool_name"])
+    tool_result_cache_misses_total = _counter("tool_result_cache_misses_total", "Tool result cache misses", ["tool_name"])
+    tool_result_cache_writes_total = _counter("tool_result_cache_writes_total", "Tool result cache writes", ["tool_name"])
+    tool_result_cache_errors_total = _counter("tool_result_cache_errors_total", "Tool result cache errors", ["tool_name"])
+    tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
+    tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
@@ -241,6 +248,13 @@ except ImportError:
     tool_result_summary_total = _NoopMetric()
     tool_result_summary_failed_total = _NoopMetric()
     tool_result_compressor_total = _NoopMetric()
+    tool_result_cache_requests_total = _NoopMetric()
+    tool_result_cache_hits_total = _NoopMetric()
+    tool_result_cache_misses_total = _NoopMetric()
+    tool_result_cache_writes_total = _NoopMetric()
+    tool_result_cache_errors_total = _NoopMetric()
+    tool_result_cache_bypass_total = _NoopMetric()
+    tool_result_cache_latency_seconds = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 
@@ -274,6 +288,26 @@ def record_tool_result_event(event: str, *, latency_seconds: float | None = None
             tool_result_store_latency_seconds.observe(latency_seconds)
         if strategy:
             tool_result_compressor_total.labels(strategy=strategy).inc()
+    except Exception:
+        return
+
+
+def record_tool_result_cache_event(tool_name: str, outcome: str, *, latency_seconds: float | None = None) -> None:
+    """Record bounded cache outcomes; no arguments, identities, or keys are labels."""
+    try:
+        tool_result_cache_requests_total.labels(tool_name=tool_name, outcome=outcome).inc()
+        if outcome == "hit":
+            tool_result_cache_hits_total.labels(tool_name=tool_name).inc()
+        elif outcome == "miss":
+            tool_result_cache_misses_total.labels(tool_name=tool_name).inc()
+        elif outcome == "write":
+            tool_result_cache_writes_total.labels(tool_name=tool_name).inc()
+        elif outcome == "error":
+            tool_result_cache_errors_total.labels(tool_name=tool_name).inc()
+        elif outcome == "bypass":
+            tool_result_cache_bypass_total.labels(tool_name=tool_name).inc()
+        if latency_seconds is not None:
+            tool_result_cache_latency_seconds.observe(latency_seconds)
     except Exception:
         return
 
