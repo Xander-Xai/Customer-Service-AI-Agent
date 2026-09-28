@@ -4,8 +4,12 @@
 
 This repository is public. Private keys, API tokens, passwords, and other
 credentials must never be committed, including in development certificates.
-The existing `.certs/` directory remains ignored, and the deployment TLS
-paths are expected to be mounted from an environment-controlled secret store.
+The existing `.certs/` directory and runtime deployment TLS directory remain
+ignored. Deployment TLS files are expected to be mounted from an
+environment-controlled secret store.
+
+Production startup now fails closed when those files are missing; it no longer
+generates a localhost self-signed key as a fallback.
 
 The historical `.certs/key.pem` found in commit
 `d9a48894d814c81a0b7dc5477a5f459d7e83a319` was a localhost self-signed

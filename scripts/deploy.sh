@@ -39,16 +39,14 @@ if [ ${#_missing[@]} -gt 0 ]; then
 fi
 echo "✅ 环境变量检查通过"
 
-# ── 生成 TLS 证书（仅首次） ──
+# ── 生产环境必须使用外部提供的 TLS 证书 ──
 SSL_DIR="${PROJECT_DIR}/nginx/ssl"
-if [ "${ENV}" = "prod" ] && [ ! -f "${SSL_DIR}/cert.pem" ]; then
-    echo "🔐 生成自签名 TLS 证书（仅用于测试，正式环境请用真实证书）..."
-    mkdir -p "${SSL_DIR}"
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout "${SSL_DIR}/key.pem" \
-        -out "${SSL_DIR}/cert.pem" \
-        -subj "/CN=localhost/O=CustomerService/C=CN" 2>/dev/null
-    echo "✅ TLS 证书已生成 → ${SSL_DIR}/"
+if [ "${ENV}" = "prod" ]; then
+    if [ ! -s "${SSL_DIR}/cert.pem" ] || [ ! -s "${SSL_DIR}/key.pem" ]; then
+        echo "❌ 生产环境需要外部提供的 TLS cert.pem 和 key.pem，拒绝生成自签名证书。" >&2
+        exit 1
+    fi
+    echo "✅ 使用外部提供的 TLS 证书 → ${SSL_DIR}/"
 fi
 
 # ── 创建数据目录 ──

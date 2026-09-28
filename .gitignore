@@ -64,6 +64,7 @@ logs/
 chroma_db/
 .admin_password
 .certs/
+deploy/nginx/ssl/
 
 # ===== 临时文件 =====
 *.tmp
