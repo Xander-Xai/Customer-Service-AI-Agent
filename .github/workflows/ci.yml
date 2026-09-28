@@ -184,6 +184,7 @@ jobs:
 
       - name: Check for secrets in code
         run: |
+          python scripts/check_secrets.py
           # 检查是否有硬编码的 API Key 或密码
           ! grep -rn "sk-[a-zA-Z0-9]\{20,\}" --include="*.py" . || { echo "❌ 发现疑似硬编码 API Key"; exit 1; }
           ! grep -rn "password\s*=\s*['\"][^'\"]\{8,\}['\"]" --include="*.py" . | grep -v "test\|mock\|placeholder\|example\|your_\|change-me\|do-not-use\|admin123\|test_" || { echo "❌ 发现疑似硬编码密码"; exit 1; }
