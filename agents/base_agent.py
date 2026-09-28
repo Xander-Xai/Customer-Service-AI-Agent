@@ -11,6 +11,7 @@
 
 import asyncio
 import json
+import time
 from abc import ABC, abstractmethod
 from dataclasses import replace
 from typing import Any
@@ -20,6 +21,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from core.config import (
     AB_TEST_ENABLED,
     TOOL_MAX_ROUNDS,
+    TOOL_RESULT_CACHE_ENABLED,
     TOOL_RESULT_MAX_ITEMS,
     TOOL_RESULT_MAX_TOKENS,
     TOOL_RESULT_OFFLOAD_ENABLED,
@@ -31,6 +33,7 @@ from core.config import (
 )
 from core.logger import get_logger, get_trace_id
 from core.message_bus import Message, MessageBus, MessageType
+from core.monitoring import record_tool_result_cache_event
 from core.protocols import (
     ERPProtocol,
     KnowledgeBaseProtocol,
@@ -40,6 +43,7 @@ from core.protocols import (
 )
 from core.session.session_manager import DRIFT_REPAIR_STRATEGIES, DriftType, EnhancedSessionManager
 from core.shared_blackboard import SharedBlackboard
+from core.tool_result_cache import cacheable_result
 from core.tool_result_optimizer import ToolResultOptimizer, compact_old_tool_messages
 from llm.client import LLMServiceError
 
@@ -109,6 +113,7 @@ class BaseAgent(ABC):
             store_ttl_seconds=TOOL_RESULT_STORE_TTL_SECONDS,
             semantic_summary_enabled=TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED,
         )
+        self.tool_result_cache = None
 
     def set_llm(self, llm: LLMProtocol):
         self.llm = llm
@@ -150,6 +155,10 @@ class BaseAgent(ABC):
     def set_tool_result_store(self, store) -> None:
         """Inject the shared store without coupling the optimizer to Redis."""
         self.tool_result_optimizer.store = store
+
+    def set_tool_result_cache(self, cache) -> None:
+        """Inject the shared exact execution cache."""
+        self.tool_result_cache = cache
 
     @staticmethod
     def _tool_result_scope(state: dict[str, Any]) -> dict[str, str]:
@@ -671,13 +680,47 @@ class BaseAgent(ABC):
 
                 # 执行每个工具调用，追加 ToolMessage
                 for p in parsed_tcs:
+                    cache_policy = (
+                        self.tool_registry.cache_policy_for(p["name"])
+                        if hasattr(self.tool_registry, "cache_policy_for")
+                        else None
+                    )
+                    cache_scope = self._tool_result_scope(state)
+                    cache_enabled = bool(
+                        TOOL_RESULT_CACHE_ENABLED
+                        and self.tool_result_cache
+                        and cache_policy
+                        and cache_policy.enabled
+                        and cache_policy.ttl_seconds > 0
+                        and (not cache_policy.require_scope or cache_scope)
+                    )
+                    result = None
+                    cache_hit = False
+                    if cache_enabled:
+                        cache_started = time.perf_counter()
+                        try:
+                            result = await self.tool_result_cache.get(p["name"], p["args"], scope=cache_scope)
+                            cache_hit = result is not None
+                            record_tool_result_cache_event(
+                                p["name"],
+                                "hit" if cache_hit else "miss",
+                                latency_seconds=time.perf_counter() - cache_started,
+                            )
+                        except Exception:
+                            record_tool_result_cache_event(
+                                p["name"],
+                                "error",
+                                latency_seconds=time.perf_counter() - cache_started,
+                            )
+                    elif TOOL_RESULT_CACHE_ENABLED:
+                        record_tool_result_cache_event(p["name"], "bypass")
                     try:
-                        if self.tool_result_optimizer.enabled and hasattr(self.tool_registry, "execute_raw"):
+                        if not cache_hit and (self.tool_result_optimizer.enabled or cache_enabled) and hasattr(self.tool_registry, "execute_raw"):
                             result = await self.tool_registry.execute_raw(
                                 p["name"], p["args"],
                                 stream_callback=state.get("stream_callback"),
                             )
-                        else:
+                        elif not cache_hit:
                             result = await self.tool_registry.execute(
                                 p["name"], p["args"],
                                 stream_callback=state.get("stream_callback"),
@@ -685,6 +728,25 @@ class BaseAgent(ABC):
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
                         result = "工具暂时不可用，请稍后重试"
+
+                    if cache_enabled and not cache_hit and cacheable_result(result, cache_policy):
+                        cache_started = time.perf_counter()
+                        try:
+                            await self.tool_result_cache.set(
+                                p["name"], p["args"], result, scope=cache_scope,
+                                ttl_seconds=cache_policy.ttl_seconds,
+                            )
+                            record_tool_result_cache_event(
+                                p["name"],
+                                "write",
+                                latency_seconds=time.perf_counter() - cache_started,
+                            )
+                        except Exception:
+                            record_tool_result_cache_event(
+                                p["name"],
+                                "error",
+                                latency_seconds=time.perf_counter() - cache_started,
+                            )
 
                     tool_policy = self.tool_result_optimizer.policy_for(p["name"])
                     configured_max_items = (

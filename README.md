@@ -964,6 +964,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `TOOL_RESULT_OFFLOAD_MIN_TOKENS` | 1200 | 触发 offload 的本地估算 token 阈值 |
 | `TOOL_RESULT_STORE_TTL_SECONDS` | 900 | 外部 Tool Result 最大存活时间 |
 | `TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED` | false | 可选 semantic summary fallback，默认关闭 |
+| `TOOL_RESULT_CACHE_ENABLED` | false | Exact scoped Tool Result execution cache，默认关闭 |
 | **Redis 键前缀** | | |
 | `REDIS_JWT_PREFIX` | csai:jwt:blacklist: | JWT 黑名单键前缀 |
 | `REDIS_RATE_PREFIX` | csai:rate: | 限流键前缀 |

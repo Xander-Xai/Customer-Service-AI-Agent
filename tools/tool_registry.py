@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.logger import get_logger
+from core.tool_result_cache import ToolCachePolicy
 
 logger = get_logger("tools.registry")
 
@@ -21,6 +22,7 @@ class ToolDefinition:
     description: str
     parameters: dict[str, Any]  # JSON Schema
     handler: Callable[..., Any]  # async callable(arguments: dict) -> str
+    cache_policy: ToolCachePolicy = ToolCachePolicy()
 
 
 class ToolRegistry:
@@ -33,7 +35,12 @@ class ToolRegistry:
         self._tools: dict[str, ToolDefinition] = {}
 
     def register(
-        self, name: str, description: str, parameters: dict[str, Any], handler: Callable[..., Any]
+        self,
+        name: str,
+        description: str,
+        parameters: dict[str, Any],
+        handler: Callable[..., Any],
+        cache_policy: ToolCachePolicy | None = None,
     ):
         """注册一个工具"""
         self._tools[name] = ToolDefinition(
@@ -41,6 +48,7 @@ class ToolRegistry:
             description=description,
             parameters=parameters,
             handler=handler,
+            cache_policy=cache_policy or ToolCachePolicy(),
         )
         logger.debug(f"工具已注册: {name}")
 
@@ -91,3 +99,8 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         """返回所有已注册工具名称"""
         return list(self._tools.keys())
+
+    def cache_policy_for(self, name: str) -> ToolCachePolicy:
+        """Return an explicit policy; unknown tools fail closed."""
+        tool = self._tools.get(name)
+        return tool.cache_policy if tool else ToolCachePolicy()

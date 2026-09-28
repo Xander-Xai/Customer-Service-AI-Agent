@@ -94,3 +94,38 @@ Known limitations: Redis integration requires a reachable deployment for a real
 integration test; real ERP pagination is documented but not asserted; no
 default semantic summary; and exact provider token counts remain provider
 specific.
+
+## Tool Result Cache Reuse
+
+V2 now has a separate, opt-in exact execution cache. Its position is before the
+tool handler and before context compression:
+
+```text
+tool call → cache policy/key → cache hit or execute_raw()
+          → raw structured result → ToolResultOptimizer → ToolMessage
+```
+
+These layers have different contracts:
+
+| Capability | Solves |
+|---|---|
+| Tool Result Cache | Avoids repeating the same safe tool execution |
+| Tool Result Compression | Reduces Tool Result tokens admitted to the LLM |
+| External Result Store | Offloads a large result and supports recovery by reference |
+| Session Memory | Manages conversation history |
+| RAG Cache | Reuses response/retrieval infrastructure |
+| Semantic Cache | Not implemented for Tool Calls |
+
+The cache stores raw structured results, never compressed ToolMessages. It uses
+canonical sorted JSON plus authenticated scope inside a SHA-256 digest. Current
+ERP policies are explicit: product 300 seconds; inventory/order/customer 30
+seconds. These are conservative opt-in defaults, not universal freshness rules.
+
+Unknown and side-effecting tools bypass. Empty results are not cached by default;
+exceptions, timeouts, authorization failures, provider failures, and rate limits
+are not cached. Cache failures fail soft and execute the real tool. Cache hits
+still pass through compression and optional offload.
+
+`TOOL_RESULT_CACHE_ENABLED=false` is the rollback switch. The current design does
+not implement distributed single-flight; stampede protection is documented as
+future work. Exact cache reuse is deliberately not semantic/embedding/LLM-based.

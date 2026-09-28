@@ -45,3 +45,29 @@ old-result compaction → next LLM call`。V1 保留 function-calling 配对关�
 可以说“本地 benchmark 的 estimated token reduction”和“本地 compressor
 latency”；不能说“生产 token cost reduction”“真实 API latency reduction”
 或“真实 ERP 已支持分页”，除非另有独立、可复现的生产证据。
+
+## Tool Result Cache Reuse：60–90 秒答案
+
+在 Context Engineering V2 之后，我又把“减少上下文”和“减少工具执行”拆成
+两个问题。Tool Result Compression 负责控制进入 LLM 的 Observation 大小，
+而 exact Cache Reuse 负责避免相同的只读工具重复访问 ERP。实现上 cache
+发生在真实 `execute_raw()` 前，以 tool name、canonical arguments 和
+authenticated scope 构造 key，只对显式 read-only policy 开启，并按工具配置
+TTL；订单、库存这类强时效数据 TTL 很短，写操作完全 bypass。Cache 命中后
+返回的仍是 raw structured result，继续进入 ToolResultOptimizer 做压缩或
+offload，所以 cache、compression 和 external store 三层职责独立。缓存故障
+采用 fail-soft，退回真实工具调用，不把 Redis 变成 Agent 单点故障。当前是
+exact cache，不是 semantic tool cache，也没有声称生产效果。
+
+## Cache 面试问题
+
+1. **Cache 和 Compression 有什么区别？** Cache 减少真实工具执行；Compression 减少进入 LLM 的 token。
+2. **为什么 cache 在 compression 之前？** 缓存 raw structured result，命中后仍能按当前轮次预算重新压缩。
+3. **为什么 Store 不等于 Cache？** Store 为已产生的大结果提供 reference recovery；Cache 为避免再次执行。
+4. **为什么库存 TTL 很短？** 库存是强时效外部状态，正确性优先于 hit rate。
+5. **为什么写操作不能缓存？** 缓存“发送成功”可能掩盖第二次实际未发送，破坏 side-effect correctness。
+6. **为什么不做 semantic tool cache？** 结构化参数的细微差异可能改变执行语义，embedding 相似不等于可复用。
+7. **为什么 key 要有权限 scope？** 相同参数不代表相同授权边界，scope 防止跨用户读取。
+8. **Redis 挂了怎么办？** cache get/set 都 fail-soft，直接执行真实工具。
+9. **为什么错误结果不缓存？** 瞬时故障会被 TTL 放大成持续故障。
+10. **Cache Hit 后为什么仍需要 optimizer？** 命中解决执行次数，不解决当前 LLM context budget。
