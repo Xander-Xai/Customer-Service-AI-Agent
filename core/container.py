@@ -410,6 +410,38 @@ class ServiceContainer:
                 seed_complaint_knowledge(self.knowledge_base)
                 seed_supplementary_data(self.knowledge_base)
 
+            # Rebuild BM25 from persisted Qdrant data so restart restores the
+            # lexical channel explicitly. A timeout supersedes in-flight
+            # publication and leaves retrieval honestly degraded.
+            import functools
+
+            from core.config import BM25_COLLECTIONS, BM25_REBUILD_TIMEOUT
+            from rag.bm25_lifecycle import (
+                REASON_REBUILD_EXCEPTION,
+                REASON_REBUILD_TIMEOUT,
+                BM25Readiness,
+            )
+
+            loop = asyncio.get_running_loop()
+            rebuild_fn = functools.partial(
+                self.knowledge_base.rebuild_bm25_from_qdrant,
+                BM25_COLLECTIONS,
+                timeout=BM25_REBUILD_TIMEOUT,
+            )
+            try:
+                meta = await asyncio.wait_for(
+                    loop.run_in_executor(None, rebuild_fn),
+                    timeout=BM25_REBUILD_TIMEOUT + 2.0,
+                )
+                if getattr(meta, "status", None) is BM25Readiness.DEGRADED:
+                    logger.warning("BM25 rebuild degraded: %s", getattr(meta, "reason", ""))
+            except asyncio.TimeoutError:
+                logger.warning("BM25 rebuild exceeded safety timeout")
+                self.knowledge_base.supersede_bm25_rebuild(REASON_REBUILD_TIMEOUT)
+            except Exception as e:
+                logger.warning("BM25 rebuild failed: %s", e, exc_info=True)
+                self.knowledge_base.supersede_bm25_rebuild(REASON_REBUILD_EXCEPTION)
+
             logger.info(
                 f"RAG 知识库初始化完成 "
                 f"(product={self.knowledge_base.get_collection_count('product_knowledge')}, "

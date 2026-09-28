@@ -171,6 +171,31 @@ try:
         "cache_writes_total",
         "Total number of cache write operations",
     )
+    embedding_provider_failures_total = _counter(
+        "embedding_provider_failures_total",
+        "Embedding provider unavailable events",
+        ["reason"],
+    )
+    embedding_dimension_errors_total = _counter(
+        "embedding_dimension_errors_total",
+        "Embedding vectors rejected for invalid dimension or values",
+    )
+    vector_channel_disabled_total = _counter(
+        "vector_channel_disabled_total",
+        "Retrieval runs where the vector channel was disabled",
+    )
+    bm25_fallback_used_total = _counter(
+        "bm25_fallback_used_total",
+        "Retrieval runs using BM25-only fallback",
+    )
+    retrieval_no_channel_total = _counter(
+        "retrieval_no_channel_total",
+        "Retrieval runs with no usable channel",
+    )
+    bm25_rebuilds_total = _counter("bm25_rebuilds_total", "Successful BM25 rebuilds")
+    bm25_rebuild_failures_total = _counter(
+        "bm25_rebuild_failures_total", "Failed BM25 rebuilds", ["reason"]
+    )
     semantic_cache_embedding_failures_total = _counter(
         "semantic_cache_embedding_failures_total",
         "Semantic cache (L2) tiers skipped due to embedding failure",
@@ -238,6 +263,13 @@ except ImportError:
     rag_search_latency_seconds = _NoopMetric()
     agent_process_time_seconds = _NoopMetric()
     cache_writes_total = _NoopMetric()
+    embedding_provider_failures_total = _NoopMetric()
+    embedding_dimension_errors_total = _NoopMetric()
+    vector_channel_disabled_total = _NoopMetric()
+    bm25_fallback_used_total = _NoopMetric()
+    retrieval_no_channel_total = _NoopMetric()
+    bm25_rebuilds_total = _NoopMetric()
+    bm25_rebuild_failures_total = _NoopMetric()
     semantic_cache_embedding_failures_total = _NoopMetric()
     tool_result_raw_bytes = _NoopMetric()
     tool_result_optimized_bytes = _NoopMetric()

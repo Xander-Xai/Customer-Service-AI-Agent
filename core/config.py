@@ -278,6 +278,10 @@ HYBRID_RRF_K = _int_env("HYBRID_RRF_K", 60)  # RRF rank 平滑常数
 HYBRID_VECTOR_TOP_K = _int_env("HYBRID_VECTOR_TOP_K", 8)  # 向量通道每 collection top-K
 HYBRID_BM25_TOP_K = _int_env("HYBRID_BM25_TOP_K", 8)  # BM25 通道每 collection top-K
 
+# P1-02: BM25 lifecycle configuration.
+BM25_REBUILD_TIMEOUT = _int_env("BM25_REBUILD_TIMEOUT", 60)
+BM25_COLLECTIONS = ["product_knowledge", "faq", "tech_support", "complaint_knowledge"]
+
 # ===== v6.0: Qdrant 向量数据库配置 =====
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = _int_env("QDRANT_PORT", 6333)  # REST API 端口

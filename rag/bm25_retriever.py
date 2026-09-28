@@ -157,6 +157,39 @@ class BM25Retriever:
         """指定 collection 的文档数"""
         return self._total_docs.get(collection, 0)
 
+    def total_documents(self) -> int:
+        return sum(self._total_docs.values())
+
+    def remove_documents(self, collection: str, ids: list[str]) -> int:
+        if not ids or collection not in self._docs:
+            return 0
+        id_set = set(ids)
+        docs = self._docs[collection]
+        keep_idx = [i for i, (did, _, _) in enumerate(docs) if did not in id_set]
+        removed = len(docs) - len(keep_idx)
+        if removed == 0:
+            return 0
+        self._docs[collection] = [docs[i] for i in keep_idx]
+        self._doc_term_count[collection] = [self._doc_term_count[collection][i] for i in keep_idx]
+        self._doc_term_freq[collection] = [self._doc_term_freq[collection][i] for i in keep_idx]
+        new_df: Counter = Counter()
+        for tfc in self._doc_term_freq[collection]:
+            for term in tfc:
+                new_df[term] += 1
+        self._term_doc_freq[collection] = new_df
+        self._total_docs[collection] = len(self._docs[collection])
+        total_terms = sum(self._doc_term_count[collection])
+        self._avg_dl[collection] = total_terms / max(self._total_docs[collection], 1)
+        return removed
+
+    def upsert_documents(self, documents, collection="default", ids=None, metadatas=None) -> None:
+        if not documents:
+            return
+        if ids is None:
+            ids = [f"bm25_{collection}_{i}" for i in range(len(documents))]
+        self.remove_documents(collection, ids)
+        self.add_documents(documents, collection=collection, ids=ids, metadatas=metadatas)
+
     # ---- BM25 计算 ----
 
     def _search_collection(

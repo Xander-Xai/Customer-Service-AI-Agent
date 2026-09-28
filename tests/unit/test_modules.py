@@ -1831,13 +1831,12 @@ class TestReActAgentDeep:
         sm.detect_drift = AsyncMock(return_value={"has_drift": False, "drifts": []})
         agent.set_session_manager(sm)
 
-        # Mock RAG knowledge base
+        # Unified retrieval contract is the canonical agent entrypoint.
         mock_kb = MagicMock()
         mock_kb.available = True
-        mock_kb.query_multiple = AsyncMock(
+        mock_kb.retrieve = AsyncMock(
             return_value=[{"content": "烟酰胺精华适合油性和混合性肌肤，建议每天使用一次。"}]
         )
-        mock_kb.rewrite_query = AsyncMock(side_effect=lambda q, llm: q)
         agent.set_knowledge_base(mock_kb)
 
         state = {
@@ -2393,7 +2392,7 @@ class TestComplaintAgentRAGFallback:
 
         kb = MagicMock()
         kb.available = True
-        kb.query_multiple = AsyncMock(side_effect=Exception("DB 连接超时"))
+        kb.retrieve = AsyncMock(side_effect=Exception("DB 连接超时"))
         agent.set_knowledge_base(kb)
 
         state = {"session_id": "complaint_rag_fail", "customer_query": "我买的面霜过敏了"}
@@ -2432,7 +2431,7 @@ class TestComplaintAgentRAGFallback:
 
         kb = MagicMock()
         kb.available = True
-        kb.query_multiple = AsyncMock(
+        kb.retrieve = AsyncMock(
             return_value=[
                 {"content": "过敏投诉应先确认产品批次并建议就医"},
                 {"content": "可提供无条件退款"},

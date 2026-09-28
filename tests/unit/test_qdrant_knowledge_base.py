@@ -8,10 +8,11 @@ QdrantKnowledgeBase 单元测试（v6.0）
 - 测试 _parse_query_result 转换逻辑
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
-from rag.qdrant_knowledge_base import QdrantKnowledgeBase, _EMBEDDING_DIM
+import pytest
+
+from rag.qdrant_knowledge_base import _EMBEDDING_DIM, QdrantKnowledgeBase
 
 
 @pytest.fixture
@@ -19,7 +20,7 @@ def mock_qdrant_client():
     """创建 mock Qdrant 客户端"""
     with (
         patch("rag.qdrant_knowledge_base.QdrantClient") as mock_client_cls,
-        patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()) as mock_ef,
+        patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()),
     ):
         mock_client = MagicMock()
         mock_client_cls.return_value = mock_client
@@ -93,14 +94,14 @@ class TestQdrantKnowledgeBase:
 
     @pytest.mark.asyncio
     async def test_query_calls_search(self, kb, mock_qdrant_client):
-        """query 应调用 QdrantClient.search 并返回解析结果"""
+        """query shim uses query_points and returns parsed results."""
         kb._embed_texts = MagicMock(return_value=[[0.1] * _EMBEDDING_DIM])
 
         mock_point = MagicMock()
         mock_point.id = 123
         mock_point.score = 0.85
         mock_point.payload = {"doc_id": "doc1", "content": "测试内容", "source": "faq"}
-        mock_qdrant_client.search.return_value = [mock_point]
+        mock_qdrant_client.query_points.return_value = MagicMock(points=[mock_point])
 
         result = await kb.query("test", "query text", n_results=3)
         assert len(result) == 1
@@ -130,12 +131,11 @@ class TestQdrantKnowledgeBase:
         reranked = kb.simple_rerank("测试", results, top_k=2)
         assert len(reranked) == 2
 
-    def test_embed_texts_fallback(self, kb):
-        """embedding 不可用时返回随机向量（不崩溃）"""
+    def test_embed_texts_fail_closed(self, kb):
+        """embedding 不可用时拒绝伪造向量。"""
         kb._embed_fn = None
-        vectors = kb._embed_texts(["test"])
-        assert len(vectors) == 1
-        assert len(vectors[0]) == _EMBEDDING_DIM
+        with pytest.raises(Exception, match="provider_unavailable"):
+            kb._embed_texts(["test"])
 
     def test_ensure_collection_creates(self, kb, mock_qdrant_client):
         """不存在的 collection 自动创建"""
@@ -162,7 +162,7 @@ class TestQdrantKnowledgeBase:
         mock_point = MagicMock()
         mock_point.score = 0.9
         mock_point.payload = {"doc_id": "d1", "content": "test_doc"}
-        mock_qdrant_client.search.return_value = [mock_point]
+        mock_qdrant_client.query_points.return_value = MagicMock(points=[mock_point])
 
         result = await kb.query_multiple(["col1", "col2"], "test", n_results=3)
         # 期望：2个 collection 都返回了同一个文档 → 去重后应该有 1 条
