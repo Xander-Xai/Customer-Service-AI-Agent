@@ -6,6 +6,7 @@ ERP 工具注册（v3.5）
 from typing import Any
 
 from core.logger import get_logger
+from core.tool_result_cache import ToolCachePolicy
 
 from .tool_registry import ToolRegistry
 
@@ -41,6 +42,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             "required": ["keyword"],
         },
         handler=_query_product,
+        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=300),
     )
 
     # ---- query_inventory ----
@@ -69,6 +71,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             },
         },
         handler=_query_inventory,
+        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=30),
     )
 
     # ---- query_order ----
@@ -97,6 +100,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             },
         },
         handler=_query_order,
+        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=30),
     )
 
     # ---- query_customer ----
@@ -121,6 +125,7 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             "required": ["customer_id"],
         },
         handler=_query_customer,
+        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=30),
     )
 
     logger.info(f"ERP 工具注册完成: {registry.list_tools()}")
