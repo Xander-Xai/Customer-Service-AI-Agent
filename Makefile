@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag
+.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag audit-docs openapi-check facts
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -44,9 +44,24 @@ format: ## 代码格式化
 	ruff check --fix .
 
 # ===== RAG 评估 =====
-eval-rag: ## RAG 检索质量评估（基于 500+ 评测集）
+eval-rag: ## RAG 检索质量评估（查询数以 tests/eval/rag_benchmark.json metadata 为准）
 	@echo "📊 RAG 检索质量评估..."
 	python3 scripts/evaluate_rag.py
+
+# ===== 文档/运行时事实工具 =====
+.PHONY: audit-docs openapi-check facts
+
+audit-docs: ## 文档一致性审计（链接/引用/配置/OpenAPI/基准）
+	@echo "🔍 文档一致性审计..."
+	python3 scripts/audit_doc_consistency.py
+
+openapi-check: ## 校验 docs/openapi.json 与 app.openapi() 一致
+	@echo "🔍 OpenAPI 快照一致性..."
+	python3 scripts/generate_openapi.py --check
+
+facts: ## 输出当前 runtime 事实 JSON（版本/模型/路径数/基准查询数）
+	@echo "🧾 当前 runtime 事实..."
+	python3 scripts/project_facts.py
 
 # ===== 知识库 & 基准测试 =====
 .PHONY: benchmark generate-knowledge-base component-count

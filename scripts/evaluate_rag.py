@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 RAG 检索质量评估脚本（v6.1 升级版）
-基于 500+ 基准查询，使用 expected_doc_ids 精确评估。
+基于 tests/eval/rag_benchmark.json 评估集（查询数以该文件 metadata.total_queries
+为准），使用 expected_doc_ids 精确评估。
 
 评估指标：Recall@3, Precision@3, MRR（Mean Reciprocal Rank）
 分组维度：difficulty（easy/medium/hard），category（成分知识/产品推荐/使用指导/售后问题/投诉处理）
@@ -141,12 +142,6 @@ def compute_metrics(
 async def evaluate_rag() -> dict:
     """执行 RAG 检索质量评估"""
 
-    print("=" * 76)
-    print("  RAG 检索质量评估报告 (v6.1)")
-    print("  500 基准查询 | 5 类评估 | 3 级难度 | 4 维度指标")
-    print("=" * 76)
-    print()
-
     # 0. 解析 KB
     _resolve_kb()
     kb_name = "QdrantKnowledgeBase"
@@ -155,7 +150,14 @@ async def evaluate_rag() -> dict:
     benchmark = load_benchmark()
     meta = benchmark["metadata"]
     queries = benchmark["queries"]
+    total = meta["total_queries"]
 
+    print("=" * 76)
+    print("  RAG 检索质量评估报告 (v6.1)")
+    print(f"  {total} 基准查询 | {len(meta.get('categories', {}))} 类评估 | "
+          f"{len(meta.get('difficulty', {}))} 级难度 | 4 维度指标")
+    print("=" * 76)
+    print()
     print("[1/5] 加载基准数据")
     print(f"      版本: {meta['version']}")
     print(f"      查询数: {meta['total_queries']}")
