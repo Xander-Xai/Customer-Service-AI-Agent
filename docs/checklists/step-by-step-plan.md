@@ -1,5 +1,10 @@
 # 审查修复执行计划（详细版）
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This is a dated 2026-06 execution plan/record. It does not describe the current file layout;
+> several referenced files have since been renamed or removed.
+
+
 > **生成日期**: 2026-06-15
 > **依据**: `docs/checklists/audit-execution-plan.md` + 代码库实际状态侦察
 > **当前状态**: Milestone 1 已完成, Milestone 2 & 3 待执行
@@ -144,8 +149,8 @@ Task 2.1 (innerHTML 重构)
 | `admin.js` | `/api/auth/me` | L79 |
 | `chat/voice.js` | `/api/chat/voice` | L149 |
 | `chat/voice.js` | `/api/tts` | L208 |
-| `api/sse.js` | `/api/chat/stream` | L21 |
-| `api/sse.js` | `/api/chat/multimodal/stream` | L95 |
+| `web/src/api/sse.js` | `/api/chat/stream` | L21 |
+| `web/src/api/sse.js` | `/api/chat/multimodal/stream` | L95 |
 | `login.js` | `/api/auth/login` | L44 |
 | `login.js` | `/api/auth/register` | L44 |
 | `auth/index.js` | `/api/auth/refresh` | L23 |
@@ -153,7 +158,7 @@ Task 2.1 (innerHTML 重构)
 | `auth/index.js` | `/api/auth/logout` | L133 |
 
 **策略**:
-- **SSE 流式**（`api/sse.js`）和 **fetchWithAuth 内部**（`auth/index.js`）— 绕过是必要的（不能修改 fetch 行为）
+- **SSE 流式**（`web/src/api/sse.js`）和 **fetchWithAuth 内部**（`auth/index.js`）— 绕过是必要的（不能修改 fetch 行为）
 - **`admin.js:79`** `/api/auth/me` — 添加 `import { fetchWithAuth }` 替代直接 fetch
 - **`chat/voice.js`** — `/api/chat/voice`（FormData POST）和 `/api/tts`（FormData POST）— 添加 auth header 自动注入
 - **`login.js`** — 登录/注册不需要 auth header（登录前无 token），但结构上可封装

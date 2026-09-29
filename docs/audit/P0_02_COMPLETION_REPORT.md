@@ -1,5 +1,10 @@
 # P0-02 Completion Report — Cache Cross-User Leakage
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document does not describe current runtime state. It records a completed audit/fix report; verification lines were valid only at its execution time.
+> Current entry point: `docs/reference/current-state.md`.
+
+
 ## 1. Verdict
 
 **PASS**（经两轮独立验收：re-review #1 FAIL→allowlist 修正→再验证；re-review #2 PARTIAL→stress 回归修复→再验证。见 §11.5、§10.1）

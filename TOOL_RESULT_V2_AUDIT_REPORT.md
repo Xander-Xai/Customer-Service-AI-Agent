@@ -1,5 +1,10 @@
 # Tool Result Context Engineering V2 Audit Report
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document does not describe current runtime state. It records the audit executed at the SHA printed below (Snapshot SHA != Current HEAD).
+> Current entry point: `docs/reference/current-state.md`.
+
+
 ## CURRENT_HEAD
 
 - Current checkout: `504b954efd7dc51c30d1d9fead217eaedfc499ca`

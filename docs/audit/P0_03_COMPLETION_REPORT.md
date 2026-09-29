@@ -1,5 +1,10 @@
 # P0-03 Completion Report
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document does not describe current runtime state. It records a completed audit/fix report; verification lines were valid only at its execution time.
+> Current entry point: `docs/reference/current-state.md`.
+
+
 ## 1. Issue
 
 P0-03 — ERP IDOR / Authorization (Security + Authorization + Data Isolation)
