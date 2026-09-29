@@ -19,6 +19,24 @@ Every measurement is labelled `PROVIDER_REPORTED`, `APPLICATION_MEASURED`, `ESTI
 
 Provider input/output/cached tokens and provider billing remain unavailable unless a future provider adapter receives those fields directly. Missing values are serialized as `null` with an explicit source label; they are never converted to zero.
 
+## Controlled provider staging
+
+The provider adapter exercises the repository's OpenAI-compatible `/chat/completions` interface. It is disabled unless the explicit gate `EVAL_REAL_PROVIDER=1` is set. A dry run is safe and makes zero provider calls:
+
+```bash
+EVAL_REAL_PROVIDER=0 python3 scripts/run_production_evidence.py \
+  --suite provider-staging \
+  --repeat 2 --warmup 1 \
+  --max-requests 20 --max-input-tokens 2000 --max-output-tokens 128 \
+  --estimated-cost-cap 1 \
+  --output artifacts/evidence/provider-staging.json \
+  --markdown-output artifacts/evidence/provider-staging.md
+```
+
+A real staging run additionally requires an exported `OPENAI_API_KEY` and explicit estimated input/output rates for the safety cap. The adapter records only normalized usage, request identifiers, status, retry/timeout counts, and timing; it never writes prompts, response text, authorization headers, or PII. `max-requests` includes worst-case retry attempts, so the run is rejected before any call when the configured retry policy could exceed the cap.
+
+Provider-reported input/output/cached/reasoning tokens are accepted only from response usage fields. A provider `cost` field is accepted only when returned directly by the provider. Configured rate-card calculations are labelled `ESTIMATED` and must not be described as provider billing.
+
 ## Metric contracts
 
 - latency records sample count, warmup count, and the interpolation method; P50/P95/P99 are not aliases for maximum
@@ -36,3 +54,5 @@ Qdrant migration is limited to dry-run, disposable local collections, or explici
 ## Artifact privacy and interpretation
 
 `artifacts/evidence/` is ignored. Reviewers must inspect workload version, Git SHA, configuration hash, sample counts, source labels, and skipped/missing values before interpreting a result. A successful local run proves only that the measurement harness and fixtures are reproducible; it does not verify provider billing, production latency, Redis, ERP, Qdrant, BM25 production traffic, or production task success.
+
+The controlled staging attempt associated with this harness received HTTP 401 for every measured request. It collected no provider token usage or provider billing, so it does not close any production-validation item in Issue #7. Its application-measured failure timing is troubleshooting evidence only, not production latency evidence.
