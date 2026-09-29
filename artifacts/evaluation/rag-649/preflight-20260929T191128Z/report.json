@@ -1,0 +1,67 @@
+{
+  "schema_version": "rag-eval-evidence/v1",
+  "run_id": "preflight-20260929T191128Z",
+  "timestamp": "2026-09-29T19:11:28.738629+00:00",
+  "status": "BLOCKED_VECTOR_INDEX",
+  "git_sha": "0ad32ed0a84986ca2ab7e2b94d1d52cd537dfbb4+dirty",
+  "benchmark": {
+    "sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+    "declared_queries": 649,
+    "executed_queries": 649
+  },
+  "environment": {
+    "python": "3.10.12",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35"
+  },
+  "config": {
+    "vector_db_mode": "qdrant_only",
+    "hybrid_search_enabled": true,
+    "hybrid_vector_top_k": 8,
+    "hybrid_bm25_top_k": 8,
+    "hybrid_rrf_k": 60,
+    "rag_n_results": 3,
+    "rag_query_rewriting": false,
+    "embedding_model": "BAAI/bge-large-zh-v1.5",
+    "embedding_dim": 1024,
+    "reranker_model": "BAAI/bge-reranker-v2-m3"
+  },
+  "preflight": {
+    "qdrant": {
+      "reachable": true,
+      "versions": {
+        "client": "unknown",
+        "server": "unknown"
+      },
+      "collections": {
+        "product_knowledge": 0,
+        "faq": 0,
+        "tech_support": 0,
+        "complaint_knowledge": 0
+      },
+      "total_points": 0
+    },
+    "embedding": {
+      "available": true,
+      "probe": "failed",
+      "error": "EmbeddingUnavailableError",
+      "detail": "embedding unavailable: encode_failed (provider='ApiEmbedding', model='BAAI/bge-large-zh-v1.5')"
+    },
+    "bm25_rebuild": {
+      "executed": true,
+      "readiness": "BM25Readiness.READY",
+      "document_count": 0
+    },
+    "reranker": {
+      "available": true,
+      "model": "BAAI/bge-reranker-v2-m3",
+      "probe": "silent_fallback",
+      "detail": "rerank API 调用失败或未附加 rerank_score（ApiReranker 静默回退）"
+    },
+    "status": "BLOCKED_VECTOR_INDEX",
+    "hint": "运行 python3 scripts/import_eval_corpus.py 先导入评测语料"
+  },
+  "notes": [
+    "formal evaluation not run; no metrics generated",
+    "credential material is never recorded; only availability/probe outcome"
+  ]
+}

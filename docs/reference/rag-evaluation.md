@@ -54,12 +54,35 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 
 ## 3. 执行评估
 
-### 3.1 快速执行
+### 3.1 快速执行（evidence pipeline）
 
 ```bash
-# 在项目根目录执行
-python3 scripts/evaluate_rag.py
+# 1) 导入评测语料到本地 Qdrant（幂等，含 BM25 rebuild + gold 覆盖率审计）
+make rag-eval-import
+
+# 2) preflight gate（Qdrant 集合计数 / embedding 探针 / reranker 探针 / BM25 就绪）
+make rag-eval-649-preflight
+
+# 3) 冒烟（前 16 条，subset_run=true，不可作为正式证据）
+make rag-eval-649-smoke
+
+# 4) 正式 649 全量评测（4 个检索配置 ablation，生成 evidence artifact）
+make rag-eval-649
 ```
+
+正式评测脚本 `scripts/evaluate_rag.py` 评测 4 个检索配置：
+
+| 实验 | Vector | BM25 | RRF | Reranker | 说明 |
+|------|--------|------|-----|----------|------|
+| vector_only | ✅ | ❌ | ❌ | ❌ | 单路向量基线 |
+| bm25_only | ❌ | ✅ | ❌ | ❌ | 单路词法基线 |
+| hybrid_no_rerank | ✅ | ✅ | ✅ | ❌ | 混合检索（无重排） |
+| hybrid_rerank | ✅ | ✅ | ✅ | ✅ | 生产架构（production-like） |
+
+> ablation 切换只作用于评测进程内的 KB 实例/请求参数
+> （`_hybrid_enabled` / `_embed_fn` / `request.rerank`），生产默认配置
+> （`HYBRID_SEARCH_ENABLED` 等）不被修改；测试防护见
+> `tests/unit/test_rag_eval_harness.py`。
 
 ### 3.2 评估数据集
 
@@ -78,18 +101,115 @@ python3 scripts/evaluate_rag.py
 | 投诉处理 | 80 |
 | difficulty: easy / medium / hard | 219 / 225 / 205 |
 
-### 3.3 结果解读
+### 3.3 结果解读（evidence artifact）
 
-评估脚本会输出：
+正式评测输出到 `artifacts/evaluation/rag-649/<run-id>/`：
 
-1. **逐条查询结果**：每条查询的命中状态（✅/❌）、命中排名、P@K 值
-2. **汇总统计表**：Hit Rate、Precision、Recall、MRR、平均距离
-3. **分类统计**：按查询类别的命中率对比
-4. **JSON 报告**：保存到 `docs/rag-evaluation-report.json`
+1. **report.json**：机器可读证据（提交）——schema_version / run_id / timestamp /
+   git SHA / benchmark sha256 与条数 / runtime config / 4 实验的
+   Hit@K、Recall@K、Precision@K、NDCG@K、MRR / 实测 latency（mean、P50/P90/P95/P99，
+   含 VECTOR/BM25/FUSION_RRF/RERANK 分阶段实测值）/ category 明细 /
+   ablation 对比（hybrid vs 单路、reranker uplift）与逐 query 改善/退化计数 /
+   failure taxonomy 计数与样本 / preflight gate 结果
+2. **failures.json**：全量失败明细（提交）——每条失败含 query_id、category、
+   expected/gold、rank、failure_type（TIMEOUT / PROVIDER_ERROR /
+   GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK）与通道级诊断
+3. **raw_results.json**：逐 query 原始检索结果（本地保留，不提交，
+   sha256 记录于 report.json）
 
-### 3.4 评估结果
+指标分母定义（写进 artifact notes）：指标在「成功执行检索」的查询上取均值；
+exception / timeout 计入 failures，不进指标分母；降级查询（如向量通道超时
+退化为词法）计入指标并按 `degraded_reason` 单独计数。
 
-> 当前值必须由 `python3 scripts/evaluate_rag.py`（649 条基准）重新生成。
+#### 3.3.1 Blocker 语义（schema v2，`rag-eval-evidence/v2`）
+
+preflight 复合判定遵循 **primary cause != downstream symptom** 原则，
+机器可读结构：
+
+```json
+{
+  "status": "BLOCKED",
+  "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+  "blockers": [
+    {"code": "EMBEDDING_PROVIDER_AUTH", "stage": "embedding", "blocking": true,
+     "http_status": 401},
+    {"code": "VECTOR_INDEX_EMPTY", "stage": "qdrant", "blocking": true,
+     "caused_by": "EMBEDDING_PROVIDER_AUTH"}
+  ]
+}
+```
+
+- `status`：BLOCKED（存在阻塞管线的 blocker）/ PARTIAL（仅局部阻塞）/
+  OK。
+- `primary_blocker`：根因（当前已知根因代码：`EMBEDDING_PROVIDER_AUTH` /
+  `EMBEDDING_PROVIDER_UNAVAILABLE` / `VECTOR_INDEX_EMPTY`）。
+- `caused_by`：downstream 症状与根因的因果链接。索引为空且 embedding
+  认证失败时，`VECTOR_INDEX_EMPTY.caused_by = EMBEDDING_PROVIDER_AUTH`；
+  embedding 健康而索引为空时，`VECTOR_INDEX_EMPTY` 本身即根因（待导入），
+  不带 `caused_by`。
+- reranker 失败（401/403 → `RERANKER_PROVIDER_AUTH`；其他失败 →
+  `RERANKER_PROVIDER_DEGRADED`）**只阻塞 hybrid_rerank**
+  （`blocks_experiments: ["hybrid_rerank"]`，`blocking: false`），
+  不得据此阻塞 vector_only / bm25_only / hybrid_no_rerank。
+- artifact 只记录 provider HTTP 状态码与探针结果，绝不记录凭据材料
+  （key / Authorization / 凭据 hash / 前后缀均不落盘）。
+
+历史 v1 artifact（`schema_version: rag-eval-evidence/v1`，如
+`preflight-20260929T191128Z`）使用单层 status 字符串
+（如 `BLOCKED_VECTOR_INDEX`），会被原样保留、不做回填；其根因分析结论为
+PROVIDER_AUTH 是 primary blocker、empty index 是 downstream blocker，
+两者不矛盾（v1 顶层 status 采用了 downstream 症状命名）。v2 起新
+artifact 使用上述结构化语义。
+
+#### 3.3.2 评测分母三视图（evaluation_populations）
+
+正式 artifact 必须输出三套 population 口径，**全部运行时动态计算，
+禁止硬编码任何分母数字**：
+
+| 视图 | 定义 | 用途 |
+|------|------|------|
+| `all_queries`（View A，**主口径**） | 全部查询进入分母；gold 未进入索引的查询（GOLD_NOT_INDEXED）仍算失败、按 0 分计入 | 系统级结果：corpus coverage + indexing + retrieval algorithm |
+| `retrieval_eligible`（View B） | 至少 1 个 gold document 已进入 corpus/index 的查询（数量动态计算） | 分析 retriever 在「至少存在可命中文档」情况下的表现 |
+| `full_gold_covered`（View C） | 全部 gold documents 都存在于当前 corpus/index 的查询（数量动态计算） | Recall@K / NDCG 分析，避免 gold 缺失直接压低算法指标 |
+
+**主口径固定为 `all_queries`（端到端）**；`retrieval_eligible` /
+`full_gold_covered` 只作为诊断视图并列输出，不得挑选其中最好看的一组
+单独对外宣称。引用指标时必须注明 population（例如
+"649-query end-to-end benchmark" 或 "full-gold-covered subset"）。
+
+### 3.4 当前评测状态
+
+> **当前 649-query 正式指标：NOT_VERIFIED。**
+>
+> 2026-09-30 的评测尝试在 preflight gate 被阻塞
+> （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，
+> v1 schema，原样保留不回填）：
+> - embedding provider 认证失败（401，探针失败）→ 语料导入与向量通道无法进行；
+> - reranker provider 同样 401（`ApiReranker` 静默回退被探针识别为
+>   `silent_fallback`，不产出假阳性）；
+> - 本地 Qdrant 集合为空（导入依赖 embedding，随之阻塞）。
+>
+> blocker 语义（按 v2 口径复盘该 v1 artifact）：primary blocker =
+> `EMBEDDING_PROVIDER_AUTH`（根因）；`RERANKER_PROVIDER_AUTH` 同级独立阻塞
+> hybrid_rerank；`VECTOR_INDEX_EMPTY`（empty index）为 downstream 症状
+> （caused_by 指向根因）——v1 顶层 status 命名为 `BLOCKED_VECTOR_INDEX`
+> 只是采用了 downstream 症状，与根因结论不矛盾。
+>
+> 语料与基准的 gold 覆盖率审计（导入 manifest：
+> `artifacts/evaluation/rag-649/import_manifest_import-20260929T190455Z.json`）：
+> 基准 1250 个 unique gold doc 中 1220 个存在于当前 5000 条语料
+> （coverage 97.6%），30 个 `scene_0008xx` gold 文档不在语料中，
+> 影响 80 条查询（其中 40 条查询的全部 gold 缺失）。正式评测时这些查询
+> 按 GOLD_NOT_INDEXED 记账；三套 population 分母
+> （all_queries / retrieval_eligible / full_gold_covered）由
+> `scripts/evaluate_rag.py` 在运行时对索引 corpus 动态计算（§3.3.2），
+> 上述 manifest 数字仅为语料文件口径的参考，不作为评测分母硬编码。
+>
+> 待 provider 凭据恢复后，按 §3.1 复现：`make rag-eval-import` →
+> `make rag-eval-649-preflight` → `make rag-eval-649`。
+
+### 3.5 历史评估结果
+
 > 以下两个小节是**历史报告快照**，数据集与配置与当前不同，只能作为对比叙事。
 
 #### 历史基线数据（2026-06-06，改进前）

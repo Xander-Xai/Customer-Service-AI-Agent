@@ -11,7 +11,6 @@ RAG Reranker（v6.2）
     reranked = reranker.rerank(query, results, top_k=3)
 """
 
-import os
 from typing import Any
 
 import httpx
@@ -48,6 +47,9 @@ class ApiReranker:
         else:
             self._available = True
             logger.info(f"API Reranker 初始化: {self._model} @ {self._base_url}")
+        # 最近一次 API 失败的 HTTP 状态码（仅供 preflight/评测 gate 诊断，
+        # 不含任何凭据材料；成功时不更新）
+        self.last_error_status: int | None = None
 
     @property
     def available(self) -> bool:
@@ -80,14 +82,17 @@ class ApiReranker:
             response.raise_for_status()
             data = response.json()
         except httpx.TimeoutException:
+            self.last_error_status = None
             logger.warning(f"Reranker API 超时 ({self._timeout}s)，使用原始排序")
             return results[:top_k]
         except httpx.HTTPStatusError as e:
+            self.last_error_status = e.response.status_code
             logger.warning(
                 f"Reranker API HTTP {e.response.status_code}: {e.response.text[:200]}"
             )
             return results[:top_k]
         except Exception as e:
+            self.last_error_status = None
             logger.warning(f"Reranker API 调用失败: {e}")
             return results[:top_k]
 
