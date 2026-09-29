@@ -2,7 +2,17 @@
 
 > 本文档解决"无真实端到端验证"缺口，提供从配置到验证的完整操作步骤。
 >
-> **复审说明（v5.5 兼容性）**：本文档经 2026-06-20 复审，核心验证流程与当前代码一致。注意 v5.3 后 WebSocket 认证不再允许 DEV_MODE 绕过，v5.5 还新增了 LLM 启动健康检查与 API Key 占位符校验，需确保 API Key 或 JWT 正确配置。
+> **校准说明（v6.3，2026-09-30）**：验证流程以当前代码为准（provider 探针、
+> JWT/占位符校验、WebSocket DEV_MODE 不绕过等加固均已生效）。历史实测結果
+> 一律归入 §8 Historical Evidence 区；当前测试数量用 `pytest --collect-only -q`
+> 现场获取，不沿用任何历史数字。涉及 RAG 检索质量时，走
+> `make rag-eval-649-preflight` 流程（见
+> [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md)），
+> 不要把历史 30-query 快照当作当前结果。
+>
+> **provider 先探针**：任何真实调用前先 `python3 scripts/probe_provider_auth.py`，
+> 401/403 是 NON_RETRYABLE auth 失败，chat/流式/评测都会被阻塞——这就是
+> 历史 staging 运行失败与当前 RAG preflight BLOCKED 的根因。
 
 ---
 
@@ -20,15 +30,19 @@
 | 项目依赖 | `pip install -r requirements.txt` |
 | API Key | 硅基流动 / DeepSeek / OpenAI 任一平台的有效 Key |
 
-### 2.1 获取低成本 API Key
+### 2.1 获取 API Key
 
-**推荐：硅基流动（SiliconFlow）**—— Qwen3-8B 约 ¥0.35/百万 token，一次 E2E 验证成本 < ¥0.01。
+> ⚠️ **价格说明**：以下费用为 2026-06 撰写时的历史估计值，价格可能已变化；
+> 部署前以 provider 官网当前定价为准。本仓库不维护动态价格。
+
+**推荐：硅基流动（SiliconFlow）**——当时 Qwen3-8B 约 ¥0.35/百万 token、
+一次 E2E 验证成本约 < ¥0.01（历史估计）。
 
 1. 访问 https://siliconflow.cn 注册账号
 2. 创建 API Key（以 `sk-` 开头）
 3. 记录 Key 值
 
-**备选：DeepSeek** —— deepseek-chat 约 ¥1/百万 token。
+**备选：DeepSeek** —— 当时 deepseek-chat 约 ¥1/百万 token（历史估计）。
 
 ---
 
@@ -43,7 +57,10 @@ cp .env.example .env
 
 ### 3.2 修改关键配置
 
-编辑 `.env`，修改以下 3 项：
+编辑 `.env`，修改以下几项（embedding 走 HTTP API：默认未单独配置时
+`EMBEDDING_API_KEY` 复用 `OPENAI_API_KEY`；需要独立凭据时单独设置。
+reranker 默认读 `RERANKER_API_KEY`，未配置时重排不可用并回退原始顺序，
+不会被静默伪装成功——preflight 探针会显式标记）：
 
 ```bash
 # ===== 必改项 =====
@@ -74,19 +91,16 @@ OPENAI_MODEL=deepseek-chat
 ## 4. 验证路径一：运行 E2E 测试（推荐，5 分钟）
 
 ```bash
-# 运行真实 LLM 端到端测试
+# 真实调用前先探针 provider 认证（401/403 直接 STOP）
+python3 scripts/probe_provider_auth.py
+
+# 运行真实 LLM 端到端测试（当前测试数量/名称以 pytest 实际输出为准，
+# 不要把本节的历史结果当作当前 checkout 的验证）
 python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -s
 ```
 
-预期输出（5 个测试全部 PASS）：
-
-```
-tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED
-tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_return_exchange_query      PASSED
-tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_technical_query_with_rag   PASSED
-tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_multi_turn_context         PASSED
-tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense          PASSED
-```
+有效 Key 就绪后你会看到 5 个 `real_llm` 标记的测试全部 PASS（测试数量以
+当前 `pytest --collect-only -q` 为准——不要按本文档背历史数字）。
 
 ### 测试覆盖内容
 
@@ -100,9 +114,9 @@ tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense     
 
 ### 截图要点
 
-建议截取以下画面作为面试展示素材：
+建议截取以下画面作为面试展示素材（用**你自己的当前运行结果**截图）：
 
-1. **终端截图**：5 个 PASSED 的测试结果
+1. **终端截图**：probe 探针 OK + `pytest PASSED` 的测试结果
 2. **终端截图**：每个测试的详细输出（query_type、collaboration_mode、响应内容）
 
 ---
@@ -214,11 +228,13 @@ curl -N http://localhost:8000/api/chat/stream \
 
 ---
 
-## 8. 实测结果（2026-06-20，硅基流动 Qwen3-8B）
+## 8. Historical Evidence（2026-06-20 快照，硅基流动 Qwen3-8B）
 
-> 以下为真实运行结果，可直接用于面试展示。
-
-> 备注：当前仓库 `pytest --collect-only -q` 收集到 1352 个测试用例，本文档中的 5 个真实 LLM 测试只是 E2E 子集。
+> **本节是历史实测快照（Historical Evidence），属于其执行时点的记录。**
+> 它不是当前 checkout 的验证结果；当前验证必须重新执行 §4 的测试，
+> 数量与结果以当前 pytest 输出为准。
+> 当时 `pytest --collect-only -q` 的收集数（当年口径：1352 个）是历史时点数字，
+> **不作为当前测试数**——当前 chaired collected 数请现场执行该命令获取。
 
 ```
 tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED   8.9s
@@ -229,7 +245,10 @@ tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense     
 =============================== 5 passed in 58.28s ===============================
 ```
 
-### 集成测试中发现并修复的 Bug
+> 上面的测试时长（8.9s–14.5s、总 58.28s）为 2026-06-20 当次网络/模型快照，
+> 不是可复现的当前延迟；不得被引用为 SLA 或性能证据。
+
+### 集成测试中发现并修复的 Bug（历史记录）
 
 真实 LLM 测试暴露了两个 Mock 测试无法覆盖的问题，已修复：
 
@@ -270,8 +289,8 @@ _RE_INJECTION_DISCLOSURE = re.compile(
 
 ## 9. 面试话术
 
-准备好后，面试时可以这样说：
+准备好后，面试时这样说（数字只能引用你自己**当前运行**的结果）：
 
-> "这个项目我已经跑通了完整的 E2E 流程。用硅基流动的 Qwen3-8B 模型，5 个自动化测试用例全部通过——覆盖产品咨询、退货路由、RAG 增强、多轮上下文和注入防御。集成测试中还发现了两个 Mock 测试无法覆盖的 Bug：一个是路由优先级缺陷，一个是小模型的注入泄露，都已在输出层修复。"
+> "这个项目我已经跑通了完整的 E2E 流程。用硅基流动的 Qwen3-8B 模型，5 个真实 LLM 自动化测试用例全部通过——覆盖产品咨询、退货路由、RAG 增强、多轮上下文和注入防御。集成测试中还发现了两个 Mock 测试无法覆盖的 Bug：一个是路由优先级缺陷，一个是小模型的注入泄露，都已在输出层修复。"
 >
 > （如录屏）"这里有一段 40 秒的录屏，展示了从登录到多轮对话到监控面板的完整流程。"

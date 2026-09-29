@@ -2,6 +2,25 @@
 
 This harness makes Issue #7 measurable without claiming that local fixtures are production evidence.
 
+## Two evidence families
+
+This repository maintains two distinct evidence families; do not substitute one for the other:
+
+1. **Provider / production evidence** — authentication, token usage/billing, latency, staging outcomes (this document, `scripts/run_production_evidence.py`, `scripts/probe_provider_auth.py`).
+2. **RAG retrieval evaluation evidence** — benchmark retrieval quality across controlled ablations (canonical reference: [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md)).
+
+A local RAG benchmark on `tests/eval/rag_benchmark.json` is **not** a production customer outcome: it measures retriever/search quality on a fixed query set, not end-user resolution quality, latency SLOs, or business metrics.
+
+## RAG metric contract (canonical: rag-evaluation.md)
+
+- **4 retrieval configurations (ablation)**: `vector_only`, `bm25_only`, `hybrid_no_rerank`, `hybrid_rerank` (production-like)
+- **multi-K metrics**: Hit@K, Recall@K, Precision@K, NDCG@K, MRR@K (K ∈ {1,3,5,8})
+- **measured stage latency**: VECTOR / BM25 / FUSION_RRF / RERANK taken from the retrieval trace (measured, not derived)
+- **evaluation populations**: `all_queries` (primary end-to-end denominator), `retrieval_eligible`, `full_gold_covered` — all computed at runtime, never hardcoded; citations must name the population
+- **failure taxonomy**: TIMEOUT / PROVIDER_ERROR / GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK (+ channel diagnostics)
+
+**Current status: the formal 649-query metrics are `NOT_VERIFIED`.** The committed preflight evidence (`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`, v1 schema, preserved as-is) shows the provider-authentication blocker; no formal metrics artifact exists yet. See rag-evaluation.md §3.4 for the live status.
+
 ## Local run
 
 ```bash
@@ -53,7 +72,7 @@ The application configuration currently loads `.env` with `load_dotenv(override=
 
 - latency records sample count, warmup count, and the interpolation method; P50/P95/P99 are not aliases for maximum
 - streaming measurements must distinguish TTFT from total completion latency
-- retrieval supports Hit@K, Recall@K, and MRR; NDCG requires relevance labels
+- retrieval (RAG evidence pipeline) supports Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K across K = {1,3,5,8}; binary relevance for NDCG; Hit@K and Recall@K are different quantities — never conflate them
 - task success uses deterministic evidence, field, tool, and degraded-signal assertions; an LLM judge is not the sole grader
 - recoverability distinguishes `normal_success`, `degraded_success`, `graceful_failure`, and `hard_failure`
 
@@ -82,7 +101,7 @@ This is the current evidence contract, not a claim that production has been vali
 | Provider authentication | `NOT_VERIFIED` / controlled probe may return HTTP 401 | Never use a repository credential or print secrets |
 | Provider token usage/billing | `NOT_AVAILABLE` | No production cost claim may be derived |
 | Production latency/P99 | `NOT_MEASURED` | Local processing time is not provider or production latency |
-| RAG quality | Must name dataset, code, model, K, and artifact | Do not conflate Hit@K with Recall@K |
+| RAG quality (649-query formal metrics) | `NOT_VERIFIED` (provider-auth blocker in committed preflight evidence) | Must name dataset, code, model, K, population, and artifact; never conflate Hit@K with Recall@K |
 | FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
 
 Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,

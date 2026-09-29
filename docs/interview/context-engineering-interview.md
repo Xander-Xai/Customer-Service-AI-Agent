@@ -46,6 +46,22 @@ old-result compaction → next LLM call`。V1 保留 function-calling 配对关�
 latency”；不能说“生产 token cost reduction”“真实 API latency reduction”
 或“真实 ERP 已支持分页”，除非另有独立、可复现的生产证据。
 
+## 与 RAG 评测链的关系（2026-09-30，PR #19）
+
+Context Engineering（本文档）与 RAG retrieval evaluation（
+`scripts/evaluate_rag.py`，canonical：docs/reference/rag-evaluation.md）是两个
+相邻但独立的问题：
+
+- RAG 评测链回答"检索质量"：4-config ablation（vector_only / bm25_only /
+  hybrid_no_rerank / hybrid_rerank）、multi-K（Hit@K / Recall@K /
+  Precision@K / NDCG@K / MRR@K）、实测 stage latency、三套 population 分母
+  （all_queries 主口径）、failure taxonomy、带 git SHA + benchmark sha256 的
+  provenance artifact
+- 面试时同样适用本文档的证据纪律：**当前 649-query 正式指标 NOT_VERIFIED**
+  （provider 401 blocker 已留档），不得报"当前 Hit/MRR"百分比；可以讲
+  ablation 设计、指标分母定义与失败记账
+- 共同纪律：本地/评测证据 ≠ 生产结果；external API latency 一律 NOT_MEASURED
+
 ## Tool Result Cache Reuse：60–90 秒答案
 
 在 Context Engineering V2 之后，我又把“减少上下文”和“减少工具执行”拆成

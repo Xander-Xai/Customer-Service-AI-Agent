@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import inspect
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -22,6 +23,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 BENCHMARK_PATH = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
+EVAL_SCRIPT = PROJECT_ROOT / "scripts" / "evaluate_rag.py"
+MAKEFILE_PATH = PROJECT_ROOT / "Makefile"
 
 
 def _llm_facts() -> dict:
@@ -77,6 +80,75 @@ def _benchmark_query_count() -> tuple[int, int]:
     return declared, actual
 
 
+# Canonical evaluation-harness facts, extracted at runtime from the evidence
+# pipeline source (single source of truth: scripts/evaluate_rag.py).
+# These are harness *capabilities* (experiment names / metric families /
+# populations / failure taxonomy), NOT evaluation results — no metric number
+# is ever emitted here.
+
+
+def _evaluation_facts() -> dict:
+    src = EVAL_SCRIPT.read_text(encoding="utf-8")
+
+    experiments = re.findall(
+        r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', src, re.MULTILINE
+    )
+    seen: set[str] = set()
+    experiment_names = [e for e in experiments if not (e in seen or seen.add(e))]
+
+    metric_names = ["hit@k", "recall@k", "precision@k", "ndcg@k", "mrr@k"]
+
+    pop_match = re.search(r"POPULATION_VIEWS\s*=\s*\(([^)]*)\)", src, re.DOTALL)
+    populations = re.findall(r'"([a-z_]+)"', pop_match.group(1)) if pop_match else []
+
+    ks_match = re.search(r"DEFAULT_KS\s*=\s*\(([^)]*)\)", src)
+    ks = re.findall(r"\d+", ks_match.group(1)) if ks_match else []
+
+    schema_match = re.search(r'REPORT_SCHEMA_VERSION\s*=\s*"([^"]+)"', src)
+    schema_version = schema_match.group(1) if schema_match else None
+
+    failure_match = re.search(r"FAILURE_TAXONOMY\s*=\s*\(([^)]*)\)", src, re.DOTALL)
+    failure_taxonomy = (
+        re.findall(r'"([A-Z_]+)"', failure_match.group(1)) if failure_match else []
+    )
+
+    canonical_doc = PROJECT_ROOT / "docs" / "reference" / "rag-evaluation.md"
+    formal_status_marker = (
+        current_formal_status(canonical_doc) if canonical_doc.exists() else None
+    )
+
+    return {
+        "evaluation_experiments": experiment_names,
+        "evaluation_metric_names": metric_names,
+        "evaluation_metric_ks": [int(k) for k in ks],
+        "evaluation_populations": populations,
+        "evaluation_failure_taxonomy": failure_taxonomy,
+        "evaluation_report_schema_version": schema_version,
+        "rag_formal_metrics_status": formal_status_marker,
+    }
+
+
+def current_formal_status(canonical_doc: Path) -> str:
+    """Derive the formal-metric status marker from the canonical review doc.
+
+    The only accepted explicit states are NOT_VERIFIED / VERIFIED; the marker
+    line must stay explicit so drift between doc and truth is detectable.
+    Absence of the marker is surfaced as UNKNOWN (not guessed), which the
+    --check contract treats as drift while formal evaluation is pending.
+    """
+    text = canonical_doc.read_text(encoding="utf-8", errors="replace")
+    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?NOT_VERIFIED", text):
+        return "NOT_VERIFIED"
+    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?VERIFIED", text):
+        return "VERIFIED"
+    return "UNKNOWN"
+
+
+def _makefile_targets() -> list[str]:
+    makefile = MAKEFILE_PATH.read_text(encoding="utf-8")
+    return re.findall(r"^([a-zA-Z][a-zA-Z0-9_-]*):", makefile, re.MULTILINE)
+
+
 def collect() -> dict:
     facts = _llm_facts()
     facts["openapi_path_count"] = _openapi_path_count()
@@ -84,6 +156,11 @@ def collect() -> dict:
     declared, actual = _benchmark_query_count()
     facts["rag_benchmark_query_count"] = declared
     facts["rag_benchmark_metadata_consistent"] = declared == actual
+    facts.update(_evaluation_facts())
+    facts["makefile_rag_eval_targets_present"] = sorted(
+        t for t in _makefile_targets()
+        if t in {"eval-rag", "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import"}
+    )
     return facts
 
 
@@ -117,6 +194,28 @@ def check_doc(doc_path: Path) -> int:
             problems.append(f"stale fact: expected `{token}` in {doc_path.name}")
     if not facts["rag_benchmark_metadata_consistent"]:
         problems.append("rag benchmark metadata inconsistent (total_queries != len(queries))")
+    # Evaluation-harness drift guards (machine-derived from evaluate_rag.py):
+    for experiment in facts["evaluation_experiments"]:
+        if experiment not in text:
+            problems.append(
+                f"stale evaluation fact: canonical experiment `{experiment}` missing from {doc_path.name}"
+            )
+    for population in ("all_queries", "retrieval_eligible", "full_gold_covered"):
+        if population not in text:
+            problems.append(
+                f"stale evaluation fact: population `{population}` missing from {doc_path.name}"
+            )
+    for target in ("rag-eval-import", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-649"):
+        if target not in text:
+            problems.append(
+                f"stale evaluation fact: canonical make target `{target}` missing from {doc_path.name}"
+            )
+    if facts.get("rag_formal_metrics_status") != "NOT_VERIFIED":
+        problems.append(
+            f"rag formal metrics status drifted: doc state is "
+            f"{facts.get('rag_formal_metrics_status')} (expected NOT_VERIFIED until a "
+            "provenance-bearing formal artifact exists)"
+        )
     for problem in problems:
         print(f"ERROR: {problem}")
     if problems:

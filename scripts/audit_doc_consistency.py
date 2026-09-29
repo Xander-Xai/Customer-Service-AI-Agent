@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic guard for documentation/runtime drift (v2).
+"""Deterministic guard for documentation/runtime drift (v3).
 
 Discovery-based: scans active docs (README.md, CLAUDE.md, docs/**) and skips
 explicit historical snapshots (archive/, milestone/, superpowers/, plans/,
@@ -19,9 +19,15 @@ Checks:
   F. RAG benchmark metadata integrity (total_queries == len(queries))
   G. prohibited stale current-state terminology in active docs
   H. referenced rag/core/web source files must exist
+  I. hardcoded test counts framed as current truth (v3, rule A)
+  J. canonical RAG evaluation command/doc references (v3, rules B/C)
+  K. unproven current formal RAG metric claims while NOT_VERIFIED (v3, rule D)
+  L. make targets referenced by current-truth docs must exist (v3, rule E)
+  M. tracked+ignored repository hygiene (v3, rule F)
 
-Historical docs (with an explicit HISTORICAL banner) are excluded from G but
-still pass through link/reference checks unless they are excluded entirely.
+Historical docs (with an explicit HISTORICAL banner) are excluded from
+terminology checks but still pass through link/reference checks unless they
+are excluded entirely.
 """
 
 from __future__ import annotations
@@ -378,6 +384,250 @@ def check_stale_terms(docs: list[Path], warnings: list[str], errors: list[str], 
                     )
 
 
+# ---------------------------------------------------------------------------
+# v3 drift rules (RAG evidence pipeline epoch)
+# ---------------------------------------------------------------------------
+
+# (I) Hardcoded test-collector counts framed as current truth. Active docs
+# must derive counts dynamically (`pytest --collect-only -q` / `npm test`);
+# dated historical snapshots are exempt via discovery/historical banners.
+CURRENT_TEST_COUNT_PATTERNS = [
+    (re.compile(r"收集\D{0,10}\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
+     "hardcoded pytest collected count framed as current"),
+    (re.compile(r"pytest --collect-only.{0,80}?\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
+     "hardcoded pytest collected count framed as current"),
+    (re.compile(r"(?:用例|测试)(?:总数|数量)\s*(?:约|=|为|:：)?\s*\d{3,}"),
+     "hardcoded test-count claim framed as current"),
+    (re.compile(r"npm test\b[^|\n]{0,40}=\s*\d+\s*/\s*\d+"),
+     "hardcoded npm test N/N framing (current-truth claim)"),
+    (re.compile(r"(?:all\s*|所有\s*|全部\s*)\d+\s*tests?\s*(?:pass|passed|通过)", re.IGNORECASE),
+     "fixed 'all N tests pass' framing"),
+]
+# Lines that explicitly frame counts as dynamic command output are allowed.
+DYNAMIC_COUNT_FRAMING = re.compile(
+    r"npm test`?[^。\n]{0,12}(?:输出|结果)|输出为准|当前输出|以命令输出"
+)
+
+# (J) Canonical RAG documentation reference required in entry-point docs.
+CANONICAL_RAG_DOC = "docs/reference/rag-evaluation.md"
+RAG_ENTRY_DOCS = [
+    "README.md",
+    "CLAUDE.md",
+    "docs/reference/current-state.md",
+]
+# Canonical RAG evaluation make targets that must be wired to the canonical
+# evaluation scripts in the Makefile.
+RAG_EVAL_MAKE_TARGETS = (
+    "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import",
+)
+
+# (K) Metric families that must not be claimed as current formal numbers while
+# the canonical doc still says NOT_VERIFIED (enter via formal_rag_metrics()).
+UNPROVEN_CURRENT_METRIC = re.compile(
+    r"current.{0,24}(?:Hit@?\d|MRR|NDCG|Recall@\d)\D{0,12}\d{1,3}(?:\.\d+)?\s*%"
+    r"|当前(?:的)?\s*(?:Hit@?\d|MRR|NDCG|Recall@\d).{0,20}\d{1,3}(?:\.\d+)?\s*%",
+    re.IGNORECASE,
+)
+METRIC_PROVENANCE_RE = re.compile(
+    r"artifact|provenance|历史|historical|快照|snapshot|估算|estimate|fixture|"
+    r"预计|目标|design goal|待重跑|待验证|NOT_VERIFIED|未验证",
+    re.IGNORECASE,
+)
+
+# (L) make targets referenced by current-truth docs must be defined.
+MAKE_TARGET_REF_RE = re.compile(
+    r"\bmake\s+(rag-eval-649-preflight|rag-eval-649-smoke|rag-eval-import|rag-eval-649|eval-rag)\b"
+)
+
+# (M) Tracked files the repo deliberately keeps despite ignore patterns
+# (documented in docs/reports/audit/**).
+TRACKED_IGNORED_ALLOWED = {"CLAUDE.md"}
+
+
+def text_lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+
+def formal_rag_metrics(root: Path = ROOT) -> str:
+    """Machine-derived RAG formal-metric status (drives rule K).
+
+    Reads the explicit NOT_VERIFIED/VERIFIED marker from the canonical
+    reference doc (the doc itself is guarded by project_facts.check_doc).
+    Returns NOT_VERIFIED | VERIFIED | UNKNOWN.
+    """
+    canonical = root / CANONICAL_RAG_DOC
+    if not canonical.exists():
+        return "UNKNOWN"
+    text = canonical.read_text(encoding="utf-8", errors="replace")
+    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?NOT_VERIFIED", text):
+        return "NOT_VERIFIED"
+    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?VERIFIED", text):
+        return "VERIFIED"
+    return "UNKNOWN"
+
+
+def check_test_count_framing(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule I: numbered test counts must not be written as current truth in
+    active docs; dynamic framing (以 … 输出为准) is allowed."""
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            for pattern, reason in CURRENT_TEST_COUNT_PATTERNS:
+                m = pattern.search(line)
+                if not m:
+                    continue
+                if DYNAMIC_COUNT_FRAMING.search(line):
+                    continue
+                errors.append(
+                    f"hardcoded test count framed as current truth ({reason}) "
+                    f"in {rel}:{line_no} — derive counts with "
+                    f"`pytest --collect-only -q` / `npm test`"
+                )
+
+
+def check_rag_eval_references(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rules J: the canonical RAG evaluation process must be resolvable —
+    canonical doc exists, Makefile wires the documented targets to the
+    canonical scripts, entry docs link the canonical reference, and the
+    canonical doc itself carries the evidence-pipeline vocabulary."""
+
+    canonical = root / CANONICAL_RAG_DOC
+    if not canonical.exists():
+        errors.append(
+            f"canonical RAG evaluation reference missing: {CANONICAL_RAG_DOC}"
+        )
+        return
+
+    makefile = root / "Makefile"
+    if not makefile.exists():
+        errors.append("Makefile missing: canonical RAG evaluation commands cannot be resolved")
+    else:
+        mk = makefile.read_text(encoding="utf-8")
+        # Canonical RAG evaluation make targets and the scripts they must invoke.
+        for name in RAG_EVAL_MAKE_TARGETS:
+            if not re.search(
+                rf"^{name}:[^\n]*\n(?:\t[^\n]*\n)*?\tpython3 scripts/(evaluate_rag|import_eval_corpus)\.py",
+                mk,
+                re.MULTILINE,
+            ):
+                errors.append(
+                    f"Makefile target `{name}` missing or not wired to the "
+                    f"canonical evaluation script "
+                    f"(scripts/evaluate_rag.py / import_eval_corpus.py)"
+                )
+
+    entry_rels = {Path(rel_str) for rel_str in RAG_ENTRY_DOCS}
+    for doc in docs:
+        rel = doc.relative_to(root)
+        if rel not in entry_rels or doc == canonical:
+            continue
+        text = doc.read_text(encoding="utf-8", errors="replace")
+        if "rag-evaluation.md" not in text:
+            errors.append(
+                f"{rel} presents RAG evaluation content but does not link the "
+                f"canonical reference {CANONICAL_RAG_DOC}"
+            )
+
+    ctext = canonical.read_text(encoding="utf-8", errors="replace")
+    for token in (
+        "vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank",
+        "all_queries", "retrieval_eligible", "full_gold_covered",
+    ):
+        if token not in ctext:
+            errors.append(
+                f"canonical RAG doc missing evidence-pipeline token: {token}"
+            )
+
+
+def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule K: while formal 649-query metrics are NOT_VERIFIED, current-truth
+    docs must not claim current Hit/MRR/NDCG percentages without a
+    provenance qualifier on the same line."""
+
+    if formal_rag_metrics(root) != "NOT_VERIFIED":
+        return
+    truth_rels = {
+        Path("README.md"),
+        Path("CLAUDE.md"),
+        Path("docs/reference/current-state.md"),
+        Path("docs/reference/rag-evaluation.md"),
+        Path("docs/evaluation/production-evidence.md"),
+    }
+    for path in docs:
+        rel = path.relative_to(root)
+        if rel not in truth_rels or rel == Path("docs/reference/rag-evaluation.md"):
+            # The canonical doc owns the metric semantics (validated separately).
+            continue
+        for line_no, line in enumerate(text_lines(path), 1):
+            if HISTORICAL_CONTEXT.search(line):
+                continue
+            if not UNPROVEN_CURRENT_METRIC.search(line):
+                continue
+            if METRIC_PROVENANCE_RE.search(line):
+                continue
+            errors.append(
+                f"unproven current RAG metric claim in {rel}:{line_no} — "
+                f"formal 649-query metrics are NOT_VERIFIED; add provenance or "
+                f"drop the number"
+            )
+
+
+def check_makefile_doc_targets(errors: list[str], root: Path = ROOT) -> None:
+    """Rule L: make targets referenced by current-truth docs must exist in the
+    Makefile (a missing Makefile is only tolerated when nothing is referenced
+    — synthetic repos)."""
+
+    mk_path = root / "Makefile"
+    mk = mk_path.read_text(encoding="utf-8") if mk_path.exists() else None
+    defined = set(re.findall(r"^([a-zA-Z][a-zA-Z0-9_-]*):", mk, re.MULTILINE)) if mk else set()
+    referenced: list[tuple[str, Path]] = []
+    for doc_rel in ("README.md", "CLAUDE.md", "docs/reference/current-state.md"):
+        p = root / doc_rel
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8", errors="replace")
+        for hit in re.findall(MAKE_TARGET_REF_RE, text):
+            referenced.append((hit, p))
+    for target, doc in referenced:
+        if target not in defined:
+            context = (
+                "not defined in the Makefile"
+                if mk is not None
+                else "but the Makefile does not exist at all"
+            )
+            errors.append(f"{doc} references make target `{target}` {context}")
+
+
+def check_tracked_ignored_files(errors: list[str], warnings: list[str], root: Path = ROOT) -> None:
+    """Rule M: repository hygiene — files both git-tracked and ignored must be
+    surfaced (runtime sidecars/secrets accumulate here silently)."""
+
+    tracked_ignored = git_tracked_ignored(root)
+    if tracked_ignored is None:
+        return
+    for path in tracked_ignored:
+        if path in TRACKED_IGNORED_ALLOWED:
+            continue
+        errors.append(
+            f"repository hygiene: tracked+ignored file not removed from index: {path} "
+            f"(git rm --cached it)"
+        )
+
+
+def git_tracked_ignored(root: Path = ROOT) -> list[str] | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-ci", "--exclude-standard"],
+            cwd=root, capture_output=True, text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        # not a git repo (e.g. synthetic test fixture): skip quietly
+        return None
+    return [p for p in out.stdout.splitlines() if p.strip()]
+
+
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -394,6 +644,11 @@ def main() -> int:
     check_openapi_snapshot(errors)
     check_benchmark_metadata(errors)
     check_stale_terms(docs, warnings, errors)
+    check_test_count_framing(docs, errors)
+    check_rag_eval_references(docs, errors)
+    check_unproven_current_metrics(docs, errors)
+    check_makefile_doc_targets(errors)
+    check_tracked_ignored_files(errors, warnings)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -405,7 +660,9 @@ def main() -> int:
         return 1
     print(
         f"OK: checked {len(docs)} active documents — links, file references, env coverage, "
-        f"canonical model config, OpenAPI snapshot, benchmark metadata, stale terminology"
+        f"canonical model config, OpenAPI snapshot, benchmark metadata, stale terminology, "
+        f"test-count framing, RAG eval references, unproven metric claims, "
+        f"make targets, tracked-ignored hygiene"
     )
     return 0
 

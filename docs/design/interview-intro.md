@@ -47,7 +47,7 @@
 >
 > **第三个是 Circuit Breaker 熔断器**。LLM API 可能持续故障，没有熔断器的话每个请求都会等 30 秒超时。我在连续 5 次失败后跳闸，后续请求直接降级到零延迟的规则分类器，60 秒后自动尝试恢复。状态转换用了 asyncio.Lock 保证并发安全。
 >
-> **第四个是生产级部署**。Nginx TLS 终止 + Gunicorn 多 Worker + Prometheus 指标采集 + Grafana 可视化仪表盘，Docker Compose 一键部署 6 个服务。
+> **第四个是部署架构**。Nginx TLS 终止 + Gunicorn 多 Worker + Prometheus 指标采集 + Grafana 可视化仪表盘，Docker Compose 一键部署 6 个服务。说明：这是已实现的部署架构；真实生产环境复核完成前，我不会宣称"已完成生产验收"。
 
 > **第五个是前端工程化**。虽然主要后端，但我也实现了完整的原生 JavaScript 前端——40+ 个 ES Module 模块、8 种主题（亮色 4 种 + 暗色 2 种 + 无障碍 + 面板）、WCAG AA/AAA 无障碍合规。SSE 真流式打字效果、WebSocket 实时通信、管理后台（用户/知识库/告警/监控）。
 
@@ -59,7 +59,7 @@
 >
 > 1. **ERP 集成是 Mock 的**——接口抽象和适配器工厂都做好了，但真实 API 对接需要企业配合
 > 2. **前端 65 处内联样式**——虽然 CSP style-src 已使用 nonce（v5.4 修复），但理想情况是完全用 CSS 类替代，方便样式维护
-> 3. **RAG 当前链路**——query rewrite/filter → Qdrant vector + BM25 → retrieval contract → fusion → rerank → context；BM25 lifecycle、deterministic Qdrant point IDs 和 migration 均有代码/测试入口。Hit@K、Recall、MRR 需绑定当前 artifact，生产质量暂为 `NOT_VERIFIED`。
+> 3. **RAG 当前链路**——query rewrite/filter → Qdrant vector + BM25 → retrieval contract → fusion → rerank → context；BM25 lifecycle、deterministic Qdrant point IDs 和 migration 均有代码/测试入口。这一轮我补上了**可复现 retrieval 评测链**（`scripts/evaluate_rag.py`：4-config ablation、multi-K 指标、实测 stage latency、failure taxonomy、provenance artifact + preflight gate）；但 developer 提供的 provider 凭据当前失效（401），正式 649-query 指标仍是 **NOT_VERIFIED**，我只能讲方法论与已阻塞的证据，不能报"当前 Hit/MRR"数字。
 > 4. **v5.4 安全升级**——密码哈希从 PBKDF2-SHA256 升级到 Argon2id（OWASP 2023 推荐），抗 GPU/ASIC 攻击能力提升 100 倍+
 >
 > 另外在真实 LLM 集成测试中发现了两个 Mock 测试无法覆盖的问题：路由优先级排序缺陷和小模型注入泄露，都已在输出层修复。这让我深刻理解了 E2E 真实测试的不可替代性。
@@ -76,7 +76,7 @@
 > LangChain Agent 是黑盒，控制流不透明。LangGraph 的 StateGraph 提供声明式的节点和条件边，我可以精确控制"什么时候该用哪种模式"，调试时也能清晰看到状态流转。对于多 Agent 系统，这种可控性是刚需。
 
 ### Q2: "缓存命中率真的有 70% 吗？"
-> 这是基于化妆品客服场景的估算。实际命中率取决于查询分布——高频 FAQ 类问题（价格、成分、物流）确实重复率很高。系统设计时通过 L2 语义缓存进一步捕获措辞不同但语义相同的问题。上线后可以通过 `/api/cache/stats` 端点监控真实命中率。
+> "70% 是设计目标区域内的估计，不是已测量的生产指标——真实命中率取决于查询分布。系统机制上就是为了吃掉这种重复：L2 语义缓存捕获措辞不同但语义相同的问题，L3 Jaccard 兜底。上线后通过 `/api/cache/stats` 和 Prometheus `cache_hit_rate` 观测真实值；在拿到生产观测之前，这个数只能叫**估算/设计目标**。"
 
 ### Q3: "自定义 LLM 客户端，为什么不用 OpenAI 官方 SDK？"
 > 三个原因：1) 需要按 base_url 做连接池隔离（不同模型用不同地址）；2) 需要和 CircuitBreaker 集成；3) Function Calling 降级——有些模型不支持 tools，400/422 错误时自动回退到纯文本模式。官方 SDK 不支持这些定制需求。
@@ -92,3 +92,6 @@
 
 ### Q7: "前端是怎么实现的？"
 > 原生 JavaScript（ES Module），没用 React/Vue。技术选型理由：1) 可嵌入性——`widget.html` 可直接嵌入任意网页；2) 体积小——无框架运行时；3) 构建用 Vite 8。实现了完整的聊天界面、主题切换（8 种）、无障碍支持（WCAG AA/AAA）、SSE 流式、WebSocket 实时通信、管理后台（用户/知识库/告警/监控）。
+
+### Q8: "RAG 效果怎么样？"——怎么回答才可信？
+> "我不会当场报一个百分比。正确讲法分三层：**机制**——rewrite → vector+BGE → BM25 → RRF(k=60) → bge-reranker 重排；**评测设计**——`scripts/evaluate_rag.py` 跑 4-config ablation（vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank），multi-K 的 Hit/Recall/Precision/NDCG/MRR，三个 population 分母（all_queries 主口径），失败按 taxonomy 记账，artifact 带 git SHA + benchmark sha256；**证据边界**——历史 30-query 快照（2026-06 的 Hit@3 80%/MRR 0.778）是历史口径，当前 649-query 正式指标因 provider 凭据失效（preflight 401 blocker）还是 NOT_VERIFIED。这套'有 provenance 才能报数字'的做法本身就是工程成熟度。详细口径见 docs/reference/rag-evaluation.md。"

@@ -23,6 +23,27 @@
 - OpenAPI HTTP paths (`app.openapi()["paths"]`): **`53`**
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
+## RAG evaluation / evidence state（2026-09-30）
+
+- **当前 649-query 正式指标（Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K）：NOT_VERIFIED。**
+  在 preflight 通过并产生正式 artifact 之前，不得把任何百分比写成当前事实。
+- Evidence harness 支持 **4 个检索配置**（canonical 实验名以
+  [docs/reference/rag-evaluation.md](rag-evaluation.md) 为准）：
+  `vector_only` / `bm25_only` / `hybrid_no_rerank` / `hybrid_rerank`。
+- Metric family：Hit@K、Recall@K、Precision@K、NDCG@K、MRR@K（multi-K：1/3/5/8）。
+- Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
+  `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
+- 当前已提交的 preflight evidence（
+  `artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，v1 schema，
+  原样保留）显示 provider authentication blocker：embedding 与 reranker 探针 401，
+  语料导入与正式评测随之阻塞。
+- 详细流程（import → preflight → smoke → formal）、artifact schema、
+  blocker 语义与评测状态：[docs/reference/rag-evaluation.md](rag-evaluation.md)。
+  canonical 命令链：`make rag-eval-import` → `make rag-eval-649-preflight` →
+  `make rag-eval-649-smoke`（冒烟，非正式证据） → `make rag-eval-649`
+  （`make eval-rag` 为其兼容 alias）。该文档在此方面内容为 **CURRENT**
+  （随评测实现同步），其历史小节单独标注。
+
 ## 验证命令（不要复制数字，重新执行）
 
 ```bash
@@ -86,6 +107,11 @@ python3 scripts/audit_doc_consistency.py
 - 本地测试/fixture benchmark ≠ 生产证据。详见
   [docs/evaluation/production-evidence.md](../evaluation/production-evidence.md)。
 - 历史报告快照位于 `docs/reports/**`（含日期），不作为当前事实入口。
+- **RAG evidence 状态（当前 649-query 正式指标）**：当前 `NOT_VERIFIED`。
+  有 provenance-bearing 的正式 artifact 前必须保持该口径；
+  已提交的 preflight artifact（provider auth blocker）时间点有效，不构成正式指标。
+  RAG 评估的具体生命周期由 `scripts/project_facts.py`（benchmark 数/harness 事实）
+  与 [docs/reference/rag-evaluation.md](rag-evaluation.md) 共同维护。
 
 ## 历史快照与当前事实的关系
 

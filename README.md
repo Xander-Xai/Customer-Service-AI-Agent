@@ -96,7 +96,13 @@ latency 没有测量时统一标记为 `NOT_MEASURED`。
 | **前端构建** | `npm run build` | `web/static/dist/` 产物生成成功 |
 | **接口真相源** | `python -c "from api.app_factory import app; print(len(app.openapi()['paths']))"` | 与 `docs/openapi.json` 一致（可用 `python3 scripts/generate_openapi.py --check` 校验） |
 | **后端关键模块** | 以 `api/`、`auth/`、`core/`、`db/` 当前实现为准 | 不再使用旧版里程碑数字代替当前验收 |
-| **RAG 有数据** | `python scripts/evaluate_rag.py` | 输出当前指标（基准查询数以 `tests/eval/rag_benchmark.json` metadata 为准；历史 80%/0.778 为 2026-06 的 30 条查询集快照） |
+| **RAG 有数据** | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649-smoke`（冒烟，非正式证据） → `make rag-eval-649` | 正式 649-query 指标当前 **NOT_VERIFIED**（详见 [RAG 评估方案](docs/reference/rag-evaluation.md)）；历史 80%/0.778 为 2026-06 的 30 条查询集快照，不是当前结果 |
+
+**RAG evidence 边界**（canonical formal command 是 `make rag-eval-649`；`make eval-rag` 是它的兼容 alias）：
+
+- 当前 649-query 正式指标（Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K）**NOT_VERIFIED**：提交的 preflight evidence 显示 provider authentication 是 blocker，语料导入与正式评测被阻塞（状态见 [RAG 评估方案](docs/reference/rag-evaluation.md) §3.4）。
+- provider authentication 恢复前，README / 简历 / 面试材料不得引用任何"当前"Hit@K/MRR/NDCG 数字；历史 30-query 快照只能以历史口径对比叙述。
+- smoke run 是链路冒烟（`subset_run=true`），**不是正式证据**；正式证据只来自 preflight 通过后的 4-config 全量运行的 provenance-bearing artifact。
 
 > 说明：`tests/unit/test_api_routes.py` 这类大文件当前仍不适合作为“全量后端验收通过”的直接依据；README 不再把历史分数或旧测试数量写成当前事实。
 
@@ -257,7 +263,7 @@ graph TB
 
 | 层级 | 节点 | 职责 | 关键实现 |
 |------|------|------|----------|
-| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（<10ms）；P0-02 三层统一 CachePolicy 跨用户隔离（个性化回答按 user_id 作用域，公开 FAQ 共享） | [cache_policy.py](cache/cache_policy.py) + [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
+| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（跳过路由/Agent/LLM 链路；命中延迟未单独测量）；P0-02 三层统一 CachePolicy 跨用户隔离（个性化回答按 user_id 作用域，公开 FAQ 共享） | [cache_policy.py](cache/cache_policy.py) + [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
 | **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | [query_router.py](router/query_router.py)：7 种意图分类 + 熔断器降级 |
 | **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | [orchestrator.py](collaboration/orchestrator.py) + [modes.py](collaboration/modes.py) |
 | **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | [response_agent.py](agents/response_agent.py) + [evaluator.py](agents/evaluator.py) |
@@ -280,7 +286,7 @@ sequenceDiagram
     MW->>G: invoke(state)
 
     G->>L0: check_cache(query)
-    alt 缓存命中 (<10ms)
+    alt 缓存命中（跳过 LLM 链路）
         L0-->>G: cached=true, response
         G->>RA: final_response
     else 缓存未命中
@@ -747,7 +753,7 @@ customer-service-ai-agent/
 | `tests/integration/` | Mock LLM 图集成 / ERP 适配器 / 多模态 / 音频管道 / 知识库生成 / BM25 重启 | `pytest tests/integration -q` |
 | `tests/e2e/` | 全链路 E2E / 生产功能 / 场景路由 / Trace 传播 / 多模态 / 真实 LLM（需 `OPENAI_API_KEY`，标记 `real_llm`） | `pytest tests/e2e -q`（real_llm 默认跳过） |
 | `tests/stress/` | 压力测试（`@pytest.mark.stress`）：缓存 / 总线 / 黑板 / 会话 / 路由并发 | `pytest tests/stress -q` |
-| `tests/eval/` | RAG 评估资产：`rag_benchmark.json`（649 条基准，metadata 口径）+ golden 数据 | `make eval-rag` / `scripts/evaluate_rag.py` |
+| `tests/eval/` | RAG 评估资产：`rag_benchmark.json`（649 条基准，metadata 口径）+ golden 数据 | `make rag-eval-649`（`make eval-rag` 为兼容 alias；`scripts/evaluate_rag.py`） |
 | `web/src/__tests__/` | Vitest 前端单元：主题 / 聊天状态 / SSE / 对比度 / Agent 映射 / 管理后台 | `npm test` |
 
 **前端测试文件**（Vitest + jsdom）：`theme.test.js`、`chatState.test.js`、`copy.test.js`、`agents.test.js`、`contrast.test.js`、`sse.test.js`、`admin-settings.test.js`（数量以 `npm test` 输出为准）。
@@ -776,8 +782,14 @@ python3 -m pytest tests/integration/test_integration.py -v
 # 单个测试
 python3 -m pytest tests/e2e/test_all.py -v -k "test_router"
 
-# RAG 检索质量评估
+# RAG 检索质量评估（兼容入口；正式评测见下方 649 evidence 流程）
 make eval-rag
+
+# RAG 649 正式评测全流程（canonical formal evaluation）
+make rag-eval-import          # 导入评测语料（幂等，含 gold 覆盖率审计 + manifest）
+make rag-eval-649-preflight   # preflight gate（Qdrant/embedding/reranker/BM25）
+make rag-eval-649-smoke       # 冒烟（前 16 条，不是正式证据）
+make rag-eval-649             # 正式 649 全量 4-config 评测 → evidence artifact
 
 # 代码检查（Ruff）
 make lint

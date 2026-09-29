@@ -1,0 +1,230 @@
+# 2026-09-30 Documentation Convergence v3 — Full-Repo Audit
+
+> **HISTORICAL AUDIT SNAPSHOT**
+>
+> 本文件是 2026-09-30 当轮执行的审计快照，只在该时点有效；它**不是 Current Truth**，
+> 以后也不会成为 Current Truth。当前事实入口仍是
+> [docs/reference/current-state.md](../../reference/current-state.md) + `core/` 运行时代码
+> + 当前验证命令（`python3 scripts/project_facts.py`、`python3 scripts/audit_doc_consistency.py`、
+> `pytest --collect-only -q` 等）。
+
+## 1. 审计基本信息
+
+- **BASE_HEAD**: `4c97406c638825e5bd50d49cf6c0e2a5a2dc8f1e`（fetch 后的 `origin/main`，
+  即 PR #19 "eval: prepare reproducible 649-query RAG evidence pipeline"；PR #18
+  `0ad32ed0a84986ca2ab7e2b94d1d52cd537dfbb4` 为其前身，均以当前代码为准复核）
+- **FINAL_HEAD**: 见本分支最新提交（`git rev-parse HEAD` 现场获取；本文件不硬编码）
+- **分支**: `docs/convergence-v3-20260930`（独立 git worktree，基线为 origin/main）
+- **审计日期**: 2026-09-30
+- **审计版本口径**: runtime version 仍为 **6.3**（`core/config.py::VERSION`）；未创建 v6.4。
+
+## 2. 审计范围
+
+- Runtime/config：`core/config.py`、`core/container.py`、`core/graph_builder.py`、
+  `api/app_factory.py`、`.env.example`、`.env.test`、`deploy/compose/*.yml`、`Makefile`
+- RAG 实现：`rag/knowledge_base.py`、`rag/retrieval_contract.py`、`rag/bm25_retriever.py`、
+  `rag/bm25_lifecycle.py`、`rag/reranker.py`、`rag/api_embedding.py`、`rag/point_id.py`、
+  `rag/point_id_migration.py`
+- RAG evidence pipeline：`scripts/evaluate_rag.py`、`scripts/import_eval_corpus.py`、
+  `tests/unit/test_rag_eval_harness.py`、`tests/eval/rag_benchmark.json`、
+  `artifacts/evaluation/rag-649/**`、`docs/reference/rag-evaluation.md`
+- 文档治理：`scripts/audit_doc_consistency.py`、`scripts/project_facts.py`、
+  `scripts/generate_openapi.py`、`tests/unit/test_doc_consistency.py`
+- 活文档：README、CLAUDE.md、docs/reference/current-state.md、docs/reference/rag-evaluation.md、
+  docs/evaluation/production-evidence.md、docs/design/architecture-design.md、
+  docs/operations/e2e-verification-guide.md、docs/checklists/*、docs/README.md、changelog
+- 面试材料：interview-intro / interview-deep-dive / interview-questions-final /
+  interview/context-engineering-interview / reports/resume-description（最后一份冻结，未改）
+- 仓库卫生：git 跟踪 × .gitignore 冲突、SQLite sidecar 文件
+
+## 3. Fact matrix 摘要
+
+| FACT | CODE/CONFIG 源 | 状态 |
+|---|---|---|
+| Runtime version | `core/config.py::VERSION`（os.getenv("APP_VERSION", "6.3")） | CURRENT_VERIFIED（`scripts/project_facts.py` 动态） |
+| Default LLM provider/model/base_url | `LLM_PROVIDER=siliconflow` / `Qwen/Qwen3-8B` / `https://api.siliconflow.cn/v1`（code fallback == .env.example == compose） | CURRENT_VERIFIED（canonical config guard） |
+| Embedding model/dim/provider | `BAAI/bge-large-zh-v1.5` / 1024 / HTTP API（`rag/api_embedding.py`）；`EMBEDDING_API_KEY` 未单独配置时回退 `OPENAI_API_KEY`（`core/config.py:259-262`） | CURRENT_VERIFIED |
+| Reranker model/provider | `BAAI/bge-reranker-v2-m3` / HTTP API；`RERANKER_API_KEY` 独立读取，不回退 LLM key；失败回退原顺序（`rag/reranker.py`），preflight 探针识别 silent_fallback | CURRENT_VERIFIED |
+| `VECTOR_DB_MODE` | `qdrant_only`（唯一有效值，ChromaDB 已移除） | CURRENT_VERIFIED |
+| `HYBRID_SEARCH_ENABLED` | `true`（向量 + BM25 + RRF k=60） | CURRENT_VERIFIED |
+| Agent role count | 9 个运行时角色（`core/container.py::_init_agents` 由 project_facts AST 计数） | CURRENT_VERIFIED |
+| OpenAPI path/method surface | 53 paths（快照 vs `app.openapi()` surface guard） | CURRENT_VERIFIED |
+| RAG benchmark query count | 649（metadata == len(queries)，动态校验；不要复制数字进新文档） | CURRENT_VERIFIED |
+| RAG retrieval chain | rewrite/filter → vector + BM25 → retrieval contract → RRF → rerank → context | CURRENT_VERIFIED |
+| RRF | k=60，多通道一致偏好（测试） | CURRENT_VERIFIED |
+| Reranker | ApiReranker；BM25 词法重排器已移除（历史）；API 失败回退原顺序 | CURRENT_VERIFIED |
+| BM25 lifecycle | `rag/bm25_lifecycle.py`，重启 rebuild | CURRENT_VERIFIED |
+| Deterministic Qdrant point ID | `rag/point_id.py` + 迁移工具 | CURRENT_VERIFIED |
+| Evaluation harness 配置（canonical experiments） | `vector_only` / `bm25_only` / `hybrid_no_rerank` / `hybrid_rerank`（由 project_facts 从源码 AST/regex 动态抽取） | CURRENT_VERIFIED |
+| 支持的评测指标 | Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K，K ∈ {1,3,5,8}；实测阶段延迟（not derived） | CURRENT_VERIFIED（harness 能力） |
+| Evaluation populations | `all_queries`（主口径）/ `retrieval_eligible` / `full_gold_covered`，运行时动态计算 | CURRENT_VERIFIED（harness 能力） |
+| Failure taxonomy | TIMEOUT / PROVIDER_ERROR / GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK（+ 通道诊断） | CURRENT_VERIFIED（harness 能力） |
+| Artifact schema | `rag-eval-evidence/v2`（v1 历史原样保留） | CURRENT_VERIFIED |
+| **当前 649-query 正式指标** | 无正式 artifact | **NOT_VERIFIED** |
+| Provider authentication | 已提交 preflight v1 evidence：embedding 探针 401、reranker silent_fallback（401 口径复盘 FAIL-CLOSED 正确） | NOT_VERIFIED（401 blocker 留档） |
+| Provider token/billing | 无 provider 直接回报字段 | NOT_AVAILABLE |
+| Production latency/P99/SLA 达标 | 无带 provenance 的生产 artifact | NOT_MEASURED |
+| 缓存命中率（L1/L2/总） | 只有观察端点与指标暴露，无生产观测 | NOT_MEASURED（历史"70%"说法已从正文移除） |
+| LLM 调用量节省 | 设计机制存在，无当前测量 | NOT_MEASURED |
+| Deployment readiness | 部署组件（Compose 6 变体等）在 repo；真实环境复核未完成 | NOT_VERIFIED |
+
+## 4. 发现的 drift（本轮修复项）
+
+### P0（current-truth 语义错误）
+
+1. **README**：`RAG 有数据` 行把 `python scripts/evaluate_rag.py` 描述为"输出当前指标"
+   → 已改为 4 步 evidence pipeline（import → preflight → smoke → formal），明确 smoke
+   非正式证据、正式指标 NOT_VERIFIED、历史 30-query 快照只作历史口径。
+2. **production-readiness-checklist §1**：硬编码 `npm test = 60/60` 作为"当前已验证"
+   → 已改为动态口径（"数量以命令输出为准"）。
+3. **production-readiness-checklist §0**：gates 未包含 RAG evidence preflight
+   → 已加入 `make rag-eval-import` / `make rag-eval-649-preflight` gate 及
+   project_facts/openapi 检查；补充"smoke 不是正式证据"。
+4. **production-readiness-checklist §2**："secrets/keys.json 已添加到 .gitignore，
+   下次提交后将从跟踪中移除" 而文件实际仍在 git index；"`.env` 文件中仍存在明文
+   SiliconFlow API Key" 属本机状态，不应作为公共仓库静态事实
+   → 本轮已 `git rm --cached`；条目改为部署环境风险描述并链接 secret policy。
+5. **architecture-design.md**：无 provenance 的当前化数字（60-70% 高频重复、5-15s→<10ms、
+   LLM 调用减少 60%+、L1≈30%/L2≈40%/组合≈70%）→ 全部改为设计目标/机制描述并显式标注
+   NOT_MEASURED；补 RAG evaluation architecture 小节（ablation + evidence chain，
+   未与 production request path 混写）。
+6. **e2e-verification-guide.md**：2026-06-20"与当前代码一致"复审口径、固定 5 PASSED
+   输出、1352 collected、"可直接用于面试展示"→ 全部改为动态口径 + 显式
+   **Historical Evidence** 区（§8 重命名），价格标注历史估计，加入 provider 先探针
+   （`probe_provider_auth.py`）与 rag preflight 指引。
+
+### P1（补充/完善）
+
+7. **current-state.md**：新增 "RAG evaluation / evidence state" 小节（4 实验、指标族、
+   populations、preflight blocker、canonical 命令链）。
+8. **CLAUDE.md**：当前 HEAD 能力补 RAG evidence pipeline；常用命令补 4 个 RAG make 目标；
+   增加禁止无 provenance 传播当前 RAG 百分比的 Agent 规则。
+9. **production-evidence.md**：明确两类证据族（provider/production vs RAG retrieval
+   evaluation）、metric contract 扩为 multi-K + populations + taxonomy + stage latency、
+   local benchmark ≠ production outcome、RAG 行标注 NOT_VERIFIED。
+10. **面试材料**：interview-intro（部署架构措辞、缓存 Q2 改估算口径、新增 Q8 RAG 证据
+    口径）；interview-deep-dive（新增 Q10：ablation/为什么不能只报 Recall/populations/
+    fail-closed/reranker silent fallback/provenance，两处 <10ms 移除）；interview-questions-
+    final（口径头、Q4/Q5 追问弹药、Q9 SLA 配置口径、准备表更新）；
+    context-engineering-interview（与 RAG 评测链的边界小节）。
+11. **changelog**：Unreleased 补 PR #19（完整性描述 + NOT_VERIFIED 状态 + hygiene）与本轮
+    convergence v3；未创建 v6.4。
+12. **docs/README.md**：新增"真相层级速查"表（current-state = current facts 入口、
+    rag-evaluation = canonical、production-evidence、reports/audit = historical snapshots、
+    旧 releases 永不重写）。
+13. **quick-launch-checklist.md**（P1）：新增 embedding/reranker 凭据、RAG preflight、
+    Qdrant corpus/index readiness 检查项；凭据语义以代码为准（embedding 可回退
+    OPENAI_API_KEY；reranker 独立 `RERANKER_API_KEY`，未配置时重排不可用而非静默成功）。
+14. **Makefile**：`eval-rag` 改为 `rag-eval-649` 的显式兼容 alias（递归 `$(MAKE) --no-print-directory`），
+    唯一 canonical formal command = `rag-eval-649`，两套逻辑不再并存。
+
+## 5. 修改的文件
+
+- README.md
+- CLAUDE.md
+- Makefile
+- scripts/audit_doc_consistency.py（guard 扩展 A–F）
+- scripts/project_facts.py（evaluation facts 抽取 + --check 增强 + formal status 标记）
+- tests/unit/test_doc_consistency.py（新增回归测试：test-count framing、canonical RAG 引用、
+  unproven metric claims、make target 依赖、tracked+ignored hygiene、project_facts 评测事实）
+- docs/reference/current-state.md
+- docs/evaluation/production-evidence.md
+- docs/design/architecture-design.md
+- docs/operations/e2e-verification-guide.md
+- docs/checklists/production-readiness-checklist.md
+- docs/checklists/quick-launch-checklist.md
+- docs/design/interview-intro.md
+- docs/design/interview-deep-dive.md
+- docs/interview-questions-final.md
+- docs/interview/context-engineering-interview.md
+- docs/reports/releases/changelog.md（Unreleased）
+- docs/README.md
+- docs/reports/audit/2026-09-30-documentation-convergence-v3.md（本文件）
+- 仓库卫生：`git rm --cached secrets/keys.json tests/data/csai.db-shm tests/data/csai.db-wal`
+  （本地文件保留；`CLAUDE.md` 虽也在 ignore 列表，但作为仓库明文使用的 AI 指令文件被有意跟踪，
+  与 docs/standards 交叉引用一致，本次保留并写入 guard 的 ALLOWED 白名单）
+
+## 6. 未修改的历史文件（保护清单）
+
+以下历史快照**原样保留**，未做 schema 回填或数字重算：
+
+- `artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`（v1 preflight evidence）
+- `artifacts/evaluation/rag-649/import_manifest_import-20260929T190455Z.json`
+- `docs/reference/rag-evaluation-report.json`（2026-06 30-query 快照）
+- `docs/archive/**`、`docs/reports/milestone/**`、`docs/reports/plans/**`
+- 旧 release notes（release-notes-v5.x/v6.0）与 changelog 的旧版本章节
+- `docs/reports/resume-description.md`（evidence freeze 标注，按任务规则不重写历史证据）
+- `docs/superpowers/**` specs（历史工作单）
+
+## 7. 基线验证结果（修改前）
+
+| 命令 | 结果 |
+|---|---|
+| `python3 scripts/project_facts.py` | OK（6.3 / Qwen3-8B / bge-large-zh-v1.5 / bge-reranker-v2-m3 / qdrant_only / 53 paths / 9 agents / 649 queries，metadata consistent） |
+| `project_facts.py --check docs/reference/current-state.md` | OK |
+| `python3 scripts/audit_doc_consistency.py` | OK（36 active docs，guards v2） |
+| `python3 scripts/generate_openapi.py --check` | OK（53 paths surface 一致） |
+| `pytest tests/unit/test_doc_consistency.py -q` | 26 passed |
+| `pytest tests/unit/test_rag_eval_harness.py -q` | 30 passed |
+| `pytest --collect-only -q` | 1823 tests collected |
+| `npm test` | 60 passed（7 files） |
+| `npm run build` | OK |
+| `git diff --check` | OK |
+| `git ls-files -ci --exclude-standard` | CLAUDE.md（有意保留）、secrets/keys.json、tests/data/csai.db-shm、tests/data/csai.db-wal（后三者本轮清理） |
+
+## 8. Final 验证结果（修改后，最终提交前再执行一轮）
+
+最终以提交时的 `git status --short`、本文件提交所在 commit 的工作树状态为准；
+提交前已确认这些命令在修改后的 checkout 全部通过（测试数量以现场输出为准）。
+
+## 9. 当前 evidence boundary
+
+- 当前 649-query 正式 RAG 指标（Hit@K/Recall@K/Precision@K/NDCG@K/MRR@K）：**NOT_VERIFIED**
+  ——provider 凭据恢复并按 `make rag-eval-import` → `make rag-eval-649-preflight` →
+  `make rag-eval-649` 产生正式 artifact 前，任何文档/面试材料不得出现"当前"百分比。
+- 历史指标（2026-06 30-query：Hit@3 80% / MRR 0.778）只能以历史口径引用，不能作为当前结果。
+- Provider auth / billing / 生产延迟 / FCR / 人效：NOT_VERIFIED / NOT_AVAILABLE / NOT_MEASURED。
+- 缓存命中率与 LLM 调用节省：机制存在、观测端点存在，生产数值 NOT_MEASURED。
+- 本地/fixture benchmark ≠ 生产 customer outcome（production-evidence.md）。
+
+## 10. 剩余 UNKNOWN / NOT_VERIFIED / NOT_MEASURED
+
+- 当前 RAG 正式指标：NOT_VERIFIED（primary blocker：provider credential 401，已留档）
+- provider 真实凭据状态（expired/revoked/account-mismatch）：UNKNOWN（401 无法进一步归因）
+- provider token/billing：NOT_AVAILABLE
+- 生产延迟/SLA/吞吐：NOT_MEASURED
+- Qdrant/Redis/PostgreSQL 真机复核：NOT_VERIFIED
+- ERP real 模式：NOT_VERIFIED（mock 为当前默认）
+- CLAUDE.md 的 tracked+ignored 状态：有意保留（见 §5 清单），属于仓库政策而非本轮 drift。
+
+## 11. 当前 RAG formal evaluation 状态
+
+分管线已在 repo 落地（PR #19）：`scripts/evaluate_rag.py`（4-config ablation、multi-K、
+实测 stage latency、fail taxonomy、provenance、v2 blockers）、`scripts/import_eval_corpus.py`
+（幂等导入 + BM25 rebuild + gold 覆盖审计 + manifest）、Make 目标 4 个、hermetic 回归测试
+30 个。**评测从未完成一次正式运行**：preflight gate 因 provider 401 fail closed（正确行为）。
+recover 路径 = 凭据 → `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649`
+→ 引用带 git SHA + benchmark sha256 的新 artifact。
+
+## 12. Repository hygiene 处理结果
+
+- `secrets/keys.json`：从 index 移除（本地文件保留）。该文件仅含轮换台账 metadata
+  （时间戳/周期/风险级，无凭据材料），但 `.gitignore` 已忽略 `secrets/`，且仓库 secret
+  policy 要求公共仓库不跟踪任何 secrets/ 下文件。
+- `tests/data/csai.db-shm` / `csai.db-wal`：从 index 移除。SQLite WAL/SHM 是运行时
+  sidecar（主库 `csai.db` 本身未被跟踪），无代码/测试依赖（`grep` 证实），符合
+  `*.db-shm`/`*.db-wal` ignore 规则。
+- `CLAUDE.md`：tracked+ignored，有意保留（ALLOWED 白名单 + guard 注释）。
+
+## 13. 后续建议
+
+1. provider 凭据恢复后走 §11 复现路径；产出正式 artifact 后把
+   `project_facts.current_formal_status` 的 NOT_VERIFIED 状态与 canonical doc 同步更新
+   （并确认所有 guard 保持一致），同时刷新面试材料中的指标引用。
+2. 为 `scripts/import_eval_corpus.py` 补 30 个 `scene_0008xx` gold 文档（影响 80 条查询、
+   主口径 GOLD_NOT_INDEXED 记账），或在 benchmark 备注该 gap 后再做正式评测。
+3. 后续轮次可考虑把 `evaluation_populations` 的动态计数也纳入 project_facts
+   （从最新 artifact 读取，带 artifact_path/timestamp/git_sha/schema_version 的 provenance），
+   本轮克制地只取 harness 能力事实，未硬编码任何一次 401 状态。
+4. 若未来决定 CLAUDE.md 不再需要跟踪，应先移除 docs/standards 中对根目录 CLAUDE.md 的
+   引用，再调整 guard 白名单。

@@ -25,6 +25,27 @@ Tool Result Cache ≠ Response Cache; Tool Result Store ≠ Session Memory; comp
 BM25 has an explicit lifecycle; Qdrant point IDs are deterministic with a
 migration path, whose target-environment safety still requires a dry run.
 
+### RAG evaluation architecture (evidence chain, not production path)
+
+上面的 RAG flow 是**生产请求路径**；评测管线是独立的一条 evidence chain，
+不要混为同一条链路。评测（`scripts/evaluate_rag.py`，canonical 文档
+docs/reference/rag-evaluation.md）采用 ablation 设计：
+
+| 实验 | Vector | BM25 | RRF | Reranker | 作用 |
+|------|--------|------|-----|----------|------|
+| vector_only | ✅ | ❌ | ❌ | ❌ | 单路向量基线 |
+| bm25_only | ❌ | ✅ | ❌ | ❌ | 单路词法基线 |
+| hybrid_no_rerank | ✅ | ✅ | ✅ | ❌ | 混合检索（无重排） |
+| hybrid_rerank | ✅ | ✅ | ✅ | ✅ | 生产架构（production-like） |
+
+对比 hybrid vs 单路 = 证明混合检索的净贡献；对比 hybrid_rerank vs
+hybrid_no_rerank = 证明重排器的净贡献（逐 query 统计 improved/degraded，
+不允许只报提升不报退化）。指标 multi-K（Hit@K / Recall@K / Precision@K /
+NDCG@K / MRR@K），分母三视图（all_queries 主口径 / retrieval_eligible /
+full_gold_covered），失败按规则 taxonomy 记账，artifacts 携带 git SHA +
+benchmark sha256 provenance。**当前 649-query 正式指标：NOT_VERIFIED**（详见
+rag-evaluation.md §3.4）。
+
 ---
 
 ## 1. 问题定义
@@ -49,7 +70,7 @@ migration path, whose target-environment safety still requires a dry run.
 ### 2.1 总体架构：四层状态机
 
 ```
-Layer 0: 缓存检查 ──→ 命中则直接返回（<10ms）
+Layer 0: 缓存检查 ──→ 命中则直接返回（亚毫秒级本地读，无 LLM 调用）
     │ miss
 Layer 1: 双层路由 ──→ LLM 分类 ∥ 规则分类（并行）+ 复杂度评分
     │
@@ -64,9 +85,9 @@ Layer 3: 响应处理 ──→ 解决状态评估 + 缓存写入 + SLA 监控
 - 社区生态好，面试官认知度高
 
 **设计决策：为什么缓存前置到 Layer 0？**
-- 化妆品客服中 60-70% 的查询是高频重复问题（"你们有什么产品？""精华液多少钱？"）
-- 缓存命中时跳过整个 LLM 路由 + Agent 处理链路，延迟从 5-15s 降到 <10ms
-- 成本考量：每次 LLM 调用都有 token 成本，缓存前置直接减少 60%+ 的 LLM 调用
+- 化妆品客服场景存在大量高频重复问题（"你们有什么产品？""精华液多少钱？"）——设计目标是让重复查询命中缓存后跳过整个 LLM 路由 + Agent 处理链路（预估重复占比 60-70%、未命中时端到端 5-15s 延迟会降为毫秒级，此为**设计目标估算，当前生产命中率/延迟未测量**）
+- 缓存命中时不发生 LLM 调用；命中占比越高，被跳过的 LLM 调用越多。当前真实节省量：`NOT_MEASURED`
+- 成本考量：每次 LLM 调用都有 token 成本，缓存前置从机制上减少必然发生的 LLM 调用
 
 ### 2.2 双层路由（Layer 1）
 
@@ -130,10 +151,10 @@ class BaseAgent(ABC):
 ### 3.1 三级语义缓存
 
 **为什么需要三级缓存？**
-- L1（Redis MD5 精确匹配）：Redis SETEX + MD5 标准化，O(1) 查找，适合完全相同的问题。命中率约 30%
-- L2（Qdrant 向量语义检索）：BGE 嵌入模型（bge-large-zh-v1.5）+ Qdrant 向量搜索，支持 payload 过滤。"精华液多少钱" ≈ "这款精华价格是多少" 命中率约 40%
+- L1（Redis MD5 精确匹配）：Redis SETEX + MD5 标准化，O(1) 查找，适合完全相同的问题
+- L2（Qdrant 向量语义检索）：BGE 嵌入模型（bge-large-zh-v1.5）+ Qdrant 向量搜索，支持 payload 过滤。"精华液多少钱" ≈ "这款精华价格是多少"
 - L3（Jaccard 回退层）：jieba 分词 + 倒排索引 + 动态阈值，FIFO 淘汰 5%（最大 500 条），向后兼容 v5.x 语义缓存格式
-- 三级组合命中率约 70%，将 LLM 调用量降低到 30% 以下
+- 三级组合的**设计目标**是显著降低穿透到 LLM 的请求量。真实命中率（L1/L2/总命中）取决于实际查询分布，当前未在生产环境测量（`NOT_MEASURED`）；可通过 `/api/cache/stats` 与 Prometheus `cache_hit_rate` 指标观测
 
 **Embedding API 优化（v6.3）**：将本地 sentence-transformers 替换为异步 HTTP API 调用（SiliconFlow bge-large-zh-v1.5），使用 httpx.AsyncClient 连接池复用，超时从 30s 降至 10s。
 
