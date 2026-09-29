@@ -115,3 +115,23 @@ Full consistency audit over: README.md, CLAUDE.md, `.env.example`/`.env.test`, M
 ## 8. Delivery boundary
 
 No production credentials, `.env` files, benchmark gold data, or main-branch mutations. Historical evidence was not rewritten into current evidence; supersession is carried by Status lines and banners.
+
+---
+
+## 9. Merge-gate addendum (2026-09-30, post-snapshot)
+
+CI on the original PR HEAD `71c52f8` failed (`test 3.10/3.11/3.12`):
+`check_openapi_snapshot` compared the full serialized `paths` JSON, which is
+fastapi/pydantic-version sensitive (requirements.txt floats both packages;
+CI resolved fastapi 0.141.1 + pydantic 2.13.5 vs snapshot-time 0.137.1/2.9.0
+with an identical path→method surface). Reproduced locally by shadowing the
+CI package versions (paths dict equal=False, surface equal=True) —
+TASK_INTRODUCED, not baseline. Fix (commit `8f609e0`): the guard and
+`generate_openapi.py --check` now compare the portable API surface + version;
+canonical-config extraction uses `ast` (`extract_runtime_env_defaults`);
+`.env.example` coverage is a strict contract (EMBEDDING_DIM,
+HYBRID_SEARCH_ENABLED, VECTOR_DB_MODE, QDRANT_HOST, QDRANT_PORT added);
+4 new non-vacuous regression tests. CI-equivalent local runs with the pinned
+toolchain: unit 1412 / integration 99 / e2e(mock) 260 / stress 12 passed;
+coverage lane 1770 passed, 82.26% (gate 80%). GitHub Actions run
+`36608222496` on HEAD `8f609e0`: test (3.10/3.11/3.12) + security = PASS.
