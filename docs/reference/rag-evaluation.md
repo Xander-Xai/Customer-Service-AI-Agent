@@ -54,12 +54,35 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 
 ## 3. 执行评估
 
-### 3.1 快速执行
+### 3.1 快速执行（evidence pipeline）
 
 ```bash
-# 在项目根目录执行
-python3 scripts/evaluate_rag.py
+# 1) 导入评测语料到本地 Qdrant（幂等，含 BM25 rebuild + gold 覆盖率审计）
+make rag-eval-import
+
+# 2) preflight gate（Qdrant 集合计数 / embedding 探针 / reranker 探针 / BM25 就绪）
+make rag-eval-649-preflight
+
+# 3) 冒烟（前 16 条，subset_run=true，不可作为正式证据）
+make rag-eval-649-smoke
+
+# 4) 正式 649 全量评测（4 个检索配置 ablation，生成 evidence artifact）
+make rag-eval-649
 ```
+
+正式评测脚本 `scripts/evaluate_rag.py` 评测 4 个检索配置：
+
+| 实验 | Vector | BM25 | RRF | Reranker | 说明 |
+|------|--------|------|-----|----------|------|
+| vector_only | ✅ | ❌ | ❌ | ❌ | 单路向量基线 |
+| bm25_only | ❌ | ✅ | ❌ | ❌ | 单路词法基线 |
+| hybrid_no_rerank | ✅ | ✅ | ✅ | ❌ | 混合检索（无重排） |
+| hybrid_rerank | ✅ | ✅ | ✅ | ✅ | 生产架构（production-like） |
+
+> ablation 切换只作用于评测进程内的 KB 实例/请求参数
+> （`_hybrid_enabled` / `_embed_fn` / `request.rerank`），生产默认配置
+> （`HYBRID_SEARCH_ENABLED` 等）不被修改；测试防护见
+> `tests/unit/test_rag_eval_harness.py`。
 
 ### 3.2 评估数据集
 
@@ -78,18 +101,49 @@ python3 scripts/evaluate_rag.py
 | 投诉处理 | 80 |
 | difficulty: easy / medium / hard | 219 / 225 / 205 |
 
-### 3.3 结果解读
+### 3.3 结果解读（evidence artifact）
 
-评估脚本会输出：
+正式评测输出到 `artifacts/evaluation/rag-649/<run-id>/`：
 
-1. **逐条查询结果**：每条查询的命中状态（✅/❌）、命中排名、P@K 值
-2. **汇总统计表**：Hit Rate、Precision、Recall、MRR、平均距离
-3. **分类统计**：按查询类别的命中率对比
-4. **JSON 报告**：保存到 `docs/rag-evaluation-report.json`
+1. **report.json**：机器可读证据（提交）——schema_version / run_id / timestamp /
+   git SHA / benchmark sha256 与条数 / runtime config / 4 实验的
+   Hit@K、Recall@K、Precision@K、NDCG@K、MRR / 实测 latency（mean、P50/P90/P95/P99，
+   含 VECTOR/BM25/FUSION_RRF/RERANK 分阶段实测值）/ category 明细 /
+   ablation 对比（hybrid vs 单路、reranker uplift）与逐 query 改善/退化计数 /
+   failure taxonomy 计数与样本 / preflight gate 结果
+2. **failures.json**：全量失败明细（提交）——每条失败含 query_id、category、
+   expected/gold、rank、failure_type（TIMEOUT / PROVIDER_ERROR /
+   GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK）与通道级诊断
+3. **raw_results.json**：逐 query 原始检索结果（本地保留，不提交，
+   sha256 记录于 report.json）
 
-### 3.4 评估结果
+指标分母定义（写进 artifact notes）：指标在「成功执行检索」的查询上取均值；
+exception / timeout 计入 failures，不进指标分母；降级查询（如向量通道超时
+退化为词法）计入指标并按 `degraded_reason` 单独计数。
 
-> 当前值必须由 `python3 scripts/evaluate_rag.py`（649 条基准）重新生成。
+### 3.4 当前评测状态
+
+> **当前 649-query 正式指标：NOT_VERIFIED。**
+>
+> 2026-09-30 的评测尝试在 preflight gate 被阻塞
+> （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`）：
+> - embedding provider 认证失败（401，探针失败）→ 语料导入与向量通道无法进行；
+> - reranker provider 同样 401（`ApiReranker` 静默回退被探针识别为
+>   `silent_fallback`，不产出假阳性）；
+> - 本地 Qdrant 集合为空（导入依赖 embedding，随之阻塞）。
+>
+> 语料与基准的 gold 覆盖率审计（导入 manifest：
+> `artifacts/evaluation/rag-649/import_manifest_import-20260929T190455Z.json`）：
+> 基准 1250 个 unique gold doc 中 1220 个存在于当前 5000 条语料
+> （coverage 97.6%），30 个 `scene_0008xx` gold 文档不在语料中，
+> 影响 80 条查询（其中 40 条查询的全部 gold 缺失）。正式评测时这些查询
+> 将按 GOLD_NOT_INDEXED 记账，分母定义见 report.json。
+>
+> 待 provider 凭据恢复后，按 §3.1 复现：`make rag-eval-import` →
+> `make rag-eval-649-preflight` → `make rag-eval-649`。
+
+### 3.5 历史评估结果
+
 > 以下两个小节是**历史报告快照**，数据集与配置与当前不同，只能作为对比叙事。
 
 #### 历史基线数据（2026-06-06，改进前）
