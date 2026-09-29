@@ -16,6 +16,169 @@ import httpx
 
 from .evidence_schema import EvidenceSource, Measurement
 
+NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 404, 422}
+
+
+class ProviderAuthenticationError(Exception):
+    """Raised when a provider credential cannot authenticate a request."""
+
+
+class ProviderCredentialFormatError(ValueError):
+    """Raised when a credential contains an unsupported wrapper or whitespace."""
+
+
+def normalize_api_key(raw_key: str | None) -> str:
+    """Accept a plain key after whitespace trimming; never add/remove wrappers."""
+    key = (raw_key or "").strip()
+    if not key:
+        raise ProviderCredentialFormatError("credential is missing")
+    if key.lower().startswith("bearer "):
+        raise ProviderCredentialFormatError("credential must not include a Bearer prefix")
+    if "\n" in key or "\r" in key or "\"" in key or "'" in key:
+        raise ProviderCredentialFormatError("credential contains unsupported quoting or newline")
+    return key
+
+
+def _trace_id(headers: Mapping[str, str]) -> str | None:
+    return headers.get("x-siliconcloud-trace-id") or headers.get("x-request-id")
+
+
+def _status_category(status_code: int) -> tuple[str, bool]:
+    if status_code == 200:
+        return "AUTHENTICATED", False
+    if status_code == 401:
+        return "AUTH_FAILED", False
+    if status_code == 403:
+        return "FORBIDDEN", False
+    if status_code == 404:
+        return "INVALID_ENDPOINT_OR_MODEL", False
+    if status_code == 408 or status_code == 429 or status_code >= 500:
+        return "TRANSIENT_PROVIDER_FAILURE", True
+    return "HTTP_ERROR", False
+
+
+@dataclass(frozen=True)
+class AuthProbeResult:
+    status_code: int | None
+    authenticated: bool
+    error_category: str
+    retryable: bool
+    attempt_count: int
+    trace_id: str | None
+    model_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ChatProbeResult:
+    status_code: int | None
+    category: str
+    retryable: bool
+    attempt_count: int
+    trace_id: str | None
+    usage: NormalizedProviderUsage | None
+    model: str | None
+    response_nonempty: bool
+
+
+def _probe_headers(api_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+
+
+def probe_provider_auth(
+    *, api_key: str | None, base_url: str, timeout: float = 15.0
+) -> AuthProbeResult:
+    """Perform exactly one safe GET /models request and discard the raw body."""
+    try:
+        normalized_key = normalize_api_key(api_key)
+    except ProviderCredentialFormatError as exc:
+        category = "CREDENTIAL_MISSING" if "missing" in str(exc) else "CREDENTIAL_FORMAT_INVALID"
+        return AuthProbeResult(None, False, category, False, 0, None)
+
+    try:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
+            response = client.get(
+                f"{base_url.rstrip('/')}/models",
+                params={"sub_type": "chat"},
+                headers=_probe_headers(normalized_key),
+            )
+        category, retryable = _status_category(response.status_code)
+        model_ids: tuple[str, ...] = ()
+        if response.status_code == 200:
+            try:
+                body = response.json()
+                data = body.get("data", []) if isinstance(body, Mapping) else []
+                model_ids = tuple(
+                    item["id"] for item in data if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+                )
+            except (ValueError, TypeError):
+                category, retryable = "INVALID_PROVIDER_RESPONSE", False
+        return AuthProbeResult(
+            response.status_code,
+            response.status_code == 200 and category == "AUTHENTICATED",
+            category,
+            retryable,
+            1,
+            _trace_id(response.headers),
+            model_ids,
+        )
+    except httpx.TimeoutException:
+        return AuthProbeResult(None, False, "TIMEOUT", True, 1, None)
+    except httpx.RequestError as exc:
+        return AuthProbeResult(None, False, type(exc).__name__.upper(), True, 1, None)
+
+
+def probe_chat_completion(
+    *, api_key: str, base_url: str, model: str, timeout: float = 15.0
+) -> ChatProbeResult:
+    """Perform one non-streaming, low-budget request without retrying."""
+    normalized_key = normalize_api_key(api_key)
+    try:
+        with httpx.Client(timeout=timeout, trust_env=False) as client:
+            response = client.post(
+                f"{base_url.rstrip('/')}/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Reply with OK."}],
+                    "stream": False,
+                    "max_tokens": 8,
+                    "temperature": 0,
+                },
+                headers={**_probe_headers(normalized_key), "Content-Type": "application/json"},
+            )
+        category, retryable = _status_category(response.status_code)
+        usage: NormalizedProviderUsage | None = None
+        response_nonempty = False
+        response_model: str | None = None
+        if response.status_code == 200:
+            body = response.json()
+            if not isinstance(body, Mapping):
+                return ChatProbeResult(200, "INVALID_PROVIDER_RESPONSE", False, 1, _trace_id(response.headers), None, None, False)
+            usage = normalize_provider_response(body, provider="siliconflow", fallback_model=model)
+            response_model = usage.model
+            choices = body.get("choices")
+            response_nonempty = bool(
+                isinstance(choices, list)
+                and choices
+                and isinstance(choices[0], Mapping)
+                and isinstance(choices[0].get("message"), Mapping)
+                and choices[0]["message"].get("content")
+            )
+            category = "CHAT_API_OK" if response_nonempty else "EMPTY_PROVIDER_RESPONSE"
+        return ChatProbeResult(
+            response.status_code,
+            category,
+            retryable,
+            1,
+            _trace_id(response.headers),
+            usage,
+            response_model,
+            response_nonempty,
+        )
+    except httpx.TimeoutException:
+        return ChatProbeResult(None, "TIMEOUT", True, 1, None, None, None, False)
+    except httpx.RequestError as exc:
+        return ChatProbeResult(None, type(exc).__name__.upper(), True, 1, None, None, None, False)
+
 
 def _number(value: Any) -> int | float | None:
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
@@ -117,11 +280,13 @@ class ProviderCallResult:
     final_status: str
     response_nonempty: bool
     error_code: str | None = None
+    error_category: str | None = None
+    http_status: int | None = None
 
 
 class ProviderAdapter:
     def __init__(self, *, api_key: str, base_url: str, model: str, timeout: float, max_attempts: int):
-        self._api_key = api_key
+        self._api_key = normalize_api_key(api_key)
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
         self.timeout = timeout
@@ -182,7 +347,28 @@ class ProviderAdapter:
                     timeouts += 1
                     last_error = "TIMEOUT"
                 except httpx.HTTPStatusError as exc:
-                    last_error = f"HTTP_{exc.response.status_code}"
+                    status_code = exc.response.status_code
+                    last_error = f"HTTP_{status_code}"
+                    if status_code in NON_RETRYABLE_STATUS_CODES:
+                        return ProviderCallResult(
+                            usage=NormalizedProviderUsage(
+                                provider,
+                                self.model,
+                                response.headers.get("x-request-id"),
+                                *[Measurement.unavailable(EvidenceSource.NOT_AVAILABLE)] * 5,
+                            ),
+                            ttft_ms=None,
+                            e2e_ms=(time.perf_counter() - start) * 1000,
+                            network_ms=(time.perf_counter() - start) * 1000,
+                            attempt_count=attempts,
+                            retry_count=retries,
+                            timeout_count=timeouts,
+                            final_status="FAILURE",
+                            response_nonempty=False,
+                            error_code=last_error,
+                            error_category=_status_category(status_code)[0],
+                            http_status=status_code,
+                        )
                 except httpx.RequestError as exc:
                     last_error = type(exc).__name__.upper()
                 if attempts < self.max_attempts:
@@ -200,4 +386,10 @@ class ProviderAdapter:
             final_status="FAILURE",
             response_nonempty=False,
             error_code=last_error,
+            error_category=(
+                _status_category(int(last_error.split("_")[1]))[0]
+                if last_error and last_error.startswith("HTTP_")
+                else last_error
+            ),
+            http_status=(int(last_error.split("_")[1]) if last_error and last_error.startswith("HTTP_") else None),
         )

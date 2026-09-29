@@ -139,6 +139,8 @@ def run_provider_staging(
             raise RuntimeError("provider output-token safety budget exceeded")
         if index >= len(cases) * warmup:
             measured_results.append(result)
+        if result.error_category in {"AUTH_FAILED", "FORBIDDEN"}:
+            break
     e2e = [result.e2e_ms for result in measured_results]
     ttft = [result.ttft_ms for result in measured_results if result.ttft_ms is not None]
     latency = summarize_latency(e2e, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED)
@@ -194,6 +196,9 @@ def run_provider_staging(
             "measured_count": len(measured_results),
             "planned_attempts": planned_attempts,
             "external_calls": sum(result.attempt_count for result in results),
+            "authentication_circuit_breaker": any(
+                result.error_category in {"AUTH_FAILED", "FORBIDDEN"} for result in results
+            ),
             "preflight": preflight,
             "artifact_privacy": "metrics_only_no_prompt_or_response",
         },

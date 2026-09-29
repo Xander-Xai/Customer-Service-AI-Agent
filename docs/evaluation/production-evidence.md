@@ -37,6 +37,18 @@ A real staging run additionally requires an exported `OPENAI_API_KEY` and explic
 
 Provider-reported input/output/cached/reasoning tokens are accepted only from response usage fields. A provider `cost` field is accepted only when returned directly by the provider. Configured rate-card calculations are labelled `ESTIMATED` and must not be described as provider billing.
 
+## Authentication preflight
+
+Run the bounded preflight before any staging suite:
+
+```bash
+python3 scripts/probe_provider_auth.py
+```
+
+It makes at most one direct `GET /v1/models?sub_type=chat` request using `OPENAI_API_KEY`, reports only status/category/trace metadata/model count, and never writes the response body or authorization header. `401` is `AUTH_FAILED` and non-retryable; `403` is `FORBIDDEN` and non-retryable. Missing, wrapped (`Bearer ...`), quoted, or newline-containing credentials are rejected locally.
+
+The application configuration currently loads `.env` with `load_dotenv(override=True)`, while the probe reads the process environment directly. Operators must verify the effective credential source without committing or printing secrets. A successful auth probe proves only credential authentication; model availability and chat permission require the subsequent bounded probes.
+
 ## Metric contracts
 
 - latency records sample count, warmup count, and the interpolation method; P50/P95/P99 are not aliases for maximum
@@ -56,3 +68,5 @@ Qdrant migration is limited to dry-run, disposable local collections, or explici
 `artifacts/evidence/` is ignored. Reviewers must inspect workload version, Git SHA, configuration hash, sample counts, source labels, and skipped/missing values before interpreting a result. A successful local run proves only that the measurement harness and fixtures are reproducible; it does not verify provider billing, production latency, Redis, ERP, Qdrant, BM25 production traffic, or production task success.
 
 The controlled staging attempt associated with this harness received HTTP 401 for every measured request. It collected no provider token usage or provider billing, so it does not close any production-validation item in Issue #7. Its application-measured failure timing is troubleshooting evidence only, not production latency evidence.
+
+The follow-up direct auth probe also returned HTTP 401 on its single request. The observed root cause is authentication failure for the supplied credential at the official SiliconFlow endpoint; whether the key is expired, revoked, account-mismatched, or otherwise invalid is not established by this probe. Chat, streaming, and staging reruns are blocked until a valid credential is supplied.
