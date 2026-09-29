@@ -50,14 +50,29 @@ def main() -> int:
 
     if args.check:
         current = SNAPSHOT.read_text(encoding="utf-8") if SNAPSHOT.exists() else ""
-        if current != rendered:
-            old_paths = len(json.loads(current)["paths"]) if current.strip() else 0
+        if not current.strip():
+            print("DRIFT: docs/openapi.json missing")
+            return 1
+        current_spec = json.loads(current)
+        # Surface comparison (path → method map): fastapi/pydantic are floating
+        # in requirements.txt, so serialized schema content legitimately differs
+        # across environments even for the same API. The portable contract is
+        # the surface, not byte-identical JSON (same rule as
+        # scripts/audit_doc_consistency.py::check_openapi_snapshot).
+        current_surface = {p: sorted(o.keys()) for p, o in sorted(current_spec.get("paths", {}).items())}
+        live_surface = {p: sorted(o.keys()) for p, o in sorted(spec["paths"].items())}
+        if current_surface != live_surface:
             print(
-                f"DRIFT: docs/openapi.json has {old_paths} paths; "
-                f"app.openapi() has {len(spec['paths'])} paths or different content"
+                f"DRIFT: docs/openapi.json has {len(current_surface)} paths vs "
+                f"app.openapi() {len(live_surface)} paths (or different path/method surface)"
             )
             return 1
-        print(f"OK: docs/openapi.json matches app.openapi() ({len(spec['paths'])} paths)")
+        if current_spec.get("info", {}).get("version") != spec.get("info", {}).get("version"):
+            print(
+                "DRIFT: docs/openapi.json info.version != app.openapi() info.version"
+            )
+            return 1
+        print(f"OK: docs/openapi.json surface matches app.openapi() ({len(spec['paths'])} paths)")
         return 0
 
     SNAPSHOT.write_text(rendered, encoding="utf-8")

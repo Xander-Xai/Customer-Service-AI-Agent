@@ -117,6 +117,94 @@ def test_missing_required_env_key_is_detected(tmp_repo: Path):
 # ------------------------------------------------------- D. canonical config
 
 
+def _write_canonical_sources(
+    tmp_repo: Path,
+    runtime_model: str,
+    env_model: str,
+    compose_model: str | None,
+) -> None:
+    (tmp_repo / "core").mkdir(parents=True, exist_ok=True)
+    (tmp_repo / "deploy" / "compose").mkdir(parents=True, exist_ok=True)
+    (tmp_repo / "core" / "config.py").write_text(
+        f'OPENAI_MODEL = os.getenv(\n'
+        f'    "OPENAI_MODEL",\n'
+        f'    "{runtime_model}",\n'
+        f')\n',
+        encoding="utf-8",
+    )
+    env_lines = [
+        "LLM_PROVIDER=siliconflow",
+        f"OPENAI_MODEL={env_model}",
+        "OPENAI_BASE_URL=https://api.siliconflow.cn/v1",
+        "EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5",
+        "RERANKER_MODEL=BAAI/bge-reranker-v2-m3",
+        "",
+    ]
+    (tmp_repo / ".env.example").write_text("\n".join(env_lines), encoding="utf-8")
+    if compose_model is not None:
+        (tmp_repo / "deploy" / "compose" / "docker-compose.yml").write_text(
+            f"- OPENAI_MODEL=${{OPENAI_MODEL:-{compose_model}}}\n", encoding="utf-8"
+        )
+
+
+def test_runtime_model_drift_is_detected_when_env_and_compose_agree(tmp_repo: Path):
+    """The guard must read the runtime fallback from core/config.py (via AST),
+    not just compare template files against each other. Here .env.example and
+    docker-compose agree on Qwen3, but the runtime code default drifted to
+    Qwen4 — that must FAIL."""
+    _write_canonical_sources(
+        tmp_repo,
+        runtime_model="Qwen/Qwen4-8B",
+        env_model="Qwen/Qwen3-8B",
+        compose_model="Qwen/Qwen3-8B",
+    )
+    errors: list[str] = []
+    audit.check_canonical_config(errors, root=tmp_repo)
+    assert any(
+        "canonical OPENAI_MODEL drift" in e and "Qwen/Qwen4-8B" in e for e in errors
+    ), errors
+
+
+def test_required_env_key_missing_even_if_present_in_config_is_detected(tmp_repo: Path):
+    """Strict .env.example contract: a key existing in core/config.py does not
+    excuse its absence from the deployment template."""
+    (tmp_repo / "core").mkdir(parents=True)
+    (tmp_repo / "core" / "config.py").write_text(
+        'HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 15)\n', encoding="utf-8"
+    )
+    # .env.example deliberately omits HTTP_TIMEOUT
+    keys = [k for k in audit.REQUIRED_ENV_KEYS if k != "HTTP_TIMEOUT"]
+    (tmp_repo / ".env.example").write_text(
+        "\n".join(f"{k}=x" for k in keys) + "\n", encoding="utf-8"
+    )
+    errors: list[str] = []
+    audit.check_env_coverage(errors, root=tmp_repo)
+    assert any(".env.example missing required key: HTTP_TIMEOUT" in e for e in errors)
+
+
+def test_ast_extraction_reads_multiline_helper_calls(tmp_repo: Path):
+    """AST extraction must handle real config.py formatting: multi-line
+    os.getenv(...) calls and _int_env/_float_env helpers."""
+    (tmp_repo / "core").mkdir(parents=True)
+    (tmp_repo / "core" / "config.py").write_text(
+        "import os\n"
+        "def _int_env(key, default):\n"
+        "    return default\n"
+        "\n"
+        "OPENAI_MODEL = os.getenv(\n"
+        '    "OPENAI_MODEL",\n'
+        '    "Qwen/Qwen3-8B",\n'
+        ")\n"
+        'LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)\n'
+        'HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 15)\n',
+        encoding="utf-8",
+    )
+    defaults = audit.extract_runtime_env_defaults(tmp_repo / "core" / "config.py")
+    assert defaults["OPENAI_MODEL"] == "Qwen/Qwen3-8B"
+    assert defaults["LLM_MAX_TOKENS"] == "4096"
+    assert defaults["HTTP_TIMEOUT"] == "15"
+
+
 def test_model_drift_between_compose_and_runtime(tmp_repo: Path):
     (tmp_repo / "core").mkdir(parents=True)
     (tmp_repo / "deploy" / "compose").mkdir(parents=True)
@@ -185,12 +273,33 @@ def test_openapi_content_drift_same_count_is_detected(tmp_repo: Path, monkeypatc
 
     errors: list[str] = []
     audit.check_openapi_snapshot(errors, root=tmp_repo)
-    assert any("paths differ from app.openapi()" in e for e in errors)
+    assert any("API surface (path→methods) differs" in e for e in errors)
 
 
 def test_openapi_snapshot_passes_on_real_repo():
     errors: list[str] = []
     audit.check_openapi_snapshot(errors, root=REAL_ROOT)
+    assert not any("drift" in e for e in errors)
+
+
+def test_schema_serialization_drift_with_same_surface_passes(tmp_repo: Path, monkeypatch):
+    """CI regression: fastapi/pydantic version changes can alter serialized
+    schema content while the API surface (path→methods) stays identical.
+    The guard must NOT report drift in that case (floating requirements.txt)."""
+    (tmp_repo / "docs").mkdir(parents=True)
+    (tmp_repo / "docs" / "openapi.json").write_text(
+        json.dumps(
+            {"paths": {"/x": {"post": {"summary": "old schema"}}}, "info": {"version": "6.3"}}
+        ),
+        encoding="utf-8",
+    )
+    _fake_app_module(
+        monkeypatch,
+        {"paths": {"/x": {"post": {"summary": "different serialization"}}}, "info": {"version": "6.3"}},
+    )
+
+    errors: list[str] = []
+    audit.check_openapi_snapshot(errors, root=tmp_repo)
     assert not any("drift" in e for e in errors)
 
 

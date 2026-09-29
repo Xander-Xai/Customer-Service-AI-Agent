@@ -9,9 +9,13 @@ warnings.
 Checks:
   A. broken local markdown links (resolved strictly relative to the file)
   B. referenced scripts/tests/source files must exist
-  C. public runtime config keys present in .env.example
-  D. canonical model/config consistency (core/config.py vs .env.example vs compose)
-  E. OpenAPI snapshot drift (docs/openapi.json vs app.openapi(), normalized)
+  C. public runtime config keys present in .env.example (strict)
+  D. canonical model/config consistency: runtime fallback (AST-extracted from
+     core/config.py) vs .env.example vs docker-compose explicit defaults
+  E. OpenAPI snapshot drift (docs/openapi.json vs app.openapi() API surface —
+     path→method map; full-JSON equality is fastapi/pydantic-version sensitive
+     because requirements.txt floats those packages, so only the surface is a
+     portable contract)
   F. RAG benchmark metadata integrity (total_queries == len(queries))
   G. prohibited stale current-state terminology in active docs
   H. referenced rag/core/web source files must exist
@@ -22,6 +26,7 @@ still pass through link/reference checks unless they are excluded entirely.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -184,9 +189,82 @@ def check_env_coverage(errors: list[str], root: Path = ROOT) -> None:
     errors.extend(
         f"public config missing from .env.example: {name}" for name in missing_flags
     )
+    # Strict contract: every REQUIRED_ENV_KEY must be present in .env.example.
+    # Presence in core/config.py does NOT satisfy this — internal-only runtime
+    # config must be removed from REQUIRED_ENV_KEYS (with a reason), not
+    # quietly excused because it happens to exist in config.py.
     for key in REQUIRED_ENV_KEYS:
-        if key not in env_keys and f'"{key}"' not in config:
+        if key not in env_keys:
             errors.append(f".env.example missing required key: {key}")
+
+
+# Defaults accepted by config.py's env helpers. Values are AST literal
+# constants, so we can read them without executing the module.
+_ENV_HELPER_NAMES = {"os.getenv", "getenv", "_int_env", "_float_env"}
+
+
+def _call_key_and_default(call: ast.Call) -> tuple[str | None, object | None]:
+    """Extract (env_key, default) from a helper call like os.getenv("K", "d")."""
+    if not call.args:
+        return None, None
+    key_node = call.args[0]
+    if not isinstance(key_node, ast.Constant) or not isinstance(key_node.value, str):
+        return None, None
+    key = key_node.value
+    default = None
+    if len(call.args) >= 2:
+        default = getattr(call.args[1], "value", None)
+    elif call.keywords:
+        for kw in call.keywords:
+            if kw.arg in {"default", "default_value"}:
+                default = getattr(kw.value, "value", None)
+    return key, default
+
+
+def extract_runtime_env_defaults(config_path: Path) -> dict[str, str]:
+    """AST-extract env-var fallback defaults from core/config.py.
+
+    Recognizes assignments of the form
+      KEY = os.getenv("KEY", "default")
+      KEY = _int_env("KEY", 123)
+      KEY = _float_env("KEY", 1.0)
+    and returns {KEY: default} (as strings, matching .env/compose semantics).
+    Values that are not plain constants (conditional expressions, computed
+    fallbacks) are skipped rather than guessed.
+    """
+    tree = ast.parse(config_path.read_text(encoding="utf-8"))
+    defaults: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        target = node.targets[0] if len(node.targets) == 1 else None
+        if not isinstance(target, ast.Name) or not isinstance(target.id, str):
+            continue
+        if not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        dotted = ""
+        if isinstance(func, ast.Attribute):
+            base = getattr(func.value, "id", "")
+            dotted = f"{base}.{func.attr}" if base else func.attr
+        elif isinstance(func, ast.Name):
+            dotted = func.id
+        if dotted not in _ENV_HELPER_NAMES:
+            continue
+        key, default = _call_key_and_default(node.value)
+        if key is None or default is None:
+            continue
+        if isinstance(default, bool):  # os.getenv(..., "true") str vs bool guard
+            continue
+        defaults[key] = str(default)
+    return defaults
+
+
+def _compose_default(compose_text: str, key: str) -> str | None:
+    """Explicit Compose default like KEY=${KEY:-value}; None when Compose does
+    not override the key at all (which is allowed)."""
+    m = re.search(rf"{key}=\$\{{{key}:-([^}}]+)\}}", compose_text)
+    return m.group(1) if m else None
 
 
 def _env_value(text: str, key: str) -> str | None:
@@ -195,25 +273,35 @@ def _env_value(text: str, key: str) -> str | None:
 
 
 def check_canonical_config(errors: list[str], root: Path = ROOT) -> None:
-    config = (root / "core/config.py").read_text(encoding="utf-8")
+    config_path = root / "core/config.py"
     env_example = (root / ".env.example").read_text(encoding="utf-8")
     compose = (root / "deploy/compose/docker-compose.yml").read_text(encoding="utf-8")
+    runtime_defaults = extract_runtime_env_defaults(config_path)
     for key in CANONICAL_MODEL_KEYS:
-        runtime = _env_value(config, key) or None
+        runtime = runtime_defaults.get(key)
         template = _env_value(env_example, key)
-        compose_m = re.search(rf"{key}=\$\{{{key}:-([^}}]+)\}}", compose)
-        compose_v = compose_m.group(1) if compose_m else None
+        compose_v = _compose_default(compose, key)
         values = {
             "core/config.py": runtime,
             ".env.example": template,
             "docker-compose.yml": compose_v,
         }
-        present = {k: v for k, v in values.items() if v}
-        unique = {v.strip() for v in present.values()}
-        if unique and len(unique) > 1:
+        present = {k: v.strip() for k, v in values.items() if v}
+        if runtime is not None and len(set(present.values())) > 1:
             errors.append(
-                f"canonical {key} drift: {present} (all defaults must match ADR-007/008)"
+                f"canonical {key} drift: {present} (all present defaults must "
+                f"match runtime fallback per ADR-007/008)"
             )
+
+
+def _openapi_surface(paths: dict) -> dict[str, list[str]]:
+    """Environment-portable API surface: path → sorted method list.
+
+    Full JSON equality of the paths object is fastapi/pydantic-version
+    sensitive (requirements.txt floats both), so the drift contract is the
+    surface, not the serialized schema content.
+    """
+    return {path: sorted(ops.keys()) for path, ops in sorted(paths.items())}
 
 
 def check_openapi_snapshot(errors: list[str], root: Path = ROOT) -> None:
@@ -231,13 +319,17 @@ def check_openapi_snapshot(errors: list[str], root: Path = ROOT) -> None:
         )
         return
     current = json.loads(snapshot.read_text(encoding="utf-8"))
-    if len(current.get("paths", {})) != len(live["paths"]):
+    live_surface = _openapi_surface(live["paths"])
+    snapshot_surface = _openapi_surface(current.get("paths", {}))
+    if len(snapshot_surface) != len(live_surface):
         errors.append(
-            f"OpenAPI path-count drift: docs/openapi.json={len(current['paths'])} "
-            f"vs app.openapi()={len(live['paths'])}"
+            f"OpenAPI path-count drift: docs/openapi.json={len(snapshot_surface)} "
+            f"vs app.openapi()={len(live_surface)}"
         )
-    elif current.get("paths") != live["paths"]:
-        errors.append("OpenAPI snapshot drift: paths differ from app.openapi()")
+    elif snapshot_surface != live_surface:
+        errors.append(
+            "OpenAPI snapshot drift: API surface (path→methods) differs from app.openapi()"
+        )
     if current.get("info", {}).get("version") != live.get("info", {}).get("version"):
         errors.append(
             "OpenAPI version drift: docs/openapi.json != app.openapi() info.version"
