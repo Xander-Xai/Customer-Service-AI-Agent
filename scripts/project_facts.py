@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Emit machine-readable current runtime facts (JSON).
 
-All values are extracted from code/metadata at execution time — nothing is
-hardcoded. Use for CI guards, release preparation, and documentation audits.
+All values are extracted from code/metadata/evidence at execution time —
+nothing is hardcoded. Use for CI guards, release preparation, and
+documentation audits.
+
+Evidence direction: artifact/evidence -> facts -> docs -> guard. In
+particular ``rag_formal_metrics_status`` derives ONLY from provenance-bearing
+artifacts under ``artifacts/evaluation/rag-649/**`` (see
+``scripts/rag_evidence_status.py``); docs are verified against it, never the
+reverse.
 
 Usage:
     python3 scripts/project_facts.py            # JSON to stdout
@@ -21,6 +28,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from rag_evidence_status import claimed_doc_formal_status, derive_rag_formal_status  # noqa: E402
 
 BENCHMARK_PATH = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
 EVAL_SCRIPT = PROJECT_ROOT / "scripts" / "evaluate_rag.py"
@@ -73,8 +85,8 @@ def _agent_role_count() -> int:
     return domain + (1 if has_react else 0) + (1 if has_response else 0)
 
 
-def _benchmark_query_count() -> tuple[int, int]:
-    data = json.loads(BENCHMARK_PATH.read_text(encoding="utf-8"))
+def _benchmark_query_count(root: Path = PROJECT_ROOT) -> tuple[int, int]:
+    data = json.loads((root / "tests" / "eval" / "rag_benchmark.json").read_text(encoding="utf-8"))
     declared = data["metadata"]["total_queries"]
     actual = len(data["queries"])
     return declared, actual
@@ -87,14 +99,14 @@ def _benchmark_query_count() -> tuple[int, int]:
 # is ever emitted here.
 
 
-def _evaluation_facts() -> dict:
-    src = EVAL_SCRIPT.read_text(encoding="utf-8")
+def _evaluation_facts(root: Path = PROJECT_ROOT) -> dict:
+    eval_script = root / "scripts" / "evaluate_rag.py"
+    src = eval_script.read_text(encoding="utf-8", errors="replace") if eval_script.exists() else ""
 
-    experiments = re.findall(
-        r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', src, re.MULTILINE
-    )
     seen: set[str] = set()
-    experiment_names = [e for e in experiments if not (e in seen or seen.add(e))]
+    experiment_names = [
+        e for e in _EXPERIMENT_NAME_RE.findall(src) if not (e in seen or seen.add(e))
+    ]
 
     metric_names = ["hit@k", "recall@k", "precision@k", "ndcg@k", "mrr@k"]
 
@@ -112,10 +124,10 @@ def _evaluation_facts() -> dict:
         re.findall(r'"([A-Z_]+)"', failure_match.group(1)) if failure_match else []
     )
 
-    canonical_doc = PROJECT_ROOT / "docs" / "reference" / "rag-evaluation.md"
-    formal_status_marker = (
-        current_formal_status(canonical_doc) if canonical_doc.exists() else None
-    )
+    # Formal-metric status is derived from provenance-bearing evidence
+    # artifacts ONLY — never from Markdown text. Docs are verified against
+    # this derived state by check_doc()/audit_doc_consistency.py.
+    formal = derive_rag_formal_status(root)
 
     return {
         "evaluation_experiments": experiment_names,
@@ -124,24 +136,13 @@ def _evaluation_facts() -> dict:
         "evaluation_populations": populations,
         "evaluation_failure_taxonomy": failure_taxonomy,
         "evaluation_report_schema_version": schema_version,
-        "rag_formal_metrics_status": formal_status_marker,
+        **formal,
     }
 
 
-def current_formal_status(canonical_doc: Path) -> str:
-    """Derive the formal-metric status marker from the canonical review doc.
-
-    The only accepted explicit states are NOT_VERIFIED / VERIFIED; the marker
-    line must stay explicit so drift between doc and truth is detectable.
-    Absence of the marker is surfaced as UNKNOWN (not guessed), which the
-    --check contract treats as drift while formal evaluation is pending.
-    """
-    text = canonical_doc.read_text(encoding="utf-8", errors="replace")
-    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?NOT_VERIFIED", text):
-        return "NOT_VERIFIED"
-    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?VERIFIED", text):
-        return "VERIFIED"
-    return "UNKNOWN"
+_EXPERIMENT_NAME_RE = re.compile(
+    r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', re.MULTILINE
+)
 
 
 def _makefile_targets() -> list[str]:
@@ -149,14 +150,14 @@ def _makefile_targets() -> list[str]:
     return re.findall(r"^([a-zA-Z][a-zA-Z0-9_-]*):", makefile, re.MULTILINE)
 
 
-def collect() -> dict:
+def collect(root: Path = PROJECT_ROOT) -> dict:
     facts = _llm_facts()
     facts["openapi_path_count"] = _openapi_path_count()
     facts["agent_role_count"] = _agent_role_count()
-    declared, actual = _benchmark_query_count()
+    declared, actual = _benchmark_query_count(root)
     facts["rag_benchmark_query_count"] = declared
     facts["rag_benchmark_metadata_consistent"] = declared == actual
-    facts.update(_evaluation_facts())
+    facts.update(_evaluation_facts(root))
     facts["makefile_rag_eval_targets_present"] = sorted(
         t for t in _makefile_targets()
         if t in {"eval-rag", "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import"}
@@ -174,8 +175,8 @@ CHECK_LINES = {
 }
 
 
-def check_doc(doc_path: Path) -> int:
-    facts = collect()
+def check_doc(doc_path: Path, root: Path = PROJECT_ROOT) -> int:
+    facts = collect(root)
     text = doc_path.read_text(encoding="utf-8")
     problems: list[str] = []
     for marker in CHECK_LINES.values():
@@ -210,11 +211,15 @@ def check_doc(doc_path: Path) -> int:
             problems.append(
                 f"stale evaluation fact: canonical make target `{target}` missing from {doc_path.name}"
             )
-    if facts.get("rag_formal_metrics_status") != "NOT_VERIFIED":
-        problems.append(
-            f"rag formal metrics status drifted: doc state is "
-            f"{facts.get('rag_formal_metrics_status')} (expected NOT_VERIFIED until a "
-            "provenance-bearing formal artifact exists)"
+    problems.extend(check_formal_status_claims(text, doc_path, root))
+    canonical_rag_doc = root / "docs" / "reference" / "rag-evaluation.md"
+    if canonical_rag_doc.exists() and canonical_rag_doc.resolve() != doc_path.resolve():
+        problems.extend(
+            check_formal_status_claims(
+                canonical_rag_doc.read_text(encoding="utf-8", errors="replace"),
+                canonical_rag_doc,
+                root,
+            )
         )
     for problem in problems:
         print(f"ERROR: {problem}")
@@ -222,6 +227,49 @@ def check_doc(doc_path: Path) -> int:
         return 1
     print(f"OK: {doc_path} matches current runtime facts")
     return 0
+
+
+def check_formal_status_claims(
+    text: str,
+    doc_path: Path,
+    root: Path = PROJECT_ROOT,
+) -> list[str]:
+    """Both check-doc directions against the ARTIFACT-derived formal status.
+
+    - docs must NOT claim VERIFIED without a valid formal artifact
+      (docs cannot self-promote: artifact, not Markdown, owns the state);
+    - when a formal artifact IS VERIFIED, docs still claiming NOT_VERIFIED
+      are stale and must be re-rendered (guard drives docs, not vice versa).
+    """
+    problems: list[str] = []
+    facts_evaluation = _evaluation_facts(root)
+    actual = facts_evaluation["rag_formal_metrics_status"]
+    claimed = claimed_doc_formal_status(text)
+    if claimed == "CONFLICT":
+        problems.append(
+            f"formal metrics status conflict: {doc_path} claims both NOT_VERIFIED and VERIFIED"
+        )
+    if claimed == "VERIFIED" and actual != "VERIFIED":
+        problems.append(
+            f"docs must not self-promote formal metrics: {doc_path} claims VERIFIED "
+            f"but evidence artifacts derive {actual} (artifact owns the state; "
+            f"regenerate a formal artifact via `make rag-eval-649` first)"
+        )
+    if actual == "VERIFIED" and claimed != "VERIFIED":
+        problems.append(
+            f"stale formal-status claim: {doc_path} does not claim VERIFIED "
+            f"but the evidence artifact derives VERIFIED; re-render the doc "
+            f"and bind it to {facts_evaluation['rag_formal_artifact_path']}"
+        )
+    if actual == "VERIFIED" and claimed == "VERIFIED" and facts_evaluation[
+        "rag_formal_artifact_path"
+    ] not in text:
+        problems.append(
+            f"formal-metric claim must bind provenance: {doc_path} claims VERIFIED "
+            f"without referencing the evidence artifact "
+            f"{facts_evaluation['rag_formal_artifact_path']}"
+        )
+    return problems
 
 
 def main() -> int:

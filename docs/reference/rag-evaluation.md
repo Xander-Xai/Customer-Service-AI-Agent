@@ -181,6 +181,15 @@ artifact 使用上述结构化语义。
 
 > **当前 649-query 正式指标：NOT_VERIFIED。**
 >
+> 状态推导（治理方向）：本状态由 `scripts/rag_evidence_status.py` 从
+> `artifacts/evaluation/rag-649/**/report.json` 中满足 formal full-run
+> contract 的 artifact 动态推导，方向是 artifact/evidence → facts → docs →
+> guard——本文档（与其它 active 文档）只渲染、不允许自行 claim 该状态；
+> preflight-only 与 smoke/subset artifact 结构上即被拒绝，
+> 不满足 formal contract 的 artifact 一律维持 NOT_VERIFIED。
+> `scripts/project_facts.py --check` 与 `scripts/audit_doc_consistency.py`
+> 会将文档行与推导状态比对，双向漂移都算 FAIL。
+>
 > 2026-09-30 的评测尝试在 preflight gate 被阻塞
 > （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，
 > v1 schema，原样保留不回填）：

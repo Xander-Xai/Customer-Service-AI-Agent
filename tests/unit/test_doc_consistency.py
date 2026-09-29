@@ -522,17 +522,214 @@ def test_provenance_qualified_metric_line_passes(tmp_repo: Path):
     assert errors == []
 
 
-def test_metric_check_skips_when_formal_status_not_notverified(tmp_repo: Path, monkeypatch):
+def facts_module():
+    return _load_facts_module()
+
+
+def facts_derive(root: Path) -> dict:
+    from rag_evidence_status import derive_rag_formal_status
+
+    return derive_rag_formal_status(root)
+
+
+def test_metric_check_uses_artifact_state_not_doc_state(tmp_repo: Path, monkeypatch):
+    """Rule D follows the ARTIFACT-derived state, not the doc text."""
     _canonical_rag_doc(tmp_repo)
-    # Flip the doc to VERIFIED: rule D must stop firing (doc owns the state).
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## formal\n\tpython3 scripts/evaluate_rag.py\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    doc = write(tmp_repo, "README.md", "current Hit@3 82%")
+    # A doc line self-claiming VERIFIED does NOT change the derived state:
     (tmp_repo / "docs" / "reference" / "rag-evaluation.md").write_text(
         "# RAG 评估\n\n- 当前 649-query 正式指标：VERIFIED（artifact: ...）。\n", encoding="utf-8"
     )
-    assert audit.formal_rag_metrics(root=tmp_repo) == "VERIFIED"
-    doc = write(tmp_repo, "README.md", "current Hit@3 82%")
+    assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert errors == []
+    assert any("unproven current RAG metric claim" in e for e in errors), (
+        "docs cannot own/promote the evidence state — guard must still fire"
+    )
+
+
+# ------------------------------------------- artifact-driven governance
+# Fixtures: report.json artifacts matching scripts/evaluate_rag.py schema.
+
+
+def _make_benchmark(tmp_repo: Path, n: int = 16) -> str:
+    import hashlib
+
+    data = {
+        "metadata": {"total_queries": n, "version": "benchmark-v1", "created_at": "2026-01-01"},
+        "queries": [{"id": f"q{i}", "query": f"问题 {i}", "data_id": f"d{i}", "expected_doc_ids": []} for i in range(n)],
+    }
+    path = tmp_repo / "tests" / "eval" / "rag_benchmark.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    path.write_bytes(payload)
+    return hashlib.sha256(payload).hexdigest()
+
+
+EXPERIMENTS = ["vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank"]
+
+
+def _formal_shaped_report(sha: str, n: int, **overrides) -> dict:
+    report = {
+        "schema_version": "rag-eval-evidence/v2",
+        "run_id": "run-20261001T000000Z",
+        "timestamp": "2026-10-01T00:00:00.000000+00:00",
+        "status": "VERIFIED_FULL",
+        "git_sha": "0123456789abcdef0123456789abcdef01234567",
+        "benchmark": {
+            "sha256": sha,
+            "declared_queries": n,
+            "actual_queries": n,
+            "executed_queries": n,
+        },
+        "metrics": {name: {"hit@3": 0.5, "recall@3": 0.5, "mrr@3": 0.5} for name in EXPERIMENTS},
+        "run_summary": {
+            name: {"n_total": n, "n_success": n, "n_failed": 0, "n_degraded": 0}
+            for name in EXPERIMENTS
+        },
+        "evaluation_populations": {
+            "primary_view": "all_queries",
+            "counts": {"all_queries": n, "retrieval_eligible": n, "full_gold_covered": n},
+        },
+        "subset_run": False,
+    }
+    report.update(overrides)
+    return report
+
+
+def _write_artifact(
+    tmp_repo: Path,
+    report: dict,
+    run_id: str = "run-20261001T000000Z",
+) -> Path:
+    out = tmp_repo / "artifacts" / "evaluation" / "rag-649" / run_id
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    return path
+
+
+def test_no_formal_artifact_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    assert sha  # benchmark present, no artifacts at all
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    assert info["rag_formal_artifact_path"] is None
+    assert info["rag_formal_artifact_timestamp"] is None
+    assert info["rag_formal_artifact_git_sha"] is None
+    assert info["rag_formal_artifact_schema_version"] is None
+    assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
+
+
+def test_preflight_artifact_does_not_verify_metrics(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = {
+        "schema_version": "rag-eval-evidence/v2",
+        "run_id": "preflight-x",
+        "timestamp": "2026-10-01T00:00:00+00:00",
+        "status": "BLOCKED_PROVIDER_AUTH",
+        "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+        "git_sha": "0123",
+        "benchmark": {"sha256": sha, "declared_queries": 16, "executed_queries": 16},
+    }
+    _write_artifact(tmp_repo, report, run_id="preflight-x")
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_smoke_subset_artifact_does_not_verify_metrics(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["status"] = "SUBSET_SMOKE"
+    report["subset_run"] = True
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_valid_formal_artifact_marks_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    _write_artifact(tmp_repo, report)
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "VERIFIED"
+    assert info["rag_formal_artifact_path"] == (
+        "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
+    )
+    assert info["rag_formal_artifact_git_sha"] == report["git_sha"]
+    assert info["rag_formal_artifact_schema_version"] == "rag-eval-evidence/v2"
+    assert audit.formal_rag_metrics(root=tmp_repo) == "VERIFIED"
+
+
+def test_formal_shaped_artifact_with_partial_execution_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["run_summary"]["vector_only"]["n_success"] = 15  # PARTIAL-like execution
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_formal_shaped_artifact_with_stale_benchmark_hash_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["benchmark"]["sha256"] = "0" * 64
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_doc_cannot_self_promote_to_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)  # still NO formal artifact
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "当前 649-query 正式指标：VERIFIED。\n"
+        "make targets are irrelevant\n"
+        "vector_only bm25_only hybrid_no_rerank hybrid_rerank all_queries retrieval_eligible full_gold_covered\n"
+        "rag-eval-import rag-eval-649-preflight rag-eval-649-smoke rag-eval-649\n"
+        "6.3 Qwen/Qwen3-8B BAAI/bge-large-zh-v1.5 BAAI/bge-reranker-v2-m3 649 53 9\n",
+    )
+    assert sha and audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
+    facts = facts_module()
+    code = facts.check_doc(doc, root=tmp_repo)
+    assert code == 1
+
+
+def test_verified_artifact_with_stale_not_verified_doc_fails(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    doc = write(tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：NOT_VERIFIED。")
+    facts = facts_module()
+    assert facts.check_doc(doc, root=tmp_repo) == 1
+
+
+def test_not_verified_artifact_with_fake_verified_doc_fails(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["run_summary"]["bm25_only"]["n_success"] = 0
+    _write_artifact(tmp_repo, report)
+    doc = write(tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：VERIFIED。")
+    facts = facts_module()
+    assert facts.check_doc(doc, root=tmp_repo) == 1
+
+
+def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    doc = write(tmp_repo, "README.md", "current Hit@3 82%")  # no provenance binding
+    errors: list[str] = []
+    audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
+    assert any("bind the number to provenance" in e for e in errors), (
+        "VERIFIED artifacts allow claims but provenance binding stays required"
+    )
+    qualified = write(tmp_repo, "README.md", "current Hit@3 82% (artifact: rag-649 run)")
+    errors2: list[str] = []
+    audit.check_unproven_current_metrics([qualified], errors2, root=tmp_repo)
+    assert errors2 == []
 
 
 # ------------------------------------------------- E. make target refs
@@ -687,8 +884,28 @@ def test_facts_targets_resolved_from_makefile():
         assert required in targets, f"Makefile missing documented target: {required}"
 
 
-def test_facts_formal_status_flag_is_not_verified_on_real_repo():
-    facts = _load_facts_module()
-    assert facts.current_formal_status(
-        Path(__file__).resolve().parents[2] / "docs" / "reference" / "rag-evaluation.md"
-    ) == "NOT_VERIFIED"
+def test_facts_formal_status_derived_from_artifacts_on_real_repo():
+    """No formal 649 artifact exists yet: the derived status must stay
+    NOT_VERIFIED with all provenance fields empty (fail-closed)."""
+    info = facts_derive(REAL_ROOT)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    for key in (
+        "rag_formal_artifact_path",
+        "rag_formal_artifact_timestamp",
+        "rag_formal_artifact_git_sha",
+        "rag_formal_artifact_schema_version",
+    ):
+        assert info[key] is None
+
+
+def test_project_facts_json_contains_artifact_derived_keys():
+    facts = facts_module()
+    collected = facts.collect()
+    for key in (
+        "rag_formal_metrics_status",
+        "rag_formal_artifact_path",
+        "rag_formal_artifact_timestamp",
+        "rag_formal_artifact_git_sha",
+        "rag_formal_artifact_schema_version",
+    ):
+        assert key in collected

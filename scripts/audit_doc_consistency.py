@@ -21,7 +21,8 @@ Checks:
   H. referenced rag/core/web source files must exist
   I. hardcoded test counts framed as current truth (v3, rule A)
   J. canonical RAG evaluation command/doc references (v3, rules B/C)
-  K. unproven current formal RAG metric claims while NOT_VERIFIED (v3, rule D)
+  K. unproven current formal RAG metric claims while artifacts derive
+      NOT_VERIFIED (v3, rule D)
   L. make targets referenced by current-truth docs must exist (v3, rule E)
   M. tracked+ignored repository hygiene (v3, rule F)
 
@@ -41,6 +42,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
 SKIP_PARTS = {
     ".git", "node_modules", "dist", "__pycache__", ".venv", ".worktrees",
@@ -422,7 +426,7 @@ RAG_EVAL_MAKE_TARGETS = (
 )
 
 # (K) Metric families that must not be claimed as current formal numbers while
-# the canonical doc still says NOT_VERIFIED (enter via formal_rag_metrics()).
+# the artifact-derived status is NOT_VERIFIED (via rag_evidence_status.py).
 UNPROVEN_CURRENT_METRIC = re.compile(
     r"current.{0,24}(?:Hit@?\d|MRR|NDCG|Recall@\d)\D{0,12}\d{1,3}(?:\.\d+)?\s*%"
     r"|当前(?:的)?\s*(?:Hit@?\d|MRR|NDCG|Recall@\d).{0,20}\d{1,3}(?:\.\d+)?\s*%",
@@ -449,21 +453,17 @@ def text_lines(path: Path) -> list[str]:
 
 
 def formal_rag_metrics(root: Path = ROOT) -> str:
-    """Machine-derived RAG formal-metric status (drives rule K).
+    """Artifact-derived RAG formal-metric status (drives rule K).
 
-    Reads the explicit NOT_VERIFIED/VERIFIED marker from the canonical
-    reference doc (the doc itself is guarded by project_facts.check_doc).
-    Returns NOT_VERIFIED | VERIFIED | UNKNOWN.
+    Single source of truth: ``scripts/rag_evidence_status.py`` derives the
+    status ONLY from provenance-bearing formal artifacts under
+    ``artifacts/evaluation/rag-649/**/report.json``. Markdown text is never
+    consulted here — docs cannot own (or promote) the evidence state.
+    Returns "VERIFIED" or NOT_VERIFIED (fail-closed).
     """
-    canonical = root / CANONICAL_RAG_DOC
-    if not canonical.exists():
-        return "UNKNOWN"
-    text = canonical.read_text(encoding="utf-8", errors="replace")
-    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?NOT_VERIFIED", text):
-        return "NOT_VERIFIED"
-    if re.search(r"当前 649-query 正式指标[：:]\s*(?:\*\*)?VERIFIED", text):
-        return "VERIFIED"
-    return "UNKNOWN"
+    from rag_evidence_status import derive_rag_formal_status
+
+    return derive_rag_formal_status(root)["rag_formal_metrics_status"]
 
 
 def check_test_count_framing(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
@@ -540,12 +540,24 @@ def check_rag_eval_references(docs: list[Path], errors: list[str], root: Path = 
 
 
 def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
-    """Rule K: while formal 649-query metrics are NOT_VERIFIED, current-truth
-    docs must not claim current Hit/MRR/NDCG percentages without a
-    provenance qualifier on the same line."""
+    """Rule K: metric claims must follow the ARTIFACT-derived status.
 
-    if formal_rag_metrics(root) != "NOT_VERIFIED":
-        return
+    - NOT_VERIFIED (no valid formal artifact): current-truth docs must not
+      claim current Hit/MRR/NDCG percentages without a provenance qualifier.
+    - VERIFIED (valid formal artifact): claims are allowed but must still bind
+      to provenance (artifact reference / provenance wording) on the line;
+      the provenance check is NEVER fully disabled.
+    """
+    from rag_evidence_status import (
+        STATUS_NOT_VERIFIED,
+        STATUS_VERIFIED,
+        derive_rag_formal_status,
+    )
+
+    evidence = derive_rag_formal_status(root)
+    status = evidence["rag_formal_metrics_status"]
+    if status not in (STATUS_NOT_VERIFIED, STATUS_VERIFIED):
+        return  # defensive: nothing else may pass the gate
     truth_rels = {
         Path("README.md"),
         Path("CLAUDE.md"),
@@ -556,7 +568,8 @@ def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Pa
     for path in docs:
         rel = path.relative_to(root)
         if rel not in truth_rels or rel == Path("docs/reference/rag-evaluation.md"):
-            # The canonical doc owns the metric semantics (validated separately).
+            # The canonical doc states metric semantics and inherits the
+            # artifact-derived status (that's rendered either way);
             continue
         for line_no, line in enumerate(text_lines(path), 1):
             if HISTORICAL_CONTEXT.search(line):
@@ -565,11 +578,19 @@ def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Pa
                 continue
             if METRIC_PROVENANCE_RE.search(line):
                 continue
-            errors.append(
-                f"unproven current RAG metric claim in {rel}:{line_no} — "
-                f"formal 649-query metrics are NOT_VERIFIED; add provenance or "
-                f"drop the number"
-            )
+            if status == STATUS_NOT_VERIFIED:
+                errors.append(
+                    f"unproven current RAG metric claim in {rel}:{line_no} — "
+                    f"formal 649-query metrics are NOT_VERIFIED (no valid formal "
+                    f"artifact); add provenance or drop the number"
+                )
+            else:
+                errors.append(
+                    f"uncurrent-provenance RAG metric claim in {rel}:{line_no} — "
+                    f"formal metrics derive VERIFIED from evidence artifact "
+                    f"{evidence['rag_formal_artifact_path']}; bind the number to provenance "
+                    f"(artifact reference) on the line"
+                )
 
 
 def check_makefile_doc_targets(errors: list[str], root: Path = ROOT) -> None:

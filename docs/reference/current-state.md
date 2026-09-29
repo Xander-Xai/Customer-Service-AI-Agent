@@ -108,8 +108,12 @@ python3 scripts/audit_doc_consistency.py
   [docs/evaluation/production-evidence.md](../evaluation/production-evidence.md)。
 - 历史报告快照位于 `docs/reports/**`（含日期），不作为当前事实入口。
 - **RAG evidence 状态（当前 649-query 正式指标）**：当前 `NOT_VERIFIED`。
-  有 provenance-bearing 的正式 artifact 前必须保持该口径；
-  已提交的 preflight artifact（provider auth blocker）时间点有效，不构成正式指标。
+  该状态由 `scripts/rag_evidence_status.py` 从
+  `artifacts/evaluation/rag-649/**/report.json` 中满足 formal full-run
+  contract 的 artifact 动态推导（preflight-only / smoke subset artifact 与
+  文档声明都不构成正式指标证据），文档行的状态必须与推导一致；
+  已提交的 preflight artifact（provider auth blocker）时间点有效，
+  不构成正式指标。
   RAG 评估的具体生命周期由 `scripts/project_facts.py`（benchmark 数/harness 事实）
   与 [docs/reference/rag-evaluation.md](rag-evaluation.md) 共同维护。
 
