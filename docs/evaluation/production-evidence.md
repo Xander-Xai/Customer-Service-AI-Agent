@@ -70,3 +70,23 @@ Qdrant migration is limited to dry-run, disposable local collections, or explici
 The controlled staging attempt associated with this harness received HTTP 401 for every measured request. It collected no provider token usage or provider billing, so it does not close any production-validation item in Issue #7. Its application-measured failure timing is troubleshooting evidence only, not production latency evidence.
 
 The follow-up direct auth probe also returned HTTP 401 on its single request. The observed root cause is authentication failure for the supplied credential at the official SiliconFlow endpoint; whether the key is expired, revoked, account-mismatched, or otherwise invalid is not established by this probe. Chat, streaming, and staging reruns are blocked until a valid credential is supplied.
+
+## Current evidence boundary
+
+This is the current evidence contract, not a claim that production has been validated.
+
+| Area | Current status | Interpretation |
+|---|---|---|
+| Local deterministic tests/fixtures | Available when commands pass | Proves the tested local contract only |
+| Tool Result compression/offload/cache reuse | Local code and targeted tests | Does not prove provider billing or end-to-end latency savings |
+| Provider authentication | `NOT_VERIFIED` / controlled probe may return HTTP 401 | Never use a repository credential or print secrets |
+| Provider token usage/billing | `NOT_AVAILABLE` | No production cost claim may be derived |
+| Production latency/P99 | `NOT_MEASURED` | Local processing time is not provider or production latency |
+| RAG quality | Must name dataset, code, model, K, and artifact | Do not conflate Hit@K with Recall@K |
+| FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
+
+Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,
+`python3 scripts/benchmark_tool_result_cache_reuse.py`, and deterministic
+`scripts/repro_*.py` scripts. Label their outputs local/fixture evidence. Provider
+and production runs require an approved environment, redacted output, and a
+provenance-bearing artifact.

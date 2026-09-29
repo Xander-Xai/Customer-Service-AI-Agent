@@ -24,7 +24,7 @@ from cache.cache_policy import (
     resolve_cache_policy,
 )
 from cache.response_cache import ResponseCache
-from rag.embedding_status import EmbeddingUnavailableError
+from rag.embedding_status import EmbeddingDimensionError, EmbeddingUnavailableError
 
 # ============================================================================
 # 内存 FakeRedis / FakeQdrant
@@ -189,16 +189,17 @@ def qdrant():
 
 
 def _cache(redis=None, qdrant=None, **kw):
-    """构造启用全部三层的 ResponseCache（embedding_model=None 走确定性随机回退）。"""
+    """构造缓存；L2 测试必须显式提供可用 embedding。"""
     defaults = {
         "fallback_enabled": True,
         "fallback_threshold": 0.1,
     }
+    embedding_model = kw.pop("embedding_model", None)
     defaults.update(kw)
     return ResponseCache(
         redis_client=redis,
         qdrant_client=qdrant,
-        embedding_model=None,
+        embedding_model=embedding_model,
         **defaults,
     )
 
@@ -374,9 +375,7 @@ class TestPersonalizedResponseNotShared:
             "User A 投诉已升级",
             metadata={"intent_type": "complaint", "user_id": "user_A"},
         )
-        assert cache.get(
-            "我的投诉 CP001 处理进度", metadata={"user_id": "user_B"}
-        ) is None
+        assert cache.get("我的投诉 CP001 处理进度", metadata={"user_id": "user_B"}) is None
 
 
 # ============================================================================
@@ -396,9 +395,7 @@ class TestPublicFaqCanBeShared:
         )
         # User B 无需提供身份也能命中公开 FAQ
         assert cache.get(FAQ_QUERY) == "烟酰胺可抑制黑色素转移"
-        assert cache.get(FAQ_QUERY, metadata={"user_id": "user_B"}) == (
-            "烟酰胺可抑制黑色素转移"
-        )
+        assert cache.get(FAQ_QUERY, metadata={"user_id": "user_B"}) == ("烟酰胺可抑制黑色素转移")
 
     def test_public_jaccard_shared_across_users(self, qdrant):
         cache = _cache(redis=None, qdrant=None)
@@ -408,9 +405,7 @@ class TestPublicFaqCanBeShared:
             metadata={"intent_type": "product_info", "user_id": "user_A"},
         )
         # User B 用相似句也能命中（L3 共享作用域）
-        got = cache.get(
-            "玫瑰精华液的成分是什么", metadata={"user_id": "user_B"}
-        )
+        got = cache.get("玫瑰精华液的成分是什么", metadata={"user_id": "user_B"})
         assert got == "含玫瑰精油与透明质酸"
 
 
@@ -475,8 +470,12 @@ class TestCacheScopeConsistency:
     def test_same_query_different_users_no_collision(self, redis):
         """User A/B 各写各的订单回答，互不覆盖。"""
         cache = _cache(redis=redis, qdrant=None)
-        cache.put(ORDER_QUERY, "A-order", metadata={"intent_type": "order_status", "user_id": "user_A"})
-        cache.put(ORDER_QUERY, "B-order", metadata={"intent_type": "order_status", "user_id": "user_B"})
+        cache.put(
+            ORDER_QUERY, "A-order", metadata={"intent_type": "order_status", "user_id": "user_A"}
+        )
+        cache.put(
+            ORDER_QUERY, "B-order", metadata={"intent_type": "order_status", "user_id": "user_B"}
+        )
         assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "A-order"
         assert cache.get(ORDER_QUERY, metadata={"user_id": "user_B"}) == "B-order"
 
@@ -634,12 +633,8 @@ class TestExplicitPolicyAndTenantScope:
             "tenant_A 投诉",
             metadata={"intent_type": "complaint", "tenant_id": "tenant_A"},
         )
-        assert cache.get(
-            "我的投诉 CP001", metadata={"tenant_id": "tenant_A"}
-        ) == "tenant_A 投诉"
-        assert cache.get(
-            "我的投诉 CP001", metadata={"tenant_id": "tenant_B"}
-        ) is None
+        assert cache.get("我的投诉 CP001", metadata={"tenant_id": "tenant_A"}) == "tenant_A 投诉"
+        assert cache.get("我的投诉 CP001", metadata={"tenant_id": "tenant_B"}) is None
 
     def test_invalidate_with_tenant_metadata_is_scoped(self, redis):
         """invalidate(query, metadata={tenant_id}) 仅失效该租户作用域条目。"""
@@ -659,12 +654,8 @@ class TestExplicitPolicyAndTenantScope:
             metadata={"intent_type": "complaint", "tenant_id": "tenant_A"},
         )
         # tenant_A 失效，tenant_B 仍存在
-        assert cache.get(
-            "我的投诉 CP001", metadata={"tenant_id": "tenant_A"}
-        ) is None
-        assert cache.get(
-            "我的投诉 CP001", metadata={"tenant_id": "tenant_B"}
-        ) == "B"
+        assert cache.get("我的投诉 CP001", metadata={"tenant_id": "tenant_A"}) is None
+        assert cache.get("我的投诉 CP001", metadata={"tenant_id": "tenant_B"}) == "B"
 
     def test_l3_scoped_invalidate_preserves_other_scope(self, qdrant):
         """L3 Jaccard 按作用域失效：失效 shared 不影响用户作用域条目。"""
@@ -678,9 +669,7 @@ class TestExplicitPolicyAndTenantScope:
         # 失效 shared 作用域（消息总线风格，无身份）
         cache.invalidate("退款进度 RD001")
         # 用户作用域条目仍存在
-        assert cache.get(
-            "退款进度 RD001", metadata={"user_id": "user_A"}
-        ) == "User A 退款"
+        assert cache.get("退款进度 RD001", metadata={"user_id": "user_A"}) == "User A 退款"
 
     def test_personalized_disabled_does_not_pollute_shared_l3(self, qdrant):
         """无身份的个性化回答不写入 L3 shared 槽，后续无身份读取不得命中。"""
@@ -696,9 +685,7 @@ class TestExplicitPolicyAndTenantScope:
     def test_l3_ttl_expiry_evicts_entry(self, qdrant):
         """L3 条目超过 default TTL 后应被淘汰且不再命中（真实过期行为）。"""
         # default TTL=0 → 写入即过期
-        cache = _cache(
-            redis=None, qdrant=None, l1_ttl_policy={"default": 0, "knowledge_qa": 0}
-        )
+        cache = _cache(redis=None, qdrant=None, l1_ttl_policy={"default": 0, "knowledge_qa": 0})
         cache.put(
             FAQ_QUERY,
             "已过期",
@@ -787,9 +774,7 @@ class TestBusInvalidationScope:
         )
 
         # 无身份失效事件 → 只清 shared
-        await bus.publish(
-            Message(topic="cache:invalidate", payload={"query": FAQ_QUERY})
-        )
+        await bus.publish(Message(topic="cache:invalidate", payload={"query": FAQ_QUERY}))
         assert cache.get(FAQ_QUERY) is None
         # 用户作用域条目不受无身份失效影响
         assert cache.get(ORDER_QUERY, metadata={"user_id": "user_A"}) == "A 订单"
@@ -915,6 +900,11 @@ class _ListEmbedding:
         return [0.3] * 1024
 
 
+class _ShortEmbedding:
+    def encode(self, query):  # noqa: ARG002
+        return [0.1, 0.2]
+
+
 class _FailingEmbedding:
     def encode(self, query):  # noqa: ARG002
         raise RuntimeError("embedding unavailable")
@@ -987,19 +977,22 @@ class TestResponseCacheOperationalBranches:
         recreate_cache.clear()
 
     def test_embedding_and_internal_edge_paths(self):
-        from cache.cache_policy import resolve_cache_policy
-
         no_qdrant = ResponseCache(fallback_enabled=False)
         assert no_qdrant._ensure_l2_collection() is False
         with pytest.raises(EmbeddingUnavailableError) as exc_info:
             no_qdrant._embed_query("fallback")
         assert exc_info.value.reason == "provider_unavailable"
 
-        assert ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1] * 1024
+        assert (
+            ResponseCache(embedding_model=_ToListEmbedding())._embed_query("tolist") == [0.1] * 1024
+        )
         assert ResponseCache(embedding_model=_ListEmbedding())._embed_query("list") == [0.3] * 1024
         with pytest.raises(EmbeddingUnavailableError) as exc_info:
             ResponseCache(embedding_model=_FailingEmbedding())._embed_query("error")
         assert exc_info.value.reason == "encode_failed"
+
+        with pytest.raises(EmbeddingDimensionError):
+            ResponseCache(embedding_model=_ShortEmbedding())._embed_query("invalid-dimension")
 
         cache = _cache(redis=None, qdrant=None)
         cache._l1 = {"ignored": "value"}
@@ -1094,7 +1087,4 @@ class TestL2SemanticIsolation:
         # 异用户、同向量 → 语义本会命中，但 scope 过滤排除
         assert cache.get("我的订单大概几时能送到", metadata={"user_id": "user_B"}) is None
         # 同用户仍可命中 → 证明隔离由 scope_key 决定，而非向量不匹配
-        assert (
-            cache.get("我的订单大概几时能送到", metadata={"user_id": "user_A"})
-            == "A 的私有订单"
-        )
+        assert cache.get("我的订单大概几时能送到", metadata={"user_id": "user_A"}) == "A 的私有订单"

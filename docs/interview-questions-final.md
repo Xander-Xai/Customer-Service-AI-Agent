@@ -1,5 +1,10 @@
 # 药妆智多星 — 面试题集·最终版
 
+> 当前口径（2026-09-29）：不要把旧的“8 agents”“二级缓存”、ChromaDB 或
+> 未验证生产指标当作当前事实。使用 9 个角色、独立的 Response/Tool Result
+> cache、Qdrant + BM25 lifecycle、retrieval contract、scope-safe offload/recovery
+> 与 evidence taxonomy。
+
 > 基于简历 v5.4.1 版本，覆盖 6 条简历内容，19 道必问 + 15 道备选
 
 ---

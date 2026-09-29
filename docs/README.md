@@ -1,5 +1,7 @@
 # 文档索引
 
+> Current entry point (2026-09-29): [code/doc alignment matrix](reports/plans/2026-09-29-code-doc-alignment.md). Runtime version remains `6.3`; document dates are not release versions.
+
 > 本索引按「读者场景 → 文档功能 → 生命周期」三维分类组织。找不到想要的文档？先看左侧的「按读者查找」。
 
 ---
@@ -35,12 +37,16 @@
 - LLM 提供商切换 → [operations/llm-provider-switch.md](operations/llm-provider-switch.md)
 - E2E 验证 → [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md)
 - 生产就绪检查 → [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)
-- 当前代码/文档对齐记录 → [reports/plans/2026-06-25-v6.2-code-doc-alignment.md](reports/plans/2026-06-25-v6.2-code-doc-alignment.md)（最新：v6.2 全量前后端联调 + 生产就绪修复 + 文档同步）
+- 当前代码/文档对齐记录 → [reports/plans/2026-09-29-code-doc-alignment.md](reports/plans/2026-09-29-code-doc-alignment.md)
+- 事实驱动工程标准 → [standards/evidence-driven-engineering-loop.md](standards/evidence-driven-engineering-loop.md)
+- Agent Context Engineering → [design/context-engineering.md](design/context-engineering.md)
+- 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
+- 公共仓库密钥策略 → [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
 ### 👑 管理者
 - 版本变更日志 → [reports/releases/changelog.md](reports/releases/changelog.md)
-- 最新发布说明 → [reports/releases/release-notes-v6.0.md](reports/releases/release-notes-v6.0.md)
+- 历史发布说明 → [reports/releases/release-notes-v6.0.md](reports/releases/release-notes-v6.0.md)（不是当前状态入口）
 - 阶段改进报告 → [reports/milestone/](reports/milestone/)
 - 评分分析 → [reports/milestone/score-improvement-analysis.md](reports/milestone/score-improvement-analysis.md)
 - 技术债务清理 → [reports/milestone/tech-debt-fix-summary.md](reports/milestone/tech-debt-fix-summary.md)

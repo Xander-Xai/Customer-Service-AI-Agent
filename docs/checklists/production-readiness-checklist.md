@@ -1,7 +1,16 @@
 # 客服 AI Agent 项目生产准备度检查清单
 
-> 最后复核：2026-06-27（v6.3 全量前后端联调 + Widget DOMPurify 本地化 + Embedding Key 独立 + CORS 加固 + 文档全面同步）
+> 本清单于 2026-09-29 重新审计。Runtime version 仍为 v6.3；下方旧日期/旧数字均为历史快照，不能替代本次执行结果。
 > 口径：只记录当前 HEAD 已验证的事实，不复述历史阶段报告里的”已完成”结论。
+
+## 0. Current HEAD gates
+
+- [ ] `scripts/audit_doc_consistency.py` 通过
+- [ ] Tool Result feature flags、rollback switches、Redis store/TTL 已验证
+- [ ] Tool Result scope isolation、cache safety 已验证
+- [ ] BM25 lifecycle restart、Qdrant point-id migration dry-run/rollback 已验证
+- [ ] production evidence harness 已生成脱敏且带 provenance 的 artifact
+- [ ] provider auth/staging 已验证；HTTP 401、token usage/billing unavailable 仍是 **NOT_VERIFIED**
 
 ## 1. 当前已验证
 

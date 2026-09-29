@@ -2,6 +2,29 @@
 
 > 本文档面向技术面试场景，系统阐述项目的核心设计决策、技术选型理由与权衡取舍。
 
+> **Current HEAD addendum (2026-09-29)**: runtime version remains 6.3. Historical
+> percentages/P99 and production outcomes are not current facts without a
+> provenance-bearing artifact.
+
+## Current Tool Result and RAG flows
+
+```text
+tool call → cache policy/key → scoped exact cache hit OR real execution
+→ raw structured result → specialized compression → token budget
+→ compact result OR external reference → ToolMessage
+→ history compaction → next LLM round
+```
+
+```text
+query → rewrite/filter → vector + BM25 → retrieval contract
+→ fusion → rerank → context
+```
+
+Tool Result Cache ≠ Response Cache; Tool Result Store ≠ Session Memory; compression
+≠ pagination. Local estimated token reduction ≠ provider billing/token saving.
+BM25 has an explicit lifecycle; Qdrant point IDs are deterministic with a
+migration path, whose target-environment safety still requires a dry run.
+
 ---
 
 ## 1. 问题定义
