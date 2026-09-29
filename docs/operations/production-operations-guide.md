@@ -1,8 +1,10 @@
 # 生产环境运维手册
 
-> **版本**: v6.3
-> **最后更新**: 2026-06-27
+> **Runtime version**: v6.3
+> **本次审计**: 2026-09-29；旧命令必须先对照当前 Makefile/compose 文件复核。
 > **适用环境**: Production / Canary  
+
+> 当前仓库不包含 `scripts/probe_provider_auth.py` 或 `scripts/run_production_evidence.py`，不要复制执行这些不存在的命令。Provider probe 若在外部环境运行，应直接读取 process environment；应用配置使用 `load_dotenv(override=True)`。禁止输出或持久化 secret。
 
 ---
 
@@ -131,8 +133,8 @@ curl http://localhost:8000/api/cache/stats | jq .
 curl http://localhost:9090/api/v1/query?query=cache_hit_rate | jq .
 
 # 3. 分析查询多样性
-python3 scripts/analyze_query_diversity.py
-# 输出: 唯一查询数 / 总查询数
+# 当前通过 Prometheus / Grafana 查询 cache_hit_rate 与请求指标；
+# 原 scripts/analyze_query_diversity.py 已移除，不再作为活动入口。
 
 # 4. 检查TTL配置
 grep CACHE_TTL .env.prod
@@ -323,7 +325,8 @@ docker compose restart app
 echo "SESSION_PERSIST_TO_DB=true" >> .env.prod
 
 # 方案D: 清理僵尸Session
-python3 scripts/cleanup_expired_sessions.py
+# 当前由 SessionManager 的 TTL 清理任务处理；原
+# scripts/cleanup_expired_sessions.py 已移除，不再作为活动入口。
 ```
 
 **预防措施**:

@@ -1,14 +1,17 @@
-# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent v6.3)
+# 药妆智多星 — 多智能体客服系统 (Customer Service AI Agent runtime v6.3)
 
 面向化妆品生产/销售企业的基于 **LangGraph** 多 Agent 协作问答系统，实现四层状态机动态路由：缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理。
 
-> **当前代码状态（2026-06-25）**
+> **Current HEAD / 当前代码状态（审计日期 2026-09-29）**
 >
-> - 当前仓库版本为 `v6.3`
-> - 本轮重新按代码核对前后端与文档，`app.openapi()` 当前导出 **53 个 HTTP 路径**（WebSocket 不计入 OpenAPI）
-> - 已验证：`npm test` **60/60** 通过，`npm run build` 通过，OpenAPI 可正常生成
-> - 三级缓存架构重构完成：L1 Redis + L2 Qdrant + L3 Jaccard 回退
-> - 15 项证据缺口已全部补齐：知识库 5000+ 条文档、四大场景路由、场景 Agent、9 个 benchmark 脚本
+> - Runtime version remains `6.3`; no `v6.4` release is declared.
+> - Audited checkout: `rescue/local-work-20260929`, HEAD `18c927d7688957648955d749d61b3959b710277c`.
+> - Verification for this HEAD is `NOT_VERIFIED` until the commands are rerun; old `npm test`, OpenAPI, benchmark and test-count numbers are historical snapshots.
+> - Response Cache is L1 Redis exact → L2 Qdrant semantic → L3 Jaccard fallback. It is separate from Tool Result Cache, Tool Result Store, compression, and Session Memory.
+> - Tool Result Context Engineering includes deterministic compression, Top-K/budgeting, history compaction, specialized compressors, optional offload/recovery, optional semantic summary, and exact scoped reuse.
+> - RAG is rewrite/filter → vector + BM25 → retrieval contract → fusion → rerank → context, with BM25 lifecycle and deterministic Qdrant point IDs/migration.
+> - Provider authentication, provider token usage/billing, and production latency are `NOT_VERIFIED` / unavailable in the current evidence boundary.
+> - Current alignment matrix: [2026-09-29 code/doc alignment](docs/reports/plans/2026-09-29-code-doc-alignment.md)
 > - 统一多模态入口 `/api/chat/multimodal` 支持自动文件类型路由
 > - Prometheus 指标已修复重复注册问题，安全注册 20+ 业务指标
 > - **真实上线结论**：当前不能直接宣称”已完成上线验收”；请先逐项执行 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)
@@ -532,7 +535,7 @@ Thought（推理当前需要什么信息）
 | 类别 | 措施 |
 |------|------|
 | **认证** | API Key（系统间）+ JWT Bearer（终端用户）双认证模式 + `hmac.compare_digest` 防时序攻击 |
-| **RBAC 角色** | 4 级角色：customer / agent / supervisor / admin，分级权限控制（[middleware.py](api/middleware.py) `ROLE_PERMISSIONS`） |
+| **RBAC 角色** | 4 级角色：customer / agent / supervisor / admin，分级权限控制（[middleware package](api/middleware/__init__.py) `ROLE_PERMISSIONS`） |
 | **密码哈希** | Argon2id（v5.4 升级，OWASP 2023 推荐）+ PBKDF2-SHA256 向后兼容（600K 迭代 + 随机 salt） |
 | **JWT** | PyJWT 库 + HS256 算法白名单 + jti 吊销 + Redis 黑名单 + Refresh Token（access 2h + refresh 7d） |
 | **CSRF** | 双重 Cookie 提交模式（`csrf_token` cookie + `X-CSRF-Token` header），`hmac.compare_digest` 比较 |
@@ -1008,7 +1011,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 
 两阶段初始化：Phase 1 同步创建基础设施（MessageBus / Metrics / CircuitBreaker / Cache / Session），Phase 2 异步初始化 AI 组件（LLM / Agent / Router / RAG / Tools）。幂等保护 + asyncio.Lock + 逆序关闭。
 
-### 中间件栈（[middleware.py](api/middleware.py)）
+### 中间件栈（[middleware package](api/middleware/__init__.py)）
 
 5 层执行顺序：Trace → CSRF → Auth（分层 RBAC）→ SecurityHeaders（CSP nonce）→ RateLimit（Redis 滑动窗口）
 
