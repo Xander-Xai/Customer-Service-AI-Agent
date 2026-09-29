@@ -16,9 +16,10 @@ following hold (fields taken from the real ``scripts/evaluate_rag.py``
 schema; this module invents no second schema):
 
 - parseable JSON with ``schema_version`` matching ``rag-eval-evidence/v<n>``
-- top-level ``status`` in {VERIFIED_FULL, VERIFIED_FULL_NO_RERANK}
-  (BLOCKED*/gated artifacts, preflight-only and SUBSET_SMOKE runs are
-  therefore rejected structurally, not by directory/file naming)
+- top-level ``status`` == "VERIFIED_FULL" (the 4-config ablation
+  contract: canonical-experiment completeness is enforced below;
+  VERIFIED_FULL_NO_RERANK, SUBSET_SMOKE, PARTIAL and BLOCKED*/gated
+  artifacts are rejected structurally, not by directory/file naming)
 - ``subset_run`` is exactly False
 - ``benchmark.sha256`` equals the sha256 of the CURRENT
   ``tests/eval/rag_benchmark.json`` (provenance binding to the live
@@ -42,6 +43,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RELATIVE_REFERENCE_DIRS = ("artifacts", "evaluation", "rag-649")
@@ -51,7 +53,14 @@ STATUS_NOT_VERIFIED = "NOT_VERIFIED"
 STATUS_VERIFIED = "VERIFIED"
 
 REPORT_SCHEMA_VERSION_RE = re.compile(r"^rag-eval-evidence/v[1-9]+$")
-FORMAL_RUN_STATUSES = frozenset({"VERIFIED_FULL", "VERIFIED_FULL_NO_RERANK"})
+
+# Canonical formal contract: the 4-config ablation (vector_only /
+# bm25_only / hybrid_no_rerank / hybrid_rerank) — backed by validate_formal_
+# rag_report requiring every canonical experiment run. VERIFIED_FULL_NO_RERANK
+# means the reranker ablation leg is missing (evaluate_rag.py can exclude
+# hybrid_rerank while still marking the remaining run full), which does NOT
+# constitute complete formal evidence: status stays NOT_VERIFIED (fail-closed).
+FORMAL_RUN_STATUSES = frozenset({"VERIFIED_FULL"})
 
 _EXPERIMENT_NAMES_RE = re.compile(
     r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', re.MULTILINE
@@ -123,7 +132,7 @@ def validate_formal_rag_report(
     experiments: list[str] | None = None,
     benchmark_sha: str | None = None,
     declared_queries: int | None = None,
-) -> tuple[str | None, dict | None]:
+) -> dict[str, Any] | None:
     """Structurally validate candidate report.json against the formal contract.
 
     Returns an info dict on success, or None when the artifact is rejected
@@ -237,8 +246,6 @@ def claimed_doc_formal_status(text: str) -> str | None:
                 states.add(match.group(0))
     if not states:
         return None
-    if "CONFLICT" in states:
-        return "CONFLICT"
     if len(states) == 2:
         return "CONFLICT"
     return next(iter(states))

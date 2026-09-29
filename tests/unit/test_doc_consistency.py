@@ -666,6 +666,33 @@ def test_valid_formal_artifact_marks_verified(tmp_repo: Path):
     assert audit.formal_rag_metrics(root=tmp_repo) == "VERIFIED"
 
 
+def test_verified_full_no_rerank_does_not_promote_formal_metrics(tmp_repo: Path):
+    """Real evaluate_rag.py state machine: with a reranker blocker the run can
+    be marked VERIFIED_FULL_NO_RERANK while hybrid_rerank never executed.
+    Missing the reranker ablation leg means the 4-config formal contract is
+    NOT satisfied: formal metrics stay NOT_VERIFIED (fail-closed)."""
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["status"] = "VERIFIED_FULL_NO_RERANK"
+    report["metrics"].pop("hybrid_rerank")
+    report["run_summary"].pop("hybrid_rerank")
+    _write_artifact(tmp_repo, report)
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    assert info["rag_formal_artifact_path"] is None
+
+
+def test_verified_full_status_with_missing_experiment_is_not_verified(tmp_repo: Path):
+    """Even with status == VERIFIED_FULL, any missing canonical experiment
+    (incomplete 4-config ablation) cannot promote formal metrics."""
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["metrics"].pop("bm25_only")
+    report["run_summary"].pop("bm25_only")
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
 def test_formal_shaped_artifact_with_partial_execution_is_not_verified(tmp_repo: Path):
     sha = _make_benchmark(tmp_repo)
     report = _formal_shaped_report(sha, 16)
