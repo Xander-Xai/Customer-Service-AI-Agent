@@ -2,6 +2,16 @@
 
 > 本文档记录药妆智多星多智能体客服系统的所有版本变更。
 
+## Unreleased — 2026-08 ~ 2026-09
+
+- Security/cache isolation hardening and public-repository secret handling.
+- Tool Result Context Engineering: deterministic budget/compression, offload/recovery, and scoped exact reuse cache.
+- Evidence-driven engineering standard and explicit `UNKNOWN` / `NOT_MEASURED` / `NOT_VERIFIED` semantics.
+- Qdrant deterministic point IDs and migration tooling; BM25 lifecycle and hybrid retrieval contract hardening.
+- Production evidence boundary and controlled provider staging/auth preflight documentation.
+
+> This records unreleased work; it does not create a `v6.4` version or claim production outcomes.
+
 ---
 
 ## v6.3 (2026-06-25) — 前后端联调 + 生产就绪加固 + 文档同步
@@ -364,11 +374,11 @@
 - 新增: `argon2-cffi>=23.1.0` - Argon2id密码哈希库
 
 ### 📄 相关文档
-- [PHASE1_IMPROVEMENTS_COMPLETED.md](QUICK_IMPROVEMENTS_COMPLETED.md) - Phase 1报告
-- [PHASE2_IMPROVEMENTS_COMPLETED.md](PHASE2_IMPROVEMENTS_COMPLETED.md) - Phase 2报告
-- [PHASE3_IMPROVEMENTS_COMPLETED.md](PHASE3_IMPROVEMENTS_COMPLETED.md) - Phase 3报告
-- [PRODUCTION_OPERATIONS_GUIDE.md](PRODUCTION_OPERATIONS_GUIDE.md) - 运维手册
-- [FINAL_ACCEPTANCE_REPORT.md](FINAL_ACCEPTANCE_REPORT.md) - 验收报告（99.0分）
+- [quick-improvements-completed.md](../milestone/quick-improvements-completed.md) - Historical Phase 1 report
+- [phase2-improvements-completed.md](../milestone/phase2-improvements-completed.md) - Historical Phase 2 report
+- [phase3-improvements-completed.md](../milestone/phase3-improvements-completed.md) - Historical Phase 3 report
+- [production-operations-guide.md](../../operations/production-operations-guide.md) - Operations guide
+- [final-acceptance-report.md](../milestone/final-acceptance-report.md) - Historical acceptance report
 
 ---
 

@@ -3,17 +3,25 @@ repos:
     hooks:
       - id: no-env-files
         name: Prevent committing .env files
-        entry: bash -c 'for f in "$@"; do case "$f" in .env|.env.*|.env.prod.generated) echo "ERROR: $f must not be committed. Add to .gitignore."; exit 1;; esac; done' --
+        entry: >-
+          bash -c 'failed=0; for f in "$@"; do name=${f##*/}; case "$name" in
+          .env|.env.*|.env.prod.generated) case "$name" in .env.example|.env.sample|.env.template) ;;
+          *) echo "ERROR: $f must not be committed. Add to .gitignore."; failed=1;; esac;; esac;
+          done; exit "$failed"' --
         language: system
-        files: '^\.env'
+        files: '^\.env($|\.)'
+        exclude: '^\.env\.(example|sample|template|test)$'
         pass_filenames: true
 
       - id: no-api-keys-in-env
         name: Prevent API keys in .env files
-        entry: bash -c '! grep -rnE "sk-[A-Za-z0-9]{20,}|api_key=['\''\"]?[A-Za-z0-9]{20,}" --include="*.env*" . 2>/dev/null'
+        entry: >-
+          bash -c 'failed=0; for f in "$@"; do if grep -Eq
+          "sk-[A-Za-z0-9]{20,}|api_key=[[:space:]]*[A-Za-z0-9_-]{20,}" "$f" 2>/dev/null;
+          then echo "ERROR: suspected API credential in $f"; failed=1; fi; done; exit "$failed"' --
         language: system
-        files: '\.env'
-        pass_filenames: false
+        files: '^\.env($|\.)'
+        pass_filenames: true
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.0

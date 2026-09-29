@@ -1,6 +1,10 @@
 # 3 分钟项目介绍脚本（面试用）
 
 > 按照"问题 → 方案 → 架构 → 亮点 → 反思"结构组织，控制在 3 分钟内。
+> 当前口径（2026-09-29）：9 个 Agent 角色、5 种协作模式、Qdrant + BM25
+> 混合检索、retrieval contract/reranker 与 Tool Result Context Engineering。
+> FCR、人效、P99、成本和 provider latency 没有当前生产证据时必须说
+> `NOT_MEASURED` / `NOT_VERIFIED`。
 
 ---
 
@@ -10,7 +14,7 @@
 >
 > 这是一个面向化妆品企业的 AI 客服系统，核心目标是：**让多个 AI Agent 协同工作，处理从简单问候到复杂投诉的各种客户问题**。
 >
-> 项目基于 **LangGraph** 构建，用了 8 个 AI Agent、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。整体大约 **36,000 行 Python + 5,600 行 JavaScript**，配备了 **1,350+ 个测试用例**和完整的 Docker 生产部署方案。
+> 项目基于 **LangGraph** 构建，包含 9 个 Agent 角色、5 种协作模式，具备 RAG 知识检索、Function Calling 工具调用、ReAct 推理链能力。测试数量以当前 `pytest --collect-only -q` 为准（本次收集 1773 项）；生产结果不由本地测试代替。
 
 ---
 
@@ -18,7 +22,7 @@
 
 > 整个系统的架构是一个**四层状态机**：
 >
-> **第一层是缓存**。化妆品客服有 60-70% 是重复问题，所以我设计了二级缓存——L1 是 MD5 精确匹配，L2 是基于 jieba 分词的 Jaccard 语义匹配，命中时延迟从 5 秒降到 10 毫秒以下。
+> **第一层是缓存**。Response Cache 使用 L1 Redis 精确、L2 Qdrant 语义、L3 Jaccard fallback；Tool Result exact reuse cache、Tool Result Store、compression 和 Session Memory 是独立机制。命中率和延迟没有当前生产证据时标记 `NOT_MEASURED`。
 >
 > **第二层是双层路由**。我让 LLM 分类器和规则分类器**并行执行**，LLM 置信度低时自动用规则结果覆盖。同时计算查询的复杂度评分——"你好"这种只有 20 分，直接走快速通道；"我的产品过敏了要退款还要查物流"这种 80 分以上，走复杂处理链路。
 >
@@ -55,7 +59,7 @@
 >
 > 1. **ERP 集成是 Mock 的**——接口抽象和适配器工厂都做好了，但真实 API 对接需要企业配合
 > 2. **前端 65 处内联样式**——虽然 CSP style-src 已使用 nonce（v5.4 修复），但理想情况是完全用 CSS 类替代，方便样式维护
-> 3. **RAG 已优化**——初期用 ChromaDB 默认英文 embedding，Hit Rate@3 只有 63%。已替换为中文 embedding 降级链（bge-small-zh-v1.5 → text2vec-base-chinese），配合 query rewriting 和 reranker，Hit Rate@3 提升到 80%，MRR 从 0.500 提升到 0.778
+> 3. **RAG 当前链路**——query rewrite/filter → Qdrant vector + BM25 → retrieval contract → fusion → rerank → context；BM25 lifecycle、deterministic Qdrant point IDs 和 migration 均有代码/测试入口。Hit@K、Recall、MRR 需绑定当前 artifact，生产质量暂为 `NOT_VERIFIED`。
 > 4. **v5.4 安全升级**——密码哈希从 PBKDF2-SHA256 升级到 Argon2id（OWASP 2023 推荐），抗 GPU/ASIC 攻击能力提升 100 倍+
 >
 > 另外在真实 LLM 集成测试中发现了两个 Mock 测试无法覆盖的问题：路由优先级排序缺陷和小模型注入泄露，都已在输出层修复。这让我深刻理解了 E2E 真实测试的不可替代性。

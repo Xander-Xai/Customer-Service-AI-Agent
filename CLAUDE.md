@@ -1,14 +1,23 @@
 # 药妆智多星多智能体客服系统
 
+## 当前事实入口
+
+- Runtime version: `6.3` (`core/config.py`); no `v6.4` release is declared.
+- Current HEAD and unresolved claims: [2026-09-29 convergence matrix](docs/reports/plans/2026-09-29-code-doc-alignment.md).
+- Last documentation convergence audit: `2026-09-29`.
+- `UNKNOWN` / `NOT_MEASURED` / `NOT_VERIFIED` are evidence states, not successful outcomes.
+
 ## 项目概述
 基于 LangGraph 的多智能体客服系统，面向化妆品生产/销售企业。
 - Python 3.10+ / FastAPI / LangGraph / Qdrant
 - 四层状态机：缓存 → 路由 → 协作模式 → 响应后处理
-- 9 个 AI Agent，5 种协作模式，三层缓存（L1 Redis + L2 Qdrant + L3 Jaccard），RAG + Function Calling + ReAct
-- 1400+ 个自动化测试用例，覆盖率门槛 80%
+- 9 个 Agent 角色，5 种协作模式；Response Cache（三层）与 Tool Result Cache/Store/Compression/Session Memory 分开
+- RAG：Qdrant 向量 + BM25 混合检索、retrieval contract、reranker、确定性 point ID 与迁移工具
+- Tool Result Context Engineering：`core/tool_result_*.py`，含预算、压缩、offload/recovery、scope-safe exact reuse
+- 测试数量以 `pytest --collect-only -q` 当前输出为准；不要复制历史 1400+ 数字
 - v6.0 新增：Qdrant 向量数据库迁移 + ChromaDB→Qdrant 数据迁移脚本 + 并行运行模式
 - v6.1 新增：统一多模态入口 + Widget 图片/语音 + 场景过滤 RAG + 5000+ 知识库文档
-- v6.3 新增：前后端联调修复 + 生产就绪加固 + 文档全面同步
+- 当前 HEAD：Tool Result Context Engineering、BM25 lifecycle、retrieval contract、Qdrant point-id migration、production evidence 口径收紧
 
 ## 常用命令
 

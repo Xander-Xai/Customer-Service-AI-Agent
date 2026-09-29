@@ -1,4 +1,7 @@
-# ADR-005: 双层缓存策略（MD5 + Jaccard）
+# ADR-005: 双层缓存策略（MD5 + Jaccard）— 历史决策
+
+> Status: **Superseded**. This ADR records the 2026-06-02 design and is not the current architecture.
+> Superseded by: [ADR-006](006-cache-and-tool-result-context-architecture.md)
 
 **日期**：2026-06-02
 **状态**：已采纳
