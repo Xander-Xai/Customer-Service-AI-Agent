@@ -1,5 +1,10 @@
 # 项目审查验收清单 — 实测版（v5.3.1 补丁）
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This is the v5.3.1 acceptance-check execution record (2026-06). It is not a current launch gate;
+> for current launch checks use production-readiness-checklist.md and quick-launch-checklist.md.
+
+
 > **生成日期**: 2026-06-15（v5.3 审计整改）
 > **更新日期**: 2026-06-16（v5.3.1 补丁：3 个 P0 修复）
 > **审计报告**: `docs/reports/audit/project-audit-report.md`

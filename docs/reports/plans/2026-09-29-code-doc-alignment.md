@@ -1,5 +1,16 @@
 # Code / Config / Tests / Scripts / Deployment / Documentation Alignment
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> Baseline SHA: `18c927d7688957648955d749d61b3959b710277c`
+> This document is valid only for that audit execution. It is not a permanent
+> Current Truth entry and is not maintained as facts move forward.
+> Current entry point: [docs/reference/current-state.md](../../reference/current-state.md).
+> Snapshot SHA != Current HEAD (`git rev-parse HEAD`).
+> Note: since this audit, `scripts/probe_provider_auth.py`,
+> `scripts/run_production_evidence.py` and `scripts/audit_doc_consistency.py`
+> all exist in the repository; statements elsewhere in this file claiming they
+> are missing were true only for the audited checkout at that time.
+
 > Audit baseline: checkout `rescue/local-work-20260929`, HEAD `18c927d7688957648955d749d61b3959b710277c`, audited 2026-09-29.
 > The working tree already contained uncommitted runtime and test changes; this audit preserves them and does not treat them as committed release evidence.
 >

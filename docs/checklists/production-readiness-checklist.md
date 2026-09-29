@@ -16,7 +16,7 @@
 
 - [x] 前端单测通过：`npm test` = 60/60（7 个测试文件）
 - [x] 前端生产构建通过：`npm run build`
-- [x] OpenAPI 当前可正常生成：`app.openapi()` = `53` 个 HTTP 路径（v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`）
+- [x] OpenAPI 当前可正常生成：`app.openapi()` = `53` 个 HTTP 路径（校验命令 `make openapi-check`；v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`）
 - [x] 前后端上传约束已对齐：统一 `5MB` 上限
 - [x] 前后端图片白名单已对齐：`JPEG/PNG/WebP`
 - [x] `/api/chat/voice` 已修复 MIME 传递错误，非法音频改为 4xx/5xx 显式返回，而不是误把 `filename` 当 `content_type`
@@ -29,7 +29,7 @@
 - [x] 后端已有 Knowledge Base 5000 条文档（成分数据 1500+ / FAQ 2500+ / 场景文档 1000+）
 - [x] LLM 客户端已实现指数退避 + 全抖动重试策略
 - [x] `POST /api/cache/invalidate` 端点已实现主动缓存失效
-- [x] OpenAPI 重新生成：`docs/openapi.json` = 53 个 HTTP 路径（48 API + 5 页面）
+- [x] OpenAPI 重新生成：`docs/openapi.json` = 53 个 HTTP 路径（47 个 `/api/*` + `/metrics/prometheus` + 5 个页面路径；操作数 55，快照由 `scripts/generate_openapi.py` 生成）
 - [x] admin.html 版本号同步至 v6.3
 - [x] _revoked_jtis 已吊销 JTI 集合新增容量限制 10000，防止内存泄漏
 - [x] mypy 已从 requirements.txt 移除，移到 requirements-dev.txt
@@ -47,11 +47,11 @@
 - [x] ERP sync confirmation dialog added (v6.3)
 - [x] submitFeedback deduplicated (alias to submitRating) (v6.3)
 - [x] getSessions pagination support (offset/limit) (v6.3)
-- [x] `docs/design/architecture-design.md` — ChromaDB 遗留模式引用已移除，新增 BM25Retriever/api_embedding/v7.0 混合检索说明 (v6.3)
-- [x] `docs/design/security.md` — 修复 `api/middleware.py` 已删除文件引用到 `api/middleware/__init__.py` (v6.3)
-- [x] `.env.example` — 废弃的 CACHE_L1_MAX/CACHE_L2_MAX 已移除 (v6.3)
-- [x] `docs/reports/releases/release-notes-v6.0.md` — ChromaDB 遗留模式和文件引用已更新 (v6.3)
-- [x] `docs/operations/production-operations-guide.md` — ChromaDB 引用和废弃缓存参数已清理 (v6.3)
+- [x] `docs/design/architecture-design.md` — ChromaDB 遗留模式引用已移除，新增 BM25Retriever/api_embedding/混合检索说明 (v6.3，历史修复记录)
+- [x] `docs/design/security.md` — 修复已删除的 `api/middleware.py` 文件引用到 `api/middleware/__init__.py` (v6.3，历史修复记录)
+- [x] `.env.example` — 废弃的 CACHE_L1_MAX/CACHE_L2_MAX 已移除 (v6.3，历史修复记录)
+- [x] `docs/reports/releases/release-notes-v6.0.md` — ChromaDB 遗留模式和文件引用已更新 (v6.3，历史修复记录)
+- [x] `docs/operations/production-operations-guide.md` — ChromaDB 引用和废弃缓存参数已清理 (v6.3，历史修复记录)
 
 ## 2. 当前仍不能直接宣称“真实上线就绪”的项目
 

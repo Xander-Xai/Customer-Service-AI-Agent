@@ -1,8 +1,8 @@
 """
-Qdrant 知识库管理器（v7.0）
+Qdrant 知识库管理器（internal feature milestone: hybrid retrieval）
 基于向量检索的 RAG 检索增强生成（Qdrant 实现）。
 
-v7.0 混合检索升级：
+混合检索升级（internal feature milestone）：
 - 新增 BM25 词法检索通道（内存倒排索引）
 - 新增 RRF 融合（向量 + BM25 结果排名融合）
 - 新增 HYBRID_SEARCH_ENABLED 配置开关
@@ -77,7 +77,7 @@ logger = get_logger("rag.qdrant_knowledge_base")
 _EMBEDDING_DIM = 1024
 
 
-# ===== v7.0: RRF 融合函数 =====
+# ===== RRF 融合函数（hybrid retrieval milestone）=====
 
 
 def rrf_fusion(
@@ -156,7 +156,7 @@ class QdrantKnowledgeBase:
             type(self._embed_fn).__name__ if self._embed_fn is not None else "unavailable"
         )
         self._collection_cache: dict[str, bool] = {}
-        # v7.0: BM25 词法检索 + 混合检索开关
+        # hybrid retrieval: BM25 词法通道 + 开关
         self._bm25: Any = None
         self._hybrid_enabled = HYBRID_SEARCH_ENABLED
         # P1-02: BM25 lifecycle state. ``self._bm25 is not None`` is NOT a
@@ -414,7 +414,7 @@ class QdrantKnowledgeBase:
         self._client.upsert(collection_name=collection_name, points=points)
         logger.debug(f"Collection '{collection_name}' 添加 {len(documents)} 条文档")
 
-        # v7.0: 同步更新 BM25 索引（P1-02: 幂等 upsert，避免重复 doc_id 追加）
+        # hybrid retrieval: 同步更新 BM25 索引（P1-02: 幂等 upsert，避免重复 doc_id 追加）
         if self._hybrid_enabled:
             # P1-02 BM25-17: serialize the BM25 mutation with rebuilds so a
             # concurrent rebuild cannot discard this write via candidate swap.

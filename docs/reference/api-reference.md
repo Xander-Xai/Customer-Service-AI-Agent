@@ -1,15 +1,21 @@
 # API 参考文档
 
-> 本文档按 `api.app_factory:app` 的真实 FastAPI 路由同步。交互式文档：http://localhost:8000/docs（Swagger UI）。当前 OpenAPI 导出：`docs/openapi.json`。
+> 本文档按 `api.app_factory:app` 的真实 FastAPI 路由同步。交互式文档：http://localhost:8000/docs（Swagger UI）。
+> OpenAPI 快照：`docs/openapi.json` 由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
+> 数量校验用 `python3 scripts/project_facts.py` 或 `python3 scripts/generate_openapi.py --check`，不要手工维护计数。
 
 ---
 
 ## 当前接口总览
 
+> 下表数量由 `app.openapi()` 在 2026-09-30 导出（53 个 HTTP 路径 / 55 个操作）。
+> 漂移守卫：`make openapi-check`。
+
 | 类型 | 数量 | 说明 |
 |------|------|------|
-| HTTP 路径 | 55 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
-| `/api/*` 业务路径 | 49 | 认证、对话、多模态、会话、监控、知识库、缓存、告警、Prompt 管理等业务接口（共 50 个后端路由中 49 个位于 `/api/*` 下） |
+| HTTP 路径 | 53 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
+| HTTP 操作 | 55 | 同一路径可含多 method；其中 49 个位于 `/api/*` 下 |
+| `/api/*` 业务操作 | 49 | 认证、对话、多模态、会话、监控、知识库、缓存、告警、Prompt 管理等业务接口 |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话 |
 | HTML 页面 | 5 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html` |
 

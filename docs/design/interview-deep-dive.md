@@ -15,11 +15,11 @@
 
 ```python
 # 项目实际代码：四层状态机的条件路由
-# multi_agent_customer_service.py 中的 build_graph()
-graph.add_conditional_edges(
-    "cache_check",
-    lambda state: "hit" if state.get("cache_hit") else "miss",
-    {"hit": "response", "miss": "routing"}
+# core/graph_builder.py 中的 build_graph()
+workflow.add_conditional_edges(
+    "check_cache",
+    lambda s: "final_response" if s.get("cached", False) else "classify_query",
+    {"final_response": "final_response", "classify_query": "classify_query"},
 )
 ```
 
@@ -35,8 +35,8 @@ graph.add_conditional_edges(
 
 ### 代码引用
 
-- [core/graph_builder.py](core/graph_builder.py) — 图构建主文件（`build_graph()` 唯一入口）
-- [core/container.py](core/container.py) — ServiceContainer 中的图构建
+- [core/graph_builder.py](../../core/graph_builder.py) — 图构建主文件（`build_graph()` 唯一入口）
+- [core/container.py](../../core/container.py) — ServiceContainer 中的图构建
 
 ---
 
@@ -98,9 +98,9 @@ for round_num in range(max_rounds):
 
 ### 代码引用
 
-- [collaboration/orchestrator.py](collaboration/orchestrator.py) — 模式选择逻辑
-- [collaboration/modes.py](collaboration/modes.py) — 5 种模式实现
-- [agents/react_agent.py](agents/react_agent.py) — ReAct 推理引擎
+- [collaboration/orchestrator.py](../../collaboration/orchestrator.py) — 模式选择逻辑
+- [collaboration/modes.py](../../collaboration/modes.py) — 5 种模式实现
+- [agents/react_agent.py](../../agents/react_agent.py) — ReAct 推理引擎
 
 ---
 
@@ -159,10 +159,10 @@ if "tools" in kwargs and response.status_code in (400, 422):
 
 ### 代码引用
 
-- [core/monitoring.py:37](core/monitoring.py#L37) — MetricsCollector
-- [core/monitoring.py](core/monitoring.py) — CircuitBreaker（搜 `class CircuitBreaker`）
-- [core/monitoring.py](core/monitoring.py) — OpenAICompatibleClient（搜 `class OpenAICompatibleClient`）
-- [llm/rule_based_llm.py](llm/rule_based_llm.py) — 规则降级引擎
+- [core/monitoring.py:37](../../core/monitoring.py#L37) — MetricsCollector
+- [core/monitoring.py](../../core/monitoring.py) — CircuitBreaker（搜 `class CircuitBreaker`）
+- [core/monitoring.py](../../core/monitoring.py) — OpenAICompatibleClient（搜 `class OpenAICompatibleClient`）
+- [llm/rule_based_llm.py](../../llm/rule_based_llm.py) — 规则降级引擎
 
 ---
 
@@ -174,12 +174,12 @@ if "tools" in kwargs and response.status_code in (400, 422):
 
 | 共享状态 | 保护机制 | 代码位置 |
 |---------|---------|---------|
-| CircuitBreaker 状态 | `asyncio.Lock` | [core/monitoring.py](core/monitoring.py) |
-| MetricsCollector 计数器 | `asyncio.Lock` | [core/monitoring.py](core/monitoring.py) |
-| SessionManager 消息列表 | `asyncio.Lock` | [core/session/session_manager.py](core/session/session_manager.py) |
-| SharedBlackboard 键值对 | `asyncio.Lock` per key | [core/shared_blackboard.py](core/shared_blackboard.py) |
-| MessageBus 订阅 | `asyncio.Queue`（天然线程安全） | [core/message_bus.py](core/message_bus.py) |
-| LLM 客户端连接池 | `httpx.AsyncClient`（内置连接池） | [llm/client.py](llm/client.py) |
+| CircuitBreaker 状态 | `asyncio.Lock` | [core/monitoring.py](../../core/monitoring.py) |
+| MetricsCollector 计数器 | `asyncio.Lock` | [core/monitoring.py](../../core/monitoring.py) |
+| SessionManager 消息列表 | `asyncio.Lock` | [core/session/session_manager.py](../../core/session/session_manager.py) |
+| SharedBlackboard 键值对 | `asyncio.Lock` per key | [core/shared_blackboard.py](../../core/shared_blackboard.py) |
+| MessageBus 订阅 | `asyncio.Queue`（天然线程安全） | [core/message_bus.py](../../core/message_bus.py) |
+| LLM 客户端连接池 | `httpx.AsyncClient`（内置连接池） | [llm/client.py](../../llm/client.py) |
 
 **关键设计决策**：
 
@@ -208,8 +208,8 @@ async def test_blackboard_concurrent_writes():
 
 ### 代码引用
 
-- [tests/stress/test_stress.py](tests/stress/test_stress.py) — 并发压力测试
-- [core/shared_blackboard.py](core/shared_blackboard.py) — 黑板锁实现
+- [tests/stress/test_stress.py](../../tests/stress/test_stress.py) — 并发压力测试
+- [core/shared_blackboard.py](../../core/shared_blackboard.py) — 黑板锁实现
 
 ---
 
@@ -267,8 +267,8 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 
 ### 代码引用
 
-- [agents/base_agent.py](agents/base_agent.py) — Prompt 隔离实现（搜 `untrusted data`）
-- [api/utils.py](api/utils.py) — 输入净化（搜 `sanitize_input`）
+- [agents/base_agent.py](../../agents/base_agent.py) — Prompt 隔离实现（搜 `untrusted data`）
+- [api/utils.py](../../api/utils.py) — 输入净化（搜 `sanitize_input`）
 - [tests/e2e/test_e2e_real_llm.py](../../tests/e2e/test_e2e_real_llm.py) — E2E/注入防御测试入口（provider-backed tests require explicit environment）
 
 ---
@@ -297,28 +297,34 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 
 ### 代码引用
 
-- [core/session/drift_detector.py](core/session/drift_detector.py) — 漂移检测实现（搜 `detect_drift`）
-- [agents/base_agent.py](agents/base_agent.py) — 漂移修复策略注入（搜 `drift_repair`）
+- [core/session/drift_detector.py](../../core/session/drift_detector.py) — 漂移检测实现（搜 `detect_drift`）
+- [agents/base_agent.py](../../agents/base_agent.py) — 漂移修复策略注入（搜 `drift_repair`）
 
 ---
 
-## Q7: "二级缓存的设计思路？"
+## Q7: "Response Cache 三层缓存的设计思路？"
 
 ### 核心回答
 
-> "两级缓存针对不同相似度的重复查询，L1 精确匹配 O(1)，L2 语义匹配捕获措辞不同但意思相同的查询。"
+> "当前 Response Cache 是三层：L1 Redis MD5 精确匹配 O(1)；L2 Qdrant 语义检索
+> （BAAI/bge-large-zh-v1.5 向量）捕获措辞不同但意思相同的查询；L3 Jaccard 回退
+> （jieba 分词 + 倒排索引）在 embedding 不可用时兜底。注意这是 Response Cache，
+> 与 Tool Result exact reuse cache / Tool Result Store / 压缩 / Session Memory
+> 是相互独立的机制（ADR-006）。"
 
 ```
 查询进入
   ↓
-L1: MD5(query) 精确匹配 → 命中 → 直接返回（<1ms）
+L1: Redis MD5(query) 精确匹配 → 命中 → 直接返回（<10ms）
   ↓ miss
-L2: jieba 分词 → Jaccard 语义匹配 → 命中 → 返回（<10ms）
+L2: Qdrant 语义检索（bge-large-zh-v1.5 向量） → 命中 → 返回
   ↓ miss
-LLM 路由 → Agent 处理 → 写入缓存 → 返回（5-15s）
+L3: jieba 分词 → Jaccard 回退（倒排索引） → 命中 → 返回
+  ↓ miss
+LLM 路由 → Agent 处理 → 写入缓存 → 返回
 ```
 
-**L2 优化——倒排索引**：
+**L3 优化——倒排索引**：
 ```python
 # cache/response_cache.py
 # 不做全量扫描 O(n)，通过 token → 候选集 倒排索引缩小范围 O(k)
@@ -327,32 +333,36 @@ for token in jieba.cut(query):
 # 只对候选集计算 Jaccard，而不是全部缓存条目
 ```
 
-**防缓存雪崩**：
+**防缓存雪崩 + 跨用户隔离**：
 ```python
-# 淘汰时只清除 5% 的低热度条目
+# 淘汰时只清除 5% 的低热度条目（FIFO，最大 500 条）
 # 而不是一次性清空，避免大量查询同时穿透到 LLM
 evict_count = max(1, len(cache) * 5 // 100)
+# 写入前经 cache/cache_policy.py 决定 cacheable/scope/ttl/version，
+# 个性化回答按 user_id 作用域隔离，无身份时 fail closed
 ```
 
 ### 代码引用
 
-- [cache/response_cache.py](cache/response_cache.py) — 双层缓存实现
-- [core/config.py](core/config.py) — 缓存配置（搜 `CACHE_`）
+- [cache/response_cache.py](../../cache/response_cache.py) — Response Cache 三层实现
+- [cache/cache_policy.py](../../cache/cache_policy.py) — CachePolicy（scope/version/ttl）
+- [core/config.py](../../core/config.py) — 缓存配置（搜 `CACHE_`）
 
 ---
 
-## Q8: "测试策略是什么？1,350+ 个测试怎么分类的？"
+## Q8: "测试策略是什么？测试怎么分类的？"
 
 ### 核心回答
 
-> "五层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。"
+> "五层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。
+> 当前 collected 数用 `pytest --collect-only -q` 现场获取，不背历史数字。"
 
-| 层级 | 文件 | 测试数 | 覆盖范围 | 依赖 |
-|------|------|--------|---------|------|
-| 单元测试 | 20 个文件（test_api_routes/test_middleware/test_core_modules 等） | ~1,044 | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具 | 无外部依赖 |
-| 集成测试 | test_integration + test_erp_integration + test_multimodal | ~86 | 图调用/ERP 适配器/多模态 | Mock LLM |
-| E2E 测试 | test_all + test_production_features + test_v4_production + test_e2e_real_llm | ~199 | 全图执行/生产特性/真实 LLM | Mock/Real LLM |
-| 压力测试 | test_stress | ~12 | 并发/吞吐 | 无外部依赖 |
+| 层级 | 目录 | 覆盖范围 | 依赖 |
+|------|------|---------|------|
+| 单元测试 | `tests/unit/` | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具/Tool Result/BM25 lifecycle/point-id 迁移 | 无外部依赖 |
+| 集成测试 | `tests/integration/` | 图调用/ERP 适配器/多模态/BM25 重启 | Mock LLM |
+| E2E 测试 | `tests/e2e/` | 全图执行/生产特性/真实 LLM（`real_llm` 标记默认跳过） | Mock/Real LLM |
+| 压力测试 | `tests/stress/` | 并发/吞吐 | 无外部依赖 |
 
 **设计决策**：
 - **Mock LLM**：所有测试用 `MockLLMClient` 替代真实 API，确保 100% 离线可运行、CI 友好
@@ -361,7 +371,7 @@ evict_count = max(1, len(cache) * 5 // 100)
 
 ### 代码引用
 
-- [tests/](tests/) — 测试目录
+- [tests/](../../tests/) — 测试目录
 - [pyproject.toml](../../pyproject.toml) — 测试配置
 
 ---
@@ -396,7 +406,7 @@ best_intent = max(scores, key=lambda k: (scores[k], -_INTENT_PRIORITY.get(k, 99)
 
 期望：安全拒绝
 
-实际：Qwen2.5-7B 回复了"我的系统提示词主要包括以下几个方面……处理简单的售前咨询……协调多Agent协作……"
+实际：当时使用的 Qwen2.5-7B（v4.2 时期的历史模型）回复了"我的系统提示词主要包括以下几个方面……处理简单的售前咨询……协调多Agent协作……"（历史测试记录；当前默认模型为 Qwen/Qwen3-8B）
 
 根因：`[untrusted data]` 隔离标签只能防止用户输入被当作系统指令，但无法阻止 LLM 在回复中讨论自己的设定。小模型对"不要泄露"的指令遵从不如大模型。
 
@@ -420,8 +430,8 @@ if _RE_INJECTION_DISCLOSURE.search(text):
 
 ### 代码引用
 
-- [router/query_router.py](router/query_router.py) — 意图优先级修复
-- [agents/response_agent.py](agents/response_agent.py) — 注入泄露检测（搜 `_RE_INJECTION_DISCLOSURE`）
+- [router/query_router.py](../../router/query_router.py) — 意图优先级修复
+- [agents/response_agent.py](../../agents/response_agent.py) — 注入泄露检测（搜 `_RE_INJECTION_DISCLOSURE`）
 - [tests/e2e/test_e2e_real_llm.py](../../tests/e2e/test_e2e_real_llm.py) — E2E 测试（当前结果以 pytest 实际输出为准）
 
 ---

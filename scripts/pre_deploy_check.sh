@@ -116,10 +116,10 @@ else
     check_fail "LangGraph 未安装"
 fi
 
-if python3 -c "import chromadb" 2>/dev/null; then
-    check_pass "ChromaDB 已安装"
+if python3 -c "import qdrant_client" 2>/dev/null; then
+    check_pass "qdrant-client 已安装"
 else
-    check_warn "ChromaDB 未安装，RAG 功能将不可用"
+    check_warn "qdrant-client 未安装，RAG 功能将不可用"
 fi
 
 echo ""

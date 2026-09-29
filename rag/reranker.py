@@ -4,7 +4,7 @@ RAG Reranker（v6.2）
 
 实现策略：
 1. ApiReranker（HTTP API）— 调用重排序 API（SiliconFlow / OpenAI 兼容接口）
-2. （BM25 词法重排已在 v7.1 移除 — 生产环境始终使用 ApiReranker）
+2. （BM25 词法重排器已移除——历史变更，生产环境始终使用 ApiReranker）
 
 使用方式：
     reranker = create_reranker()
@@ -102,7 +102,7 @@ class ApiReranker:
 
 
 def create_reranker() -> ApiReranker:
-    """创建 API Reranker（BM25 词法重排已在 v7.1 移除，生产环境始终使用 API Reranker）
+    """创建 API Reranker（BM25 词法重排器已移除——历史变更，生产环境始终使用 API Reranker）
 
     Returns:
         ApiReranker 实例（API Key 未配置时 available=False，rerank 回退到原始顺序）

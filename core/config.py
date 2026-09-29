@@ -270,7 +270,7 @@ RERANKER_BASE_URL = os.getenv("RERANKER_BASE_URL", "https://api.siliconflow.cn/v
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
 
-# ===== v7.0: 混合检索（向量 + BM25）配置 =====
+# ===== Hybrid retrieval (vector + BM25) configuration =====
 HYBRID_SEARCH_ENABLED = (
     os.getenv("HYBRID_SEARCH_ENABLED", "true").lower() == "true"
 )  # 混合检索总开关

@@ -1,5 +1,10 @@
 # Tool Result Cache Reuse Audit
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document does not describe current runtime state. It records the audit executed at the SHA printed below (Snapshot SHA != Current HEAD).
+> Current entry point: `docs/reference/current-state.md`.
+
+
 ## CURRENT_HEAD
 
 `245d2829446df0a9eeca0863734a2b012cad9642` (`origin/main` at audit time).

@@ -1,5 +1,10 @@
 # 2026-06-23 代码与文档对齐记录
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document describes the alignment work of the dated audit run only.
+> It is not a current-truth entry; see docs/reference/current-state.md.
+
+
 ## 目标
 
 基于当前仓库真实代码，完成一轮更彻底的前后端联调、上线阻碍排查和活文档回填。

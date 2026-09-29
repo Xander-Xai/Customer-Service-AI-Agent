@@ -1,6 +1,7 @@
 # 文档索引
 
-> Current entry point (2026-09-29): [code/doc alignment matrix](reports/plans/2026-09-29-code-doc-alignment.md). Runtime version remains `6.3`; document dates are not release versions.
+> Current entry point: [reference/current-state.md](reference/current-state.md)（当前事实 + 验证命令，不硬编码 HEAD）。
+> Runtime version 由 `core/config.py::VERSION` 决定；带日期的对齐报告（`reports/plans/**`）是历史审计快照，不是 Current Truth。
 
 > 本索引按「读者场景 → 文档功能 → 生命周期」三维分类组织。找不到想要的文档？先看左侧的「按读者查找」。
 
@@ -37,7 +38,7 @@
 - LLM 提供商切换 → [operations/llm-provider-switch.md](operations/llm-provider-switch.md)
 - E2E 验证 → [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md)
 - 生产就绪检查 → [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)
-- 当前代码/文档对齐记录 → [reports/plans/2026-09-29-code-doc-alignment.md](reports/plans/2026-09-29-code-doc-alignment.md)
+- 当前事实入口 → [reference/current-state.md](reference/current-state.md)
 - 事实驱动工程标准 → [standards/evidence-driven-engineering-loop.md](standards/evidence-driven-engineering-loop.md)
 - Agent Context Engineering → [design/context-engineering.md](design/context-engineering.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
@@ -63,6 +64,9 @@
 - 编码规范 → [standards/conventions.md](standards/conventions.md)
 - 项目介绍 → [design/interview-intro.md](design/interview-intro.md)
 - 深入 Q&A → [design/interview-deep-dive.md](design/interview-deep-dive.md)
+- 面试题集 → [interview-questions-final.md](interview-questions-final.md)
+- Tool Result 面试材料 → [interview/context-engineering-interview.md](interview/context-engineering-interview.md)
+- 简历描述（证据冻结） → [reports/resume-description.md](reports/resume-description.md)
 
 ---
 
@@ -102,9 +106,12 @@
 |---|---|
 | [001-langgraph-multi-agent.md](decisions/001-langgraph-multi-agent.md) | 选择 LangGraph 作为多 Agent 编排框架 |
 | [002-vanilla-js-frontend.md](decisions/002-vanilla-js-frontend.md) | 前端使用原生 JavaScript |
-| [003-qwen-default-llm.md](decisions/003-qwen-default-llm.md) | 默认 LLM 选型 |
-| [004-rag-embedding-selection.md](decisions/004-rag-embedding-selection.md) | RAG 向量库与 Embedding 选型 |
-| [005-dual-layer-cache.md](decisions/005-dual-layer-cache.md) | 双层缓存策略 |
+| [003-qwen-default-llm.md](decisions/003-qwen-default-llm.md) | 默认 LLM 选型（Superseded by ADR-007） |
+| [004-rag-embedding-selection.md](decisions/004-rag-embedding-selection.md) | RAG 向量库与 Embedding 选型（Partially Superseded by ADR-008） |
+| [005-dual-layer-cache.md](decisions/005-dual-layer-cache.md) | 双层缓存策略（Superseded by ADR-006） |
+| [006-cache-and-tool-result-context-architecture.md](decisions/006-cache-and-tool-result-context-architecture.md) | Cache 与 Tool Result Context 架构分离 |
+| [007-current-default-llm.md](decisions/007-current-default-llm.md) | 当前默认 LLM（Qwen/Qwen3-8B） |
+| [008-current-rag-retrieval-architecture.md](decisions/008-current-rag-retrieval-architecture.md) | 当前 RAG 检索与 Embedding 架构 |
 
 ---
 
@@ -115,7 +122,8 @@
 | 文件 | 说明 | 读者 |
 |---|---|---|
 | [api-reference.md](reference/api-reference.md) | API 端点速查 | 开发者 |
-| [model-comparison.md](reference/model-comparison.md) | 模型对比、成本估算 | 开发者、审计者 |
+| [current-state.md](reference/current-state.md) | 当前事实入口（版本/模型/验证命令） | 开发者、审计者 |
+| [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 |
 | [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 |
 
 ---
@@ -190,14 +198,16 @@
 | [multi-dimensional-analysis.md](reports/audit/multi-dimensional-analysis.md) | 多维度质量分析 |
 | [audit-remediation-report.md](reports/audit/audit-remediation-report.md) | 审计整改报告 |
 
-#### `reports/plans/` — 实施计划
+#### `reports/plans/` — 实施计划（均为 HISTORICAL AUDIT SNAPSHOT）
 
 | 文件 | 说明 |
 |---|---|
+| [2026-09-29-code-doc-alignment.md](reports/plans/2026-09-29-code-doc-alignment.md) | 2026-09-29 全仓对齐审计（baseline 18c927d，仅该时点有效） |
 | [2026-06-25-code-doc-alignment.md](reports/plans/2026-06-25-code-doc-alignment.md) | 2026-06-25 第二轮全量前后端联调对齐复核 |
 | [2026-06-25-v6.2-code-doc-alignment.md](reports/plans/2026-06-25-v6.2-code-doc-alignment.md) | 2026-06-25 v6.2 全量前后端联调 + 生产就绪修复 + 文档同步 |
 | [2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md) | 2026-06-23 代码与文档对齐记录（历史） |
 | [2026-06-22-code-doc-alignment.md](reports/plans/2026-06-22-code-doc-alignment.md) | 2026-06-22 代码与文档对齐记录（历史） |
+| [frontend-repair-plan.md](reports/plans/frontend-repair-plan.md) | 前端修复计划（历史） |
 
 ---
 
@@ -256,4 +266,4 @@ draft   design/   archive/
 
 ---
 
-*最后更新：2026-06-25（v6.3 前后端联调修复 + 生产就绪加固 + 文档全面同步）*
+*最后更新：2026-09-30（runtime/config/文档收敛 v2；current-state 入口 + ADR-007/008 + OpenAPI 生成器）*
