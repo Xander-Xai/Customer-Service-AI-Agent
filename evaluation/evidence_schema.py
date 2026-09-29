@@ -120,6 +120,16 @@ class EvidenceRecord:
     recoverability: dict[str, int | float | str | None] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    estimated_cost: Measurement = field(
+        default_factory=lambda: Measurement.unavailable(EvidenceSource.NOT_AVAILABLE)
+    )
+    provider_request_id: str | None = None
+    attempt_count: int | None = None
+    retry_count: int | None = None
+    timeout_count: int | None = None
+    provider_error_code: str | None = None
+    final_status: str | None = None
+    samples: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.request_count < 0 or self.success_count < 0 or self.failure_count < 0:
@@ -146,7 +156,18 @@ class EvidenceRecord:
             "input_tokens": self.input_tokens.to_dict(),
             "output_tokens": self.output_tokens.to_dict(),
             "cached_tokens": self.cached_tokens.to_dict(),
+            "provider_input_tokens": self.input_tokens.to_dict(),
+            "provider_output_tokens": self.output_tokens.to_dict(),
+            "provider_cached_tokens": self.cached_tokens.to_dict(),
             "provider_cost": self.provider_cost.to_dict(),
+            "estimated_cost": self.estimated_cost.to_dict(),
+            "provider_request_id": self.provider_request_id,
+            "attempt_count": self.attempt_count,
+            "retry_count": self.retry_count,
+            "timeout_count": self.timeout_count,
+            "provider_error_code": self.provider_error_code,
+            "final_status": self.final_status,
+            "samples": self.samples,
             "retrieval_channels": self.retrieval_channels,
             "task_success": self.task_success,
             "recoverability": self.recoverability,
