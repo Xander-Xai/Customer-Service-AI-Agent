@@ -13,6 +13,12 @@ RAG 检索质量评估脚本（v6.3 evidence 版，RAG 649 Evidence Refresh 工�
   mean/P50/P90/P95/P99；不使用推算值
 - warm-up：每实验正式 run 前 N 条 warmup（结果弃置，不计入正式统计）
 - provider/index preflight gate：Qdrant 集合计数、embedding 探针、reranker 探针、BM25 rebuild
+- blocker 语义（v2）：primary cause != downstream symptom —— 结构化
+  primary_blocker + blockers[]（code/stage/blocking/blocks_experiments/caused_by，
+  机器可读；历史 v1 artifact 的单层 status 字符串不再产生）
+- 评测分母三视图（evaluation_populations，全部运行时动态计算，禁止硬编码）：
+  all_queries（View A，端到端，主口径）/ retrieval_eligible（View B）/
+  full_gold_covered（View C，适合 Recall@K / NDCG）
 - 失败记账：exception/timeout/degraded 全部记录，failure taxonomy 规则化分类
 - provenance：git SHA + benchmark sha256 + runtime config + 模型名 全部自动采集
 
@@ -20,6 +26,8 @@ RAG 检索质量评估脚本（v6.3 evidence 版，RAG 649 Evidence Refresh 工�
 - Hit/Recall/Precision/NDCG/MRR 均在「成功执行检索」的查询上取均值（n_success）
 - exception / timeout 计入 failures（不进指标分母），计数在 failures_summary
 - degraded（如向量通道超时降级为词法）查询计入指标，但按 degraded_reason 单独计数
+- 主口径（primary metric view）固定为 all_queries（端到端）；retrieval_eligible /
+  full_gold_covered 只作为诊断视图并列输出，不得单独替代主口径做对外宣称
 
 用法：
     python3 scripts/evaluate_rag.py                       # 正式 649 全量 4 实验
@@ -63,7 +71,10 @@ EVAL_COLLECTIONS = [
 ]
 
 DEFAULT_KS = (1, 3, 5, 8)
-REPORT_SCHEMA_VERSION = "rag-eval-evidence/v1"
+REPORT_SCHEMA_VERSION = "rag-eval-evidence/v2"
+
+# provider 认证失败判定（仅记录 HTTP 状态码本身，绝不记录凭据材料）
+PROVIDER_AUTH_HTTP_STATUSES = frozenset({401, 403})
 
 EXPERIMENT_SPECS: dict[str, dict[str, Any]] = {
     # vector_only: 仅向量通道（禁用 BM25），无 rerank
@@ -187,6 +198,80 @@ def category_metrics(
 
 
 # ---------------------------------------------------------------------------
+# 评测分母三视图（population protocol；全部运行时动态计算，禁止硬编码）
+# ---------------------------------------------------------------------------
+
+POPULATION_VIEWS = ("all_queries", "retrieval_eligible", "full_gold_covered")
+
+POPULATION_DEFINITIONS = {
+    "all_queries": (
+        "View A — end-to-end：全部查询进入分母；gold 未进入索引的查询"
+        "（GOLD_NOT_INDEXED）仍算失败、按 0 分计入。衡量 corpus coverage + "
+        "indexing + retrieval algorithm 的系统级结果（主口径）。"
+    ),
+    "retrieval_eligible": (
+        "View B — retrieval eligible：至少 1 个 gold document 已进入 "
+        "corpus/index 的查询（数量运行时动态计算）。用于分析 retriever 在"
+        "「至少存在可命中文档」情况下的表现。"
+    ),
+    "full_gold_covered": (
+        "View C — full-gold-covered：全部 gold documents 都存在于当前 "
+        "corpus/index 的查询（数量运行时动态计算）。适合 Recall@K / NDCG，"
+        "避免 gold 缺失直接压低算法指标。"
+    ),
+}
+
+
+def population_flags(expected_ids: list[str], corpus_ids: set[str]) -> dict[str, Any]:
+    """单查询的 population 归属标记（基于 gold docs 是否在索引 corpus 中）。"""
+    present = sum(1 for gid in expected_ids if gid in corpus_ids)
+    return {
+        "gold_expected_count": len(expected_ids),
+        "gold_in_corpus_count": present,
+        "retrieval_eligible": present > 0,
+        "full_gold_covered": bool(expected_ids) and present == len(expected_ids),
+    }
+
+
+def population_counts(
+    queries: list[dict[str, Any]], corpus_ids: set[str]
+) -> dict[str, int]:
+    """三视图分母计数（动态计算；不依赖任何硬编码数字）。"""
+    eligible = sum(
+        1 for q in queries if any(gid in corpus_ids for gid in q["expected_doc_ids"])
+    )
+    covered = sum(
+        1
+        for q in queries
+        if q["expected_doc_ids"]
+        and all(gid in corpus_ids for gid in q["expected_doc_ids"])
+    )
+    return {
+        "all_queries": len(queries),
+        "retrieval_eligible": eligible,
+        "full_gold_covered": covered,
+    }
+
+
+def population_metrics(rows: list[dict[str, Any]], ks: tuple[int, ...]) -> dict[str, Any]:
+    """按三视图聚合指标/latency（分母 = 该视图内成功执行的查询）。"""
+    views = {
+        "all_queries": rows,
+        "retrieval_eligible": [r for r in rows if r.get("retrieval_eligible")],
+        "full_gold_covered": [r for r in rows if r.get("full_gold_covered")],
+    }
+    out: dict[str, Any] = {}
+    for name in POPULATION_VIEWS:
+        sub = views[name]
+        out[name] = {
+            "query_count": len(sub),
+            "metrics": summarize_metric_rows(sub, ks),
+            "latency": aggregate_latency([r["total_ms"] for r in sub]),
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 失败分类（规则化）
 # ---------------------------------------------------------------------------
 
@@ -298,6 +383,126 @@ def load_benchmark(path: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def http_status_from_exception(exc: BaseException | None, max_depth: int = 5) -> int | None:
+    """沿异常因果链（__cause__/__context__）提取 HTTP 状态码。
+
+    只返回状态码整数本身；response body / headers / 凭据材料一律不采集。
+    找不到时返回 None（例如本地构造的 EmbeddingUnavailableError 无底层响应）。
+    """
+    cur = exc
+    seen = 0
+    while cur is not None and seen < max_depth:
+        status = getattr(getattr(cur, "response", None), "status_code", None)
+        if isinstance(status, int):
+            return status
+        cur = cur.__cause__ or cur.__context__
+        seen += 1
+    return None
+
+
+def derive_blockers(
+    *,
+    embedding_configured: bool,
+    embedding_probe: str | None,
+    embedding_http_status: int | None,
+    reranker_probe: str | None,
+    reranker_http_status: int | None,
+    qdrant_total_points: int,
+    requested_experiments: tuple[str, ...] | list[str],
+) -> dict[str, Any]:
+    """preflight 复合判定 v2：primary cause != downstream symptom。
+
+    因果链：provider authentication failure → embedding unavailable
+    → corpus 无法 embed/import → Qdrant 为空 → vector/hybrid 评测不可运行。
+    因此：
+    - embedding/reranker 认证失败 → PROVIDER_AUTH 类 blocker（根因候选）
+    - 索引为空 + embedding 不可用 → VECTOR_INDEX_EMPTY 为 downstream blocker，
+      标记 caused_by=EMBEDDING_PROVIDER_AUTH（不与根因互斥/矛盾）
+    - 索引为空 + embedding 健康 → VECTOR_INDEX_EMPTY 本身是根因（待导入）
+    - reranker 失败只阻塞 hybrid_rerank；不得据此阻塞
+      vector_only / bm25_only / hybrid_no_rerank
+
+    返回 {"status", "primary_blocker", "blockers"}；字段全部机器可读。
+    """
+    wanted = set(requested_experiments) & set(EXPERIMENT_SPECS)
+    vector_channel_needed = bool(wanted & {"vector_only", "hybrid_no_rerank", "hybrid_rerank"})
+    bm25_needed = bool(wanted & {"bm25_only", "hybrid_no_rerank", "hybrid_rerank"})
+    rerank_needed = "hybrid_rerank" in wanted
+
+    blockers: list[dict[str, Any]] = []
+
+    embedding_auth = embedding_probe == "failed" and (
+        embedding_http_status in PROVIDER_AUTH_HTTP_STATUSES
+    )
+    if embedding_probe == "failed":
+        blockers.append({
+            "code": (
+                "EMBEDDING_PROVIDER_AUTH"
+                if embedding_auth else "EMBEDDING_PROVIDER_UNAVAILABLE"
+            ),
+            "stage": "embedding",
+            "blocking": vector_channel_needed,
+            "blocks_experiments": [
+                e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
+            ],
+            "blocks_corpus_import": not embedding_configured or embedding_auth,
+            "http_status": embedding_http_status,
+            "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行",
+        })
+    elif not embedding_configured:
+        blockers.append({
+            "code": "EMBEDDING_PROVIDER_UNAVAILABLE",
+            "stage": "embedding",
+            "blocking": vector_channel_needed,
+            "blocks_experiments": [
+                e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
+            ],
+            "blocks_corpus_import": True,
+            "http_status": None,
+            "detail": "embedding 通道未配置（无 embed_fn），向量依赖实验与导入均不可用",
+        })
+
+    if qdrant_total_points == 0:
+        downstream: dict[str, Any] = {
+            "code": "VECTOR_INDEX_EMPTY",
+            "stage": "qdrant",
+            "blocking": vector_channel_needed or bm25_needed,
+            "blocks_experiments": [e for e in EXPERIMENT_SPECS if e in wanted],
+            "detail": (
+                "评测 collection 全部为 0 points；BM25 索引由 Qdrant 重建，"
+                "因此 bm25_only 同样被阻塞；修复根因后运行 "
+                "python3 scripts/import_eval_corpus.py 导入语料"
+            ),
+        }
+        if any(b["code"].startswith("EMBEDDING_PROVIDER") for b in blockers):
+            downstream["caused_by"] = blockers[0]["code"]
+        blockers.append(downstream)
+
+    if rerank_needed and reranker_probe not in (None, "ok"):
+        reranker_auth = reranker_http_status in PROVIDER_AUTH_HTTP_STATUSES
+        blockers.append({
+            "code": "RERANKER_PROVIDER_AUTH" if reranker_auth else "RERANKER_PROVIDER_DEGRADED",
+            "stage": "reranker",
+            # 只阻塞 hybrid_rerank；不影响 vector_only/bm25_only/hybrid_no_rerank
+            "blocking": False,
+            "blocks_experiments": ["hybrid_rerank"],
+            "http_status": reranker_http_status,
+            "detail": (
+                "reranker 探针未确认真实 rerank（silent_fallback 或 API 失败）；"
+                "仅阻塞 hybrid_rerank，其余实验照常运行"
+            ),
+        })
+
+    blocking = [b for b in blockers if b["blocking"]]
+    primary: str | None = None
+    for code in ("EMBEDDING_PROVIDER_AUTH", "EMBEDDING_PROVIDER_UNAVAILABLE", "VECTOR_INDEX_EMPTY"):
+        if any(b["code"] == code for b in blocking):
+            primary = code
+            break
+    status = "BLOCKED" if blocking else ("PARTIAL" if blockers else "OK")
+    return {"status": status, "primary_blocker": primary, "blockers": blockers}
+
+
 def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
     """provider/index gate。所有 gate 都执行并记录（阻塞原因要可审计）。"""
 
@@ -330,17 +535,23 @@ def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
         "total_points": sum(collections_info.values()),
     }
 
-    # 2. Embedding 探针（无论索引是否为空都探测，记录真实凭据状态）
-    embedding_gate: dict[str, Any] = {"available": kb.embedding_available}
+    # 2. Embedding 探针（无论索引是否为空都探测，记录真实凭据状态；
+    #    configured=embed_fn 已配置；probe=实际调用结果；绝不记录凭据材料）
+    embedding_gate: dict[str, Any] = {"configured": kb.embedding_available}
     if kb.embedding_available:
         try:
             vec = kb._embed_texts(["评测探针：透明质酸功效"])[0]
             embedding_gate.update(
                 {"probe": "ok", "dim": len(vec), "model": kb._embedding_model_name}
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 评测必须记录任何失败并继续
             embedding_gate.update(
-                {"probe": "failed", "error": type(e).__name__, "detail": str(e)[:200]}
+                {
+                    "probe": "failed",
+                    "error": type(e).__name__,
+                    "detail": str(e)[:200],
+                    "http_status": http_status_from_exception(e),
+                }
             )
     gates["embedding"] = embedding_gate
 
@@ -369,7 +580,7 @@ def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
         from rag.reranker import create_reranker
 
         rr = create_reranker()
-        reranker_gate["available"] = rr.available
+        reranker_gate["configured"] = rr.available
         reranker_gate["model"] = rr._model
         if rr.available and rerank_probe:
             probed = rr.rerank(
@@ -382,29 +593,44 @@ def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
             )
             real_rerank = any("rerank_score" in r for r in probed)
             reranker_gate["probe"] = "ok" if real_rerank else "silent_fallback"
+            reranker_gate["http_status"] = getattr(rr, "last_error_status", None)
             if not real_rerank:
                 reranker_gate["detail"] = (
                     "rerank API 调用失败或未附加 rerank_score（ApiReranker 静默回退）"
                 )
-    except Exception as e:
-        reranker_gate.update({"available": False, "probe": "failed", "error": type(e).__name__})
+    except Exception as e:  # noqa: BLE001 - gate 必须记录失败而不是中断
+        reranker_gate.update(
+            {
+                "configured": False,
+                "probe": "failed",
+                "http_status": http_status_from_exception(e),
+                "error": type(e).__name__,
+            }
+        )
     gates["reranker"] = reranker_gate
 
-    # 5. 复合判定（记录到证据，不掩盖任何一项）
-    if gates["qdrant"]["total_points"] == 0:
-        gates["status"] = "BLOCKED_VECTOR_INDEX"
-        gates["hint"] = "运行 python3 scripts/import_eval_corpus.py 先导入评测语料"
-    elif embedding_gate.get("probe") != "ok":
-        gates["status"] = "BLOCKED_PROVIDER_AUTH"
-        gates["hint"] = (
-            "embedding provider 认证失败（详见 environment.embedding）；"
-            "导入与向量/重排实验均无法进行"
-        )
-    elif reranker_gate.get("probe") not in ("ok",) and rerank_probe:
-        gates["status"] = "PARTIAL"
+    # 5. 复合判定（primary cause != downstream symptom；机器可读 blockers）
+    embedding_gate = gates["embedding"]
+    assessment = derive_blockers(
+        embedding_configured=embedding_gate.get("configured", False),
+        embedding_probe=embedding_gate.get("probe"),
+        embedding_http_status=embedding_gate.get("http_status"),
+        reranker_probe=gates["reranker"].get("probe"),
+        reranker_http_status=gates["reranker"].get("http_status"),
+        qdrant_total_points=gates["qdrant"]["total_points"],
+        requested_experiments=tuple(EXPERIMENT_SPECS),
+    )
+    gates.update(assessment)
+    if gates["status"] == "BLOCKED":
+        if gates["primary_blocker"] == "VECTOR_INDEX_EMPTY":
+            gates["hint"] = "运行 python3 scripts/import_eval_corpus.py 先导入评测语料"
+        else:
+            gates["hint"] = (
+                "修复 provider 认证（http_status 见 blockers），"
+                "然后重新运行 make rag-eval-import 导入语料"
+            )
+    elif gates["status"] == "PARTIAL":
         gates["hint"] = "reranker 不可用：可运行 vector_only/bm25_only/hybrid_no_rerank"
-    else:
-        gates["status"] = "OK"
     return gates
 
 
@@ -516,6 +742,7 @@ async def run_experiment(
                         "degraded_reason": degraded_reason,
                         "vector_channel_used": bool(meta.get("vector_channel_used")),
                         "lexical_channel_used": bool(meta.get("lexical_channel_used")),
+                        **population_flags(expected, corpus_ids),
                         **metrics,
                     }
                 )
@@ -571,6 +798,9 @@ async def run_experiment(
                 rer = stage_detail.get("RERANK", {})
                 if rer.get("status") == "degraded":
                     diags.append("RERANK_DEGRADED")
+                fusion = stage_detail.get("FUSION_RRF", {})
+                if fusion.get("status") == "degraded":
+                    diags.append("FUSION_DEGRADED")
                 failures.append(
                     {
                         "query_id": qid,
@@ -604,6 +834,7 @@ async def run_experiment(
             "wall_seconds": round(elapsed, 1),
             "warmup": {"count": warmup_n, "query_ids": warmup_ids, "results_discarded": True},
             "metrics": summarize_metric_rows(rows, ks),
+            "population_metrics": population_metrics(rows, ks),
             "latency": aggregate_latency([r["total_ms"] for r in rows]),
             "stage_latency": {
                 stage: aggregate_latency([r["stages_ms"][stage] for r in rows if stage in r["stages_ms"]])
@@ -684,6 +915,11 @@ def ablation_analysis(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "improved_queries": len(improved),
             "degraded_queries": len(degraded_),
             "unchanged_queries": len(unchanged),
+            # comparative tags（不是 error 分类；用于回答 reranker 值不值）
+            "tags": {
+                "RERANK_IMPROVED": improved,
+                "RERANK_DEGRADED": degraded_,
+            },
             "improved_query_ids_sample": improved[:20],
             "degraded_query_ids_sample": degraded_[:20],
         }
@@ -735,18 +971,22 @@ async def evaluate(args: argparse.Namespace) -> int:
         _write_gate_report(out_dir, run_id, benchmark_sha, len(queries), gates, meta, args)
         return 1
 
-    embedding_ok = gates["embedding"].get("probe") == "ok"
-    reranker_ok = gates["reranker"].get("available") is True and gates["reranker"].get("probe") == "ok"
-    experiments = list(args.experiments)
-    status_notes: list[str] = []
-    if not embedding_ok:
-        experiments = [e for e in experiments if e == "bm25_only"]
-        status_notes.append("embedding 探针失败：仅保留 bm25_only")
-    if not reranker_ok and "hybrid_rerank" in experiments:
-        experiments.remove("hybrid_rerank")
-        status_notes.append("reranker 不可用：hybrid_rerank 未运行（PARTIAL）")
+    reranker_ok = gates["reranker"].get("probe") == "ok"
+    # 实验可运行性由 blockers 的 blocks_experiments 直接推导（机器可读，
+    # 不再手工维护 if/elif 链；reranker 失败只会阻塞 hybrid_rerank）
+    blocked_by: dict[str, list[str]] = {}
+    for blocker in gates.get("blockers", []):
+        for exp in blocker.get("blocks_experiments", []):
+            blocked_by.setdefault(exp, []).append(blocker["code"])
+    experiments = [e for e in args.experiments if e not in blocked_by]
+    status_notes: list[str] = [
+        f"{e} 未运行：被 {'/'.join(codes)} 阻塞"
+        for e, codes in blocked_by.items()
+        if e in args.experiments
+    ]
     if not experiments:
-        print("  [FATAL] 无可运行实验（embedding + reranker 均不可用）")
+        print("  [FATAL] 无可运行实验（所有请求实验均被 preflight blocker 阻塞）")
+        _write_gate_report(out_dir, run_id, benchmark_sha, len(queries), gates, meta, args)
         return 1
     for note in status_notes:
         print(f"  [NOTE] {note}")
@@ -842,6 +1082,16 @@ async def evaluate(args: argparse.Namespace) -> int:
             "relevance": "binary (any of expected_doc_ids in top-k)",
             "mrr_truncation": f"MRR computed on top-{args.top_k} retrieved list",
         },
+        # 三套 population 口径：主口径固定 all_queries（端到端）；
+        # 其余两视图只作诊断并列输出，禁止挑选最好看的一组单独宣称
+        "evaluation_populations": {
+            "definitions": POPULATION_DEFINITIONS,
+            "primary_view": "all_queries",
+            "counts": population_counts(queries, corpus_ids),
+            "per_experiment": {
+                name: res["population_metrics"] for name, res in results.items()
+            },
+        },
         "metrics": {name: res["metrics"] for name, res in results.items()},
         "latency": {name: res["latency"] for name, res in results.items()},
         "stage_latency": {name: res["stage_latency"] for name, res in results.items()},
@@ -868,6 +1118,11 @@ async def evaluate(args: argparse.Namespace) -> int:
             "warmup queries are discarded from formal statistics",
             "ablation overrides are instance/request-level inside this process; "
             "production defaults (HYBRID_SEARCH_ENABLED etc.) are untouched",
+            "primary metric view is evaluation_populations.all_queries (end-to-end); "
+            "retrieval_eligible / full_gold_covered are diagnostic views and must "
+            "always be reported alongside, never as a standalone replacement",
+            "population counts are computed at runtime from the indexed corpus; "
+            "no hardcoded denominators",
             "raw_results.json is a local artifact; its sha256 is recorded below",
         ] + status_notes,
         "raw_results_sha256": _sha256_file(raw_path),
@@ -934,7 +1189,10 @@ def _write_gate_report(
         "schema_version": REPORT_SCHEMA_VERSION,
         "run_id": run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        # v2 blocker semantics: primary cause != downstream symptom
         "status": gates.get("status", "BLOCKED"),
+        "primary_blocker": gates.get("primary_blocker"),
+        "blockers": gates.get("blockers", []),
         "git_sha": git_sha(),
         "benchmark": {
             "sha256": benchmark_sha,
@@ -949,7 +1207,10 @@ def _write_gate_report(
         "preflight": gates,
         "notes": [
             "formal evaluation not run; no metrics generated",
-            "credential material is never recorded; only availability/probe outcome",
+            "credential material is never recorded; only availability/probe outcome "
+            "and provider HTTP status codes",
+            "blocker semantics v2: primary_blocker is the root cause; downstream "
+            "symptoms (e.g. VECTOR_INDEX_EMPTY) carry caused_by links to it",
         ],
     }
     with open(out_dir / "report.json", "w", encoding="utf-8") as f:

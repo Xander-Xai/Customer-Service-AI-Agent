@@ -280,6 +280,185 @@ def test_hybrid_vs_single_channel_delta() -> None:
     assert out["hybrid_vs_bm25"]["mrr"] == pytest.approx(0.0)
 
 
+# ---------------------------------------------------------------- blockers
+# v2 blocker semantics: primary cause != downstream symptom.
+
+
+def _derive(
+    *,
+    embedding_configured: bool = True,
+    embedding_probe: str | None = "ok",
+    embedding_http_status: int | None = None,
+    reranker_probe: str | None = "ok",
+    reranker_http_status: int | None = None,
+    qdrant_total_points: int = 5000,
+    requested: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    return ev.derive_blockers(
+        embedding_configured=embedding_configured,
+        embedding_probe=embedding_probe,
+        embedding_http_status=embedding_http_status,
+        reranker_probe=reranker_probe,
+        reranker_http_status=reranker_http_status,
+        qdrant_total_points=qdrant_total_points,
+        requested_experiments=requested or tuple(ev.EXPERIMENT_SPECS),
+    )
+
+
+def _blocker_codes(result: dict[str, Any]) -> list[str]:
+    return [b["code"] for b in result["blockers"]]
+
+
+def test_embedding_auth_fail_is_primary_and_empty_index_downstream() -> None:
+    """embedding 401 + 空索引：primary=PROVIDER_AUTH，空索引是 downstream 症状。"""
+    out = _derive(
+        embedding_probe="failed", embedding_http_status=401, qdrant_total_points=0
+    )
+    assert out["status"] == "BLOCKED"
+    assert out["primary_blocker"] == "EMBEDDING_PROVIDER_AUTH"
+    codes = _blocker_codes(out)
+    assert "EMBEDDING_PROVIDER_AUTH" in codes
+    assert "VECTOR_INDEX_EMPTY" in codes
+    empty = next(b for b in out["blockers"] if b["code"] == "VECTOR_INDEX_EMPTY")
+    assert empty["caused_by"] == "EMBEDDING_PROVIDER_AUTH"
+    assert empty["blocking"] is True
+
+
+def test_embedding_healthy_empty_index_is_primary_blocker() -> None:
+    """embedding 健康 + Qdrant 空：primary blocker = VECTOR_INDEX_EMPTY（待导入）。"""
+    out = _derive(embedding_probe="ok", qdrant_total_points=0)
+    assert out["status"] == "BLOCKED"
+    assert out["primary_blocker"] == "VECTOR_INDEX_EMPTY"
+    empty = next(b for b in out["blockers"] if b["code"] == "VECTOR_INDEX_EMPTY")
+    assert "caused_by" not in empty  # 无 embedding 根因 → 不是 downstream 症状
+
+
+def test_reranker_auth_only_blocks_hybrid_rerank() -> None:
+    """reranker 401：不得阻塞 vector_only/bm25_only/hybrid_no_rerank。"""
+    out = _derive(
+        embedding_probe="ok",
+        reranker_probe="silent_fallback",
+        reranker_http_status=401,
+        qdrant_total_points=5000,
+    )
+    assert out["status"] == "PARTIAL"
+    assert out["primary_blocker"] is None  # 管线未被整体阻塞
+    rer = next(b for b in out["blockers"] if b["code"] == "RERANKER_PROVIDER_AUTH")
+    assert rer["blocking"] is False
+    assert rer["blocks_experiments"] == ["hybrid_rerank"]
+    # 其他三个实验不在任何 blocker 的 blocks_experiments 中
+    blocked_all = {
+        e for b in out["blockers"] for e in b.get("blocks_experiments", [])
+    }
+    assert blocked_all == {"hybrid_rerank"}
+    assert not (blocked_all & {"vector_only", "bm25_only", "hybrid_no_rerank"})
+
+
+def test_reranker_non_auth_failure_uses_degraded_code() -> None:
+    """非 401/403 的 reranker 失败不冒充 AUTH（http_status=None）。"""
+    out = _derive(reranker_probe="silent_fallback", reranker_http_status=None)
+    codes = _blocker_codes(out)
+    assert "RERANKER_PROVIDER_DEGRADED" in codes
+    assert "RERANKER_PROVIDER_AUTH" not in codes
+
+
+def test_embedding_unavailable_not_configured_is_primary() -> None:
+    """embed_fn 未配置：EMBEDDING_PROVIDER_UNAVAILABLE，空索引仍为 downstream。"""
+    out = _derive(
+        embedding_configured=False,
+        embedding_probe=None,
+        qdrant_total_points=0,
+    )
+    assert out["status"] == "BLOCKED"
+    assert out["primary_blocker"] == "EMBEDDING_PROVIDER_UNAVAILABLE"
+    empty = next(b for b in out["blockers"] if b["code"] == "VECTOR_INDEX_EMPTY")
+    assert empty["caused_by"] == "EMBEDDING_PROVIDER_UNAVAILABLE"
+
+
+def test_all_healthy_preflight_is_ok_without_blockers() -> None:
+    out = _derive()
+    assert out["status"] == "OK"
+    assert out["primary_blocker"] is None
+    assert out["blockers"] == []
+
+
+def test_blockers_never_record_credential_material() -> None:
+    """blockers 结构只允许出现状态码/探针结果，不得出现 key/token 字样。"""
+    out = _derive(
+        embedding_probe="failed",
+        embedding_http_status=401,
+        reranker_probe="silent_fallback",
+        reranker_http_status=403,
+        qdrant_total_points=0,
+    )
+    dumped = json.dumps(out)
+    for forbidden in ("api_key", "apikey", "authorization", "bearer", "sk-"):
+        assert forbidden not in dumped.lower()
+    assert out["blockers"][0]["http_status"] == 401
+
+
+# ---------------------------------------------------------------- populations
+
+
+def test_population_counts_dynamic_not_hardcoded() -> None:
+    """三视图分母全部由 corpus_ids 运行时推导；空 corpus → B/C 归零。"""
+    queries = _queries(4)
+    full_corpus = {"doc_0", "doc_1", "doc_2"}
+    counts = ev.population_counts(queries, full_corpus)
+    assert counts == {
+        "all_queries": 4,
+        "retrieval_eligible": 4,
+        "full_gold_covered": 4,
+    }
+    empty_counts = ev.population_counts(queries, set())
+    assert empty_counts == {
+        "all_queries": 4,
+        "retrieval_eligible": 0,
+        "full_gold_covered": 0,
+    }
+    # 部分覆盖：每条 query 仍至少有 doc_0 在 corpus → eligible=4，covered=0
+    partial = ev.population_counts(queries, {"doc_0"})
+    assert partial["retrieval_eligible"] == 4
+    assert partial["full_gold_covered"] == 0
+
+
+def test_population_flags_recorded_per_row() -> None:
+    queries = _queries(2)
+    res = _run(FakeKB(), queries, corpus_ids={"doc_0"})
+    for row in res["rows"]:
+        assert row["gold_expected_count"] == 3
+        assert row["gold_in_corpus_count"] == 1
+        assert row["retrieval_eligible"] is True
+        assert row["full_gold_covered"] is False
+
+
+def test_population_metrics_views_split() -> None:
+    """all_queries 含全部成功行；eligible/covered 按标记过滤（动态计算）。"""
+    queries = _queries(3)
+    res = _run(FakeKB(), queries, corpus_ids={"doc_0"})
+    pm = res["population_metrics"]
+    assert pm["all_queries"]["query_count"] == 3
+    assert pm["retrieval_eligible"]["query_count"] == 3
+    assert pm["full_gold_covered"]["query_count"] == 0
+    assert pm["all_queries"]["metrics"]["hit@1"] == pytest.approx(1.0)
+    assert pm["full_gold_covered"]["metrics"] == {}
+
+
+def test_gold_not_indexed_queries_stay_in_all_queries_view() -> None:
+    """View A 语义：gold 全缺失的查询仍在 all_queries 分母内（GOLD_NOT_INDEXED 记失败）。
+
+    FakeKB 是脚本化返回（会命中 gold id），因此这里只断言分母归属与失败分类，
+    不断言指标值；真实运行中 gold 不在索引里时 hit@k 天然为 0。
+    """
+    queries = _queries(2)
+    res = _run(FakeKB(), queries, corpus_ids=set())
+    assert res["failure_counts"] == {"GOLD_NOT_INDEXED": 2}
+    pm = res["population_metrics"]
+    assert pm["all_queries"]["query_count"] == 2
+    assert pm["retrieval_eligible"]["query_count"] == 0
+    assert pm["full_gold_covered"]["query_count"] == 0
+
+
 # ---------------------------------------------------------------- artifact
 
 
@@ -296,7 +475,15 @@ def test_report_schema_shape() -> None:
     row = rows_payload["hybrid_rerank"][0]
     for key in ("query_id", "category", "total_ms", "stages_ms", "mrr", "hit@1"):
         assert key in row
-    assert ev.REPORT_SCHEMA_VERSION == "rag-eval-evidence/v1"
+    # v2: population flags recorded per row
+    for key in (
+        "gold_expected_count",
+        "gold_in_corpus_count",
+        "retrieval_eligible",
+        "full_gold_covered",
+    ):
+        assert key in row
+    assert ev.REPORT_SCHEMA_VERSION == "rag-eval-evidence/v2"
 
 
 # ---------------------------------------------------------------- overrides
