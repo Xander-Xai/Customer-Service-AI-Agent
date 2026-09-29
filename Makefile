@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag audit-docs openapi-check facts
+.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -47,6 +47,19 @@ format: ## 代码格式化
 eval-rag: ## RAG 检索质量评估（查询数以 tests/eval/rag_benchmark.json metadata 为准）
 	@echo "📊 RAG 检索质量评估..."
 	python3 scripts/evaluate_rag.py
+
+rag-eval-649: ## RAG 649 正式评测（preflight → 4 实验 ablation → evidence artifact）
+	@echo "📊 RAG 649 evidence 评测（先确认语料已导入: make rag-eval-import）..."
+	python3 scripts/evaluate_rag.py
+
+rag-eval-649-preflight: ## RAG 649 评测 preflight gate（Qdrant/embedding/reranker/BM25）
+	python3 scripts/evaluate_rag.py --preflight-only
+
+rag-eval-649-smoke: ## RAG 649 评测冒烟（前 16 条，subset_run=true）
+	python3 scripts/evaluate_rag.py --limit 16
+
+rag-eval-import: ## 导入评测语料（幂等）并重建 BM25（写入 import manifest）
+	python3 scripts/import_eval_corpus.py
 
 # ===== 文档/运行时事实工具 =====
 .PHONY: audit-docs openapi-check facts
