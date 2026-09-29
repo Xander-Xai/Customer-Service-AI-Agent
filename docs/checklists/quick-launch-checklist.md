@@ -47,6 +47,9 @@ chmod +x scripts/pre_deploy_check.sh
 ### 3. 构建与测试 [15分钟]
 
 ```bash
+# 3.0 文档/配置一致性审计（可选但推荐）
+python3 scripts/audit_doc_consistency.py
+
 # 3.1 运行单元测试
 make test
 
@@ -60,7 +63,7 @@ docker compose down
 ```
 
 **期望结果**:
-- ✅ 测试全部通过（1,361+ 项，覆盖率 ≥80%）
+- ✅ pytest 在当前 checkout 全量通过（collected 数以 `pytest --collect-only -q` 输出为准，不要沿用任何历史数字；覆盖率门槛见 `make test-cov`）
 - ✅ Docker镜像构建成功
 - ✅ 健康检查返回200
 
@@ -74,7 +77,11 @@ make db-upgrade
 alembic current
 
 # 4.3 验证 Qdrant 可访问
-curl -s http://localhost:6333/collections | jq '.result'
+# 注意：生产 Compose 的 Qdrant 没有 ports: 主机映射（只有 expose: 6333/6334），
+# 宿主机 curl localhost:6333 不可靠。必须从 Compose network 内验证：
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec qdrant curl -fsS http://localhost:6333/collections | jq '.result'
+# 该命令与 Compose 中 qdrant 服务的 healthcheck（curl http://localhost:6333/healthz）一致。
 ```
 
 **期望结果**:

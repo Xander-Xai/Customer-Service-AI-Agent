@@ -81,11 +81,11 @@ python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -s
 预期输出（5 个测试全部 PASS）：
 
 ```
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_return_exchange_query      PASSED
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_technical_query_with_rag   PASSED
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_multi_turn_context         PASSED
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense          PASSED
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_return_exchange_query      PASSED
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_technical_query_with_rag   PASSED
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_multi_turn_context         PASSED
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense          PASSED
 ```
 
 ### 测试覆盖内容
@@ -221,11 +221,11 @@ curl -N http://localhost:8000/api/chat/stream \
 > 备注：当前仓库 `pytest --collect-only -q` 收集到 1352 个测试用例，本文档中的 5 个真实 LLM 测试只是 E2E 子集。
 
 ```
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED   8.9s
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_return_exchange_query      PASSED  12.7s
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_technical_query_with_rag   PASSED   6.2s
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_multi_turn_context         PASSED  14.5s
-tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense          PASSED   6.0s
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED   8.9s
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_return_exchange_query      PASSED  12.7s
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_technical_query_with_rag   PASSED   6.2s
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_multi_turn_context         PASSED  14.5s
+tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense          PASSED   6.0s
 =============================== 5 passed in 58.28s ===============================
 ```
 
@@ -239,7 +239,7 @@ tests/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_injection_defense         
 
 **根因**：规则分类器中 `product_info`、`technical_support`、`billing` 三个意图各匹配 1 次（"面霜"→产品、"过敏"→技术、"退货退款"→账单），`max(scores)` 取字典插入顺序第一个 `product_info`。
 
-**修复**：[router/query_router.py](router/query_router.py) 新增意图优先级 `_INTENT_PRIORITY`，同分时按 complaint > billing > technical > order > product > cosmetic_advice 排序：
+**修复**：[router/query_router.py](../../router/query_router.py) 新增意图优先级 `_INTENT_PRIORITY`，同分时按 complaint > billing > technical > order > product > cosmetic_advice 排序：
 
 ```python
 # 同分时高优先级意图胜出
@@ -252,7 +252,7 @@ best_intent = max(scores, key=lambda k: (scores[k], -_INTENT_PRIORITY.get(k, 99)
 
 **根因**：`[untrusted data]` 隔离标签只能防止 LLM 把用户输入当作系统指令，但无法阻止 LLM 在回复中讨论自己的系统设置。小模型对指令遵从不够强。
 
-**修复**：[agents/response_agent.py](agents/response_agent.py) 新增输出层注入检测——正则匹配"系统提示词…如下/包括/是"等泄露模式，命中后替换为安全回复：
+**修复**：[agents/response_agent.py](../../agents/response_agent.py) 新增输出层注入检测——正则匹配"系统提示词…如下/包括/是"等泄露模式，命中后替换为安全回复：
 
 ```python
 _RE_INJECTION_DISCLOSURE = re.compile(

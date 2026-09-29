@@ -25,7 +25,8 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
-      - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      # Canonical default from core/config.py: Qwen/Qwen3-8B (see .env.example)
+      - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
       - ROUTING_COMPLEXITY_THRESHOLD=50
       - CACHE_L1_MAX=500
       - CACHE_L2_MAX=2000
@@ -53,7 +54,8 @@ services:
       # 熔断器配置
       - CIRCUIT_BREAKER_FAIL_THRESHOLD=5
       - CIRCUIT_BREAKER_RECOVERY_TIME=60
-      - LLM_ROUTER_TIMEOUT=8.0
+      # Recommended deployment value 8.0; runtime fallback in core/config.py is 4.0
+      - LLM_ROUTER_TIMEOUT=${LLM_ROUTER_TIMEOUT:-8.0}
       # v3.4: 安全配置
       - MAX_QUERY_LENGTH=2000
       - MAX_SESSIONS=10000

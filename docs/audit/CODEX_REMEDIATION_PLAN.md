@@ -1,5 +1,10 @@
 # Customer AI Agent Remediation Plan
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document does not describe current runtime state. It records a completed audit/fix report; verification lines were valid only at its execution time.
+> Current entry point: `docs/reference/current-state.md`.
+
+
 > 规划范围：仅基于当前 main 分支代码、测试、配置和 CI 做 Remediation Planning。  
 > 本文不实施任何 Issue，不修改业务源码、测试源码或 CI 配置。  
 > 事实优先级：当前代码与可复现验证结果 > 当前配置与测试 > 历史审计文档、README、简历和面试材料。

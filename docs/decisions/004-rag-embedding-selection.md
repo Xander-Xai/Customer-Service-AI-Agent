@@ -1,7 +1,9 @@
 # ADR-004: RAG 向量库与中文 Embedding 选型
 
 **日期**：2026-06-06
-**状态**：已采纳（v6.0 已从 ChromaDB 迁移至 Qdrant，此 ADR 的向量库决策已被 supersede，参见 [release-notes-v6.0.md](../reports/releases/release-notes-v6.0.md)）
+**状态**：Partially Superseded by [ADR-008](008-current-rag-retrieval-architecture.md)。
+向量库决策（ChromaDB → Qdrant，v6.0）与本地 sentence-transformers 三级降级链均已
+被当前实现取代；本文保留 2026-06-06 的历史决策与当时的评测数字，正文不再维护。
 **决策者**：项目负责人
 
 ## 背景

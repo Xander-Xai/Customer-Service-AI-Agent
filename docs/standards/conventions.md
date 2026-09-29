@@ -16,13 +16,13 @@ customer-service-ai-agent/
 │   └── middleware/       # 认证/限流/CSRF/安全头/追踪（__init__.py + trace_middleware.py）
 ├── core/                 # 核心 DI 容器与 LangGraph 状态机构建
 │   └── session/          # 会话管理（SessionManager/DriftDetector/TokenCounter）
-├── agents/               # 9 个 AI Agent（7 领域专家 + ResponseAgent + ReAct）+ Evaluator
+├── agents/               # 9 个运行时 Agent 角色（7 领域专家 + ResponseAgent + ReActAgent）+ ResponseEvaluator 评估器；BaseAgent 为抽象基类，不计入角色数
 ├── auth/                 # 认证与授权模块（JWT + Argon2id + RBAC）
 ├── db/                   # 数据库连接与 Schema（SQLAlchemy + Alembic）
 ├── router/               # 双层查询路由（LLM + 规则并行 + 复杂度评分）
 ├── collaboration/        # 5 种协作模式 + Orchestrator
 ├── rag/                  # Qdrant 知识库 + API Embedding（api_embedding.py）+ BM25 检索器（bm25_retriever.py）+ 重排 + RRF 融合 + 种子数据
-├── cache/                # 三层缓存（L1 Redis + L2 Qdrant + L3 Jaccard）
+├── cache/                # Response Cache 三层（L1 Redis + L2 Qdrant + L3 Jaccard）；Tool Result Cache/Store/压缩在 core/（core/tool_result_*.py），是独立机制
 ├── erp/                  # 金蝶 ERP 适配器（Mock/Real + HMAC）
 ├── tools/                # Function Calling 工具注册（OpenAI 格式）
 ├── llm/                  # LLM 客户端（重试 + 熔断 + FC + SSE）+ 规则兜底
@@ -44,7 +44,8 @@ customer-service-ai-agent/
 │   └── styles/           # CSS 样式表 (variables/layout/animations/components等 15 CSS)
 ├── deploy/               # 部署配置 (Docker Compose, Nginx, Prometheus)
 ├── scripts/              # 运维/benchmark/评测脚本
-├── tests/                # 后端自动化测试（unit/integration/e2e/stress/eval 共 5000+ 条）
+├── tests/                # pytest unit/integration/e2e/stress + tests/eval 基准资产（rag_benchmark.json 649 条评测查询是数据集，不是测试用例）
+│                         # exact collected test count: pytest --collect-only -q
 ```
 
 ## 工程执行闭环

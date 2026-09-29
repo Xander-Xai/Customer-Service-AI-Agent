@@ -3,8 +3,8 @@
 ## 当前事实入口
 
 - Runtime version: `6.3` (`core/config.py`); no `v6.4` release is declared.
-- Current HEAD and unresolved claims: [2026-09-29 convergence matrix](docs/reports/plans/2026-09-29-code-doc-alignment.md).
-- Last documentation convergence audit: `2026-09-29`.
+- Current entry point: [docs/reference/current-state.md](docs/reference/current-state.md)（当前事实 + 验证命令；不硬编码 HEAD，`git rev-parse HEAD` 获取）。
+- 带日期的对齐/审计报告（`docs/reports/plans/**`）是 HISTORICAL AUDIT SNAPSHOT，只在审计执行时点有效，不是永久 Current Truth。
 - `UNKNOWN` / `NOT_MEASURED` / `NOT_VERIFIED` are evidence states, not successful outcomes.
 
 ## 项目概述
@@ -84,7 +84,7 @@ make db-downgrade # 回滚迁移
 - `core/` — 基础设施（DI容器/图构建/MessageBus/SharedBlackboard/Monitoring/PromptManager/ABTest/TokenTracker/TokenQuota）
 - `core/session/` — 会话管理（SessionManager/DriftDetector/TokenCounter + **会话数据加密 AES-256-Fernet**）
 - `db/` — SQLAlchemy 模型 + Alembic 迁移
-- `rag/` — Qdrant 知识库 + 查询改写 + BM25/CrossEncoder 重排 + RRF 融合（v6.0: 从 ChromaDB 迁移至 Qdrant）
+- `rag/` — Qdrant 知识库 + 查询改写 + BM25 混合检索 + ApiReranker 重排 + RRF 融合（v6.0: 从 ChromaDB 迁移至 Qdrant，历史记录）
 - `router/` — 双层查询路由（LLM + 规则并行 + 熔断器降级）
 - `collaboration/` — 5 种协作模式 + Orchestrator
 - `tools/` — Function Calling 工具注册（OpenAI 格式）
@@ -98,11 +98,10 @@ make db-downgrade # 回滚迁移
 - `tests/` — 测试套件（unit/integration/e2e/stress/performance）
 
 ### 测试
-- 单元测试在 `tests/unit/`（**26 个文件**）
-- 集成测试在 `tests/integration/`（3 个文件）
-- 端到端测试在 `tests/e2e/`（4 个文件）
-- 压力测试在 `tests/stress/test_stress.py`
-- 前端测试在 `web/src/__tests__/`（Vitest，**7 个文件**）
+- 单元测试在 `tests/unit/`，集成测试在 `tests/integration/`，端到端测试在 `tests/e2e/`（`real_llm` 标记需真实 API Key）
+- 压力测试在 `tests/stress/`（`@pytest.mark.stress`）；RAG 基准资产在 `tests/eval/`
+- 前端测试在 `web/src/__tests__/`（Vitest）
+- **不要在文档里硬编码测试文件数或用例数**：用 `pytest --collect-only -q` / `npm test` 当前输出为准
 - 大部分测试使用 MockLLM，不需要真实 API Key
 - 真实 LLM E2E 测试需配置 `OPENAI_API_KEY`
 
@@ -143,7 +142,7 @@ make db-downgrade # 回滚迁移
 - 熔断器保护：连续 5 次失败后自动降级到规则引擎
 - 路由捷径：高置信规则匹配（confidence ≥ 0.75）跳过 LLM 路由调用
 - RAG 预取：与路由分类并行执行，Agent 可直接使用预取结果
-- 缓存预热：启动时通过 HTTP API 预生成 15 条通用高频问题（`scripts/warm_cache.py`）
+- 缓存预热：启动时通过 HTTP API 预热通用高频问题（`scripts/warm_cache.py`；条数以脚本内 WARM_QUERIES 当前值为准）
 
 ### 部署
 - Docker Compose 6 个变体：base / prod / override / canary / scale / monitoring

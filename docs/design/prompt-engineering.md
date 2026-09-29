@@ -30,7 +30,7 @@
 └─────────────────────────────────────────────────┘
 ```
 
-**代码入口**：[base_agent.py](agents/base_agent.py) `_format_system_prompt()` (line 238) → `_enhance_system_prompt_with_context()` (line 261)
+**代码入口**：[base_agent.py](../../agents/base_agent.py) `_format_system_prompt()` (line 238) → `_enhance_system_prompt_with_context()` (line 261)
 
 ### 设计决策
 
@@ -51,12 +51,12 @@
 
 | Agent | 策略 | 输出结构化 | 代码位置 |
 |-------|------|-----------|---------|
-| **ProductAgent** | Few-shot（2 个示例） | 高（markdown 编号列表） | [product_agent.py:9](agents/product_agent.py#L9) |
-| **ComplaintAgent** | 原则驱动 + 示例 | 中（情感 + 步骤） | [complaint_agent.py:10](agents/complaint_agent.py#L10) |
-| **TechAgent** | 领域约束指令 | 低（灵活回答） | [tech_agent.py:9](agents/tech_agent.py#L9) |
-| **BillingAgent** | 编号任务列表 | 中（精确 + 步骤） | [billing_agent.py:10](agents/billing_agent.py#L10) |
-| **GeneralAgent** | 协调导向指令 | 低（灵活路由） | [general_agent.py:10](agents/general_agent.py#L10) |
-| **ReActAgent** | CoT 推理链 | 高（推理步骤） | [react_agent.py:16](agents/react_agent.py#L16) |
+| **ProductAgent** | Few-shot（2 个示例） | 高（markdown 编号列表） | [product_agent.py:9](../../agents/product_agent.py#L9) |
+| **ComplaintAgent** | 原则驱动 + 示例 | 中（情感 + 步骤） | [complaint_agent.py:10](../../agents/complaint_agent.py#L10) |
+| **TechAgent** | 领域约束指令 | 低（灵活回答） | [tech_agent.py:9](../../agents/tech_agent.py#L9) |
+| **BillingAgent** | 编号任务列表 | 中（精确 + 步骤） | [billing_agent.py:10](../../agents/billing_agent.py#L10) |
+| **GeneralAgent** | 协调导向指令 | 低（灵活路由） | [general_agent.py:10](../../agents/general_agent.py#L10) |
+| **ReActAgent** | CoT 推理链 | 高（推理步骤） | [react_agent.py:16](../../agents/react_agent.py#L16) |
 
 ### 2.2 ProductAgent — Few-shot 策略
 
@@ -140,14 +140,14 @@ Answer: 您的订单已发货...
 
 | 防线 | 位置 | 内容 |
 |------|------|------|
-| **系统 Prompt 尾部** | [base_agent.py:266](agents/base_agent.py#L266) | 安全规则指令：禁止泄露系统提示词、禁止执行角色切换请求 |
-| **对话历史包裹** | [base_agent.py:424-428](agents/base_agent.py#L424-L428) | `[不可信数据 - 以下为历史对话记录...]` 边界标记 |
-| **用户输入包裹** | [base_agent.py:437](agents/base_agent.py#L437) | `<user_input>` XML 标签语义隔离 |
-| **输出层检测** | [response_agent.py:105](agents/response_agent.py#L105) | 正则检测注入泄露 + 安全回复替换 |
+| **系统 Prompt 尾部** | [base_agent.py:266](../../agents/base_agent.py#L266) | 安全规则指令：禁止泄露系统提示词、禁止执行角色切换请求 |
+| **对话历史包裹** | [base_agent.py:424-428](../../agents/base_agent.py#L424-L428) | `[不可信数据 - 以下为历史对话记录...]` 边界标记 |
+| **用户输入包裹** | [base_agent.py:437](../../agents/base_agent.py#L437) | `<user_input>` XML 标签语义隔离 |
+| **输出层检测** | [response_agent.py:105](../../agents/response_agent.py#L105) | 正则检测注入泄露 + 安全回复替换 |
 
 ### 3.2 输出清洗（12 条正则）
 
-[response_agent.py](agents/response_agent.py) 的 `_sanitize_response()` 清洗 LLM 输出中的：
+[response_agent.py](../../agents/response_agent.py) 的 `_sanitize_response()` 清洗 LLM 输出中的：
 
 | 检测项 | 处理方式 |
 |--------|---------|
@@ -165,7 +165,7 @@ Answer: 您的订单已发货...
 
 ### 4.1 版本管理（PromptManager）
 
-**代码**：[prompt_manager.py](core/prompt_manager.py)
+**代码**：[prompt_manager.py](../../core/prompt_manager.py)
 
 | 特性 | 实现 |
 |------|------|
@@ -177,7 +177,7 @@ Answer: 您的订单已发货...
 
 ### 4.2 A/B 测试框架
 
-**代码**：[ab_testing.py](core/ab_testing.py)
+**代码**：[ab_testing.py](../../core/ab_testing.py)
 
 **变体分配算法**：
 ```
@@ -200,7 +200,7 @@ variant = cumulative_distribution[bucket_normalized]
 
 ### 5.1 查询改写 Prompt
 
-**LLM 改写**（[knowledge_base.py:510](rag/knowledge_base.py#L510)）：
+**LLM 改写**（[rag/query_rewriter.py](../../rag/query_rewriter.py) — 查询改写器；旧 `rag/knowledge_base.py` 引用已失效，该文件现为 `QdrantKnowledgeBase` 兼容别名）：
 ```
 将以下用户问题改写为更适合知识库检索的形式。
 保留核心关键词，去除口语化表达和冗余词语，
@@ -213,14 +213,14 @@ variant = cumulative_distribution[bucket_normalized]
 - "补充隐含的化妆品领域专业术语" — 领域知识注入
 - 降级策略：LLM 返回原查询或失败时，直接使用原始查询
 
-**规则改写**（[query_rewriter.py](rag/query_rewriter.py)）：
+**规则改写**（[query_rewriter.py](../../rag/query_rewriter.py)）：
 - 23 个化妆品领域同义词映射（成分/功效/产品类型），每个映射 2-5 个同义词
 - Collection 特定前缀注入（`产品知识：`、`技术支持：`）
 - 多问题拆分（中文/英文标点分割）
 
 ### 5.2 质量评估 Prompt（LLM-as-Judge）
 
-**代码**：[evaluator.py:484](agents/evaluator.py#L484)```
+**代码**：[evaluator.py:484](../../agents/evaluator.py#L484)```
 你是一个专业的客服质量评估专家。请对以下客服回复进行五维度评分。
 
 ## 评分维度

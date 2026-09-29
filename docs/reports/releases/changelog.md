@@ -9,6 +9,7 @@
 - Evidence-driven engineering standard and explicit `UNKNOWN` / `NOT_MEASURED` / `NOT_VERIFIED` semantics.
 - Qdrant deterministic point IDs and migration tooling; BM25 lifecycle and hybrid retrieval contract hardening.
 - Production evidence boundary and controlled provider staging/auth preflight documentation.
+- Documentation/config convergence v2 (2026-09-30): aligned deployment model defaults (`docker-compose.yml` → `Qwen/Qwen3-8B`, ADR-007), added ADR-007/008 with ADR-003/004 supersession markers, added `docs/reference/current-state.md` entry point, regenerated `docs/openapi.json` via `scripts/generate_openapi.py`, rewrote LLM provider runbook against current runtime, separated historical benchmark/estimation claims from current facts in `docs/reference/*`, and expanded `scripts/audit_doc_consistency.py` (links, file refs, env coverage, canonical config, OpenAPI drift, benchmark metadata, stale terms) with regression tests in `tests/unit/test_doc_consistency.py`.
 
 > This records unreleased work; it does not create a `v6.4` version or claim production outcomes.
 

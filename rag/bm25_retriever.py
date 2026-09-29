@@ -1,8 +1,8 @@
 """
-BM25 检索器（v7.0）
+BM25 检索器（internal feature milestone: hybrid retrieval）
 内存倒排索引，支持中文分词，用于混合检索的 BM25 词法通道。
 
-（BM25Reranker 已在 v7.1 移除，生产环境始终使用 ApiReranker）
+（BM25Reranker 已移除——历史变更，生产环境始终使用 ApiReranker）
 
 使用方式：
     retriever = BM25Retriever()

@@ -1,5 +1,10 @@
 # 客户服务 AI Agent 审查修复计划
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This is a dated 2026-06 execution plan/record. It does not describe the current file layout;
+> several referenced files have since been renamed or removed.
+
+
 > **生成日期**: 2026-06-15
 > **依据文档**: `docs/reports/audit/project-audit-report.md`
 

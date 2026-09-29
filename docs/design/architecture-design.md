@@ -143,7 +143,7 @@ class BaseAgent(ABC):
 
 **跨用户隔离 / CachePolicy（P0-02）**：所有响应在写入缓存前先经统一 `CachePolicy`（`cache/cache_policy.py`）决定 `cacheable / scope / ttl / sensitivity / version`。个性化回答（订单状态、退款、投诉、售后、消费信息）默认 **不可进入共享缓存**：存在可信 `user_id`（P0-04 在请求边界写入 `state["user_id"]`）时写入用户作用域（`scope_key = u:hash(user_id)`），仅本人可命中；无身份时 fail closed（不写、不读共享槽）。公开回答（FAQ、成分功效、政策、产品信息）写入 `shared` 作用域，所有用户共享。三层（L1 Redis key / L2 Qdrant payload+filter / L3 Jaccard 元组）使用同一 `scope_key` 与 `version`，任一层不得绕过。读取发生在路由分类之前（intent 未知），因此读取端同时探测 `shared` 与调用方身份作用域——因个性化数据永不落入 `shared`，OR 探测不会泄漏。`CACHE_CONTENT_VERSION` 提升即可整体失效旧条目（版本不匹配）。
 
-**Reranker 二次重排（v6.3）**：检索结果进入 Agent 前经重排序器（Reranker）优化。`ApiReranker` 调用 SiliconFlow / OpenAI 兼容的 CrossEncoder API（`BAAI/bge-reranker-v2-m3`），按相关性分数降序排列，提升 Top-K 精度。API 不可用时自动降级到 `BM25Reranker`（关键词重叠 BM25 公式 + jieba 分词，零外部依赖），确保检索质量不依赖外部服务。
+**Reranker 二次重排（v6.3+）**：检索结果进入 Agent 前经重排序器（Reranker）优化。`ApiReranker`（[rag/reranker.py](../../rag/reranker.py)）调用 SiliconFlow / OpenAI 兼容的 rerank API（`BAAI/bge-reranker-v2-m3`），按相关性分数降序排列，提升 Top-K 精度。API 不可用/超时/HTTP 错误时回退到原始排序顺序（本地 BM25 词法重排器已移除——历史变更），检索质量不依赖本地模型。
 
 ### 3.2 ReAct 推理引擎
 
@@ -247,8 +247,8 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 ### 功能实现
 
 - **聊天界面**：`web/index.html` + `chat/` 模块（消息渲染/输入/会话管理/语音/TTS）
-- **SSE 流式**：`api/sse.js` — 逐 token 推送 + Agent 流转轨迹 + 进度条
-- **WebSocket**：`api/websocket.js` — 指数退避重连（2s~30s）+ 心跳 + 消息队列
+- **SSE 流式**：`web/src/api/sse.js` — 逐 token 推送 + Agent 流转轨迹 + 进度条
+- **WebSocket**：`web/src/api/websocket.js` — 指数退避重连（2s~30s）+ 心跳 + 消息队列
 - **文件上传**：支持图片/视频/PDF/DOCX/文本，`/api/chat/file`
 - **语音输入**：Web Speech API + 🎤 按钮
 - **TTS 语音**：`/api/tts` — Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器
@@ -256,7 +256,7 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 - **主题系统**：8 种主题（亮色 pure/warm/soft/cream + 暗色 classic/warm + 无障碍 + 面板）+ 字号/行高/动画控制
 - **无障碍**：ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA）
 - **移动端**：响应式布局 + 抽屉式导航
-- **管理后台**：`admin.html` + 8 个 admin 模块 — 用户管理/知识库统计/告警配置/Prompt 管理/Token 用量/系统健康/监控仪表盘
+- **管理后台**：`admin.html` + 7 个 `admin-*.js` 模块 — 用户管理/知识库统计/告警配置/Prompt 管理/Token 用量/系统健康/监控仪表盘
 - **可嵌入 Widget**：`widget.html` — 轻量聊天组件
 
 ### 模块结构
@@ -324,13 +324,13 @@ web/src/
 
 ### 已知限制与改进方向
 1. **ERP Mock 模式**：生产 ERP 集成仅完成接口抽象，真实适配器未完整实现（`ERP_MODE=real` 开关已预留但未充分验证），当前默认运行在 Mock 模式
-2. **Widget DOMPurify CDN 依赖**：widget 的 Markdown XSS 防护依赖 CDN 加载 DOMPurify，若 CDN 不可用则降级为纯文本渲染
+2. **Widget DOMPurify 本地 vendor**：widget 的 Markdown XSS 防护使用本地 `web/static/vendor/dompurify.min.js`（v6.3 起不再依赖 CDN）；若 vendor 缺失则降级为纯文本渲染
 3. **RAG Embedding 优化**：已从本地 sentence-transformers 替换为异步 API 嵌入（api_embedding.py bge-large-zh-v1.5），添加 BM25 混合检索（v6.3），多项优化并行以提升 Hit Rate
 4. **前端内联样式**：CSP 的 style-src 仍使用 `unsafe-inline`（部分主题切换和动态样式无法避免），未来可考虑迁移到 CSS 自定义属性方案
-5. **小模型注入防御**：Qwen3-8B 对"不泄露系统提示"的指令遵从不足 → 已在输出层增加正则检测兜底（v4.2 修复）
+5. **小模型注入防御**：小模型（v4.2 时期为 Qwen2.5-7B 历史模型）对"不泄露系统提示"的指令遵从不足 → 已在输出层增加正则检测兜底（v4.2 修复）
 
-### 真实 LLM 测试发现的问题（v4.2）
-E2E 集成测试（硅基流动 Qwen3-8B）暴露了两个 Mock 测试无法覆盖的 Bug：
+### 真实 LLM 测试发现的问题（v4.2，历史记录）
+E2E 集成测试（v4.2 时期，硅基流动历史模型）暴露了两个 Mock 测试无法覆盖的 Bug：
 1. **路由优先级缺陷**：多意图同分时 `max()` 按字典顺序取第一个，导致"退货退款"被路由到产品 Agent → 新增 `_INTENT_PRIORITY` 权重
 2. **注入泄露**：小模型会在回复中讨论自己的系统设置，`[untrusted data]` 隔离不够 → 输出层正则检测 + 安全回复替换
 
@@ -338,14 +338,15 @@ E2E 集成测试（硅基流动 Qwen3-8B）暴露了两个 Mock 测试无法覆�
 
 ## 8. 测试策略
 
-| 层级 | 覆盖范围 | 数量 |
-|------|---------|------|
-| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 / 协作模式 / 查询路由 / 告警通知 / 知识库 / 认证 / 漂移检测 等 26 个文件 | ~1,040 |
-| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 / 音频管道 / 知识库生成 | ~86 |
-| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key）/ 场景路由 / Trace ID 传播 | ~200 |
-| 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 | ~12 |
-| 前端测试 | Agent 映射 / 状态管理 / SSE / 主题 / 对比度 / 管理后台 | ~60 Vitest（7 个文件） |
-| **总计** | **26 个单元测试文件，39+ 个测试文件** | **~1,370+ 项** |
+| 层级 | 覆盖范围 | 运行方式 |
+|------|---------|---------|
+| 单元测试 | API 路由 / 中间件 / Agent / Session / Cache / Router / RAG / LLM / 工具 / 协作模式 / 查询路由 / 告警通知 / 知识库 / 认证 / 漂移检测 / Tool Result / BM25 lifecycle / point-id 迁移 | `pytest tests/unit -q` |
+| 集成测试 | 端到端图调用 / ERP 适配器 / 多模态 / 音频管道 / 知识库生成 / BM25 重启 | `pytest tests/integration -q` |
+| E2E 测试 | 全图执行 / 生产特性 / 真实 LLM（需 API Key）/ 场景路由 / Trace ID 传播 | `pytest tests/e2e -q` |
+| 压力测试 | 缓存吞吐 / 总线并发 / 黑板并发 | `pytest tests/stress -q` |
+| 前端测试 | Agent 映射 / 状态管理 / SSE / 主题 / 对比度 / 管理后台 | `npm test` |
+
+> 测试数量不写入文档：当前 collected 数以 `pytest --collect-only -q` 输出为准。
 
 所有核心测试 **无需 LLM API Key 或网络**，Mock 适配器 + Mock Qdrant + Mock LLM 实现 100% 离线测试。
 

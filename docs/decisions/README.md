@@ -8,9 +8,12 @@
 |-----|------|------|------|
 | [ADR-001](001-langgraph-multi-agent.md) | 选择 LangGraph 作为多 Agent 编排框架 | 2026-06-02 | 已采纳 |
 | [ADR-002](002-vanilla-js-frontend.md) | 前端使用原生 JavaScript | 2026-06-08 | 已采纳 |
-| [ADR-003](003-qwen-default-llm.md) | Qwen2.5-7B 作为默认 LLM | 2026-06-02 | 已采纳 |
-| [ADR-004](004-rag-embedding-selection.md) | RAG 向量库与中文 Embedding 选型 | 2026-06-06 | 已采纳 |
-| [ADR-005](005-dual-layer-cache.md) | 双层缓存策略（MD5 + Jaccard） | 2026-06-02 | 已采纳 |
+| [ADR-003](003-qwen-default-llm.md) | Qwen2.5-7B 作为默认 LLM | 2026-06-02 | Superseded by ADR-007 |
+| [ADR-004](004-rag-embedding-selection.md) | RAG 向量库与中文 Embedding 选型 | 2026-06-06 | Partially Superseded by ADR-008 |
+| [ADR-005](005-dual-layer-cache.md) | 双层缓存策略（MD5 + Jaccard） | 2026-06-02 | Superseded by ADR-006 |
+| [ADR-006](006-cache-and-tool-result-context-architecture.md) | Cache 与 Tool Result Context 架构分离 | 2026-09-29 | 已采纳 |
+| [ADR-007](007-current-default-llm.md) | 当前默认 LLM（Qwen/Qwen3-8B，OpenAI-compatible 接口） | 2026-09-30 | 已采纳 |
+| [ADR-008](008-current-rag-retrieval-architecture.md) | 当前 RAG 检索与 Embedding 架构 | 2026-09-30 | 已采纳 |
 
 ## 模板
 

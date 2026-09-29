@@ -1,6 +1,13 @@
 # RAG 检索质量评估方案
 
-> **v6.0 已迁移**：向量数据库已从 ChromaDB 迁移至 Qdrant，Embedding 模型从 English all-MiniLM-L6-v2 升级为中文 bge-large-zh-v1.5（1024 维），并引入 BM25 混合检索 + RRF 融合 + bge-reranker-v2-m3 重排序完整链路。以下 ChromaDB 历史数据仅用于基线对比。
+> **当前口径（2026-09-30 收敛）**：向量数据库为 Qdrant（`VECTOR_DB_MODE=qdrant_only`，
+> ChromaDB 已移除）；Embedding 为 `BAAI/bge-large-zh-v1.5`（1024 维，HTTP API 计算，
+> `rag/api_embedding.py`）；检索链路为 rewrite/filter → vector + BM25 →
+> retrieval contract → RRF(k=60) → `bge-reranker-v2-m3` 重排（ADR-008）。
+> 当前基准查询数由 `tests/eval/rag_benchmark.json` 的 metadata 决定
+> （**649 条**，2026-06-24 创建；以 `python3 scripts/project_facts.py` 的输出为准）。
+> 文中所有具体指标数字均标注了生成日期与数据集，属于对应日期的报告快照；
+> 当前值必须用 `python3 scripts/evaluate_rag.py` 重新生成 artifact 后引用。
 >
 > 本文档解决"RAG 无评估指标"缺口，提供评估方法论、执行脚本和面试话术。
 
@@ -34,11 +41,14 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 
 本项目有 3 个知识集合，建议按类别分别评估：
 
-| Collection | 文档数 | 评估重点 |
+| Collection | 历史文档数（2026-06 报告） | 评估重点 |
 |-----------|--------|---------|
 | product_knowledge | 35 | 成分查询、产品匹配的精确度 |
 | faq | 30 | 常见问题的快速命中率 |
 | tech_support | 20 | 技术问题的专业性匹配 |
+
+> 当前 collection 文档数以 `python3 scripts/evaluate_rag.py` / `/api/knowledge/stats`
+> 的当前输出为准；上表为 2026-06 历史报告快照。
 
 ---
 
@@ -53,19 +63,20 @@ python3 scripts/evaluate_rag.py
 
 ### 3.2 评估数据集
 
-脚本内置 30 条测试查询，覆盖：
+当前评估数据集为 `tests/eval/rag_benchmark.json`：**649 条查询**
+（数字由 metadata `total_queries` 决定，2026-06-24 生成；不要复制为永久数字），
+覆盖 5 类（成分知识/产品推荐/使用指导/售后问题/投诉处理）与 3 级难度
+（easy/medium/hard）。历史脚本曾内置 30 条查询套件
+（`docs/reference/rag-evaluation-report.json`），属于旧口径，仅作历史对比。
 
-| 类别 | 查询数 | 示例 |
-|------|--------|------|
-| 成分咨询 | 6 | "烟酰胺有什么功效？""视黄醇敏感肌能用吗？" |
-| 肤质匹配 | 2 | "油性皮肤适合什么面霜？" |
-| 成分交互 | 2 | "VC精华不能和什么一起用？" |
-| 物流/售后 | 4 | "怎么退货？""发什么快递？" |
-| 会员/支付 | 4 | "会员等级？""怎么付款？" |
-| 安全/质量 | 3 | "孕期能用吗？""怎么辨别正品？" |
-| 使用指导 | 3 | "护肤正确顺序？""面膜多久敷一次？" |
-| 问题肌肤 | 2 | "黑头怎么去？""敏感肌怎么护理？" |
-| 特殊场景 | 3 | "医美术后护理？""运动前后护肤？" |
+| 维度（当前 649 条基准） | 数量 |
+|------|--------|
+| 成分知识 | 218 |
+| 产品推荐 | 150 |
+| 使用指导 | 100 |
+| 售后问题 | 101 |
+| 投诉处理 | 80 |
+| difficulty: easy / medium / hard | 219 / 225 / 205 |
 
 ### 3.3 结果解读
 
@@ -78,40 +89,36 @@ python3 scripts/evaluate_rag.py
 
 ### 3.4 评估结果
 
-#### 基线数据（2026-06-06，改进前）
+> 当前值必须由 `python3 scripts/evaluate_rag.py`（649 条基准）重新生成。
+> 以下两个小节是**历史报告快照**，数据集与配置与当前不同，只能作为对比叙事。
 
-使用默认 embedding（all-MiniLM-L6-v2，英文模型，ChromaDB 历史数据）：
+#### 历史基线数据（2026-06-06，改进前）
+
+使用默认 embedding（all-MiniLM-L6-v2，英文模型，ChromaDB 历史数据，30 条查询集）：
 
 | 指标 | 值 | 说明 |
 |------|---------|------|
 | Hit Rate@3 | **63.3%** | 受英文 embedding 模型限制，低于 70% 目标 |
 | MRR | **0.500** | 首条结果命中率中等 |
-| 平均距离 | **0.7226** | ChromaDB L2 距离 |
+| 平均距离 | **0.7226** | ChromaDB L2 距离（历史数据） |
 
 > 完整报告：`docs/archive/rag-evaluation-report.json`
 
-#### 已实现的改进（v4.3+，代码已就绪，待重新评估）
-
-以下改进已在代码中实现，但尚未用评估脚本重新验证：
-
-| 改进项 | 实现状态 | 代码位置 | 预期效果 |
-|--------|---------|---------|---------|
-| **中文 Embedding** | ✅ 已实现 | [core/config.py:224](core/config.py#L224) 主模型 bge-large-zh-v1.5（1024维）：异步 HTTP API 调用（SiliconFlow），httpx 连接池复用 | Hit Rate +16.7pp |
-| **Query 改写** | ✅ 已实现 | [query_rewriter.py](rag/query_rewriter.py) 30+ 同义词映射 + 多问题拆分 | 长查询命中率提升 |
-| **Reranker** | ✅ 已实现 | [reranker.py](rag/reranker.py) CrossEncoder 优先 → BM25 降级 | Precision@3 提升 |
-| **多 Collection 检索** | ✅ 已实现 | [knowledge_base.py:114](rag/knowledge_base.py#L114) 5 个 collection 并行查询 | 覆盖率提升 |
-| **RRF 融合** | ✅ 已实现 | [knowledge_base.py:145](rag/knowledge_base.py#L145) Reciprocal Rank Fusion | 多模态结果融合 |
-
-#### 改进后数据（2026-06-10，中文 embedding + query rewriting + reranker）
+#### 历史改进数据（2026-06-10，中文 embedding + query rewriting + reranker，30 条查询集）
 
 | 指标 | 基线（英文 embedding） | 改进后 | 提升 |
 |------|----------------------|--------|------|
 | **Hit Rate@3** | 63.3% | **80.0%** | +16.7pp |
 | **MRR** | 0.500 | **0.778** | +55.6% |
 
-> 完整报告：`docs/rag-evaluation-report.json`（自动生成）
+> 报告快照：[docs/reference/rag-evaluation-report.json](rag-evaluation-report.json)
+> （自动生成，2026-06，30 条查询口径）
 
-> **面试话术**：63.3% 是改进前的基线（英文 embedding）。通过替换为中文 embedding 降级链 + query rewriting + reranker，Hit Rate@3 提升到 80.0%，MRR 从 0.500 提升到 0.778。评估脚本可随时重跑验证。
+> **面试话术**：63.3% 是改进前的历史基线（英文 embedding，30 条查询集）。
+> 当时的改进（中文 embedding + query rewriting + reranker）把 Hit Rate@3 提到
+> 80.0%、MRR 提到 0.778（历史报告值，30 条查询口径）。当前实现已升级为
+> Qdrant + bge-large-zh-v1.5 + BM25 混合检索 + 649 条基准评估集，
+> 当前指标必须用评估脚本重新生成后引用。
 
 ---
 
@@ -123,7 +130,7 @@ python3 scripts/evaluate_rag.py
 
 | 改进项 | 方案 | 预期提升 |
 |--------|------|---------|
-| **中文 Embedding 模型** | 替换 all-MiniLM-L6-v2 为 `BAAI/bge-small-zh-v1.5` 或 `text2vec-base-chinese` | Hit Rate +10-15% |
+| **中文 Embedding 模型** | 已完成（历史改进记录：all-MiniLM-L6-v2 → bge-large-zh-v1.5，2026-06） | 已落地 |
 | **Query 改写** | 用 LLM 将口语化查询改写为标准检索语句 | 长查询命中率提升 |
 | **结果重排序（Rerank）** | 检索 Top-10 后用 Cross-Encoder 重排序取 Top-3 | Precision@3 提升 |
 
@@ -138,9 +145,10 @@ python3 scripts/evaluate_rag.py
 ### 4.3 已有的降级策略
 
 本项目已实现：
-- **多集合并行检索**：[knowledge_base.py:114](rag/knowledge_base.py#L114) `query_multiple` 同时查 3 个 collection
-- **距离排序去重**：[knowledge_base.py:127](rag/knowledge_base.py#L127) 按距离升序 + 内容去重
-- **RAG 失败降级**：[base_agent.py](agents/base_agent.py) Agent 在 RAG 无结果时仍有 LLM 直接回答能力
+- **多集合并行检索**：[rag/qdrant_knowledge_base.py](../../rag/qdrant_knowledge_base.py) `query_multiple` 多 collection 并行 + 向量/BM25 双通道
+- **检索契约与降级路径**：[rag/retrieval_contract.py](../../rag/retrieval_contract.py) 定义各阶段结果结构
+- **距离排序去重**：[rag/qdrant_knowledge_base.py](../../rag/qdrant_knowledge_base.py) 距离升序 + 内容去重
+- **RAG 失败降级**：[agents/base_agent.py](../../agents/base_agent.py) Agent 在 RAG 无结果时仍有 LLM 直接回答能力
 
 ---
 
@@ -148,11 +156,23 @@ python3 scripts/evaluate_rag.py
 
 ### Q: "你怎么评估 RAG 检索质量？"
 
-> "我用了一个包含 649 条测试查询的评估集（`tests/eval/rag_benchmark.json`），覆盖成分知识、产品推荐、使用指导、售后、投诉五大类及难中易三级难度。评估指标用 Hit Rate@K 和 MRR。当前 Qdrant 系统的 Hit Rate@3 在 80% 左右——使用 bge-large-zh-v1.5 嵌入、查询改写、BM25 混合检索（RRF 融合）及 bge-reranker-v2-m3 重排序。对比纯向量检索（ChromaDB + all-MiniLM-L6-v2 时期约 65%）提升显著。评估脚本保存在 `scripts/evaluate_rag.py`，可随时复现。"
+> "评估集是 `tests/eval/rag_benchmark.json`，当前为 649 条测试查询（数量以
+> metadata 为准，2026-06-24 生成），覆盖成分知识、产品推荐、使用指导、售后、
+> 投诉五大类及难中易三级难度。评估指标用 Hit Rate@K、Recall、Precision 和 MRR。
+> 当前检索链路：查询改写 → 向量（Qdrant，bge-large-zh-v1.5）+ BM25 双通道 →
+> RRF(k=60) 融合 → bge-reranker-v2-m3 重排。历史报告（2026-06，30 条查询集）
+> 显示 Hit Rate@3 = 80.0%、MRR = 0.778；当前 649 条基准上的当前值需要用
+> `scripts/evaluate_rag.py` 重跑生成 artifact 后引用。"
 
 ### Q: "Hit Rate 不够高怎么办？"
 
-> "当前系统已经完成了 Qdrant 升级，使用 bge-large-zh-v1.5（1024 维，中文优化）作为主 Embedding 模型。Retrieval 链路是：同义词扩展查询改写 → 向量检索（Qdrant）+ BM25 双通道并行 → RRF(k=60) 融合 → bge-reranker-v2-m3 重排序。Hit Rate@3 达到约 80%，相比 ChromaDB/all-MiniLM 时期的 ~65% 提升显著。如果再优化，我会考虑：第一，针对专有名词（成分名、产品名）优化 BM25 的词法索引权重。第二，引入多向量策略——对同一文档生成 Embedding 和关键词两套表示，分别检索再融合。第三，经验反馈闭环——把人工客服标记的误检案例加入 Hard Negative 训练集，微调重排序器。"
+> "当前系统的检索链路是：同义词扩展查询改写 → 向量检索（Qdrant，bge-large-zh-v1.5，
+> 1024 维）+ BM25 双通道并行 → RRF(k=60) 融合 → bge-reranker-v2-m3 重排序。
+> 历史报告（30 条查询集）Hit Rate@3 约 80%，当前 649 条基准的当前值以最近一次
+> 评估 artifact 为准。如果再优化，我会考虑：第一，针对专有名词（成分名、产品名）
+> 优化 BM25 的词法索引权重。第二，引入多向量策略——对同一文档生成 Embedding 和
+> 关键词两套表示，分别检索再融合。第三，经验反馈闭环——把人工客服标记的误检
+> 案例加入 Hard Negative 训练集，微调重排序器。"
 
 ### Q: "RAG 检索不到怎么办？系统会怎么处理？"
 

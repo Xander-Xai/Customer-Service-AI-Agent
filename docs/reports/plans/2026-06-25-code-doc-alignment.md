@@ -1,5 +1,10 @@
 # 2026-06-25 代码与文档对齐记录
 
+> **HISTORICAL AUDIT SNAPSHOT**
+> This document describes the alignment work of the dated audit run only.
+> It is not a current-truth entry; see docs/reference/current-state.md.
+
+
 ## 目标
 
 基于当前仓库真实代码（HEAD `e67f578`），完成又一轮前后端全量复核、文档更新和发现的问题修复。
