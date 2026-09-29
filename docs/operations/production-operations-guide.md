@@ -494,10 +494,14 @@ docker ps | grep qdrant
 docker logs customer-service-qdrant --tail 50
 
 # 2. 测试 Qdrant REST API 连通性（v6.0+ HTTP 端口 6333）
-curl -s http://localhost:6333/collections | jq '.result.collections[].name'
+# 注意：生产 Compose 的 qdrant 只有 expose（无主机端口映射），
+# 必须从 Compose network 内执行（与 qdrant 服务 healthcheck 的 curl 用法一致）：
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec qdrant curl -fsS http://localhost:6333/collections | jq '.result.collections[].name'
 
 # 3. 检查集合状态和向量配置
-curl -s http://localhost:6333/collections/product_knowledge | jq '.result'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec qdrant curl -fsS http://localhost:6333/collections/product_knowledge | jq '.result'
 
 # 4. 检查健康端点
 curl -s http://localhost:8000/api/health | jq '.components.qdrant'
@@ -524,7 +528,7 @@ docker exec customer-service-qdrant df -h /qdrant/storage
 - ✅ 定期备份 Qdrant 快照（`docker cp qdrant:/qdrant/storage ./backups/`）
 - ✅ 为 Qdrant 容器配置资源限制（CPU 2-4 核，内存 4-8GB）
 - ✅ 生产环境建议设置 `gRPC` 端口（6334）以提高性能
-- ✅ 配置 `VECTOR_DB_MODE=qdrant_only` 仅使用 Qdrant（生产推荐，v6.3 起 ChromaDB 完全移除）
+- ✅ 配置 `VECTOR_DB_MODE=qdrant_only` 仅使用 Qdrant（生产推荐；ChromaDB 已于 v6.3 完全移除——历史迁移记录）
 
 ---
 
@@ -746,14 +750,17 @@ docker compose exec redis redis-cli KEYS "csai:session:*" | xargs docker compose
 #### 6. Qdrant 检索缓慢
 
 ```
-# 检查集合大小（v6.0+ 使用 Qdrant REST API）
-curl -s http://localhost:6333/collections | jq '.result.collections[] | {name, vectors_count}'
+# 检查集合大小（v6.0+ 使用 Qdrant REST API；生产 Compose 内 qdrant 无主机端口映射，
+# 从 Compose network 内执行）
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec qdrant curl -fsS http://localhost:6333/collections | jq '.result.collections[] | {name, vectors_count}'
 
 # 或通过项目健康端点
 curl -s http://localhost:8000/api/health | jq '.components.qdrant'
 
 # 检查具体集合详情
-curl -s http://localhost:6333/collections/product_knowledge | jq '.result.points_count'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec qdrant curl -fsS http://localhost:6333/collections/product_knowledge | jq '.result.points_count'
 
 # 优化建议：
 # - 定期优化 Qdrant 索引（curl -X POST http://localhost:6333/collections/{name}/index）
@@ -1052,10 +1059,10 @@ make prod
 
 ### 文档资源
 
-- [项目 README](README.md)
+- [项目 README](../../README.md)
 - [生产准备度检查清单](../checklists/production-readiness-checklist.md)
 - [API 文档](http://localhost:8000/docs)
-- [架构设计文档](docs/design/architecture-design.md)
+- [架构设计文档](../design/architecture-design.md)
 
 ---
 
