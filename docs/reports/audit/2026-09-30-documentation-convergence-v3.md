@@ -172,10 +172,24 @@
 | `git diff --check` | OK |
 | `git ls-files -ci --exclude-standard` | CLAUDE.md（有意保留）、secrets/keys.json、tests/data/csai.db-shm、tests/data/csai.db-wal（后三者本轮清理） |
 
-## 8. Final 验证结果（修改后，最终提交前再执行一轮）
+## 8. Final 验证结果（PR #20 closeout 时实测）
 
-最终以提交时的 `git status --short`、本文件提交所在 commit 的工作树状态为准；
-提交前已确认这些命令在修改后的 checkout 全部通过（测试数量以现场输出为准）。
+最终环境：PR #20 最终 HEAD（`git rev-parse HEAD` 现场获取，收口 commit
+`docs: finalize convergence v3 audit metadata`；治理收口前的基线为
+`ca4636f6d571d80f83fd2c2214f00cdcfd2c8bca`）。
+
+| 命令 | 结果 |
+|---|---|
+| `python3 scripts/rag_evidence_status.py` | rag_formal_metrics_status=**NOT_VERIFIED**，`rag_formal_artifact_*` 全部 null |
+| `python3 scripts/project_facts.py` | OK，`rag_formal_metrics_status=NOT_VERIFIED`（artifact 推导，非 Markdown） |
+| `project_facts.py --check docs/reference/current-state.md` | OK（含 canonical rag-evaluation.md 双向治理比对） |
+| `python3 scripts/audit_doc_consistency.py` | OK（36 active docs，guards A–M，rule K 走 artifact 推导状态） |
+| `pytest tests/unit/test_doc_consistency.py -q` | 60 passed |
+| `pytest tests/unit/test_rag_eval_harness.py -q` | 30 passed |
+| `ruff check`（治理脚本 + 测试） | clean |
+| `git diff --check` | clean |
+| CI（PR #20 push 后：tests 3.10/3.11/3.12 + security） | run 36638725103 SUCCESS |
+| 总 pytest collected 数 | 以 `pytest --collect-only -q` 现场输出为准，不在本文硬编码 |
 
 ## 9. 当前 evidence boundary
 
@@ -218,9 +232,10 @@ recover 路径 = 凭据 → `make rag-eval-import` → `make rag-eval-649-prefli
 
 ## 13. 后续建议
 
-1. provider 凭据恢复后走 §11 复现路径；产出正式 artifact 后把
-   `project_facts.current_formal_status` 的 NOT_VERIFIED 状态与 canonical doc 同步更新
-   （并确认所有 guard 保持一致），同时刷新面试材料中的指标引用。
+1. provider 凭据恢复后走 §11 复现路径；正式 artifact 产生后**无需改 Python 代码**——
+   `scripts/rag_evidence_status.py` 会从 artifact 推导 VERIFIED，只需按 guard 提示
+   把 current-state/rag-evaluation 文档行重渲染并绑定 artifact provenance
+   （`project_facts.py --check` / `audit_doc_consistency.py` 双向强制），同时刷新面试材料中的指标引用。
 2. 为 `scripts/import_eval_corpus.py` 补 30 个 `scene_0008xx` gold 文档（影响 80 条查询、
    主口径 GOLD_NOT_INDEXED 记账），或在 benchmark 备注该 gap 后再做正式评测。
 3. 后续轮次可考虑把 `evaluation_populations` 的动态计数也纳入 project_facts
@@ -228,3 +243,53 @@ recover 路径 = 凭据 → `make rag-eval-import` → `make rag-eval-649-prefli
    本轮克制地只取 harness 能力事实，未硬编码任何一次 401 状态。
 4. 若未来决定 CLAUDE.md 不再需要跟踪，应先移除 docs/standards 中对根目录 CLAUDE.md 的
    引用，再调整 guard 白名单。
+
+## 14. 治理收口（PR #20 后半轮，本轮新增）
+
+PR #20 前半轮曾把 formal status 从 canonical Markdown 文本读取
+（`project_facts.current_formal_status`），这属于 evidence-direction inversion
+（docs → facts → guard）。后半轮已修复为：
+
+```
+artifact/evidence
+  → scripts/rag_evidence_status.py        # 唯一推导入口（module）
+  → scripts/project_facts.py              # machine-readable fact projection
+  → docs                                  # 渲染投影，不拥有状态
+  → scripts/audit_doc_consistency.py      # 一致性 verifier（双向）
+```
+
+要点：
+
+- **Markdown 不拥有 formal evidence state**：formal status 只由
+  `artifacts/evaluation/rag-649/**/report.json` 中通过 formal full-run
+  contract 的 provenance-bearing artifact 推导；preflight-only / smoke / subset
+  artifact 与文档声明结构上即被拒绝。
+- **VERIFIED contract**：`status == VERIFIED_FULL` 且 4-config ablation
+  （vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank）全部执行完成
+  （metrics + run_summary，n_success == executed，benchmark sha256 绑定当前
+  benchmark，`evaluation_populations.primary_view == all_queries`）。
+- `VERIFIED_FULL_NO_RERANK`（reranker ablation 腿缺失）**不提升** formal
+  VERIFIED，一律 NOT_VERIFIED（fail-closed）；`SUBSET_SMOKE` / `PARTIAL` /
+  preflight BLOCKED 同样 NOT_VERIFIED。
+- 文档双向守卫：无 artifact 时文档不得 claim VERIFIED（不能自我提级）；有
+  VERIFIED artifact 时仍写 NOT_VERIFIED 的文档判 stale；VERIFIED 行内必须绑定
+  artifact provenance。
+- 历史证据保护清单（§6）与 `evaluate_rag.py` schema / benchmark 数据本轮
+  **未改动**；历史 artifact 无任何回填或重算。
+- 回归测试：`tests/unit/test_doc_consistency.py` 最终 **60 passed**
+  （含 artifact-driven 治理断言：
+  `test_no_formal_artifact_is_not_verified`、
+  `test_preflight_artifact_does_not_verify_metrics`、
+  `test_smoke_subset_artifact_does_not_verify_metrics`、
+  `test_valid_formal_artifact_marks_verified`、
+  `test_verified_full_no_rerank_does_not_promote_formal_metrics`、
+  `test_doc_cannot_self_promote_to_verified`、
+  `test_verified_artifact_with_stale_not_verified_doc_fails`、
+  `test_not_verified_artifact_with_fake_verified_doc_fails`、
+  `test_metric_check_uses_artifact_state_not_doc_state`、
+  `test_metric_claim_guard_uses_artifact_state_not_doc_state` 等）；
+  `tests/unit/test_rag_eval_harness.py` **30 passed**。CI：run 36638725103。
+- **当前 formal status：NOT_VERIFIED**；`rag_formal_artifact_path / timestamp /
+  git_sha / schema_version` 全部 null（当前仓库尚无正式 649 full-run artifact）。
+
+> 本节与 §8 为 PR #20 最终收口时点的实测快照；治理实现以当前仓库代码为准。
