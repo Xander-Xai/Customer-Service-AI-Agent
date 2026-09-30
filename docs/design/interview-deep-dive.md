@@ -137,8 +137,8 @@ async with self._lock:  # asyncio.Lock 保护状态转换
 | 级别 | 触发条件 | 降级策略 | 延迟 |
 |------|---------|---------|------|
 | L1 | LLM 超时（单次） | 重试 3 次，指数退避 | +5-10s |
-| L2 | 熔断器 OPEN | 规则分类器接管路由 + 简单模板回复 | <10ms |
-| L3 | 规则也无法处理 | 返回"服务暂时不可用"+ 建议转人工 | <1ms |
+| L2 | 熔断器 OPEN | 规则分类器接管路由 + 简单模板回复 | 零外部调用（仅为量级示意，非实测） |
+| L3 | 规则也无法处理 | 返回"服务暂时不可用"+ 建议转人工 | 本机内存计算（量级示意，非实测） |
 
 **自定义 LLM 客户端为什么不用官方 SDK**：
 ```python
@@ -293,7 +293,7 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 ```
 
 **为什么用 Jaccard 而不是 Embedding 余弦相似度？**
-> "Jaccard 基于分词集合，计算零延迟（不需要调 embedding API），适合每次对话轮次都做检测。Embedding 相似度更准但需要网络调用，我用它做 L2 缓存的语义匹配（低频调用）。场景不同，选择不同。"
+> "Jaccard 基于分词集合，纯内存计算（不需要调 embedding API，无网络调用），适合每次对话轮次都做检测；L3 本身就是进程内实现，这一点与 L1 Redis / L2 Qdrant 的网络存储访问不同。Embedding 相似度更准但需要网络调用，我用它做 L2 缓存的语义匹配（低频调用）。场景不同，选择不同。"
 
 ### 代码引用
 
@@ -315,7 +315,7 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 ```
 查询进入
   ↓
-L1: Redis MD5(query) 精确匹配 → 命中 → 直接返回（<10ms）
+L1: Redis MD5(query) 精确匹配 → 命中 → 直接返回（跳过 Router/Agent/LLM 链路，无 LLM 调用；注意 Redis/Qdrant 是网络存储访问，不是进程内读，各层实际延迟当前无生产级测量）
   ↓ miss
 L2: Qdrant 语义检索（bge-large-zh-v1.5 向量） → 命中 → 返回
   ↓ miss
@@ -433,6 +433,84 @@ if _RE_INJECTION_DISCLOSURE.search(text):
 - [router/query_router.py](../../router/query_router.py) — 意图优先级修复
 - [agents/response_agent.py](../../agents/response_agent.py) — 注入泄露检测（搜 `_RE_INJECTION_DISCLOSURE`）
 - [tests/e2e/test_e2e_real_llm.py](../../tests/e2e/test_e2e_real_llm.py) — E2E 测试（当前结果以 pytest 实际输出为准）
+
+---
+
+## Q10: "RAG 评测真的做了吗？指标怎么设计的？"
+
+> 本节是 2026-09-30 之后面试 RAG 的主要抓手：评测链已落地
+> （PR #19 evidence pipeline），但**当前 649-query 正式指标 NOT_VERIFIED**
+> （provider 凭据 401 blocker 已在 preflight artifact 中留档）。
+> 回答必须区分"设计/实现"与"结果"。
+
+### 核心回答
+
+> "RAG 评测链已经落地且可复现：`scripts/evaluate_rag.py` 以
+> `tests/eval/rag_benchmark.json`（649 条，metadata 动态校验）为基准，跑
+> **4-config ablation**——vector_only / bm25_only / hybrid_no_rerank /
+> hybrid_rerank（production-like）。指标是 **multi-K**（K=1/3/5/8）的
+> Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K；latency 是**实测**分阶段值
+> （VECTOR / BM25 / FUSION_RRF / RERANK，取自 retrieval trace，不是推算）。
+> 文件头（benchmark 总数/下一级指标分母）全部运行时算。",
+> "证据链是全量 provenance 的：artifact 记录 git SHA、benchmark sha256、
+> schema version、runtime config、模型名；warmup 弃置不计；失败查询
+> 不会被删——按规则 taxonomy（TIMEOUT / PROVIDER_ERROR /
+> GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK）进入 failures。当前状态 Trustworthy
+> 但**没有指标产出**：embedding/reranker provider 401，preflight fail closed
+> 把正式评测拦住了（这是好事——评测 gate 就该这么设计）。"
+
+### 为什么要 ablation 而不是一个总数？
+
+- 只有 `hybrid_rerank` 一个数，无法归因：提升来自混合检索还是重排器？
+- `hybrid_rerank vs hybrid_no_rerank` = 重排器的净贡献（逐 query 统计 improved/degraded，禁止只报上升不报下降）
+- `hybrid_no_rerank vs vector_only/bm25_only` = 双通道 + RRF 的净贡献
+- RRF 倾向"多通道同时命中"的文档——单通道命中不等于混合后收益
+
+### 为什么不能只报一个 Recall？
+
+- **Recall@K 只回答"漏了没有"**（占 gold 无法命中），回答不了"用户前几条能不能看到"
+- **Hit@K** 是"top-K 里有没有 gold"（二值），对单 gold/多 gold 场景与 Recall 差异很大
+- **Precision@K** 回答展示位置质量；**NDCG@K** 关注排序位置、黄金排布被截断的 IDCG 处理（binary relevance、按可命中上限截断）；**MRR@K** 强调第一个命中的位置
+- 多 gold 时 Recall@8 可能理想，Hit@3 却差——用户前 3 条看不到 → 产品上就是失败
+
+### 为什么要区分三套 population 分母？
+
+- **all_queries（主口径）**：gold 未进索引的查询也算失败、按 0 分计入——衡量"系统级结果"（corpus coverage + 索引 + 检索算法）
+- **retrieval_eligible**：至少 1 个 gold 在 index 的查询——衡量 retriever 在"有可命中文档"时的表现
+- **full_gold_covered**：全部 gold 都在 index 的查询——适合 Recall@K/NDCG，避免 gold 缺失直接压低算法分
+- 数量全部运行时动态计算；对外引用必须注明 population，不得挑最好看的视图单独宣称
+- GOLD_NOT_INDEXED 的查询不会被放弃记账：归入 fail/log 数据，主口径计 0
+
+### provider 401 为什么必须 fail closed？
+
+- 评测链依赖真实检索语义（embedding/rerank 是检索的一部分）；凭据失效时若"继续跑"会得到无意义指标，还可能让静默降级（reranker fallback）把 401 掩成"表现一般"
+- preflight 把 primary blocker（EMBEDDING_PROVIDER_AUTH）与 downstream 症状（VECTOR_INDEX_EMPTY，caused_by 指向根因）分开——这是"根因 ≠ 症状"的工程语义
+- reranker 失败只阻塞 hybrid_rerank（不连坐 vector_only/bm25_only/hybrid_no_rerank）——分级阻塞，保持其他实验可运行
+
+### reranker 静默 fallback 为什么危险？怎么证明它真的生效了？
+
+- `ApiReranker` 失败时回退原顺序是**可用性兜底**；但如果不区分"重排成功"与"回退"，hybrid_rerank 实验可能测的只是原始排序——重排从实现变成了幻觉
+- 证据：preflight 探针直接调用真实 rerank API；**silent_fallback 会被识别并计为探针失败**，不产出假阳性
+- 正式评测里对比 hybrid_rerank 与 hybrid_no_rerank：如果前者与后者完全一致（逐 query improved/degraded 全为 0），本身就说明重排没生效——双保险
+
+### provenance / benchmark SHA / git SHA 怎么用？
+
+- 任何指标引用必须有 artifact：报告里带 `git_sha`、`benchmark.sha256`、`schema_version`、配置快照
+- benchmark 文件 hash 变了 → 历史数字不能再和当前数字直接比（必须注明 revision）
+- 历史 30-query 快照（2026-06，Hit@3 80%/MRR 0.778）只能在明确说"历史口径"时引用
+
+### 加分点
+
+- "评测的 ablation 切换是 instance/request 级的，跑完必恢复，生产默认配置不被污染——有回归测试防护"
+- "失败查询永不静默丢弃——taxonomy 逐条记录，bad case 分类是后续改进的输入"
+- "warmup 弃置 + 分阶段实测延迟，避免把首查询冷启动算进指标"
+
+### 代码引用
+
+- [scripts/evaluate_rag.py](../../scripts/evaluate_rag.py) — evidence pipeline（4 实验、指标、taxonomy、preflight）
+- [scripts/import_eval_corpus.py](../../scripts/import_eval_corpus.py) — 幂等语料导入 + gold 覆盖率审计 + import manifest
+- [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md) — canonical 评测文档（artifact schema、populations、当前状态）
+- [tests/unit/test_rag_eval_harness.py](../../tests/unit/test_rag_eval_harness.py) — 评测 harness 回归测试
 
 ---
 

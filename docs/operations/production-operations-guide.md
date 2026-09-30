@@ -1,10 +1,25 @@
 # 生产环境运维手册
 
 > **Runtime version**: v6.3
-> **本次审计**: 2026-09-29；旧命令必须先对照当前 Makefile/compose 文件复核。
+> **本次审计**: 2026-09-30（final convergence pass）；旧命令必须先对照当前 Makefile/compose 文件复核。
 > **适用环境**: Production / Canary  
 
-> 当前仓库不包含 `scripts/probe_provider_auth.py` 或 `scripts/run_production_evidence.py`，不要复制执行这些不存在的命令。Provider probe 若在外部环境运行，应直接读取 process environment；应用配置使用 `load_dotenv(override=True)`。禁止输出或持久化 secret。
+> **Provider/production evidence 链路（canonical）**：本仓库**包含**以下两个可执行入口
+> （已核对当前 `scripts/`），真实 provider 调用必须走它们，不要用裸 curl 替代正式链路：
+>
+> ```
+> provider real call
+>   ↓ scripts/probe_provider_auth.py          # 认证探针（一次最小化请求）
+>   ↓ auth passed?
+>   ├── no  → STOP / BLOCKED_BY_AUTHENTICATION（修凭据，不烧 token）
+>   └── yes
+>         ↓ controlled production/staging evidence
+>         ↓ scripts/run_production_evidence.py  # 受控 evidence harness（EVAL_REAL_PROVIDER 门控）
+> ```
+>
+> 裸 curl 只作为人工诊断补充（如查询 `/v1/user/usage`），不构成 evidence artifact。
+> Provider probe 直接读取 process environment；应用配置使用 `load_dotenv(override=True)`。
+> 禁止输出或持久化 secret。
 
 ---
 
@@ -93,8 +108,13 @@ curl -s -X POST ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}/chat/completio
 
 ```bash
 # 方案A: 切换到备用Provider（紧急）
+# 运行时 LLM 客户端始终读取 OPENAI_API_KEY / OPENAI_BASE_URL / OPENAI_MODEL
+# （见 core/container.py）；LLM_PROVIDER 仅作为监控/评测的 provider 标签，
+# 不改变连接目标。仓库不存在 DEEPSEEK_API_KEY 等按 provider 命名的变量。
+export OPENAI_BASE_URL=https://api.deepseek.com/v1
+export OPENAI_MODEL=deepseek-chat
+export OPENAI_API_KEY=your_deepseek_key
 export LLM_PROVIDER=deepseek
-export DEEPSEEK_API_KEY=your_deepseek_key
 docker compose restart app
 
 # 方案B: 增加超时时间（临时）
@@ -143,11 +163,13 @@ grep CACHE_TTL .env.prod
 **解决方案**:
 
 ```bash
-# 方案A: 调整TTL（根据业务特点）
-# 产品咨询类: 长TTL（24小时）
-# 订单查询类: 短TTL（5分钟）
-echo "CACHE_TTL_PRODUCT=86400" >> .env.prod
-echo "CACHE_TTL_BILLING=300" >> .env.prod
+# 方案A: 调整TTL（按业务意图自动分级）
+# TTL 由 core/config.py 的 CACHE_TTL_POLICY 按 intent_type 决定：
+# knowledge_qa: 7天, pricing_stock: 5分钟, policy_rule: 24小时,
+# order_status: 5分钟, after_sales: 1小时, chitchat: 10分钟
+# 注意：不存在 CACHE_TTL_PRODUCT / CACHE_TTL_BILLING 独立变量（历史遗留写法已移除）；
+# 需要调整请修改 CACHE_TTL_POLICY 或部署侧覆盖 CACHE_TTL（default 兜底）
+echo "CACHE_TTL=3600" >> .env.prod
 
 # 方案B: 启用缓存预热
 python3 scripts/warm_cache.py http://localhost:8000
@@ -194,15 +216,16 @@ ORDER BY mean_exec_time DESC
 LIMIT 10;"
 
 # 3. 检查连接池配置
-grep DB_POOL_SIZE .env.prod
+# 连接池大小当前硬编码在 db/database.py（engine pool_size=10, max_overflow=20，
+# 仅 PostgreSQL 生效）；当前不存在 DB_POOL_SIZE / DB_POOL_OVERFLOW 环境变量
 ```
 
 **解决方案**:
 
 ```bash
 # 方案A: 增加连接池大小（短期）
-echo "DB_POOL_SIZE=20" >> .env.prod
-echo "DB_POOL_OVERFLOW=40" >> .env.prod
+# 需修改 db/database.py 中的 pool_size / max_overflow（当前为代码级配置，
+# 无对应环境变量）；改后重启：
 docker compose restart app
 
 # 方案B: 优化慢查询（长期）
@@ -212,11 +235,9 @@ alembic upgrade head
 # 使用JOIN替代N+1查询
 # 修改代码使用 selectinload
 
-# 方案C: 启用查询缓存
-echo "QUERY_CACHE_ENABLED=true" >> .env.prod
-
-# 方案D: 读写分离（高并发场景）
+# 方案C: 读写分离（高并发场景）
 # 配置主从复制，读操作走从库
+# 注意：当前仓库无 QUERY_CACHE_ENABLED 环境变量（历史写法已移除）
 ```
 
 **预防措施**:
@@ -262,11 +283,13 @@ docker compose restart redis
 docker exec -it customer-service-redis redis-cli FLUSHDB
 
 # 方案C: 增加Redis内存限制
-echo "REDIS_MAXMEMORY=2gb" >> .env.prod
+# Redis 参数由 compose command 控制（deploy/compose/docker-compose.yml:
+# --maxmemory 256mb --maxmemory-policy allkeys-lru）；.env.prod 不支持
+# REDIS_MAXMEMORY 环境变量（历史写法已移除），需修改 compose 或部署侧覆盖
 docker compose up -d redis
 
 # 方案D: 启用Redis持久化
-echo "REDIS_APPENDONLY=yes" >> .env.prod
+# AOF 已在 compose command 中启用（--appendonly yes）；如需调整同样修改 compose
 docker compose up -d redis
 ```
 
@@ -288,8 +311,8 @@ docker compose up -d redis
 
 ```bash
 # 1. 检查Session TTL配置
-grep SESSION_TTL .env.prod
-# 预期: SESSION_TTL=3600 (1小时)
+grep SESSION_IDLE_TTL .env.prod
+# 预期: SESSION_IDLE_TTL=3600 (1小时, core/config.py 默认值)
 
 # 2. 验证Session隔离
 python3 -c "
@@ -314,7 +337,7 @@ print(f'MessageBus 已加载，session_id 通过 ContextVar 自动隔离')
 
 ```bash
 # 方案A: 延长Session TTL
-echo "SESSION_TTL=7200" >> .env.prod  # 2小时
+echo "SESSION_IDLE_TTL=7200" >> .env.prod  # 2小时
 docker compose restart app
 
 # 方案B: 修复Session隔离bug
@@ -322,7 +345,9 @@ docker compose restart app
 # 检查 BaseAgent.process_with_retry() 中的设置
 
 # 方案C: 启用Session持久化
-echo "SESSION_PERSIST_TO_DB=true" >> .env.prod
+# 使用 SESSION_STORAGE_BACKEND（memory|redis，core/config.py）；当前无
+# SESSION_PERSIST_TO_DB 变量（历史写法已移除）
+echo "SESSION_STORAGE_BACKEND=redis" >> .env.prod
 
 # 方案D: 清理僵尸Session
 # 当前由 SessionManager 的 TTL 清理任务处理；原
@@ -353,15 +378,16 @@ curl http://localhost:8000/api/alerts?limit=50 | jq '.alerts[] | {severity, time
 curl http://localhost:9090/api/v1/query?query=rate(csai_errors_total[5m]) | jq .
 
 # 3. 检查抑制窗口配置
-grep ALERT_SUPPRESSION_WINDOW .env.prod
+# 抑制窗口当前硬编码在 alerts/notifier.py（默认 300 秒 / 5 分钟）；
+# 当前不存在 ALERT_SUPPRESSION_WINDOW 环境变量（历史写法已移除）
 ```
 
 **解决方案**:
 
 ```bash
 # 方案A: 调整告警阈值
-echo "SLA_ALERT_THRESHOLD=50" >> .env.prod  # 提高阈值
-echo "SLA_ALERT_COOLDOWN=600" >> .env.prod  # 10分钟冷却
+echo "SLA_ALERT_THRESHOLD=50" >> .env.prod  # 提高阈值（core/config.py 默认 30.0）
+echo "SLA_ALERT_COOLDOWN=600" >> .env.prod  # 10分钟冷却（默认 300）
 
 # 方案B: 启用告警分级
 # warning: 仅Webhook
@@ -728,9 +754,9 @@ docker compose restart app
 docker compose exec postgres psql -U csai -d csai -c "SELECT count(*) FROM pg_stat_activity;"
 
 # 调整连接池大小
-# 在 .env.prod 中设置:
-# DATABASE_POOL_SIZE=20
-# DATABASE_MAX_OVERFLOW=10
+# 注意：连接池大小当前硬编码在 db/database.py（pool_size=10, max_overflow=20，
+# 仅 PostgreSQL 生效）；不存在 DATABASE_POOL_SIZE / DATABASE_MAX_OVERFLOW
+# 环境变量，调整需修改代码后重启。
 ```
 
 #### 5. Redis 内存溢出
@@ -815,10 +841,10 @@ make prod
 
 ```
 # 根据服务器配置调整
-GUNICORN_WORKERS=$(( $(nproc) * 2 + 1 ))  # CPU核心数 * 2 + 1
-GUNICORN_THREADS=2
-GUNICORN_TIMEOUT=120
-GUNICORN_KEEPALIVE=5
+# GUNICORN_WORKERS 是唯一 env 可调项（gunicorn.conf.py 通过 os.getenv 读取）：
+export GUNICORN_WORKERS=$(( $(nproc) * 2 + 1 ))  # CPU核心数 * 2 + 1
+# timeout=120 / keepalive=5 当前硬编码在 gunicorn.conf.py（非环境变量）；
+# threads 未启用（uvicorn 异步 worker）；调整请直接编辑 gunicorn.conf.py。
 ```
 
 #### 缓存优化
@@ -950,8 +976,10 @@ ls -lh backups/latest/
 pg_restore --list backups/YYYYMMDD_HHMMSS/postgres_csai.dump
 
 # 3. 测试恢复流程（在测试环境）
-docker compose -f deploy/compose/docker-compose.test.yml up -d
-./scripts/restore.sh backups/YYYYMMDD_HHMMSS/
+# 当前仓库无 scripts/restore.sh（历史写法已移除）；恢复由
+# scripts/backup.sh + pg_restore 手工完成：
+#   pg_restore -U csai -d csai backups/YYYYMMDD_HHMMSS/postgres_csai.dump
+#   并按需恢复 Qdrant 快照（docker cp / qdrant snapshot）
 ```
 
 ### 异地备份策略
@@ -1034,7 +1062,9 @@ make prod-build
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --no-deps app
 
 # 7. 验证功能
-./scripts/smoke_test.sh
+# 当前仓库无 scripts/smoke_test.sh（历史写法已移除）；用健康检查与
+# docs/checklists/quick-launch-checklist.md 的验证命令代替：
+curl -s http://localhost:8000/api/health | jq .
 
 # 8. 如有问题，回滚
 git checkout PREVIOUS_TAG

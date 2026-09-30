@@ -17,7 +17,8 @@
 - 测试数量以 `pytest --collect-only -q` 当前输出为准；不要复制历史 1400+ 数字
 - v6.0 新增：Qdrant 向量数据库迁移 + ChromaDB→Qdrant 数据迁移脚本 + 并行运行模式
 - v6.1 新增：统一多模态入口 + Widget 图片/语音 + 场景过滤 RAG + 5000+ 知识库文档
-- 当前 HEAD：Tool Result Context Engineering、BM25 lifecycle、retrieval contract、Qdrant point-id migration、production evidence 口径收紧
+- 当前 HEAD：Tool Result Context Engineering、BM25 lifecycle、retrieval contract、Qdrant point-id migration、RAG 649 evidence pipeline（4-config ablation + provenance artifact）、production evidence 口径收紧
+- **RAG 当前 649-query 正式指标为 NOT_VERIFIED**：有 provenance-bearing 的正式 artifact 之前，AI Agent 不得生成、引用或传播任何"当前 Hit@K / MRR / NDCG / Recall 百分比"。历史 30-query 快照（2026-06）只能作历史对比叙事。评测（ablation / 指标分母 / evidence 状态）canonical reference：[docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md)。
 
 ## 常用命令
 
@@ -46,8 +47,14 @@ make lint
 # 代码格式化（Ruff）
 make format
 
-# RAG 检索质量评估
+# RAG 检索质量评估（兼容 alias；正式评测入口是 rag-eval-649）
 make eval-rag
+
+# RAG 649 evidence pipeline（canonical formal evaluation）
+make rag-eval-import          # 导入评测语料（幂等 + gold 覆盖率审计 + manifest）
+make rag-eval-649-preflight   # preflight gate（provider auth / Qdrant / BM25）
+make rag-eval-649-smoke       # 冒烟（前 16 条，不是正式证据）
+make rag-eval-649             # 正式 649 全量 4-config ablation → evidence artifact
 
 # 类型检查
 mypy . --ignore-missing-imports

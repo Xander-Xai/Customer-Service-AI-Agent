@@ -44,11 +44,10 @@ format: ## 代码格式化
 	ruff check --fix .
 
 # ===== RAG 评估 =====
-eval-rag: ## RAG 检索质量评估（查询数以 tests/eval/rag_benchmark.json metadata 为准）
-	@echo "📊 RAG 检索质量评估..."
-	python3 scripts/evaluate_rag.py
+eval-rag: ## RAG 检索质量评估（rag-eval-649 的兼容 alias；此为唯一正式评测入口）
+	@$(MAKE) --no-print-directory rag-eval-649
 
-rag-eval-649: ## RAG 649 正式评测（preflight → 4 实验 ablation → evidence artifact）
+rag-eval-649: ## RAG 649 正式评测（canonical formal command: preflight → 4 实验 ablation → evidence artifact）
 	@echo "📊 RAG 649 evidence 评测（先确认语料已导入: make rag-eval-import）..."
 	python3 scripts/evaluate_rag.py
 

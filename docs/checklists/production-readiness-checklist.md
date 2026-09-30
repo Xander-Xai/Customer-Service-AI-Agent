@@ -1,20 +1,29 @@
 # 客服 AI Agent 项目生产准备度检查清单
 
-> 本清单于 2026-09-29 重新审计。Runtime version 仍为 v6.3；下方旧日期/旧数字均为历史快照，不能替代本次执行结果。
-> 口径：只记录当前 HEAD 已验证的事实，不复述历史阶段报告里的”已完成”结论。
+> 本清单于 2026-09-30 重新审计。Runtime version 仍为 v6.3；下方旧日期/旧数字均为历史快照，不能替代本次执行结果。
+> 口径：本清单只记录**要执行的 gate 与要复核的项**；动态 PASS/计数结果不在此写死，
+> 进入带日期的 audit 报告（`docs/reports/audit/**`）。测试数量一律以
+> `pytest --collect-only -q` / `npm test` 当前输出为准。
 
 ## 0. Current HEAD gates
 
 - [ ] `scripts/audit_doc_consistency.py` 通过
+- [ ] `python3 scripts/project_facts.py --check docs/reference/current-state.md` 通过
+- [ ] `python3 scripts/generate_openapi.py --check` 通过
 - [ ] Tool Result feature flags、rollback switches、Redis store/TTL 已验证
 - [ ] Tool Result scope isolation、cache safety 已验证
 - [ ] BM25 lifecycle restart、Qdrant point-id migration dry-run/rollback 已验证
+- [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
+      `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
+      artifact 显示 provider auth blocker，见
+      [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md) §3.4；
+      smoke run 不是正式证据）
 - [ ] production evidence harness 已生成脱敏且带 provenance 的 artifact
 - [ ] provider auth/staging 已验证；HTTP 401、token usage/billing unavailable 仍是 **NOT_VERIFIED**
 
-## 1. 当前已验证
+## 1. 当前已验证（结构性事实，复现命令见括号）
 
-- [x] 前端单测通过：`npm test` = 60/60（7 个测试文件）
+- [x] 前端单测可运行：`npm test`（当前 7 个 Vitest 测试文件；通过数以命令输出为准）
 - [x] 前端生产构建通过：`npm run build`
 - [x] OpenAPI 当前可正常生成：`app.openapi()` = `53` 个 HTTP 路径（校验命令 `make openapi-check`；v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`）
 - [x] 前后端上传约束已对齐：统一 `5MB` 上限
@@ -52,16 +61,27 @@
 - [x] `.env.example` — 废弃的 CACHE_L1_MAX/CACHE_L2_MAX 已移除 (v6.3，历史修复记录)
 - [x] `docs/reports/releases/release-notes-v6.0.md` — ChromaDB 遗留模式和文件引用已更新 (v6.3，历史修复记录)
 - [x] `docs/operations/production-operations-guide.md` — ChromaDB 引用和废弃缓存参数已清理 (v6.3，历史修复记录)
+- [x] RAG evidence pipeline 就绪：`scripts/evaluate_rag.py`（4-config ablation、
+      multi-K 指标、实测 stage latency、failure taxonomy、provenance）、
+      `scripts/import_eval_corpus.py`（幂等导入 + manifest）、Make 目标
+      `rag-eval-import/-preflight/-smoke/rag-eval-649`；提交有 preflight v1
+      证据与 import manifest (PR #19)
 
-## 2. 当前仍不能直接宣称“真实上线就绪”的项目
+## 2. 当前仍不能直接宣称"真实上线就绪"的项目
 
 - [ ] 真实生产密钥、域名、证书、外部依赖连通性尚未按生产环境复核
-- [ ] `tests/unit/test_api_routes.py` 这类大文件当前仍不应直接等同于“后端全量验收完成”
+- [ ] `tests/unit/test_api_routes.py` 这类大文件当前仍不应直接等同于"后端全量验收完成"
 - [ ] 健康检查、监控、Qdrant、Redis、PostgreSQL 的联机状态尚未在真实部署环境下复核
 - [ ] `.env.test`、README、历史验收报告中仍保留大量开发/历史口径，不能替代真实发布验收
-- [ ] ~~仓库中存在 `secrets/keys.json` 这类运维台账文件~~ — 已添加到 .gitignore，下次提交后将从跟踪中移除
+- [ ] 历史遗留 tracked+ignored 文件已按 2026-09-30 审计处理：`secrets/keys.json`、
+      `tests/data/csai.db-shm`、`tests/data/csai.db-wal` 已 `git rm --cached`
+      从跟踪中移除（本地文件保留）；guard `scripts/audit_doc_consistency.py`
+      的 hygiene check 会拦截再次混入
 - [ ] CSRF 保护在生产模式下（`DEV_MODE=false`）依赖 Bearer Token 跳过校验，登录页等无 Bearer Token 的 POST 请求需验证 CSRF 兼容性
-- [ ] `.env` 文件中仍存在明文 SiliconFlow API Key，虽然被 gitignore，但存在意外泄露风险
+- [ ] 生产部署环境的本地配置文件若含真实密钥，存在意外泄露风险——使用
+      `scripts/check_secrets.py` 检查当前树；真实密钥的管理遵循
+      [docs/security/public-repository-secret-policy.md](../security/public-repository-secret-policy.md)
+      （本项描述部署环境风险，不指向任何具体机器状态）
 - [ ] 生产配置文件 `.env.prod` 中 TLS 为关闭状态，需要配置真实证书路径
 - [ ] 生产配置文件 `.env.prod` 中 ERP 模式为 mock，需要连接真实金蝶 API
 - [ ] CORS_ORIGINS 在生产环境未配置时将导致前端跨域请求失败
@@ -73,25 +93,35 @@
 ## 3. 上线前必须逐项补齐
 
 - [ ] 用生产环境真实密钥替换所有占位符，并确认不再把任何真实密钥提交到仓库
+- [ ] 评测/重排/embedding 提供商凭据就绪后执行 `make rag-eval-649` 产生正式
+      RAG evidence artifact（正式指标当前 NOT_VERIFIED；历史 30-query 快照不作当前证据）
 - [ ] 为 Widget 选择不泄露凭据的接入方式；当前 `widget.html?api_key=...` 仍更适合作为演示/受控内网场景，而不是公开分发方案
 - [ ] 在目标环境执行后端完整验证：单测、关键集成测试、健康检查、登录、聊天、会话、监控
 - [ ] 确认 `VECTOR_DB_MODE`、`DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`SESSION_TOKEN_SECRET`、`API_KEY`、`MONITORING_ADMIN_TOKEN` 已按生产值配置
+      （`EMBEDDING_API_KEY` / `RERANKER_API_KEY` 可独立配置；向量化与重排凭据必须实际可用
+      ——embedding 未单独配置时会复用 `LLM` 的 `OPENAI_API_KEY`，见 `core/config.py`）
 - [ ] 验证 `/api/health`、`/api/metrics`、`/api/kpi`、`/metrics/prometheus` 在目标环境下的权限和返回格式
 - [ ] 验证上传链路在 Nginx / 反向代理 / FastAPI 三级限制下仍保持一致
 - [ ] 复核备份、恢复、告警路由和通知通道，而不是只看文档说明
 
 ## 4. 推荐验收顺序
 
-1. `npm test`
+1. `npm test`（数量以输出为准）
 2. `npm run build`
 3. `pytest tests/unit/test_app_factory.py tests/unit/test_ws_coverage.py tests/unit/test_auth_tools_coverage.py -q --maxfail=1`
-4. 目标环境启动后验证 `/api/health`
-5. 手工验证登录、聊天、会话切换、文件上传、管理后台
-6. 目标环境验证 Redis / PostgreSQL / Qdrant / Prometheus / Grafana / Alertmanager
+4. `python3 scripts/audit_doc_consistency.py` + `python3 scripts/project_facts.py --check docs/reference/current-state.md`
+5. 目标环境启动后验证 `/api/health`
+6. 手工验证登录、聊天、会话切换、文件上传、管理后台
+7. 目标环境验证 Redis / PostgreSQL / Qdrant / Prometheus / Grafana / Alertmanager
+8. （凭据就绪时）`make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649`
 
 ## 5. 相关文档
 
 - [README.md](../../README.md)
+- [当前事实入口](../reference/current-state.md)
+- [RAG 评估方案](../reference/rag-evaluation.md)
+- [生产证据边界](../evaluation/production-evidence.md)
 - [API 参考](../reference/api-reference.md)
 - [生产运维手册](../operations/production-operations-guide.md)
-- [本轮代码与文档对齐记录](../reports/plans/2026-06-25-v6.2-code-doc-alignment.md)
+- [2026-09-30 文档收敛审计 v3](../reports/audit/2026-09-30-documentation-convergence-v3.md)
+- [2026-09-29 全仓对齐审计](../reports/plans/2026-09-29-code-doc-alignment.md)（历史快照）

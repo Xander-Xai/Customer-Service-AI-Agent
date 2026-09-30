@@ -53,10 +53,22 @@
 - 技术债务清理 → [reports/milestone/tech-debt-fix-summary.md](reports/milestone/tech-debt-fix-summary.md)
 
 ### 🔒 审计者
+- 当前事实入口 → [reference/current-state.md](reference/current-state.md)
 - 安全审计报告 → [reports/audit/](reports/audit/)
 - 治理审计 → [design/governance-audit.md](design/governance-audit.md)
 - 模型对比分析 → [reference/model-comparison.md](reference/model-comparison.md)
-- RAG 评估 → [reference/rag-evaluation.md](reference/rag-evaluation.md)
+- RAG 评估（canonical） → [reference/rag-evaluation.md](reference/rag-evaluation.md)
+- 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
+
+### 真相层级（-current truth 速查）
+
+| 想知道 | 看 | 生命周期 |
+|---|---|---|
+| 当前 runtime 事实 + 验证命令 | [reference/current-state.md](reference/current-state.md) | 🟢 CURRENT（随代码/命令同步） |
+| RAG 评估方法/口径/当前评测状态 | [reference/rag-evaluation.md](reference/rag-evaluation.md) | 🟢 CURRENT（评测实现变更时更新；历史小节单独标注） |
+| provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟢 CURRENT |
+| 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
+| 版本历史 | [reports/releases/](reports/releases/) | 🟡 SNAPSHOT（旧版本章节永不重写） |
 
 ### 🆕 新人
 - 项目总览 → [../README.md](../README.md)
@@ -266,4 +278,4 @@ draft   design/   archive/
 
 ---
 
-*最后更新：2026-09-30（runtime/config/文档收敛 v2；current-state 入口 + ADR-007/008 + OpenAPI 生成器）*
+*最后更新：2026-09-30（文档收敛 v3：RAG evidence pipeline 口径 + 真相层级速查 + runtime/config/文档收敛 v2 延续）*

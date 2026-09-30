@@ -1,9 +1,12 @@
 # 药妆智多星 — 面试题集·最终版
 
-> 当前口径（2026-09-29）：不要把旧的“8 agents”“二级缓存”、ChromaDB 或
+> 当前口径（2026-09-30）：不要把旧的"8 agents""二级缓存"、ChromaDB 或
 > 未验证生产指标当作当前事实。使用 9 个角色、独立的 Response/Tool Result
 > cache、Qdrant + BM25 lifecycle、retrieval contract、scope-safe offload/recovery
-> 与 evidence taxonomy。
+> 4-config RAG ablation（vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank）、
+> multi-K 指标与三套 population 分母。**当前 649-query 正式 RAG 指标
+> NOT_VERIFIED**（preflight 显示 provider auth blocker）；任何百分比必须绑定
+> provenance-bearing artifact（详见 docs/reference/rag-evaluation.md）。
 
 > 基于简历 v5.4.1 版本，覆盖 6 条简历内容，19 道必问 + 15 道备选
 
@@ -101,7 +104,23 @@
 
 **Q4 【必问】** RAG 检索质量怎么评估？分析过 bad case 吗？举一个检索失败的例子，后来怎么改进的？
 
+> 💡 **加分口径**：评测链是 `scripts/evaluate_rag.py`（4-config ablation：
+> vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank）+ multi-K 指标
+> + 三套 population 分母；bad case 走 failure taxonomy
+> （TIMEOUT / PROVIDER_ERROR / GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK）逐条记账。
+> 当前 649 正式指标 NOT_VERIFIED（provider 401 blocker）；历史 30-query 数字
+> 只能以"历史口径"叙述。
+
 **Q5 【必问】** 查询改写 + 双路重排 + RRF，这套链路的端到端效果怎么验证？有没有对比过"去掉某个环节"的效果差异？
+
+> 💡 **追问弹药（ablation 设计）**：
+> - 为什么不能只报一个 Recall？→ Hit@3/Recall@8/Precision@3/NDCG/MRR 各回答不同问题（用户是否在前几条看到 vs 全量覆盖 vs 展示质量 vs 排序）
+> - hybrid_no_rerank vs hybrid_rerank = 重排净贡献（逐 query improved/degraded 计数，不许只报提升）
+> - all_queries / retrieval_eligible / full_gold_covered 为什么都要？→ 系统级端到端 vs retriever 能力 vs 算法纯净口径；引用必须注明 population
+> - GOLD_NOT_INDEXED 怎么记账？→ 主口径计 0 + 逐查询标记，不静默丢弃
+> - provider 401 为什么 fail closed？凭据失效时"继续跑"会产出无意义指标并可能被静默降级掩盖
+> - reranker silent fallback 为什么危险？preflight 探针识别 silent_fallback = 不产出假阳性；两实验结果完全一致本身就是重排未生效的证据
+> - 数字的 provenance：artifact 带 git SHA + benchmark sha256，基准变了历史数不能直接比
 
 **Q6 （备选）** A/B 测试 prompt 变体分配怎么做的？SHA-256 确定性分流怎么保证同一个用户永远看到同一个变体？变体效果怎么对比？
 
@@ -113,7 +132,10 @@
 
 ### 性能与可观测性（4分钟）
 
-**Q9 【必问】** SLA 基准 5-20s，这个区间很大——哪个环节决定了 5s 和 20s 的差异？瓶颈在哪？做过哪些优化？
+**Q9 【必问】** SLA 基线（Sequential 15s / Parallel 20s / ReAct 30s 配置超时）——哪个环节决定了达标差异？瓶颈在哪？做过哪些优化？
+
+> ⚠️ **口径**：SLA 相关只谈**配置目标**（`SLA_*` 配置）与监控告警机制；
+> 端到端真实延迟分布是 `NOT_MEASURED`，不要把配置目标说成"实测 P95"。
 
 > **追问：** 你能拆一下端到端链路里每个环节的耗时分布吗？比如 LLM 调用、检索、后处理各占多少？如果不知道具体数值，可以估算一下比例——哪一段是你觉得最需要优化的？
 
@@ -183,9 +205,10 @@
 | 一面 Q9 | 置信度来源 + 0.75 怎么定的 + 估算捷径占比 |
 | 一面 Q13 | 5 维质量维度 + Sequential→ReAct 链路 + 并发消息处理 |
 | 一面 Q15 | 查询改写的 prompt 设计 + 防漂移机制 |
-| 二面 Q4 | 一个真实的 bad case + 改进前后对比 |
+| 二面 Q4 | 一个真实的 bad case + 改进前后对比（用 taxonomy 归类） |
+| 二面 Q5 | 4-config ablation 问题清单（见 Q5 追问弹药）+ provenance 语义 |
 | 二面 Q7 | Redis 降级的完整流程：detect→fallback→sync |
-| 二面 Q9 | 各环节耗时估算（LLM ~60%、检索 ~20%、后处理 ~10%） |
+| 二面 Q9 | 各环节耗时估算（LLM ~60%、检索 ~20%、后处理 ~10%——明确标注为"我的估算/假设"，端到端分布当前 NOT_MEASURED） |
 | 二面 Q11 | 全局降级链路：路由捷径→熔断器→规则引擎的层层兜底 |
 
 ### 第二档：熟悉即可（5 个）
@@ -209,4 +232,4 @@
 
 ---
 
-*版本：v1.0 · 基于简历 v5.4.1（2026-06-18）*
+*版本：v1.1 · 基于简历 v5.4.1（2026-06-18）；2026-09-30 更新 RAG 评估口径（PR #19 evidence pipeline；正式指标 NOT_VERIFIED）*
