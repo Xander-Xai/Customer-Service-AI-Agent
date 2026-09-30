@@ -230,7 +230,8 @@ class ResponseCache:
         Args:
             redis_client: redis.Redis 同步客户端（None 时跳过 L1）
             qdrant_client: QdrantClient 实例（None 时跳过 L2）
-            embedding_model: SentenceTransformer 编码模型（None 时使用随机向量回退）
+            embedding_model: 可调用 embedding provider（需提供 .encode()；None 或
+                encode 失败时 fail-closed 跳过 L2 语义缓存——绝不使用随机向量）
             l1_ttl_policy: 按 intent_type 映射 TTL 秒数的字典
             l2_collection: Qdrant 集合名称
             l2_threshold: 向量搜索相似度阈值（默认 0.85）

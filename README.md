@@ -46,7 +46,7 @@
 > v5.4 功能已包含在 v6.0 中。以下是 v5.4 的原始记录，供参考。
 
 ### 安全升级
-- ✅ **Argon2id密码哈希** - OWASP 2023推荐标准，抗GPU/ASIC攻击能力提升100倍+
+- ✅ **Argon2id密码哈希** - OWASP 2023推荐标准，memory-hard 属性显著提高离线破解成本（本项目未做具体倍数基准）
 - ✅ **内存硬度64MB** - 抵御现代硬件攻击
 - ✅ **向后兼容PBKDF2** - 旧用户登录时自动迁移
 
@@ -68,7 +68,7 @@
 
 ### 评分提升
 - 📊 **90.6 → 99.0分** (+8.4分)
-- 🏆 **极致级生产就绪** - 超越99.9%的生产系统（大模型自身评测，不作为正规材料参考依据）
+- 🏆 **生产导向工程设计（历史自评快照）** - 大模型评测曾给出「超越99.9%的生产系统」（estimate，不作为正规材料/生产验收依据；生产验证当前 NOT_VERIFIED）
 - ⏱️ **7小时完成** - 8项高ROI改进
 
 **详细报告**: [docs/reports/milestone/phase3-improvements-completed.md](docs/reports/milestone/phase3-improvements-completed.md) | [docs/reports/milestone/final-acceptance-report.md](docs/reports/milestone/final-acceptance-report.md)
@@ -96,7 +96,13 @@ latency 没有测量时统一标记为 `NOT_MEASURED`。
 | **前端构建** | `npm run build` | `web/static/dist/` 产物生成成功 |
 | **接口真相源** | `python -c "from api.app_factory import app; print(len(app.openapi()['paths']))"` | 与 `docs/openapi.json` 一致（可用 `python3 scripts/generate_openapi.py --check` 校验） |
 | **后端关键模块** | 以 `api/`、`auth/`、`core/`、`db/` 当前实现为准 | 不再使用旧版里程碑数字代替当前验收 |
-| **RAG 有数据** | `python scripts/evaluate_rag.py` | 输出当前指标（基准查询数以 `tests/eval/rag_benchmark.json` metadata 为准；历史 80%/0.778 为 2026-06 的 30 条查询集快照） |
+| **RAG 有数据** | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649-smoke`（冒烟，非正式证据） → `make rag-eval-649` | 正式 649-query 指标当前 **NOT_VERIFIED**（详见 [RAG 评估方案](docs/reference/rag-evaluation.md)）；历史 80%/0.778 为 2026-06 的 30 条查询集快照，不是当前结果 |
+
+**RAG evidence 边界**（canonical formal command 是 `make rag-eval-649`；`make eval-rag` 是它的兼容 alias）：
+
+- 当前 649-query 正式指标（Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K）**NOT_VERIFIED**：提交的 preflight evidence 显示 provider authentication 是 blocker，语料导入与正式评测被阻塞（状态见 [RAG 评估方案](docs/reference/rag-evaluation.md) §3.4）。
+- provider authentication 恢复前，README / 简历 / 面试材料不得引用任何"当前"Hit@K/MRR/NDCG 数字；历史 30-query 快照只能以历史口径对比叙述。
+- smoke run 是链路冒烟（`subset_run=true`），**不是正式证据**；正式证据只来自 preflight 通过后的 4-config 全量运行的 provenance-bearing artifact。
 
 > 说明：`tests/unit/test_api_routes.py` 这类大文件当前仍不适合作为“全量后端验收通过”的直接依据；README 不再把历史分数或旧测试数量写成当前事实。
 
@@ -257,7 +263,7 @@ graph TB
 
 | 层级 | 节点 | 职责 | 关键实现 |
 |------|------|------|----------|
-| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（<10ms）；P0-02 三层统一 CachePolicy 跨用户隔离（个性化回答按 user_id 作用域，公开 FAQ 共享） | [cache_policy.py](cache/cache_policy.py) + [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
+| **Layer 0** | `check_cache` | L1 Redis MD5 精确匹配 + L2 Qdrant 语义检索 + L3 Jaccard 回退，命中直接返回（跳过路由/Agent/LLM 链路；命中延迟未单独测量）；P0-02 三层统一 CachePolicy 跨用户隔离（个性化回答按 user_id 作用域，公开 FAQ 共享） | [cache_policy.py](cache/cache_policy.py) + [response_cache.py](cache/response_cache.py)：L1 Redis SETEX + L2 Qdrant 向量检索 + L3 Jaccard 倒排索引 |
 | **Layer 1** | `classify_query` | LLM Router ∥ Rule Classifier 并行（`asyncio.gather`）+ 复杂度评分（阈值 50） | [query_router.py](router/query_router.py)：7 种意图分类 + 熔断器降级 |
 | **Layer 2** | `sequential/parallel/consultation/hierarchical/react` | 5 种协作模式动态选择 | [orchestrator.py](collaboration/orchestrator.py) + [modes.py](collaboration/modes.py) |
 | **Layer 3** | `final_response` | 质量评估 + 模式升级重试 + 缓存写入 + SLA 监控 + 事件广播 | [response_agent.py](agents/response_agent.py) + [evaluator.py](agents/evaluator.py) |
@@ -280,7 +286,7 @@ sequenceDiagram
     MW->>G: invoke(state)
 
     G->>L0: check_cache(query)
-    alt 缓存命中 (<10ms)
+    alt 缓存命中（跳过 LLM 链路）
         L0-->>G: cached=true, response
         G->>RA: final_response
     else 缓存未命中
@@ -390,7 +396,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     Query["用户查询"] --> L1["L1 Redis 精确缓存 — MD5 SETEX O(1)"]
-    L1 -->|"hit"| Response["直接响应 &lt;10ms"]
+    L1 -->|"hit"| Response["直接响应：跳过 Router/Agent/LLM 链路"]
     L1 -->|"miss"| L2["L2 Qdrant 语义缓存 — BGE 向量检索"]
     L2 -->|"hit"| Response
     L2 -->|"miss"| L3["L3 Jaccard 回退 — jieba 分词 + 倒排索引"]
@@ -430,7 +436,7 @@ flowchart LR
 | 滑动窗口裁剪 | 消息数（`SESSION_WINDOW_SIZE`）+ token 数（tiktoken `cl100k_base`）双重控制 | 默认 10 条 / 4000 tokens |
 | 历史摘要 | LLM 异步生成 2-3 句摘要注入上下文 | `SESSION_SUMMARY_MAX_CHARS=500` |
 | 中文分词 | jieba 分词（lazy import，fallback 正则） | - |
-| 漂移检测（[drift_detector.py](core/session/drift_detector.py)） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40+ 否定/矛盾词对）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
+| 漂移检测（[drift_detector.py](core/session/drift_detector.py)） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40 组否定/矛盾词对，`core/session/drift_detector.py` `NEGATION_PAIRS` 当前计数）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
 | 漂移修复 | 自动注入修复提示到 Agent 上下文 | - |
 | 漂移升级 | 累计 ≥5 次漂移建议转人工 | `DRIFT_ESCALATION_THRESHOLD=5` |
 | 存储后端 | memory / file / Redis 三种后端 | `SESSION_STORAGE_BACKEND` |
@@ -575,7 +581,7 @@ Thought（推理当前需要什么信息）
 | **管理后台** | `admin.html` + 7 个 `admin-*.js` 模块 | 监控仪表盘（指标卡片/环形图/趋势图）+ 用户管理 + 知识库管理（统计/种子/添加文档/ERP 同步）+ 告警配置 + Prompt 版本 CRUD + Token 用量统计 + 审计日志 + 系统健康 |
 | **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页，支持 `api_key`/`theme`/`lang` URL 参数，中英双语，SSE+REST 双保险 |
 | **反馈** | `chat/messages.js` | 👍/👎 反馈 + message_index 精确定位 |
-| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA） |
+| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（按 WCAG AA/AAA 对比度要求设计，含自动化对比度测试；完整合规认证未单独完成） |
 | **移动端** | 响应式布局 + 抽屉式导航（`responsive.css`） |
 | **Toast 通知** | `utils/toast.js` | 操作反馈通知（成功/错误/警告/信息） |
 | **剪贴板** | `utils/copy.js` | 一键复制消息内容 |
@@ -747,7 +753,7 @@ customer-service-ai-agent/
 | `tests/integration/` | Mock LLM 图集成 / ERP 适配器 / 多模态 / 音频管道 / 知识库生成 / BM25 重启 | `pytest tests/integration -q` |
 | `tests/e2e/` | 全链路 E2E / 生产功能 / 场景路由 / Trace 传播 / 多模态 / 真实 LLM（需 `OPENAI_API_KEY`，标记 `real_llm`） | `pytest tests/e2e -q`（real_llm 默认跳过） |
 | `tests/stress/` | 压力测试（`@pytest.mark.stress`）：缓存 / 总线 / 黑板 / 会话 / 路由并发 | `pytest tests/stress -q` |
-| `tests/eval/` | RAG 评估资产：`rag_benchmark.json`（649 条基准，metadata 口径）+ golden 数据 | `make eval-rag` / `scripts/evaluate_rag.py` |
+| `tests/eval/` | RAG 评估资产：`rag_benchmark.json`（649 条基准，metadata 口径）+ golden 数据 | `make rag-eval-649`（`make eval-rag` 为兼容 alias；`scripts/evaluate_rag.py`） |
 | `web/src/__tests__/` | Vitest 前端单元：主题 / 聊天状态 / SSE / 对比度 / Agent 映射 / 管理后台 | `npm test` |
 
 **前端测试文件**（Vitest + jsdom）：`theme.test.js`、`chatState.test.js`、`copy.test.js`、`agents.test.js`、`contrast.test.js`、`sse.test.js`、`admin-settings.test.js`（数量以 `npm test` 输出为准）。
@@ -776,8 +782,14 @@ python3 -m pytest tests/integration/test_integration.py -v
 # 单个测试
 python3 -m pytest tests/e2e/test_all.py -v -k "test_router"
 
-# RAG 检索质量评估
+# RAG 检索质量评估（兼容入口；正式评测见下方 649 evidence 流程）
 make eval-rag
+
+# RAG 649 正式评测全流程（canonical formal evaluation）
+make rag-eval-import          # 导入评测语料（幂等，含 gold 覆盖率审计 + manifest）
+make rag-eval-649-preflight   # preflight gate（Qdrant/embedding/reranker/BM25）
+make rag-eval-649-smoke       # 冒烟（前 16 条，不是正式证据）
+make rag-eval-649             # 正式 649 全量 4-config 评测 → evidence artifact
 
 # 代码检查（Ruff）
 make lint

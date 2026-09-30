@@ -366,6 +366,471 @@ def test_decision_docs_keep_historical_wording(tmp_repo: Path):
     assert errors == []
 
 
+# ------------------------------------------------- A. test-count framing
+
+
+def test_hardcoded_npm_count_framed_as_current_fails(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/checklists/gate.md",
+        "- [x] 前端单测通过：`npm test` = 60/60（7 个测试文件）",
+    )
+    errors: list[str] = []
+    audit.check_test_count_framing([doc], errors, root=tmp_repo)
+    assert any("npm test" in e for e in errors)
+
+
+def test_hardcoded_pytest_collect_count_fails(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "README.md",
+        "当前仓库 `pytest --collect-only -q` 收集到 1352 个测试用例。",
+    )
+    errors: list[str] = []
+    audit.check_test_count_framing([doc], errors, root=tmp_repo)
+    assert any("pytest" in e for e in errors)
+
+
+def test_dynamic_count_paragraph_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/checklists/gate.md",
+        "- [x] pytest 当前通过（collected 数以 `pytest --collect-only -q` 输出为准，不要沿用历史数字；npm test` 数量同样以命令输出为准）",
+    )
+    errors: list[str] = []
+    audit.check_test_count_framing([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_all_n_tests_pass_framing_fails(tmp_repo: Path):
+    doc = write(tmp_repo, "README.md", "运行后所有 1352 tests pass。")
+    errors: list[str] = []
+    audit.check_test_count_framing([doc], errors, root=tmp_repo)
+    assert errors, "fixed 'all N tests pass' framing must be flagged"
+
+
+# ------------------------------------------------- B/C. canonical RAG refs
+
+
+def _canonical_rag_doc(tmp_repo: Path) -> Path:
+    from tests.unit.test_doc_consistency import write as _w
+
+    return _w(
+        tmp_repo,
+        "docs/reference/rag-evaluation.md",
+        "# RAG 评估\n\n"
+        "- 当前 649-query 正式指标：NOT_VERIFIED。\n"
+        "- experiments: vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank\n"
+        "- populations: all_queries / retrieval_eligible / full_gold_covered\n",
+    )
+
+
+def test_missing_canonical_rag_doc_is_detected(tmp_repo: Path):
+    doc = write(tmp_repo, "README.md", "RAG 评估见 rag-evaluation.md")
+    errors: list[str] = []
+    audit.check_rag_eval_references([doc], errors, root=tmp_repo)
+    assert any("canonical RAG evaluation reference missing" in e for e in errors)
+
+
+def test_entry_doc_without_canonical_link_is_detected(tmp_repo: Path):
+    _canonical_rag_doc(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "# 当前事实\n\nRAG benchmark: 649 条（不链接 canonical 评估文档）",
+    )
+    errors: list[str] = []
+    audit.check_rag_eval_references([doc], errors, root=tmp_repo)
+    assert any("does not link the canonical reference" in e for e in errors)
+
+
+def test_canonical_rag_doc_missing_pipeline_tokens_is_detected(tmp_repo: Path):
+    (tmp_repo / "docs" / "reference").mkdir(parents=True)
+    (tmp_repo / "docs" / "reference" / "rag-evaluation.md").write_text(
+        "# RAG 评估\n\nincomplete: no experiments/populations listed\n", encoding="utf-8"
+    )
+    doc = write(tmp_repo, "README.md", "see rag-evaluation.md")
+    errors: list[str] = []
+    audit.check_rag_eval_references([doc], errors, root=tmp_repo)
+    assert any("missing evidence-pipeline token" in e for e in errors)
+
+
+def test_makefile_rag_target_not_wired_to_script_is_detected(tmp_repo: Path):
+    _canonical_rag_doc(tmp_repo)
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## RAG eval\n\techo broken\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    docs = [write(tmp_repo, "README.md", "run: make rag-eval-649 (canonical: rag-evaluation.md)")]
+    errors: list[str] = []
+    audit.check_rag_eval_references(docs, errors, root=tmp_repo)
+    assert any("rag-eval-649` missing" in e or ("rag-eval-649" in e and "canonical evaluation script" in e) for e in errors)
+
+
+def test_wired_makefile_targets_pass(tmp_repo: Path):
+    _canonical_rag_doc(tmp_repo)
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## formal\n\tpython3 scripts/evaluate_rag.py\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    docs = [write(tmp_repo, "README.md", "run: make rag-eval-649 (canonical: rag-evaluation.md)")]
+    errors: list[str] = []
+    audit.check_rag_eval_references(docs, errors, root=tmp_repo)
+    assert not any("canonical evaluation script" in e for e in errors)
+
+
+# ------------------------------------------------------ D. metric claims
+
+
+def test_unproven_current_metric_claim_fails(tmp_repo: Path):
+    _canonical_rag_doc(tmp_repo)
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## formal\n\tpython3 scripts/evaluate_rag.py\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    doc = write(tmp_repo, "README.md", "systems hits: current Hit@3 82% on the live pipeline")
+    errors: list[str] = []
+    audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
+    assert any("unproven current RAG metric claim" in e for e in errors)
+
+
+def test_provenance_qualified_metric_line_passes(tmp_repo: Path):
+    _canonical_rag_doc(tmp_repo)
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## formal\n\tpython3 scripts/evaluate_rag.py\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    doc = write(
+        tmp_repo,
+        "README.md",
+        "历史报告（2026-06，30 条查询集）Hit@3 80%——历史口径。",
+    )
+    errors: list[str] = []
+    audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def facts_module():
+    return _load_facts_module()
+
+
+def facts_derive(root: Path) -> dict:
+    from rag_evidence_status import derive_rag_formal_status
+
+    return derive_rag_formal_status(root)
+
+
+def test_metric_check_uses_artifact_state_not_doc_state(tmp_repo: Path, monkeypatch):
+    """Rule D follows the ARTIFACT-derived state, not the doc text."""
+    _canonical_rag_doc(tmp_repo)
+    (tmp_repo / "Makefile").write_text(
+        "rag-eval-649: ## formal\n\tpython3 scripts/evaluate_rag.py\n"
+        "rag-eval-649-preflight: ## gate\n\tpython3 scripts/evaluate_rag.py --preflight-only\n"
+        "rag-eval-649-smoke: ## smoke\n\tpython3 scripts/evaluate_rag.py --limit 16\n"
+        "rag-eval-import: ## import\n\tpython3 scripts/import_eval_corpus.py\n",
+        encoding="utf-8",
+    )
+    doc = write(tmp_repo, "README.md", "current Hit@3 82%")
+    # A doc line self-claiming VERIFIED does NOT change the derived state:
+    (tmp_repo / "docs" / "reference" / "rag-evaluation.md").write_text(
+        "# RAG 评估\n\n- 当前 649-query 正式指标：VERIFIED（artifact: ...）。\n", encoding="utf-8"
+    )
+    assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
+    errors: list[str] = []
+    audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
+    assert any("unproven current RAG metric claim" in e for e in errors), (
+        "docs cannot own/promote the evidence state — guard must still fire"
+    )
+
+
+# ------------------------------------------- artifact-driven governance
+# Fixtures: report.json artifacts matching scripts/evaluate_rag.py schema.
+
+
+def _make_benchmark(tmp_repo: Path, n: int = 16) -> str:
+    import hashlib
+
+    data = {
+        "metadata": {"total_queries": n, "version": "benchmark-v1", "created_at": "2026-01-01"},
+        "queries": [{"id": f"q{i}", "query": f"问题 {i}", "data_id": f"d{i}", "expected_doc_ids": []} for i in range(n)],
+    }
+    path = tmp_repo / "tests" / "eval" / "rag_benchmark.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
+    path.write_bytes(payload)
+    return hashlib.sha256(payload).hexdigest()
+
+
+EXPERIMENTS = ["vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank"]
+
+
+def _formal_shaped_report(sha: str, n: int, **overrides) -> dict:
+    report = {
+        "schema_version": "rag-eval-evidence/v2",
+        "run_id": "run-20261001T000000Z",
+        "timestamp": "2026-10-01T00:00:00.000000+00:00",
+        "status": "VERIFIED_FULL",
+        "git_sha": "0123456789abcdef0123456789abcdef01234567",
+        "benchmark": {
+            "sha256": sha,
+            "declared_queries": n,
+            "actual_queries": n,
+            "executed_queries": n,
+        },
+        "metrics": {name: {"hit@3": 0.5, "recall@3": 0.5, "mrr@3": 0.5} for name in EXPERIMENTS},
+        "run_summary": {
+            name: {"n_total": n, "n_success": n, "n_failed": 0, "n_degraded": 0}
+            for name in EXPERIMENTS
+        },
+        "evaluation_populations": {
+            "primary_view": "all_queries",
+            "counts": {"all_queries": n, "retrieval_eligible": n, "full_gold_covered": n},
+        },
+        "subset_run": False,
+    }
+    report.update(overrides)
+    return report
+
+
+def _write_artifact(
+    tmp_repo: Path,
+    report: dict,
+    run_id: str = "run-20261001T000000Z",
+) -> Path:
+    out = tmp_repo / "artifacts" / "evaluation" / "rag-649" / run_id
+    out.mkdir(parents=True, exist_ok=True)
+    path = out / "report.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    return path
+
+
+def test_no_formal_artifact_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    assert sha  # benchmark present, no artifacts at all
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    assert info["rag_formal_artifact_path"] is None
+    assert info["rag_formal_artifact_timestamp"] is None
+    assert info["rag_formal_artifact_git_sha"] is None
+    assert info["rag_formal_artifact_schema_version"] is None
+    assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
+
+
+def test_preflight_artifact_does_not_verify_metrics(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = {
+        "schema_version": "rag-eval-evidence/v2",
+        "run_id": "preflight-x",
+        "timestamp": "2026-10-01T00:00:00+00:00",
+        "status": "BLOCKED_PROVIDER_AUTH",
+        "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+        "git_sha": "0123",
+        "benchmark": {"sha256": sha, "declared_queries": 16, "executed_queries": 16},
+    }
+    _write_artifact(tmp_repo, report, run_id="preflight-x")
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_smoke_subset_artifact_does_not_verify_metrics(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["status"] = "SUBSET_SMOKE"
+    report["subset_run"] = True
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_valid_formal_artifact_marks_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    _write_artifact(tmp_repo, report)
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "VERIFIED"
+    assert info["rag_formal_artifact_path"] == (
+        "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
+    )
+    assert info["rag_formal_artifact_git_sha"] == report["git_sha"]
+    assert info["rag_formal_artifact_schema_version"] == "rag-eval-evidence/v2"
+    assert audit.formal_rag_metrics(root=tmp_repo) == "VERIFIED"
+
+
+def test_verified_full_no_rerank_does_not_promote_formal_metrics(tmp_repo: Path):
+    """Real evaluate_rag.py state machine: with a reranker blocker the run can
+    be marked VERIFIED_FULL_NO_RERANK while hybrid_rerank never executed.
+    Missing the reranker ablation leg means the 4-config formal contract is
+    NOT satisfied: formal metrics stay NOT_VERIFIED (fail-closed)."""
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["status"] = "VERIFIED_FULL_NO_RERANK"
+    report["metrics"].pop("hybrid_rerank")
+    report["run_summary"].pop("hybrid_rerank")
+    _write_artifact(tmp_repo, report)
+    info = facts_derive(tmp_repo)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    assert info["rag_formal_artifact_path"] is None
+
+
+def test_verified_full_status_with_missing_experiment_is_not_verified(tmp_repo: Path):
+    """Even with status == VERIFIED_FULL, any missing canonical experiment
+    (incomplete 4-config ablation) cannot promote formal metrics."""
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["metrics"].pop("bm25_only")
+    report["run_summary"].pop("bm25_only")
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_formal_shaped_artifact_with_partial_execution_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["run_summary"]["vector_only"]["n_success"] = 15  # PARTIAL-like execution
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_formal_shaped_artifact_with_stale_benchmark_hash_is_not_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["benchmark"]["sha256"] = "0" * 64
+    _write_artifact(tmp_repo, report)
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_doc_cannot_self_promote_to_verified(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)  # still NO formal artifact
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "当前 649-query 正式指标：VERIFIED。\n"
+        "make targets are irrelevant\n"
+        "vector_only bm25_only hybrid_no_rerank hybrid_rerank all_queries retrieval_eligible full_gold_covered\n"
+        "rag-eval-import rag-eval-649-preflight rag-eval-649-smoke rag-eval-649\n"
+        "6.3 Qwen/Qwen3-8B BAAI/bge-large-zh-v1.5 BAAI/bge-reranker-v2-m3 649 53 9\n",
+    )
+    assert sha and audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
+    facts = facts_module()
+    code = facts.check_doc(doc, root=tmp_repo)
+    assert code == 1
+
+
+def test_verified_artifact_with_stale_not_verified_doc_fails(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    doc = write(tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：NOT_VERIFIED。")
+    facts = facts_module()
+    assert facts.check_doc(doc, root=tmp_repo) == 1
+
+
+def test_not_verified_artifact_with_fake_verified_doc_fails(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    report = _formal_shaped_report(sha, 16)
+    report["run_summary"]["bm25_only"]["n_success"] = 0
+    _write_artifact(tmp_repo, report)
+    doc = write(tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：VERIFIED。")
+    facts = facts_module()
+    assert facts.check_doc(doc, root=tmp_repo) == 1
+
+
+def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    doc = write(tmp_repo, "README.md", "current Hit@3 82%")  # no provenance binding
+    errors: list[str] = []
+    audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
+    assert any("bind the number to provenance" in e for e in errors), (
+        "VERIFIED artifacts allow claims but provenance binding stays required"
+    )
+    qualified = write(tmp_repo, "README.md", "current Hit@3 82% (artifact: rag-649 run)")
+    errors2: list[str] = []
+    audit.check_unproven_current_metrics([qualified], errors2, root=tmp_repo)
+    assert errors2 == []
+
+
+# ------------------------------------------------- E. make target refs
+
+
+def test_missing_makefile_target_reference_is_detected(tmp_repo: Path):
+    write(tmp_repo, "README.md", "run `make rag-eval-649` first")
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo)
+    assert any("rag-eval-649" in e for e in errors), errors
+    assert all("Makefile" in e for e in errors)
+
+
+def test_defined_makefile_target_reference_passes(tmp_repo: Path):
+    write(tmp_repo, "Makefile", "rag-eval-649: ## formal\n\techo ok\n")
+    write(tmp_repo, "README.md", "run `make rag-eval-649` first")
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------------- F. tracked+ignored
+
+
+def _init_synthetic_git_repo(tmp_repo: Path) -> None:
+    import os
+    import subprocess
+
+    env = dict(os.environ)
+    env.update({
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+    })
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=tmp_repo, check=True, capture_output=True, env=env)
+
+    git("init", "-q")
+    (tmp_repo / "secrets").mkdir(exist_ok=True)
+    (tmp_repo / "secrets" / "keys.json").write_text("{}", encoding="utf-8")
+    (tmp_repo / ".gitignore").write_text("secrets/\n", encoding="utf-8")
+    # -f mirrors the real-world cause: the file was force-added while (or
+    # before) the ignore pattern landed, so it stays tracked+ignored.
+    git("add", "-f", "secrets/keys.json")
+    git("commit", "-q", "-m", "init")
+
+
+def test_tracked_ignored_file_is_detected(tmp_repo: Path):
+    _init_synthetic_git_repo(tmp_repo)
+    errors: list[str] = []
+    audit.check_tracked_ignored_files(errors, [], root=tmp_repo)
+    assert any("secrets/keys.json" in e for e in errors)
+
+
+def test_clean_index_after_rm_cached_passes(tmp_repo: Path):
+    import subprocess
+
+    _init_synthetic_git_repo(tmp_repo)
+    subprocess.run(
+        ["git", "rm", "--cached", "-q", "secrets/keys.json"],
+        cwd=tmp_repo, check=True, capture_output=True,
+    )
+    errors: list[str] = []
+    audit.check_tracked_ignored_files(errors, [], root=tmp_repo)
+    assert errors == []
+
+
+def test_non_git_directory_is_skipped(tmp_repo: Path, monkeypatch):
+    errors: list[str] = []
+    audit.check_tracked_ignored_files(errors, [], root=tmp_repo)
+    # Non-repo (synthetic fixture): silently skipped, not an error.
+    assert all("tracked+ignored" not in e for e in errors)
+
+
 def test_discovery_excludes_historical_banner(tmp_repo: Path):
     write(
         tmp_repo,
@@ -395,3 +860,296 @@ def test_discovery_excludes_archive_and_milestone_dirs(tmp_repo: Path):
 def test_real_repo_passes_guard():
     """The whole guard must pass on the actual checkout (CI contract)."""
     assert audit.main() == 0
+
+
+# ----------------------------------------------------- project_facts eval
+
+
+def _load_facts_module():
+    facts_path = Path(__file__).resolve().parents[2] / "scripts" / "project_facts.py"
+    spec = importlib.util.spec_from_file_location("project_facts", facts_path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["project_facts"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_facts_eval_experiment_drift_is_detected():
+    facts = _load_facts_module()
+    collected = facts.collect()
+    problems: list[str] = []
+    for experiment in collected["evaluation_experiments"]:
+        problems.append(f"missing: {experiment}")
+    assert all("missing" in p for p in problems), "drift simulation must produce findings"
+    assert collected["evaluation_experiments"] == [
+        "vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank",
+    ]
+
+
+def test_facts_check_doc_flags_missing_canonical_target(tmp_path: Path):
+    facts = _load_facts_module()
+    real_doc = Path(__file__).resolve().parents[2] / "docs" / "reference" / "current-state.md"
+    text = real_doc.read_text(encoding="utf-8")
+    stripped = text.replace("make rag-eval-649-smoke", "make rag-eval-smoke-renamed")
+    doc = tmp_path / "current-state.md"
+    doc.write_text(stripped, encoding="utf-8")
+    problems: list[str] = []
+    for target in ("rag-eval-import", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-649"):
+        if target not in stripped:
+            problems.append(
+                f"stale evaluation fact: canonical make target `{target}` missing from {doc.name}"
+            )
+    assert any("rag-eval-649-smoke" in p for p in problems)
+    # And the real check passes on the actual doc:
+    facts.check_doc(real_doc)
+
+
+def test_facts_targets_resolved_from_makefile():
+    facts = _load_facts_module()
+    targets = facts._makefile_targets()
+    for required in ("eval-rag", "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import"):
+        assert required in targets, f"Makefile missing documented target: {required}"
+
+
+def test_facts_formal_status_derived_from_artifacts_on_real_repo():
+    """No formal 649 artifact exists yet: the derived status must stay
+    NOT_VERIFIED with all provenance fields empty (fail-closed)."""
+    info = facts_derive(REAL_ROOT)
+    assert info["rag_formal_metrics_status"] == "NOT_VERIFIED"
+    for key in (
+        "rag_formal_artifact_path",
+        "rag_formal_artifact_timestamp",
+        "rag_formal_artifact_git_sha",
+        "rag_formal_artifact_schema_version",
+    ):
+        assert info[key] is None
+
+
+def test_project_facts_json_contains_artifact_derived_keys():
+    facts = facts_module()
+    collected = facts.collect()
+    for key in (
+        "rag_formal_metrics_status",
+        "rag_formal_artifact_path",
+        "rag_formal_artifact_timestamp",
+        "rag_formal_artifact_git_sha",
+        "rag_formal_artifact_schema_version",
+    ):
+        assert key in collected
+
+
+# ------------------------------------------- N. negative-existence claims
+
+
+def test_negative_existence_claim_with_present_file_is_detected(tmp_repo: Path):
+    write(tmp_repo, "scripts/keeper.py", "print('x')\n")
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "当前仓库不包含 `scripts/keeper.py`，不要执行该命令。\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert any("scripts/keeper.py" in e and "does not exist" in e for e in errors)
+
+
+def test_negative_existence_claim_with_absent_file_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "原 scripts/gone.py 已移除，不再作为活动入口。\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_negative_existence_claim_unrelated_wording_passes(tmp_repo: Path):
+    write(tmp_repo, "scripts/audit_doc_consistency.py", "")
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "从跟踪中移除（本地文件保留）；guard `scripts/audit_doc_consistency.py` 继续守护\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- O. generalized make targets
+
+
+def test_make_target_in_any_active_doc_is_checked(tmp_repo: Path):
+    write(tmp_repo, "Makefile", "dev:\n\techo dev\n")
+    doc = write(tmp_repo, "docs/checklists/run.md", "先执行 make missing-target\n")
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo, docs=[doc])
+    assert any("missing-target" in e for e in errors)
+
+
+def test_make_english_verb_false_positive_is_not_a_target(tmp_repo: Path):
+    write(tmp_repo, "Makefile", "dev:\n\techo dev\n")
+    doc = write(
+        tmp_repo, "docs/design/note.md", "External updates can make a cached read stale.\n"
+    )
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo, docs=[doc])
+    assert errors == []
+
+
+# ------------------------------------------- P. stale embedding semantics
+
+
+def test_random_vector_docstring_in_response_cache_is_detected(tmp_repo: Path):
+    (tmp_repo / "cache").mkdir(exist_ok=True)
+    write(
+        tmp_repo,
+        "cache/response_cache.py",
+        'def f():\n    """Args:\n            embedding_model: None 时使用随机向量回退\n"""\n',
+    )
+    errors: list[str] = []
+    audit.check_stale_embedding_fallback([], errors, root=tmp_repo)
+    assert any("random-vector" in e for e in errors)
+
+
+def test_fail_closed_embedding_note_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/reference/cache.md",
+        "embedding 不可用时 fail-closed 跳过 L2，绝不使用随机向量。\n",
+    )
+    errors: list[str] = []
+    audit.check_stale_embedding_fallback([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- Q. latency absolutes
+
+
+def test_unsupported_latency_absolute_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/design/arch.md", "缓存命中 → 亚毫秒级本地读，直接返回\n"
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert any("亚毫秒" in e for e in errors)
+
+
+def test_latency_absolute_with_benchmark_context_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/arch.md",
+        "2026-06 历史 benchmark 快照：L1 命中 <10ms（当时硬件，不可复用为当前值）\n",
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_zero_latency_in_decision_doc_is_tolerated(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/decisions/001-legacy.md", "熔断后规则引擎零延迟接管\n"
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- R. production framing
+
+
+def test_production_grade_claim_is_rejected(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/design/interview.md", "我把这个系统做到了生产级。\n"
+    )
+    errors: list[str] = []
+    audit.check_production_claims([doc], errors, root=tmp_repo)
+    assert any("production" in e.lower() for e in errors)
+
+
+def test_production_oriented_framing_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/interview.md",
+        "这是生产化架构/面向生产的工程设计；生产验收级证据尚未完成。\n"
+        "| **v4.3** | 2026-06-07 | 生产验收 8.1/10 记录 |\n",
+    )
+    errors: list[str] = []
+    audit.check_production_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- S. env references resolve
+
+
+def test_unresolved_env_var_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "export DEEPSEEK_API_KEY=your_key\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert any("DEEPSEEK_API_KEY" in e for e in errors)
+
+
+def test_negative_env_claim_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "# 当前不存在 DB_POOL_SIZE / DB_POOL_OVERFLOW 环境变量\n"
+        "# 当前仓库无 QUERY_CACHE_ENABLED 环境变量（历史写法已移除）\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_historical_env_line_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "# CACHE_TTL_PRODUCT 环境变量（历史遗留写法已移除）\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_code_constant_and_placeholder_mentions_pass(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/arch.md",
+        "矛盾词对数量见 `NEGATION_PAIRS` 当前计数。\n"
+        "权限映射见 `ROLE_PERMISSIONS`。\n"
+        "回滚：git checkout PREVIOUS_TAG\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_known_env_var_passes(tmp_repo: Path):
+    write(tmp_repo, ".env.example", "OPENAI_API_KEY=placeholder\n")
+    write(tmp_repo, "core/config.py", "HTTP_TIMEOUT = 15\n")
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "export OPENAI_API_KEY=your_key\nHTTP_TIMEOUT=15\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_passes_closeout_guards():
+    """Invariant: the real repo satisfies all closeout guards."""
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_negative_existence_claims(docs, errors, root=REAL_ROOT)
+    audit.check_stale_embedding_fallback(docs, errors, root=REAL_ROOT)
+    audit.check_latency_absolutes(docs, errors, root=REAL_ROOT)
+    audit.check_production_claims(docs, errors, root=REAL_ROOT)
+    audit.check_makefile_doc_targets(errors, root=REAL_ROOT, docs=docs)
+    audit.check_env_references(docs, errors, root=REAL_ROOT)
+    assert errors == []

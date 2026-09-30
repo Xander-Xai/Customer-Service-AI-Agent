@@ -25,6 +25,27 @@ Tool Result Cache ≠ Response Cache; Tool Result Store ≠ Session Memory; comp
 BM25 has an explicit lifecycle; Qdrant point IDs are deterministic with a
 migration path, whose target-environment safety still requires a dry run.
 
+### RAG evaluation architecture (evidence chain, not production path)
+
+上面的 RAG flow 是**生产请求路径**；评测管线是独立的一条 evidence chain，
+不要混为同一条链路。评测（`scripts/evaluate_rag.py`，canonical 文档
+docs/reference/rag-evaluation.md）采用 ablation 设计：
+
+| 实验 | Vector | BM25 | RRF | Reranker | 作用 |
+|------|--------|------|-----|----------|------|
+| vector_only | ✅ | ❌ | ❌ | ❌ | 单路向量基线 |
+| bm25_only | ❌ | ✅ | ❌ | ❌ | 单路词法基线 |
+| hybrid_no_rerank | ✅ | ✅ | ✅ | ❌ | 混合检索（无重排） |
+| hybrid_rerank | ✅ | ✅ | ✅ | ✅ | 生产架构（production-like） |
+
+对比 hybrid vs 单路 = 证明混合检索的净贡献；对比 hybrid_rerank vs
+hybrid_no_rerank = 证明重排器的净贡献（逐 query 统计 improved/degraded，
+不允许只报提升不报退化）。指标 multi-K（Hit@K / Recall@K / Precision@K /
+NDCG@K / MRR@K），分母三视图（all_queries 主口径 / retrieval_eligible /
+full_gold_covered），失败按规则 taxonomy 记账，artifacts 携带 git SHA +
+benchmark sha256 provenance。**当前 649-query 正式指标：NOT_VERIFIED**（详见
+rag-evaluation.md §3.4）。
+
 ---
 
 ## 1. 问题定义
@@ -49,7 +70,8 @@ migration path, whose target-environment safety still requires a dry run.
 ### 2.1 总体架构：四层状态机
 
 ```
-Layer 0: 缓存检查 ──→ 命中则直接返回（<10ms）
+Layer 0: 缓存检查 ──→ 命中则直接返回（跳过 Router/Agent/LLM 链路，无 LLM 调用；
+│                    各层缓存的实际访问延迟当前无生产级测量证据）
     │ miss
 Layer 1: 双层路由 ──→ LLM 分类 ∥ 规则分类（并行）+ 复杂度评分
     │
@@ -64,9 +86,9 @@ Layer 3: 响应处理 ──→ 解决状态评估 + 缓存写入 + SLA 监控
 - 社区生态好，面试官认知度高
 
 **设计决策：为什么缓存前置到 Layer 0？**
-- 化妆品客服中 60-70% 的查询是高频重复问题（"你们有什么产品？""精华液多少钱？"）
-- 缓存命中时跳过整个 LLM 路由 + Agent 处理链路，延迟从 5-15s 降到 <10ms
-- 成本考量：每次 LLM 调用都有 token 成本，缓存前置直接减少 60%+ 的 LLM 调用
+- 化妆品客服场景存在大量高频重复问题（"你们有什么产品？""精华液多少钱？"）——设计目标是让重复查询命中缓存后跳过整个 LLM 路由 + Agent 处理链路（预估重复占比 60-70%、未命中时端到端 5-15s 延迟会降为毫秒级，此为**设计目标估算，当前生产命中率/延迟未测量**）
+- 缓存命中时不发生 LLM 调用；命中占比越高，被跳过的 LLM 调用越多。当前真实节省量：`NOT_MEASURED`
+- 成本考量：每次 LLM 调用都有 token 成本，缓存前置从机制上减少必然发生的 LLM 调用
 
 ### 2.2 双层路由（Layer 1）
 
@@ -82,7 +104,7 @@ fast_path = complexity < threshold  # 低复杂度走快速通道
 ```
 
 **设计决策：为什么两个路由器并行而不是只用 LLM？**
-- **可靠性**：LLM 服务不稳定（网络超时、API 限流），规则分类器是零延迟零故障的 fallback
+- **可靠性**：LLM 服务不稳定（网络超时、API 限流），规则分类器是无需外部 LLM 调用的本地降级 fallback（跳过 LLM 调用，实际延迟取决于运行环境，当前不宣称 0ms）
 - **性能**：规则分类器提前完成时，如果 LLM 置信度低（< 0.7），直接用规则结果
 - **成本**：简单查询（"你好"）用规则分类器就能搞定，不需要调 LLM
 
@@ -130,10 +152,10 @@ class BaseAgent(ABC):
 ### 3.1 三级语义缓存
 
 **为什么需要三级缓存？**
-- L1（Redis MD5 精确匹配）：Redis SETEX + MD5 标准化，O(1) 查找，适合完全相同的问题。命中率约 30%
-- L2（Qdrant 向量语义检索）：BGE 嵌入模型（bge-large-zh-v1.5）+ Qdrant 向量搜索，支持 payload 过滤。"精华液多少钱" ≈ "这款精华价格是多少" 命中率约 40%
+- L1（Redis MD5 精确匹配）：Redis SETEX + MD5 标准化，O(1) 查找，适合完全相同的问题
+- L2（Qdrant 向量语义检索）：BGE 嵌入模型（bge-large-zh-v1.5）+ Qdrant 向量搜索，支持 payload 过滤。"精华液多少钱" ≈ "这款精华价格是多少"
 - L3（Jaccard 回退层）：jieba 分词 + 倒排索引 + 动态阈值，FIFO 淘汰 5%（最大 500 条），向后兼容 v5.x 语义缓存格式
-- 三级组合命中率约 70%，将 LLM 调用量降低到 30% 以下
+- 三级组合的**设计目标**是显著降低穿透到 LLM 的请求量。真实命中率（L1/L2/总命中）取决于实际查询分布，当前未在生产环境测量（`NOT_MEASURED`）；可通过 `/api/cache/stats` 与 Prometheus `cache_hit_rate` 指标观测
 
 **Embedding API 优化（v6.3）**：将本地 sentence-transformers 替换为异步 HTTP API 调用（SiliconFlow bge-large-zh-v1.5），使用 httpx.AsyncClient 连接池复用，超时从 30s 降至 10s。
 
@@ -192,7 +214,7 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 **为什么需要熔断器？**
 - LLM API 可能出现持续故障（服务端过载、网络中断）
 - 没有熔断器时，每个请求都会等待 LLM 超时（30s），导致请求堆积
-- 熔断器在连续 5 次失败后"跳闸"，后续请求直接降级到规则分类器（零延迟），60 秒后自动尝试恢复
+- 熔断器在连续 5 次失败后"跳闸"，后续请求直接降级到本地规则分类器（跳过外部 LLM 调用），60 秒后自动尝试恢复
 
 **并发安全**：状态转换使用 `asyncio.Lock` 保护，防止多个协程同时从 HALF_OPEN → CLOSED。
 
@@ -254,7 +276,7 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 - **TTS 语音**：`/api/tts` — Edge TTS（zh-CN-XiaoxiaoNeural 等）+ 声音选择器
 - **会话侧面板**：点击会话项弹出侧面板（Agent/模式/时间），Esc 关闭
 - **主题系统**：8 种主题（亮色 pure/warm/soft/cream + 暗色 classic/warm + 无障碍 + 面板）+ 字号/行高/动画控制
-- **无障碍**：ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA）
+- **无障碍**：ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（按 WCAG AA/AAA 对比度要求设计，含自动化对比度测试；完整无障碍合规认证未单独完成）
 - **移动端**：响应式布局 + 抽屉式导航
 - **管理后台**：`admin.html` + 7 个 `admin-*.js` 模块 — 用户管理/知识库统计/告警配置/Prompt 管理/Token 用量/系统健康/监控仪表盘
 - **可嵌入 Widget**：`widget.html` — 轻量聊天组件
@@ -357,7 +379,7 @@ E2E 集成测试（v4.2 时期，硅基流动历史模型）暴露了两个 Mock
 | **v5.3** | Token Quota 持久化（Redis Hash + 内存回退） | 用户级 Token 限额跨重启保留 |
 | **v5.3** | 黑板 Session 隔离（ContextVar） | 多用户并发时 Agent 间数据不串扰 |
 | **v5.3** | 会话数据加密（AES-256-Fernet） | 敏感会话数据落盘加密 |
-| **v5.4** | Argon2id 密码哈希 | 抗 GPU/ASIC 攻击能力提升 100 倍+ |
+| **v5.4** | Argon2id 密码哈希 | PBKDF2-SHA256 → Argon2id：引入 memory-hard 属性、提高离线破解成本（本项目未测量具体倍数） |
 | **v5.4** | 分级告警（warning/critical/emergency）+ 自动升级 | 7×24 无人值守运维 |
 | **v5.4** | 8 个业务 Prometheus 指标 | 数据驱动决策（满意度/Agent/意图/升级率等） |
 | **v5.5** | 账单 Agent 降级增强 + LLM 启动健康检查 | LLM 不可用时保留 ERP 上下文，启动阶段提前暴露供应商连通性问题 |

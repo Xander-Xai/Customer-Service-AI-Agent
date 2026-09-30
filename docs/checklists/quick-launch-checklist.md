@@ -30,6 +30,22 @@ vim .env.prod
 - [ ] `DEV_MODE=false` — 确保不是true
 - [ ] `QDRANT_HOST` / `QDRANT_PORT` — 确认 Qdrant 连接配置
 - [ ] `VECTOR_DB_MODE=qdrant_only` — 生产环境修改为 `qdrant_only`
+- [ ] `EMBEDDING_API_KEY` — RAG 向量/语义缓存必需；未单独配置时会回退复用 LLM 的
+      `OPENAI_API_KEY`（`core/config.py`），生产建议独立配置
+- [ ] `RERANKER_API_KEY` — 独立重排凭据（**不会**回退到 OPENAI_API_KEY）；未配置时
+      reranker 不可用、检索按原始顺序返回，preflight 会显式报告
+
+### 1.1 RAG / 检索依赖就绪（可选但生产知识库必做）
+
+```bash
+# 若使用正式 RAG 评测链，先确认语料/索引/凭据：
+make rag-eval-import          # 幂等导入 + BM25 rebuild + gold 覆盖审计 + manifest
+make rag-eval-649-preflight   # provider auth / Qdrant 计数 / BM25 就绪 gate
+# preflight 显示 BLOCKED 时先解决 blocker，再跑正式评测；smoke 不是正式证据
+```
+
+- [ ] 评测/知识库 embedding 凭据真实可用（401 会阻塞导入与向量实验）
+- [ ] Qdrant 集合已部署且非空（生产数据导入依赖 embedding 凭据）
 
 ### 2. 预部署检查 [5分钟]
 
