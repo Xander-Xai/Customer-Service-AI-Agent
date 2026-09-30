@@ -23,8 +23,15 @@ Checks:
   J. canonical RAG evaluation command/doc references (v3, rules B/C)
   K. unproven current formal RAG metric claims while artifacts derive
       NOT_VERIFIED (v3, rule D)
-  L. make targets referenced by current-truth docs must exist (v3, rule E)
-  M. tracked+ignored repository hygiene (v3, rule F)
+   L. make targets referenced by current-truth docs must exist (v3, rule E)
+   M. tracked+ignored repository hygiene (v3, rule F)
+   Final-closeout guards: N. negative-existence claims (doc says a repo file
+      is missing while it exists); P. stale fail-open embedding semantics
+      (random-vector fallback); Q. unsupported latency absolutes (零延迟/
+      亚毫秒/<10ms) without benchmark/estimate/historical context;
+      R. production-grade status claims while production evidence is
+      NOT_VERIFIED; S. env-shaped tokens in active docs must resolve to a
+      real config surface or be marked historical/negative on the line.
 
 Historical docs (with an explicit HISTORICAL banner) are excluded from
 terminology checks but still pass through link/reference checks unless they
@@ -105,6 +112,113 @@ HISTORICAL_CONTEXT = re.compile(
     r"历史|Historical|historical|snapshot|快照|基线|baseline|时期|当时|改进前|旧|曾经|"
     r"Superseded|superseded|已移除|迁移|ADR-003|ADR-004|v4\.2 时期|2026-06",
 )
+
+# ---- Guard N: active docs claiming a repo file does NOT exist while it does.
+# Binds the negative claim to the path (before via 不包含…, after via 已删除/…)
+# so unrelated "移除" wording on the same line does not false-positive.
+NEG_CONTAINS_RE = re.compile(r"不包含|不含|不包括|不提供|not (?:include|ship)")
+NEG_AFTER_RE = re.compile(r"已删除|已弃用|不存在|not exist|no longer|removed")
+REPO_FILE_RE = re.compile(
+    r"(?:scripts|tests|rag|core|cache|agents|api|llm|web/src|docs|deploy|auth|db|erp|media|alerts|knowledge)"
+    r"/[A-Za-z0-9_./-]+\.(?:py|js|ts|json|yml|yaml|sh|md|html)"
+)
+
+# ---- Guard P: stale fail-open embedding semantics. The current
+# cache/response_cache.py is fail-closed (embedding unavailable -> skip L2,
+# NEVER a random-vector fallback); any doc/source text reintroducing the
+# random-vector fallback claim is stale.
+STALE_RANDOM_VECTOR_RE = re.compile(r"随机向量|random\s+vector|random-vector", re.IGNORECASE)
+STALE_RANDOM_VECTOR_NEGATED_RE = re.compile(
+    r"绝不|不要|禁止|不使用|不用|不再使用|无随机向量|没有随机向量|"
+    r"never\s+use|no\s+random|without\s+random|never\s+creates?",
+    re.IGNORECASE,
+)
+
+# ---- Guard Q: unsupported latency absolutes in current-truth/active docs.
+LATENCY_ABSOLUTE_RE = re.compile(
+    r"零延迟|零耗时|(?<![0-9])0\s*ms|零毫秒|亚毫秒|微秒级|毫秒级响应|"
+    r"(?:<|&lt;|低于|≤|以内)\s*\d+\s*ms",
+    re.IGNORECASE,
+)
+LATENCY_ALLOWED_RE = re.compile(
+    r"估算|估计|estimate|设计目标|design target|目标值|不宣称|无法保证|取决于|"
+    r"视.*而定|未测量|NOT_MEASURED|benchmark|基准|历史|Historical|snapshot|快照|当时|"
+    r"旧|曾经|Superseded|迁移|已移除|2026-06"
+)
+
+# ---- Guard R: production-readiness framing. Production validation evidence
+# (provider auth / billing / latency / real ERP) is NOT_VERIFIED; active docs
+# may describe production-oriented design but must not claim production-grade
+# status. Changelog/version-table rows are historical by construction.
+PRODUCTION_CLAIM_RE = re.compile(
+    r"(?:做到|达到)(?:了)?\s*生产级|已(?:做到|达到)生产级|生产级系统|生产级架构|"
+    r"生产级多智能体|生产级平台|生产级客服|已完成生产验收|生产验收完成|生产验收通过|"
+    r"已上线|上线验收通过|production-ready(?:\s+system)?|production validated",
+    re.IGNORECASE,
+)
+PRODUCTION_ALLOWED_RE = re.compile(
+    r"不宣称|不会宣称|不能直接宣称|不得宣称|无法宣称|尚未|未完成|没有完成|"
+    r"NOT_VERIFIED|NOT_MEASURED|NOT_AVAILABLE|生产级要求|生产级目标|生产级设计|"
+    r"生产化|production-oriented|面向生产|目标|estimate|估算|历史|Historical|"
+    r"snapshot|快照|当时|Superseded|2026-06"
+)
+VERSION_TABLE_ROW_RE = re.compile(r"^\|\s*\*{0,2}v\d+\.\d+", re.IGNORECASE)
+
+# ---- Guard S: env-shaped tokens referenced in active docs must resolve to a
+# real config surface (core/config.py constant, env read in code,
+# .env.example/.env.test key, compose/workflow env) or be marked
+# historical/negative on the same line. Mechanizes the stale-env-name drift
+# class (e.g. CACHE_TTL_PRODUCT / DB_POOL_SIZE previously drifted through
+# production-operations-guide.md unchecked).
+ENV_TOKEN_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b")
+# A line only carries an env-reference risk when the token appears in an
+# env-usage context: KEY=value, yaml env entry (`KEY:` at line start), or the
+# line names it as a 环境变量/.env/export/getenv surface. Bare mentions of
+# code constants (NEGATION_PAIRS), audit labels, or shell placeholders stay
+# out of scope.
+ENV_USAGE_CONTEXT_RE = re.compile(r"环境变量|\.env|export\s|getenv|ENV\b|env\s*:", re.IGNORECASE)
+ENV_ASSIGN_SHAPE_RE = re.compile(r"^\s*(?:-\s*)?[A-Z][A-Z0-9_]*\s*[:=]")
+ENV_NEGATIVE_BEFORE_RE = re.compile(
+    r"(?:不存在|已移除|已删除|已弃用|已废弃|废止|无|removed|deleted|deprecated|"
+    r"no\s+longer)[\s/A-Za-z0-9_.,、（）()／]*$",
+    re.IGNORECASE,
+)
+# Tokens that are env-shaped but are not environment variables: evidence
+# status codes, failure-taxonomy labels, ERP table names, placeholders,
+# timestamp formats, script-internal constants.
+ENV_NON_VAR_ALLOWLIST = {
+    "APPLICATION_MEASURED",
+    "ATTACKER_IP",
+    "AUTH_FAILED",
+    "BD_CUSTOMER",
+    "BD_MATERIAL",
+    "BLOCKED_BY_AUTHENTICATION",
+    "BLOCKED_VECTOR_INDEX",
+    "EMBEDDING_PROVIDER_AUTH",
+    "EMBEDDING_PROVIDER_UNAVAILABLE",
+    "FUSION_RRF",
+    "GOLD_NOT_INDEXED",
+    "HALF_OPEN",
+    "LOCAL_ONLY",
+    "LOW_RANK",
+    "MISS_ALL",
+    "NON_RETRYABLE",
+    "NOT_AVAILABLE",
+    "NOT_MEASURED",
+    "NOT_VERIFIED",
+    "PROVIDER_AUTH",
+    "PROVIDER_ERROR",
+    "PROVIDER_REPORTED",
+    "RERANKER_PROVIDER_AUTH",
+    "RERANKER_PROVIDER_DEGRADED",
+    "SAL_ORDER",
+    "STK_INVENTORY",
+    "VECTOR_INDEX_EMPTY",
+    "WARM_QUERIES",
+    "WELCOME_HTML",
+    "YYYYMMDD_HHMMSS",
+    "YOUR_API_KEY",
+}
 
 
 def is_historical_dir(rel: Path) -> bool:
@@ -439,9 +553,20 @@ METRIC_PROVENANCE_RE = re.compile(
 )
 
 # (L) make targets referenced by current-truth docs must be defined.
+# Guard O generalization: ANY active doc referencing `make <target>` (not just
+# the RAG eval targets or a fixed doc list) must point at a defined target.
 MAKE_TARGET_REF_RE = re.compile(
     r"\bmake\s+(rag-eval-649-preflight|rag-eval-649-smoke|rag-eval-import|rag-eval-649|eval-rag)\b"
 )
+MAKE_ANY_TARGET_RE = re.compile(r"\bmake\s+([A-Za-z][A-Za-z0-9_-]*)")
+# English-verb false positives ("can make a cached read stale").
+MAKE_STOP_TARGETS = {
+    "a", "an", "the", "it", "its", "sure", "use", "up", "of", "in", "on", "at",
+    "to", "for", "and", "or", "that", "this", "all", "any", "no", "not", "me",
+    "my", "your", "our", "them", "they", "we", "be", "been", "is", "are", "was",
+    "were", "do", "does", "did", "done", "made", "sense", "difference",
+    "decision", "call", "note", "few", "lot", "one",
+}
 
 # (M) Tracked files the repo deliberately keeps despite ignore patterns
 # (documented in docs/reports/audit/**).
@@ -593,22 +718,30 @@ def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Pa
                 )
 
 
-def check_makefile_doc_targets(errors: list[str], root: Path = ROOT) -> None:
-    """Rule L: make targets referenced by current-truth docs must exist in the
-    Makefile (a missing Makefile is only tolerated when nothing is referenced
-    — synthetic repos)."""
-
+def check_makefile_doc_targets(
+    errors: list[str], root: Path = ROOT, docs: list[Path] | None = None
+) -> None:
+    """Rule L / Guard O: make targets referenced by active docs must exist in
+    the Makefile (a missing Makefile is only tolerated when nothing is
+    referenced — synthetic repos)."""
     mk_path = root / "Makefile"
     mk = mk_path.read_text(encoding="utf-8") if mk_path.exists() else None
     defined = set(re.findall(r"^([a-zA-Z][a-zA-Z0-9_-]*):", mk, re.MULTILINE)) if mk else set()
     referenced: list[tuple[str, Path]] = []
-    for doc_rel in ("README.md", "CLAUDE.md", "docs/reference/current-state.md"):
-        p = root / doc_rel
-        if not p.exists():
-            continue
-        text = p.read_text(encoding="utf-8", errors="replace")
+    if docs is None:
+        docs = [
+            root / rel
+            for rel in ("README.md", "CLAUDE.md", "docs/reference/current-state.md")
+            if (root / rel).exists()
+        ]
+    for doc in docs:
+        text = doc.read_text(encoding="utf-8", errors="replace")
         for hit in re.findall(MAKE_TARGET_REF_RE, text):
-            referenced.append((hit, p))
+            referenced.append((hit, doc))
+        for hit in re.findall(MAKE_ANY_TARGET_RE, text):
+            if hit in MAKE_STOP_TARGETS or hit.startswith("-"):
+                continue
+            referenced.append((hit, doc))
     for target, doc in referenced:
         if target not in defined:
             context = (
@@ -616,7 +749,10 @@ def check_makefile_doc_targets(errors: list[str], root: Path = ROOT) -> None:
                 if mk is not None
                 else "but the Makefile does not exist at all"
             )
-            errors.append(f"{doc} references make target `{target}` {context}")
+            errors.append(
+                f"{doc.relative_to(root) if root in doc.parents else doc} references "
+                f"make target `{target}` {context}"
+            )
 
 
 def check_tracked_ignored_files(errors: list[str], warnings: list[str], root: Path = ROOT) -> None:
@@ -649,6 +785,230 @@ def git_tracked_ignored(root: Path = ROOT) -> list[str] | None:
     return [p for p in out.stdout.splitlines() if p.strip()]
 
 
+def check_negative_existence_claims(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    """Guard N: active docs must not claim a repo file is missing while it
+    exists (and vice versa is covered by check_file_refs_line_aware). The
+    negative claim must bind to the path (直接前缀 不包含…，或路径后紧跟
+    已删除/已移除…), so unrelated "移除" wording on the same line is ignored."""
+
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            refs = REPO_FILE_RE.findall(line)
+            if not refs:
+                continue
+            for ref in refs:
+                if any(ch in ref for ch in "*<"):
+                    continue
+                if not (root / ref).exists():
+                    continue  # missing-file refs handled by file-ref guards
+                claimed_missing = False
+                for hit in re.finditer(re.escape(ref), line):
+                    before = line[max(0, hit.start() - 40): hit.start()]
+                    after = line[hit.end(): hit.end() + 24]
+                    if NEG_CONTAINS_RE.search(before) or NEG_AFTER_RE.match(after.strip()):
+                        claimed_missing = True
+                        break
+                if claimed_missing:
+                    errors.append(
+                        f"negative-existence claim drift: {rel}:{line_no} says "
+                        f"`{ref}` does not exist but the file is present in the "
+                        f"repo — update the doc or the claim"
+                    )
+
+
+def check_stale_embedding_fallback(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    """Guard P: the response cache is fail-closed on embedding failure
+    (EmbeddingUnavailableError -> skip L2; never a random vector). Ban the
+    random-vector fallback wording from cache source and active docs."""
+
+    targets: list[tuple[Path, bool]] = [
+        (root / "cache" / "response_cache.py", False),
+    ]
+    for doc in docs:
+        targets.append((doc, True))
+    for path, is_doc in targets:
+        if not path.exists():
+            continue
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not STALE_RANDOM_VECTOR_RE.search(line):
+                continue
+            if not is_doc and STALE_RANDOM_VECTOR_NEGATED_RE.search(line):
+                continue
+            if is_doc and (
+                HISTORICAL_CONTEXT.search(line)
+                or STALE_RANDOM_VECTOR_NEGATED_RE.search(line)
+            ):
+                continue
+            where = (
+                path.relative_to(root) if root in path.parents or path.parent == root
+                else path
+            )
+            errors.append(
+                f"stale embedding fallback semantics: {where}:{line_no} claims a "
+                f"random-vector fallback — response cache is fail-closed "
+                f"(embedding unavailable -> skip L2, no random vector)"
+            )
+
+
+def check_latency_absolutes(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    """Guard Q: current-truth/active docs must not state latency absolutes
+    (零延迟/亚毫秒/<10ms/…) without a same-line benchmark/estimate/historical
+    qualifier. In-process mechanism descriptions (no numbers) stay allowed."""
+
+    for path in docs:
+        rel = path.relative_to(root)
+        if is_decision_doc(rel):
+            continue  # ADR bodies are frozen decision records (status line rules)
+        for line_no, line in enumerate(text_lines(path), 1):
+            hit = LATENCY_ABSOLUTE_RE.search(line)
+            if not hit:
+                continue
+            if LATENCY_ALLOWED_RE.search(line):
+                continue
+            errors.append(
+                f"unsupported latency absolute ({hit.group(0)}) in {rel}:{line_no} "
+                f"— state the mechanism (skip Router/Agent/LLM) instead of an "
+                f"unmeasured latency number, or bind it to a benchmark/historical "
+                f"artifact"
+            )
+
+
+def check_production_claims(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    """Guard R: production-grade status claims are not allowed as current
+    facts while provider/production evidence is NOT_VERIFIED. Design-oriented
+    framing (生产化/面向生产/生产级要求) and disclaimers stay allowed;
+    changelog/version-table rows are historical."""
+
+    for path in docs:
+        rel = path.relative_to(root)
+        if is_decision_doc(rel):
+            continue  # ADR bodies are frozen decision records (status line rules)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not PRODUCTION_CLAIM_RE.search(line):
+                continue
+            if VERSION_TABLE_ROW_RE.match(line.strip()) or PRODUCTION_ALLOWED_RE.search(line):
+                continue
+            errors.append(
+                f"unsupported production-grade claim in {rel}:{line_no} — "
+                f"production validation evidence is NOT_VERIFIED; use "
+                f"production-oriented framing (生产化架构/生产工程化设计) or a "
+                f"disclaimer instead"
+            )
+
+
+def collect_known_env_keys(root: Path = ROOT) -> frozenset[str]:
+    """Machine-derived env surface: core/config.py constants + env reads in
+    any Python module + .env.example/.env.test keys + compose/deploy/workflow
+    env references. Over-collection is safe (guard fails toward allowing)."""
+
+    keys: set[str] = set()
+
+    config_path = root / "core" / "config.py"
+    if config_path.exists():
+        text = config_path.read_text(encoding="utf-8", errors="replace")
+        keys |= set(re.findall(r"^([A-Z][A-Z0-9_]{2,})\s*=", text, re.MULTILINE))
+
+    py_read_re = re.compile(
+        r"(?:os\.getenv|(?<![A-Za-z_])getenv|_int_env|_float_env|_str_env|"
+        r"os\.environ\.get)\(\s*[\"']([A-Z][A-Z0-9_]+)[\"']"
+        r"|os\.environ\[\s*[\"']([A-Z][A-Z0-9_]+)[\"']\s*\]"
+    )
+    for path in root.rglob("*.py"):
+        if SKIP_PARTS.intersection(path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in py_read_re.finditer(text):
+            keys.add(match.group(1) or match.group(2))
+
+    for name in (".env.example", ".env.test"):
+        p = root / name
+        if p.exists():
+            keys |= set(
+                re.findall(
+                    r"^([A-Z][A-Z0-9_]+)=",
+                    p.read_text(encoding="utf-8", errors="replace"),
+                    re.MULTILINE,
+                )
+            )
+
+    yml_paths: list[Path] = list(root.glob("docker-compose*.yml"))
+    deploy_dir = root / "deploy"
+    if deploy_dir.is_dir():
+        yml_paths.extend(deploy_dir.rglob("*.yml"))
+        yml_paths.extend(deploy_dir.rglob("*.yaml"))
+    workflows_dir = root / ".github" / "workflows"
+    if workflows_dir.is_dir():
+        yml_paths.extend(workflows_dir.glob("*.yml"))
+        yml_paths.extend(workflows_dir.glob("*.yaml"))
+    for path in yml_paths:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        keys |= set(re.findall(r"\$\{([A-Z][A-Z0-9_]+)", text))
+        keys |= set(
+            re.findall(
+                r"^\s*(?:-\s*)?([A-Z][A-Z0-9_]{2,})\s*[:=]\s*[\"']?\S",
+                text,
+                re.MULTILINE,
+            )
+        )
+
+    return frozenset(keys)
+
+
+def check_env_references(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard S: env-shaped tokens in active docs must resolve to a real config
+    surface, or the line must mark them historical/negative (不存在/已移除/…).
+    This is the doc-side counterpart of check_env_coverage."""
+
+    known = collect_known_env_keys(root)
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if HISTORICAL_CONTEXT.search(line):
+                continue
+            if not ENV_USAGE_CONTEXT_RE.search(line):
+                continue
+            reported: set[str] = set()
+            for match in ENV_TOKEN_RE.finditer(line):
+                token = match.group(0)
+                if token in known or token in ENV_NON_VAR_ALLOWLIST or token in reported:
+                    continue
+                tail = line[match.end():]
+                # Flag when the token is assigned (KEY=value / KEY: value) or
+                # the line explicitly frames it as env usage (环境变量/.env/
+                # export/getenv). Bare prose mentions of code constants stay
+                # out of scope.
+                assigned = bool(re.match(r"\s*[:=]", tail)) or bool(
+                    ENV_ASSIGN_SHAPE_RE.search(line.strip())
+                    and line.strip().startswith(token)
+                )
+                if not assigned and not ENV_USAGE_CONTEXT_RE.search(line):
+                    continue
+                if ENV_NEGATIVE_BEFORE_RE.search(line[: match.start()]):
+                    continue
+                reported.add(token)
+                errors.append(
+                    f"unresolved env reference: {rel}:{line_no} mentions "
+                    f"`{token}` — not found in core/config.py, code env reads, "
+                    f".env.example/.env.test, or compose/workflow env; fix the "
+                    f"name or mark the line historical/negative"
+                )
+
+
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -668,8 +1028,15 @@ def main() -> int:
     check_test_count_framing(docs, errors)
     check_rag_eval_references(docs, errors)
     check_unproven_current_metrics(docs, errors)
-    check_makefile_doc_targets(errors)
+    check_makefile_doc_targets(errors, docs=docs)
     check_tracked_ignored_files(errors, warnings)
+    # Final-closeout guards (2026-09-30): reverse existence claims, stale
+    # embedding semantics, latency absolutes, production framing.
+    check_negative_existence_claims(docs, errors)
+    check_stale_embedding_fallback(docs, errors)
+    check_latency_absolutes(docs, errors)
+    check_production_claims(docs, errors)
+    check_env_references(docs, errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -683,7 +1050,9 @@ def main() -> int:
         f"OK: checked {len(docs)} active documents — links, file references, env coverage, "
         f"canonical model config, OpenAPI snapshot, benchmark metadata, stale terminology, "
         f"test-count framing, RAG eval references, unproven metric claims, "
-        f"make targets, tracked-ignored hygiene"
+        f"make targets (all active docs), tracked-ignored hygiene, "
+        f"negative-existence claims, stale embedding-fallback semantics, "
+        f"latency absolutes, production framing, env references"
     )
     return 0
 

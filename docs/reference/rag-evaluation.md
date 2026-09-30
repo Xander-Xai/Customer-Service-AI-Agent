@@ -309,4 +309,4 @@ artifact 使用上述结构化语义。
 
 ### Q: "为什么先选 ChromaDB 后迁移到 Qdrant？"
 
-> "初期选择 ChromaDB 三个原因：第一，嵌入式不需要单独部署，开发测试方便。第二，原生支持 metadata 过滤和 collection 隔离。第三，自带默认 embedding 不需要额外配置。v6.0 迁移到 Qdrant 是因为生产环境需要更高并发性能和独立部署的可靠性——Qdrant 用 Rust 编写、通过 Docker 部署、支持 gRPC 通信，更适合生产级多智能体客服系统。"
+> "初期选择 ChromaDB 三个原因：第一，嵌入式不需要单独部署，开发测试方便。第二，原生支持 metadata 过滤和 collection 隔离。第三，自带默认 embedding 不需要额外配置。v6.0 迁移到 Qdrant 是因为生产环境需要更高并发性能和独立部署的可靠性——Qdrant 用 Rust 编写、通过 Docker 部署、支持 gRPC 通信，更适合生产化部署的多智能体客服系统。"

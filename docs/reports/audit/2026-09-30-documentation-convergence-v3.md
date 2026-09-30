@@ -293,3 +293,75 @@ artifact/evidence
   git_sha / schema_version` 全部 null（当前仓库尚无正式 649 full-run artifact）。
 
 > 本节与 §8 为 PR #20 最终收口时点的实测快照；治理实现以当前仓库代码为准。
+
+## 15. Final Review / Final Closeout（最后一轮，2026-10-01）
+
+- **PR20_PRE_FINAL_HEAD**: `4f07746518c8f73584438c898755c199d414aebf`
+- **FINAL_HEAD**: PR #20 最终合并提交（squash 后见 `git rev-parse origin/main`；
+  本快照遵循既有约定不预写最终 SHA）。
+- **WORKTREE_PATH**: `/home/dev/projects/csaa-convergence-v3`（`docs/convergence-v3-20260930`
+  独立 worktree；主 checkout 的本地未提交改动未被触碰）。
+
+### 15.1 本轮对既有修复的复核（对照当前代码验证，非复述 PR 描述）
+
+| 既有结论 | 复核证据 | 结论 |
+|---|---|---|
+| Cache「本地/进程内/亚毫秒」表述已修正 | grep 全部 active docs：`亚毫秒/进程内读/本地读` 仅存于历史 snapshot 与 ADR 正文；`architecture-design.md`/`interview-deep-dive.md` 已改为「跳过 Router/Agent/LLM 链路 + Redis/Qdrant 网络存储 + 延迟未测量」 | VERIFIED |
+| `cache/response_cache.py` 无随机向量 fail-open docstring | module/class/Args docstring（L233-234）与实现一致：`EmbeddingUnavailableError -> skip L2`（L710-722, L760, L824）；Guard P + 回归测试在位 | VERIFIED |
+| `production-operations-guide.md` 引用的脚本/负向声明与仓库一致 | `scripts/probe_provider_auth.py`、`scripts/run_production_evidence.py` 存在；`scripts/restore.sh`/`smoke_test.sh`/`analyze_query_diversity.py`/`cleanup_expired_sessions.py` 确实不存在；负向 env 声明（`CACHE_TTL_PRODUCT` 等）与 `core/config.py` 一致 | VERIFIED |
+| E2E 文档 CURRENT/HISTORICAL 分离 | `e2e-verification-guide.md` L95-105（当前无「5 个全部 PASS」证据声明）+ L240-251（历史 58.28s 快照标注）+ L295-303（面试话术：401/BLOCKED_BY_AUTHENTICATION 为当前 blocker） | VERIFIED |
+| 面试材料量化 claim | Argon2id「100 倍+」已删（改为 memory-hard 定性）；WCAG 表述为「按 AA/AAA 对比度要求设计，完整合规认证未单独完成」；「生产级」均改为 production-oriented 框架；`resume-description.md` evidence-freeze 未触碰 | VERIFIED |
+
+### 15.2 本轮新发现的 drift（修复）
+
+1. **P1 — provider 切换配方失真**（`production-operations-guide.md` L110-113）：
+   `export DEEPSEEK_API_KEY=...` 引用了仓库中不存在的变量。运行时恒读
+   `OPENAI_API_KEY/OPENAI_BASE_URL/OPENAI_MODEL`（`core/container.py:240-274`），
+   `LLM_PROVIDER` 仅作标签。已改为正确的 DeepSeek 切换配方。
+2. **P1 — 连接池「环境变量」失真**（同文件原 L753-754）：声称可在 `.env.prod` 设置
+   `DATABASE_POOL_SIZE/DATABASE_MAX_OVERFLOW`——两者不存在，池大小硬编码于
+   `db/database.py`（pool_size=10, max_overflow=20），且与同文档 L215 的正确
+   负向声明自相矛盾。已改为指向代码事实。
+3. **P2 — Gunicorn 调参表述失真**（同文件原 L840-842）：`GUNICORN_THREADS/TIMEOUT/
+   KEEPALIVE` 被当作 env 可调项；实际仅 `GUNICORN_WORKERS`/`GUNICORN_BIND` 经
+   `os.getenv` 读取，timeout=120/keepalive=5 硬编码于 `gunicorn.conf.py`。已改写。
+4. **P2 — README 矛盾词对计数**：「40+ 否定/矛盾词对」与代码 `NEGATION_PAIRS = 40`
+   不符，改为代码派生计数并链接来源。
+5. **P2 — README「极致级生产就绪/超越99.9%」**：改为 production-oriented 框架 +
+   estimate/历史自评快照标注（Guard R 精神，生产验证 NOT_VERIFIED）。
+
+### 15.3 新增 Guard S（env 引用可解析性）
+
+`scripts/audit_doc_consistency.py` 新增 `check_env_references` +
+`collect_known_env_keys`：active docs 中 env 形态 token 必须能解析到机器可读的
+config 面（`core/config.py` 模块常量、任意 Python 模块的 env 读取、
+`.env.example`/`.env.test` key、compose/deploy/workflow env），或该行具备
+env 使用语境（`KEY=value`/yaml 赋值形态/「环境变量/.env/export/getenv」）且
+未被同线 negative（不存在/无/已移除…）或 historical 语境豁免。
+提取面 over-collection 时 fail toward allowing（不误伤）。回归测试
+`tests/unit/test_doc_consistency.py` 新增 5 例 + real-repo 不变量纳入 Guard S。
+
+### 15.4 本轮验证（现场实测）
+
+| 命令 | 结果 |
+|---|---|
+| `python3 scripts/rag_evidence_status.py` | NOT_VERIFIED，artifact 字段 null |
+| `python3 scripts/project_facts.py` | OK（6.3 / Qwen3-8B / 53 paths / 9 agents / 649 queries / formal NOT_VERIFIED） |
+| `python3 scripts/project_facts.py --check docs/reference/current-state.md` | OK |
+| `python3 scripts/audit_doc_consistency.py` | OK（36 active docs，含 Guard S） |
+| `python3 scripts/generate_openapi.py --check` | OK（53 paths） |
+| `pytest tests/unit/test_doc_consistency.py -q` | 78 passed |
+| `pytest tests/unit/test_rag_eval_harness.py -q` | 30 passed |
+| `pytest -q -m "not real_llm"` | 见 PR body 的最终轮数据（以实际输出为准） |
+| `ruff check`（changed py files） | clean |
+| `npm test` / `npm run build` | 见 PR body |
+| `git diff --check` / `git ls-files -ci --exclude-standard` | clean / 仅 CLAUDE.md（政策性白名单） |
+
+### 15.5 剩余 evidence boundary（未变）
+
+- RAG 正式 649 指标：**NOT_VERIFIED**（blocker：provider credential 401 留档）
+- provider token/billing：**NOT_AVAILABLE**；生产延迟/SLA/吞吐：**NOT_MEASURED**
+- provider 凭据失效根因：**UNKNOWN**（401 无法进一步归因）
+- Qdrant/Redis/PostgreSQL 真机部署复核、ERP real 模式：**NOT_VERIFIED**
+- 本节为 HISTORICAL AUDIT SNAPSHOT 的最后一轮补充；current truth 入口仍是
+  `docs/reference/current-state.md`。

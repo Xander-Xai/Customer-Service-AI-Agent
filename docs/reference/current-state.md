@@ -102,6 +102,10 @@ python3 scripts/audit_doc_consistency.py
 
 ## 证据边界
 
+- 缓存命中率（L1/L2/L3 总）与缓存各层访问延迟：观测端点/指标存在
+  （`/api/cache/stats`、`cache_redis_latency_seconds` / `cache_qdrant_latency_seconds` /
+  `cache_operation_duration_seconds`），但生产级数值均 `NOT_MEASURED`；
+  缓存命中的收益语义是"跳过 Router/Agent/LLM 链路"，不宣称具体延迟数字。
 - Provider authentication、provider token usage/billing、生产延迟/SLA、FCR、
   人工效率：`NOT_VERIFIED` / `NOT_MEASURED`（除非链接带 provenance 的当前 artifact）。
 - 本地测试/fixture benchmark ≠ 生产证据。详见

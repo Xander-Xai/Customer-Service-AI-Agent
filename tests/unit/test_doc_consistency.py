@@ -936,3 +936,220 @@ def test_project_facts_json_contains_artifact_derived_keys():
         "rag_formal_artifact_schema_version",
     ):
         assert key in collected
+
+
+# ------------------------------------------- N. negative-existence claims
+
+
+def test_negative_existence_claim_with_present_file_is_detected(tmp_repo: Path):
+    write(tmp_repo, "scripts/keeper.py", "print('x')\n")
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "当前仓库不包含 `scripts/keeper.py`，不要执行该命令。\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert any("scripts/keeper.py" in e and "does not exist" in e for e in errors)
+
+
+def test_negative_existence_claim_with_absent_file_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "原 scripts/gone.py 已移除，不再作为活动入口。\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_negative_existence_claim_unrelated_wording_passes(tmp_repo: Path):
+    write(tmp_repo, "scripts/audit_doc_consistency.py", "")
+    doc = write(
+        tmp_repo,
+        "docs/operations/guide.md",
+        "从跟踪中移除（本地文件保留）；guard `scripts/audit_doc_consistency.py` 继续守护\n",
+    )
+    errors: list[str] = []
+    audit.check_negative_existence_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- O. generalized make targets
+
+
+def test_make_target_in_any_active_doc_is_checked(tmp_repo: Path):
+    write(tmp_repo, "Makefile", "dev:\n\techo dev\n")
+    doc = write(tmp_repo, "docs/checklists/run.md", "先执行 make missing-target\n")
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo, docs=[doc])
+    assert any("missing-target" in e for e in errors)
+
+
+def test_make_english_verb_false_positive_is_not_a_target(tmp_repo: Path):
+    write(tmp_repo, "Makefile", "dev:\n\techo dev\n")
+    doc = write(
+        tmp_repo, "docs/design/note.md", "External updates can make a cached read stale.\n"
+    )
+    errors: list[str] = []
+    audit.check_makefile_doc_targets(errors, root=tmp_repo, docs=[doc])
+    assert errors == []
+
+
+# ------------------------------------------- P. stale embedding semantics
+
+
+def test_random_vector_docstring_in_response_cache_is_detected(tmp_repo: Path):
+    (tmp_repo / "cache").mkdir(exist_ok=True)
+    write(
+        tmp_repo,
+        "cache/response_cache.py",
+        'def f():\n    """Args:\n            embedding_model: None 时使用随机向量回退\n"""\n',
+    )
+    errors: list[str] = []
+    audit.check_stale_embedding_fallback([], errors, root=tmp_repo)
+    assert any("random-vector" in e for e in errors)
+
+
+def test_fail_closed_embedding_note_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/reference/cache.md",
+        "embedding 不可用时 fail-closed 跳过 L2，绝不使用随机向量。\n",
+    )
+    errors: list[str] = []
+    audit.check_stale_embedding_fallback([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- Q. latency absolutes
+
+
+def test_unsupported_latency_absolute_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/design/arch.md", "缓存命中 → 亚毫秒级本地读，直接返回\n"
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert any("亚毫秒" in e for e in errors)
+
+
+def test_latency_absolute_with_benchmark_context_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/arch.md",
+        "2026-06 历史 benchmark 快照：L1 命中 <10ms（当时硬件，不可复用为当前值）\n",
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_zero_latency_in_decision_doc_is_tolerated(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/decisions/001-legacy.md", "熔断后规则引擎零延迟接管\n"
+    )
+    errors: list[str] = []
+    audit.check_latency_absolutes([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- R. production framing
+
+
+def test_production_grade_claim_is_rejected(tmp_repo: Path):
+    doc = write(
+        tmp_repo, "docs/design/interview.md", "我把这个系统做到了生产级。\n"
+    )
+    errors: list[str] = []
+    audit.check_production_claims([doc], errors, root=tmp_repo)
+    assert any("production" in e.lower() for e in errors)
+
+
+def test_production_oriented_framing_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/interview.md",
+        "这是生产化架构/面向生产的工程设计；生产验收级证据尚未完成。\n"
+        "| **v4.3** | 2026-06-07 | 生产验收 8.1/10 记录 |\n",
+    )
+    errors: list[str] = []
+    audit.check_production_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- S. env references resolve
+
+
+def test_unresolved_env_var_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "export DEEPSEEK_API_KEY=your_key\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert any("DEEPSEEK_API_KEY" in e for e in errors)
+
+
+def test_negative_env_claim_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "# 当前不存在 DB_POOL_SIZE / DB_POOL_OVERFLOW 环境变量\n"
+        "# 当前仓库无 QUERY_CACHE_ENABLED 环境变量（历史写法已移除）\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_historical_env_line_passes(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "# CACHE_TTL_PRODUCT 环境变量（历史遗留写法已移除）\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_code_constant_and_placeholder_mentions_pass(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/arch.md",
+        "矛盾词对数量见 `NEGATION_PAIRS` 当前计数。\n"
+        "权限映射见 `ROLE_PERMISSIONS`。\n"
+        "回滚：git checkout PREVIOUS_TAG\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_known_env_var_passes(tmp_repo: Path):
+    write(tmp_repo, ".env.example", "OPENAI_API_KEY=placeholder\n")
+    write(tmp_repo, "core/config.py", "HTTP_TIMEOUT = 15\n")
+    doc = write(
+        tmp_repo,
+        "docs/operations/ops.md",
+        "export OPENAI_API_KEY=your_key\nHTTP_TIMEOUT=15\n",
+    )
+    errors: list[str] = []
+    audit.check_env_references([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_passes_closeout_guards():
+    """Invariant: the real repo satisfies all closeout guards."""
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_negative_existence_claims(docs, errors, root=REAL_ROOT)
+    audit.check_stale_embedding_fallback(docs, errors, root=REAL_ROOT)
+    audit.check_latency_absolutes(docs, errors, root=REAL_ROOT)
+    audit.check_production_claims(docs, errors, root=REAL_ROOT)
+    audit.check_makefile_doc_targets(errors, root=REAL_ROOT, docs=docs)
+    audit.check_env_references(docs, errors, root=REAL_ROOT)
+    assert errors == []

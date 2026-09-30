@@ -99,8 +99,10 @@ python3 scripts/probe_provider_auth.py
 python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -s
 ```
 
-有效 Key 就绪后你会看到 5 个 `real_llm` 标记的测试全部 PASS（测试数量以
-当前 `pytest --collect-only -q` 为准——不要按本文档背历史数字）。
+有效 provider credential 就绪后运行真实 LLM suite（`pytest tests/e2e/test_e2e_real_llm.py`）；
+**PASS / FAIL / skipped 数量与耗时一律以该次执行输出为准**。当前仓库没有
+"5 个测试全部 PASS" 的当前证据——你执行时看到的结果才是本轮结果（且每次都可能与
+历史快照不同）。
 
 ### 测试覆盖内容
 
@@ -234,7 +236,7 @@ curl -N http://localhost:8000/api/chat/stream \
 > 它不是当前 checkout 的验证结果；当前验证必须重新执行 §4 的测试，
 > 数量与结果以当前 pytest 输出为准。
 > 当时 `pytest --collect-only -q` 的收集数（当年口径：1352 个）是历史时点数字，
-> **不作为当前测试数**——当前 chaired collected 数请现场执行该命令获取。
+> **不作为当前测试数**——当前收集数请现场执行该命令获取。
 
 ```
 tests/e2e/test_e2e_real_llm.py::TestRealLLMEndToEnd::test_basic_product_query        PASSED   8.9s
@@ -289,8 +291,14 @@ _RE_INJECTION_DISCLOSURE = re.compile(
 
 ## 9. 面试话术
 
-准备好后，面试时这样说（数字只能引用你自己**当前运行**的结果）：
+准备面试时这样说（**只能引用你自己当前运行的实测结果**；没有新 artifact 就不要报当前 PASS 数）：
 
-> "这个项目我已经跑通了完整的 E2E 流程。用硅基流动的 Qwen3-8B 模型，5 个真实 LLM 自动化测试用例全部通过——覆盖产品咨询、退货路由、RAG 增强、多轮上下文和注入防御。集成测试中还发现了两个 Mock 测试无法覆盖的 Bug：一个是路由优先级缺陷，一个是小模型的注入泄露，都已在输出层修复。"
+> "这个项目建立了完整的 E2E 验证链路：provider 认证探针 → 真实 LLM suite
+> （产品咨询、退货路由、RAG 增强、多轮上下文、注入防御等场景）→ 历史教训驱动
+> 的输出层加固。**历史口径**：2026-06 曾有一次真实 LLM E2E 快照跑完当时全部
+> 5 个场景（HISTORICAL SNAPSHOT，不可复用为当前结果）；**当前证据**：provider
+> auth probe 最新留档是 HTTP 401 / BLOCKED_BY_AUTHENTICATION，所以真实调用
+> 当前是阻塞的——我不会把历史结果包装成当前生产验证。测试中发现过两个 Mock
+> 无法覆盖的问题：路由优先级缺陷和小模型注入泄露，都已在输出层修复。"
 >
 > （如录屏）"这里有一段 40 秒的录屏，展示了从登录到多轮对话到监控面板的完整流程。"

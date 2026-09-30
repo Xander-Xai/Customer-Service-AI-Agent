@@ -46,7 +46,7 @@
 > v5.4 功能已包含在 v6.0 中。以下是 v5.4 的原始记录，供参考。
 
 ### 安全升级
-- ✅ **Argon2id密码哈希** - OWASP 2023推荐标准，抗GPU/ASIC攻击能力提升100倍+
+- ✅ **Argon2id密码哈希** - OWASP 2023推荐标准，memory-hard 属性显著提高离线破解成本（本项目未做具体倍数基准）
 - ✅ **内存硬度64MB** - 抵御现代硬件攻击
 - ✅ **向后兼容PBKDF2** - 旧用户登录时自动迁移
 
@@ -68,7 +68,7 @@
 
 ### 评分提升
 - 📊 **90.6 → 99.0分** (+8.4分)
-- 🏆 **极致级生产就绪** - 超越99.9%的生产系统（大模型自身评测，不作为正规材料参考依据）
+- 🏆 **生产导向工程设计（历史自评快照）** - 大模型评测曾给出「超越99.9%的生产系统」（estimate，不作为正规材料/生产验收依据；生产验证当前 NOT_VERIFIED）
 - ⏱️ **7小时完成** - 8项高ROI改进
 
 **详细报告**: [docs/reports/milestone/phase3-improvements-completed.md](docs/reports/milestone/phase3-improvements-completed.md) | [docs/reports/milestone/final-acceptance-report.md](docs/reports/milestone/final-acceptance-report.md)
@@ -396,7 +396,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     Query["用户查询"] --> L1["L1 Redis 精确缓存 — MD5 SETEX O(1)"]
-    L1 -->|"hit"| Response["直接响应 &lt;10ms"]
+    L1 -->|"hit"| Response["直接响应：跳过 Router/Agent/LLM 链路"]
     L1 -->|"miss"| L2["L2 Qdrant 语义缓存 — BGE 向量检索"]
     L2 -->|"hit"| Response
     L2 -->|"miss"| L3["L3 Jaccard 回退 — jieba 分词 + 倒排索引"]
@@ -436,7 +436,7 @@ flowchart LR
 | 滑动窗口裁剪 | 消息数（`SESSION_WINDOW_SIZE`）+ token 数（tiktoken `cl100k_base`）双重控制 | 默认 10 条 / 4000 tokens |
 | 历史摘要 | LLM 异步生成 2-3 句摘要注入上下文 | `SESSION_SUMMARY_MAX_CHARS=500` |
 | 中文分词 | jieba 分词（lazy import，fallback 正则） | - |
-| 漂移检测（[drift_detector.py](core/session/drift_detector.py)） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40+ 否定/矛盾词对）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
+| 漂移检测（[drift_detector.py](core/session/drift_detector.py)） | 4 种类型：话题漂移（jieba Jaccard < 0.15）、意图漂移（7 类意图）、矛盾检测（40 组否定/矛盾词对，`core/session/drift_detector.py` `NEGATION_PAIRS` 当前计数）、重复检测（0.8 相似度） | `DRIFT_*` 阈值 |
 | 漂移修复 | 自动注入修复提示到 Agent 上下文 | - |
 | 漂移升级 | 累计 ≥5 次漂移建议转人工 | `DRIFT_ESCALATION_THRESHOLD=5` |
 | 存储后端 | memory / file / Redis 三种后端 | `SESSION_STORAGE_BACKEND` |
@@ -581,7 +581,7 @@ Thought（推理当前需要什么信息）
 | **管理后台** | `admin.html` + 7 个 `admin-*.js` 模块 | 监控仪表盘（指标卡片/环形图/趋势图）+ 用户管理 + 知识库管理（统计/种子/添加文档/ERP 同步）+ 告警配置 + Prompt 版本 CRUD + Token 用量统计 + 审计日志 + 系统健康 |
 | **可嵌入 Widget** | `widget.html` | 轻量聊天组件，可嵌入任意网页，支持 `api_key`/`theme`/`lang` URL 参数，中英双语，SSE+REST 双保险 |
 | **反馈** | `chat/messages.js` | 👍/👎 反馈 + message_index 精确定位 |
-| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（WCAG AA/AAA） |
+| **无障碍** | ARIA 标签 + 焦点环 + 对比度 + 跳转链接 + 键盘快捷键（按 WCAG AA/AAA 对比度要求设计，含自动化对比度测试；完整合规认证未单独完成） |
 | **移动端** | 响应式布局 + 抽屉式导航（`responsive.css`） |
 | **Toast 通知** | `utils/toast.js` | 操作反馈通知（成功/错误/警告/信息） |
 | **剪贴板** | `utils/copy.js` | 一键复制消息内容 |

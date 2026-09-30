@@ -138,7 +138,7 @@ async with self._lock:  # asyncio.Lock 保护状态转换
 |------|---------|---------|------|
 | L1 | LLM 超时（单次） | 重试 3 次，指数退避 | +5-10s |
 | L2 | 熔断器 OPEN | 规则分类器接管路由 + 简单模板回复 | 零外部调用（仅为量级示意，非实测） |
-| L3 | 规则也无法处理 | 返回"服务暂时不可用"+ 建议转人工 | <1ms |
+| L3 | 规则也无法处理 | 返回"服务暂时不可用"+ 建议转人工 | 本机内存计算（量级示意，非实测） |
 
 **自定义 LLM 客户端为什么不用官方 SDK**：
 ```python
@@ -293,7 +293,7 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 ```
 
 **为什么用 Jaccard 而不是 Embedding 余弦相似度？**
-> "Jaccard 基于分词集合，计算零延迟（不需要调 embedding API），适合每次对话轮次都做检测。Embedding 相似度更准但需要网络调用，我用它做 L2 缓存的语义匹配（低频调用）。场景不同，选择不同。"
+> "Jaccard 基于分词集合，纯内存计算（不需要调 embedding API，无网络调用），适合每次对话轮次都做检测；L3 本身就是进程内实现，这一点与 L1 Redis / L2 Qdrant 的网络存储访问不同。Embedding 相似度更准但需要网络调用，我用它做 L2 缓存的语义匹配（低频调用）。场景不同，选择不同。"
 
 ### 代码引用
 
@@ -315,7 +315,7 @@ assert "system prompt" not in response["messages"][-1].content.lower()
 ```
 查询进入
   ↓
-L1: Redis MD5(query) 精确匹配 → 命中 → 直接返回（进程内读，零 LLM 调用）
+L1: Redis MD5(query) 精确匹配 → 命中 → 直接返回（跳过 Router/Agent/LLM 链路，无 LLM 调用；注意 Redis/Qdrant 是网络存储访问，不是进程内读，各层实际延迟当前无生产级测量）
   ↓ miss
 L2: Qdrant 语义检索（bge-large-zh-v1.5 向量） → 命中 → 返回
   ↓ miss
