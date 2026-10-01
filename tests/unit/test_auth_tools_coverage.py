@@ -2,7 +2,6 @@
 测试 auth.service 和 tools.erp_tools（补齐覆盖率至 80%+）
 """
 
-import asyncio
 import hashlib
 import os
 import time

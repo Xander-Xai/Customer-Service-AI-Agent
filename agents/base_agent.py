@@ -546,8 +546,10 @@ class BaseAgent(ABC):
                     self.bb.read_prefix("complaint."),
                 )
                 bb_findings = []
+                # asyncio.gather above requests exactly these four prefixes, so
+                # the sequences are equal-length by contract.
                 for prefix, entries in zip(
-                    ["product.", "tech.", "erp.", "complaint."], bb_results
+                    ["product.", "tech.", "erp.", "complaint."], bb_results, strict=True
                 ):
                     if entries:
                         for _key, val in entries.items():
@@ -997,7 +999,7 @@ class BaseAgent(ABC):
         if response_content == fallback_response or response_content.startswith("抱歉"):
             rule_reply = await self._try_rule_fallback(messages, fallback_response)
             if rule_reply:
-                self.logger.info(f"[RuleFallback] LLM 降级成功，使用 RuleBasedLLM 回复")
+                self.logger.info("[RuleFallback] LLM 降级成功，使用 RuleBasedLLM 回复")
                 response_content = rule_reply
 
         if stream_callback:

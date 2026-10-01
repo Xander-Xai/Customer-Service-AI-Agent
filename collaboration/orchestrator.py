@@ -42,11 +42,11 @@ _COMPLAINT_KEYWORDS = set(INTENT_KEYWORDS.get("complaint", []))
 def _has_keywords(query: str, keywords: set) -> bool:
     """
     检查查询是否包含指定关键词集合中的任一关键词
-    
+
     Args:
         query: 用户查询文本
         keywords: 关键词集合
-        
+
     Returns:
         bool: 如果查询包含任一关键词则返回True
     """
@@ -56,17 +56,17 @@ def _has_keywords(query: str, keywords: set) -> bool:
 class CollaborationOrchestrator:
     """
     协作编排器（v3.0 - 唯一模式选择来源）
-    
+
     核心职责：
     1. 统一模式选择逻辑（消除与 multi_agent_customer_service.py 的重复）
     2. graph 节点直接委托 orchestrator 执行协作
     3. 提供结构化日志和监控指标
-    
+
     设计原则：
     - 单一职责：仅负责任务分发和模式选择
     - 开闭原则：新增模式无需修改现有代码，只需注册
     - 依赖倒置：通过MessageBus和Blackboard解耦Agent通信
-    
+
     使用示例：
         >>> orchestrator = CollaborationOrchestrator(bus, blackboard)
         >>> mode_name, context = orchestrator.build_context(routing_result, state)
@@ -76,7 +76,7 @@ class CollaborationOrchestrator:
     def __init__(self, message_bus: MessageBus, blackboard: SharedBlackboard):
         """
         初始化协作编排器
-        
+
         Args:
             message_bus: 消息总线，用于Agent间异步通信
             blackboard: 共享黑板，用于状态共享和数据传递
@@ -94,11 +94,11 @@ class CollaborationOrchestrator:
     def select_mode_name(self, routing_result: Any, state: dict[str, Any]) -> str:
         """
         仅选择模式名称（供 LangGraph Conditional Edge 使用）
-        
+
         Args:
             routing_result: 路由结果，包含复杂度、类型等信息
             state: LangGraph状态字典
-            
+
         Returns:
             str: 选定的协作模式名称
         """
@@ -110,13 +110,13 @@ class CollaborationOrchestrator:
     ) -> tuple[str, dict[str, Any]]:
         """
         选择模式并返回上下文（供 graph 节点使用）
-        
+
         Args:
             routing_result: 路由结果
             state: LangGraph状态字典
-            
+
         Returns:
-            tuple: (mode_name, context_dict) 
+            tuple: (mode_name, context_dict)
                    - mode_name: 协作模式名称
                    - context_dict: 传递给模式的上下文参数
         """
@@ -127,13 +127,13 @@ class CollaborationOrchestrator:
     ) -> tuple[str, dict[str, Any]]:
         """
         统一的模式选择逻辑（唯一的模式选择来源）
-        
+
         决策流程：
         1. 快速通道判断 (< threshold) → Sequential
         2. 投诉类查询 → Hierarchical（需要协调多方）
         3. 高复杂度多领域 → ReAct（推理+行动）
         4. 其他情况根据领域数量选择 Parallel/Consultation
-        
+
         Args:
             routing_result: 路由结果对象
                 - complexity: 复杂度评分 (0-100)
@@ -142,7 +142,7 @@ class CollaborationOrchestrator:
                 - fast_path: 是否快速通道
             state: LangGraph状态字典
                 - customer_query: 用户原始查询
-                
+
         Returns:
             tuple: (mode_name, context)
         """

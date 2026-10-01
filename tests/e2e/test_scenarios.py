@@ -2,7 +2,7 @@
 
 import pytest
 
-from router.query_router import QueryRouter, RoutingResult, SCENE_MAPPING
+from router.query_router import SCENE_MAPPING, QueryRouter, RoutingResult
 
 # 40+ 条场景覆盖测试用例
 SCENARIO_CASES = [
