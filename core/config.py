@@ -342,6 +342,177 @@ ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "")  # 为空则使用 SQLite
 ALEMBIC_CONFIG_PATH = os.getenv("ALEMBIC_CONFIG_PATH", "alembic.ini")
 
+# ===== LangGraph Checkpoint 持久化配置 =====
+# 背景：MemorySaver 只存在于当前 Python 进程内，gunicorn 多 worker / 多副本
+# 之间不共享，实例重启即丢失。生产需要官方 PostgreSQL checkpointer。
+#   memory   -> langgraph.checkpoint.memory.MemorySaver（进程内，仅开发/测试）
+#   postgres -> langgraph.checkpoint.postgres.AsyncPostgresSaver（跨进程/重启持久化）
+# 留空表示按环境自动选择：开发/测试->memory，生产->postgres。
+LANGGRAPH_CHECKPOINT_BACKEND_RAW = os.getenv("LANGGRAPH_CHECKPOINT_BACKEND", "").strip().lower()
+# 显式 checkpoint 数据库 URL。留空且 backend=postgres 时安全复用 DATABASE_URL
+# （仅接受 libpq 兼容的 postgresql:// / postgres://，剥离 SQLAlchemy +driver 后缀；
+#  SQLite / 其它协议一律拒绝，绝不静默降级）。
+LANGGRAPH_CHECKPOINT_DATABASE_URL = os.getenv("LANGGRAPH_CHECKPOINT_DATABASE_URL", "").strip()
+# psycopg 连接池大小与首次 setup 超时（秒）
+LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE = _int_env("LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE", 1)
+LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE = _int_env("LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE", 10)
+LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT = _float_env("LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT", 15.0)
+
+
+def resolve_checkpoint_backend(raw: str = "", *, dev_mode: bool = False) -> str:
+    """解析 checkpoint backend，非法值 fail closed。
+
+    空值按环境选择（开发/测试 memory，生产 postgres）；显式值只允许
+    ``memory`` / ``postgres``，其它值抛 ``ConfigurationError``。
+    """
+    value = (raw or "").strip().lower()
+    if not value:
+        return "memory" if dev_mode else "postgres"
+    if value not in ("memory", "postgres"):
+        raise ConfigurationError(
+            f"LANGGRAPH_CHECKPOINT_BACKEND 非法: {value!r}（仅支持 memory | postgres）"
+        )
+    return value
+
+
+def derive_checkpoint_database_url(
+    explicit: str = "", *, database_url: str = ""
+) -> str | None:
+    """把 SQLAlchemy 风格 DSN 安全转换为 psycopg 可用的 libpq DSN。
+
+    只接受 postgres 协议；剥离 ``postgresql+psycopg2://`` 这类 SQLAlchemy
+    driver 后缀，标准化 ``postgres://`` -> ``postgresql://``。SQLite / MySQL /
+    无 scheme 的输入返回 ``None``（由调用方 fail closed），不做字符串乱替换。
+    """
+    raw = (explicit or "").strip() or (database_url or "").strip()
+    if not raw:
+        return None
+    scheme, sep, rest = raw.partition("://")
+    if not sep:
+        return None
+    base = scheme.split("+", 1)[0].lower()
+    if base in ("postgres", "postgresql"):
+        return f"postgresql://{rest}"
+    return None
+
+
+LANGGRAPH_CHECKPOINT_BACKEND = resolve_checkpoint_backend(
+    LANGGRAPH_CHECKPOINT_BACKEND_RAW, dev_mode=DEV_MODE
+)
+
+
+def validate_checkpoint_settings(
+    backend: str, *, explicit_url: str = "", database_url: str = "", dev_mode: bool = False
+) -> list[str]:
+    """校验 checkpoint 配置，返回错误信息列表（空 = 通过）。
+
+    生产（``dev_mode=False``）：
+      - 禁止 ``memory``（进程内、不跨 worker/副本、重启丢失）；
+      - ``postgres`` 必须能解析出 PostgreSQL DSN（显式 URL 或 DATABASE_URL）。
+    开发/测试：不做约束（允许显式 memory / 自动 memory）。
+    """
+    problems: list[str] = []
+    if dev_mode:
+        return problems
+    if backend == "memory":
+        problems.append(
+            "Production requires LANGGRAPH_CHECKPOINT_BACKEND=postgres "
+            "(MemorySaver is process-local and not shared across workers/replicas)"
+        )
+    elif backend == "postgres" and not derive_checkpoint_database_url(
+        explicit_url, database_url=database_url
+    ):
+        problems.append(
+            "Production checkpoint backend=postgres requires a PostgreSQL "
+            "LANGGRAPH_CHECKPOINT_DATABASE_URL or a PostgreSQL DATABASE_URL"
+        )
+    return problems
+
+# ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
+# AgentRun 业务状态真相源是 PostgreSQL；Redis/Celery 仅调度。
+# dispatch: celery（生产，解耦到 worker）| inline（开发/测试 fallback，进程内执行）
+AGENT_RUN_DISPATCH = os.getenv("AGENT_RUN_DISPATCH", "celery").strip().lower()
+AGENT_RUN_QUEUE = os.getenv("AGENT_RUN_QUEUE", "agent_runs").strip() or "agent_runs"
+AGENT_RUN_MAX_ATTEMPTS = _int_env("AGENT_RUN_MAX_ATTEMPTS", 3)
+AGENT_RUN_TASK_SOFT_TIME_LIMIT = _int_env("AGENT_RUN_TASK_SOFT_TIME_LIMIT", 120)
+AGENT_RUN_TASK_TIME_LIMIT = _int_env("AGENT_RUN_TASK_TIME_LIMIT", 180)
+# Celery broker 默认复用 REDIS_URL；result backend 留空表示不落结果（非真相源）
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "").strip() or REDIS_URL
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip()
+
+if AGENT_RUN_DISPATCH not in ("celery", "inline"):
+    raise ConfigurationError(
+        f"AGENT_RUN_DISPATCH 非法: {AGENT_RUN_DISPATCH!r}（仅支持 celery | inline）"
+    )
+
+# Thread 串行执行锁（同一 thread 的 Run 不得并发）
+AGENT_RUN_THREAD_LOCK_ENABLED = (
+    os.getenv("AGENT_RUN_THREAD_LOCK_ENABLED", "true").lower() == "true"
+)
+AGENT_RUN_THREAD_LOCK_BACKEND = (
+    os.getenv("AGENT_RUN_THREAD_LOCK_BACKEND", "redis").strip().lower()
+)
+AGENT_RUN_THREAD_LOCK_TTL_SECONDS = _float_env("AGENT_RUN_THREAD_LOCK_TTL_SECONDS", 300.0)
+AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS = _float_env(
+    "AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS", 5.0
+)
+# worker ownership lease / heartbeat（崩溃后可被接管）
+AGENT_RUN_LEASE_SECONDS = _float_env("AGENT_RUN_LEASE_SECONDS", 180.0)
+AGENT_RUN_HEARTBEAT_SECONDS = _float_env("AGENT_RUN_HEARTBEAT_SECONDS", 30.0)
+# 重试退避（指数 + jitter）
+AGENT_RUN_RETRY_BASE_DELAY = _float_env("AGENT_RUN_RETRY_BASE_DELAY", 2.0)
+AGENT_RUN_RETRY_MAX_DELAY = _float_env("AGENT_RUN_RETRY_MAX_DELAY", 60.0)
+AGENT_RUN_RETRY_JITTER = _float_env("AGENT_RUN_RETRY_JITTER", 0.3)
+
+if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
+    raise ConfigurationError(
+        f"AGENT_RUN_THREAD_LOCK_BACKEND 非法: {AGENT_RUN_THREAD_LOCK_BACKEND!r}"
+        "（仅支持 redis | memory）"
+    )
+
+# ===== 跨进程 Agent 事件流（Worker -> Redis Stream -> API SSE）=====
+# Redis Stream = ephemeral streaming channel；AgentRun(PostgreSQL) 才是真相源。
+RUN_EVENT_STREAM_ENABLED = os.getenv("RUN_EVENT_STREAM_ENABLED", "true").lower() == "true"
+RUN_EVENT_STREAM_BACKEND = os.getenv("RUN_EVENT_STREAM_BACKEND", "redis").strip().lower()
+RUN_EVENT_STREAM_MAXLEN = _int_env("RUN_EVENT_STREAM_MAXLEN", 1000)  # XADD MAXLEN ~
+RUN_EVENT_STREAM_TTL_SECONDS = _int_env("RUN_EVENT_STREAM_TTL_SECONDS", 3600)  # EXPIRE
+RUN_EVENT_MAX_BYTES = _int_env("RUN_EVENT_MAX_BYTES", 16384)  # 单事件大小上限
+RUN_EVENT_SSE_BLOCK_MS = _int_env("RUN_EVENT_SSE_BLOCK_MS", 15000)  # XREAD BLOCK
+RUN_EVENT_SSE_COUNT = _int_env("RUN_EVENT_SSE_COUNT", 100)  # 每批最大事件数
+RUN_EVENT_SSE_IDLE_TIMEOUT_SECONDS = _int_env("RUN_EVENT_SSE_IDLE_TIMEOUT_SECONDS", 300)
+RUN_EVENT_SSE_POLL_DB_SECONDS = _float_env("RUN_EVENT_SSE_POLL_DB_SECONDS", 5.0)
+
+if RUN_EVENT_STREAM_BACKEND not in ("redis", "memory"):
+    raise ConfigurationError(
+        f"RUN_EVENT_STREAM_BACKEND 非法: {RUN_EVENT_STREAM_BACKEND!r}（仅支持 redis | memory）"
+    )
+
+# ===== MCP（Model Context Protocol）外部工具适配 =====
+# 与 native Function Calling 并存：MCP 是标准化外部工具接口，不是替代品。
+# 默认关闭（fail closed）；开启时只允许 MCP_SERVERS allowlist 中的服务器/工具。
+MCP_ENABLED = os.getenv("MCP_ENABLED", "false").lower() == "true"
+MCP_SERVERS = os.getenv("MCP_SERVERS", "")  # JSON array，见 .env.example
+MCP_DEFAULT_TIMEOUT_SECONDS = _float_env("MCP_DEFAULT_TIMEOUT_SECONDS", 15.0)
+MCP_MAX_PAYLOAD_BYTES = _int_env("MCP_MAX_PAYLOAD_BYTES", 32768)
+# MCP 初始化失败时：false=降级为仅 native 工具（默认）；true=启动失败
+MCP_FAIL_CLOSED = os.getenv("MCP_FAIL_CLOSED", "false").lower() == "true"
+
+# ===== Human-in-the-loop（高风险操作人工审批）=====
+# 只对真正高风险 Tool（退款/改单/高额赔付/投诉升级/ERP 写操作）拦截审批，
+# 不给普通问答加审批。分布式 AgentRun 路径生效（需 run_id 上下文）。
+HITL_ENABLED = os.getenv("HITL_ENABLED", "true").lower() == "true"
+HITL_HIGH_RISK_TOOLS = os.getenv(
+    "HITL_HIGH_RISK_TOOLS",
+    "refund,create_refund,modify_order,update_order,cancel_order,compensate,refund_order",
+)
+HITL_MEDIUM_RISK_TOOLS = os.getenv(
+    "HITL_MEDIUM_RISK_TOOLS",
+    "create_after_sales_ticket,create_ticket,create_complaint,escalate_complaint",
+)
+# 参数中含金额且 >= 阈值时也升级为 HIGH（高额赔付）
+HITL_HIGH_AMOUNT_THRESHOLD = _float_env("HITL_HIGH_AMOUNT_THRESHOLD", 1000.0)
+HITL_APPROVAL_TTL_SECONDS = _int_env("HITL_APPROVAL_TTL_SECONDS", 604800)  # 7 天
+
 # ===== v4.1: SSE 流式输出配置 =====
 SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
 SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
@@ -447,6 +618,18 @@ def validate_required_config():
     if not _DEV_MODE and not DATABASE_URL:
         errors.append("Production requires DATABASE_URL (PostgreSQL)")
 
+    # LangGraph checkpoint：生产禁止进程内 MemorySaver（多 worker/多副本不共享、
+    # 重启即丢失），且必须能解析出可用的 PostgreSQL DSN。
+    if not _DEV_MODE:
+        errors.extend(
+            validate_checkpoint_settings(
+                LANGGRAPH_CHECKPOINT_BACKEND,
+                explicit_url=LANGGRAPH_CHECKPOINT_DATABASE_URL,
+                database_url=DATABASE_URL,
+                dev_mode=_DEV_MODE,
+            )
+        )
+
     if errors:
         for err in errors:
             print(f"🚨 配置校验失败: {err}", file=sys.stderr)
@@ -469,6 +652,26 @@ def validate_required_config():
     _embedding_raw = os.getenv("EMBEDDING_API_KEY", "")
     if not _DEV_MODE and not _embedding_raw:
         warnings.append("EMBEDDING_API_KEY not set, reusing OPENAI_API_KEY for embedding service — configure a dedicated key for production")
+    if not _DEV_MODE and AGENT_RUN_DISPATCH == "inline":
+        warnings.append(
+            "AGENT_RUN_DISPATCH=inline in production: runs execute inside the API "
+            "process (no worker decoupling). Use 'celery' for production."
+        )
+    if not _DEV_MODE and AGENT_RUN_THREAD_LOCK_BACKEND == "memory":
+        warnings.append(
+            "AGENT_RUN_THREAD_LOCK_BACKEND=memory in production: thread lock is "
+            "process-local, not shared across workers/replicas. Use 'redis'."
+        )
+    if not _DEV_MODE and RUN_EVENT_STREAM_ENABLED and RUN_EVENT_STREAM_BACKEND == "memory":
+        warnings.append(
+            "RUN_EVENT_STREAM_BACKEND=memory in production: event stream is "
+            "process-local and will not reach the API SSE process. Use 'redis'."
+        )
+    if MCP_ENABLED and not (MCP_SERVERS or "").strip():
+        warnings.append(
+            "MCP_ENABLED=true but MCP_SERVERS is empty: no external MCP server is "
+            "allowed (fail closed). Configure the allowlist or set MCP_ENABLED=false."
+        )
 
     for w in warnings:
         logging.getLogger("config").warning(f"[config] {w}")

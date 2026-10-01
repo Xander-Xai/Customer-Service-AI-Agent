@@ -102,20 +102,19 @@ class ServiceContainer:
 
         self.orchestrator = CollaborationOrchestrator(self.bus, self.bb)
 
-        # v5.2: LangGraph Checkpointer（对话状态持久化）
-        try:
-            from langgraph.checkpoint.memory import MemorySaver
-
-            self.checkpointer = MemorySaver()
-        except ImportError:
-            self.checkpointer = None
-            logger.debug("langgraph.checkpoint.memory 不可用，断点续传功能禁用")
+        # LangGraph Checkpointer：生命周期在 initialize() 中显式管理
+        # （内存/PostgreSQL 由 LANGGRAPH_CHECKPOINT_BACKEND 决定），
+        # 不再在 __init__ 中隐式创建 MemorySaver。
+        self.checkpointer: Any = None
+        self._checkpoint_runtime: Any = None
 
         # RAG & Tools
         self.knowledge_base: KnowledgeBaseProtocol | None = None
         # v6.1: 容器级单例 Embedding 模型
         self.embedding_model: Any = None
         self.tool_registry: ToolRegistryProtocol | None = None
+        # v6.4: MCP 外部工具适配器（可选，关闭时为空）
+        self.mcp_adapters: list[Any] = []
 
         # v5.1: Prompt 版本管理器
         self.prompt_manager: Any = None
@@ -198,6 +197,9 @@ class ServiceContainer:
             # 5. Router
             await self._init_router()
 
+            # 5.5. LangGraph Checkpointer（必须在图编译前 ready）
+            await self._init_checkpointer()
+
             # 6. 构建 LangGraph 应用
             self._build_graph()
 
@@ -216,20 +218,114 @@ class ServiceContainer:
             )
 
     def _build_graph(self):
-        """构建 LangGraph 工作流图（委托给 multi_agent_customer_service.build_graph）"""
+        """构建 LangGraph 工作流图（委托给 core.graph_builder.build_graph）
+
+        前置条件：checkpointer 必须已 ready（由 _init_checkpointer() 在
+        initialize() 中保证）。生产环境缺失 checkpointer 视为配置错误，
+        绝不临时降级到 MemorySaver。
+        """
         from core.graph_builder import build_graph
 
         if self.checkpointer is None:
-            try:
-                from langgraph.checkpoint.memory import MemorySaver
+            from core.config import DEV_MODE
 
-                self.checkpointer = MemorySaver()
-            except ImportError:
-                pass
+            if not DEV_MODE:
+                from core.config import ConfigurationError
+
+                raise ConfigurationError(
+                    "生产环境图构建前 LangGraph checkpointer 未就绪；"
+                    "请检查 LANGGRAPH_CHECKPOINT_BACKEND / 数据库配置"
+                )
+            # 开发/测试的向后兼容路径（例如直接构造容器而不调用 initialize()）
+            self._ensure_memory_checkpointer()
 
         self.graph_app = build_graph(self, checkpointer=self.checkpointer)
-        cp_status = "enabled" if self.checkpointer else "disabled"
-        logger.info(f"[Container] LangGraph 构建完成 (checkpointer={cp_status})")
+        runtime = self._checkpoint_runtime
+        backend = getattr(runtime, "backend", "none")
+        logger.info(f"[Container] LangGraph 构建完成 (checkpointer={backend})")
+
+    def _ensure_memory_checkpointer(self):
+        """同步兜底：在开发/测试中确保存在 MemorySaver（不用于生产）。"""
+        if self.checkpointer is not None:
+            return
+        from core.checkpointer import build_memory_checkpointer
+
+        self._checkpoint_runtime = build_memory_checkpointer()
+        self.checkpointer = self._checkpoint_runtime.checkpointer
+
+    async def _init_checkpointer(self, *, backend=None, database_url=None, dev_mode=None):
+        """初始化 LangGraph checkpoint 后端（显式生命周期）。
+
+        - backend=postgres：创建官方 AsyncPostgresSaver，失败时生产 fail closed。
+        - backend=memory：进程内 MemorySaver（开发/测试）。
+        - 开发环境下 postgres 初始化失败会降级到 MemorySaver，但显式记录
+          status=degraded 并暴露到健康检查，绝不静默。
+        """
+        from core import config as cfg
+        from core.checkpointer import (
+            CheckpointBackendError,
+            build_memory_checkpointer,
+            build_postgres_checkpointer,
+        )
+
+        if backend is None:
+            backend = cfg.LANGGRAPH_CHECKPOINT_BACKEND
+        if dev_mode is None:
+            dev_mode = cfg.DEV_MODE
+        if database_url is None:
+            database_url = cfg.derive_checkpoint_database_url(
+                cfg.LANGGRAPH_CHECKPOINT_DATABASE_URL, database_url=cfg.DATABASE_URL
+            )
+
+        try:
+            if backend == "postgres":
+                self._checkpoint_runtime = await build_postgres_checkpointer(
+                    database_url,
+                    min_size=cfg.LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE,
+                    max_size=cfg.LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE,
+                    setup_timeout=cfg.LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT,
+                )
+            elif backend == "memory":
+                self._checkpoint_runtime = build_memory_checkpointer()
+            else:
+                raise CheckpointBackendError(f"未知 checkpoint backend: {backend}")
+        except Exception as e:
+            if not dev_mode:
+                logger.error(
+                    "生产环境 LangGraph checkpoint 初始化失败 (backend=%s): %s",
+                    backend,
+                    type(e).__name__,
+                )
+                raise cfg.ConfigurationError(
+                    f"生产环境 LangGraph checkpoint 初始化失败（backend={backend}）："
+                    "拒绝回退 MemorySaver，请修复数据库连通性/配置后重启"
+                ) from e
+            logger.warning(
+                "开发环境 checkpoint 后端 %s 初始化失败，显式降级 MemorySaver: %s",
+                backend,
+                type(e).__name__,
+            )
+            self._checkpoint_runtime = build_memory_checkpointer()
+            self._checkpoint_runtime.status = "degraded"
+            self._checkpoint_runtime.detail = type(e).__name__
+
+        self.checkpointer = self._checkpoint_runtime.checkpointer
+
+    async def _close_checkpointer(self):
+        """释放 checkpoint 后端资源（连接池），幂等。"""
+        runtime = self._checkpoint_runtime
+        if runtime is None:
+            return
+        from core.checkpointer import close_checkpoint_runtime
+
+        try:
+            await close_checkpoint_runtime(runtime)
+            logger.info("  ✅ LangGraph checkpoint 后端已关闭")
+        except Exception as e:
+            logger.warning(f"  ⚠️ checkpoint 后端关闭异常: {e}")
+        finally:
+            self._checkpoint_runtime = None
+            self.checkpointer = None
 
     # ===== 内部初始化方法 =====
 
@@ -460,6 +556,52 @@ class ServiceContainer:
             self.tool_registry = create_erp_tools(self._get_erp_authz())
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
 
+        # MCP 外部工具（可选，allowlist + fail closed；与 native FC 并存）
+        await self._init_mcp_tools()
+
+    async def _init_mcp_tools(self):
+        """发现并注册 MCP 工具到同一个 ToolRegistry（默认关闭）。
+
+        失败行为：``MCP_FAIL_CLOSED=false``（默认）时记录告警并降级为仅 native
+        工具；``true`` 时抛出，阻断启动。``MCP_ENABLED=false`` 可完全回滚。
+        """
+        from core.config import (
+            MCP_DEFAULT_TIMEOUT_SECONDS,
+            MCP_ENABLED,
+            MCP_FAIL_CLOSED,
+            MCP_MAX_PAYLOAD_BYTES,
+            MCP_SERVERS,
+        )
+
+        if not MCP_ENABLED:
+            return
+        if self.mcp_adapters:
+            return  # 幂等：已接入
+        from tools.mcp_adapter import (
+            build_mcp_adapters,
+            load_mcp_server_configs,
+            register_mcp_tools,
+        )
+
+        configs = load_mcp_server_configs(
+            MCP_SERVERS,
+            default_timeout=MCP_DEFAULT_TIMEOUT_SECONDS,
+            default_max_payload=MCP_MAX_PAYLOAD_BYTES,
+        )
+        adapters = build_mcp_adapters(configs)
+        for adapter in adapters:
+            try:
+                names = await register_mcp_tools(self.tool_registry, adapter)
+                self.mcp_adapters.append(adapter)
+                logger.info(f"MCP server {adapter.config.name} 工具已接入: {names}")
+            except Exception as e:
+                logger.warning(
+                    f"MCP server {adapter.config.name} 初始化失败: {type(e).__name__}"
+                )
+                if MCP_FAIL_CLOSED:
+                    raise
+                logger.warning("降级为仅 native 工具（MCP_FAIL_CLOSED=false）")
+
     async def _init_cache(self):
         """v6.1: 初始化三级缓存，注入外部依赖"""
         if self.cache is not None:
@@ -680,6 +822,10 @@ class ServiceContainer:
         if self.cache is not None:
             self._services["cache"] = self.cache
 
+        # LangGraph Checkpoint 后端
+        if self.checkpointer is not None:
+            self._services["checkpointer"] = self.checkpointer
+
         # ERP
         if self.erp is not None:
             self._services["erp_adapter"] = self.erp
@@ -770,6 +916,17 @@ class ServiceContainer:
             logger.info("  ✅ LLM 连接池已关闭")
         except Exception as e:
             logger.warning(f"  ⚠️ LLM 连接池关闭异常: {e}")
+
+        # 1.5. 关闭 LangGraph checkpoint 后端（PostgreSQL 连接池）
+        await self._close_checkpointer()
+
+        # 1.6. 关闭 MCP 外部工具连接
+        for adapter in self.mcp_adapters:
+            try:
+                await adapter.close()
+            except Exception as e:
+                logger.warning(f"  ⚠️ MCP adapter 关闭异常: {type(e).__name__}")
+        self.mcp_adapters = []
 
         # 2. 关闭 ERP 适配器
         if self.erp and hasattr(self.erp, "close"):

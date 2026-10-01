@@ -38,6 +38,7 @@ markers = [
     "stress: 压力测试（耗时较长）",
     "xdist_group: 组隔离执行标识",
     "unit: 单元测试（快速、隔离、无外部依赖）",
+    "integration: 集成测试（跨组件 / 需外部服务时用 skipif 或环境变量 gate）",
     "slow: 慢测试（通过 -m 'not slow' 跳过）",
 ]
 asyncio_mode = "auto"

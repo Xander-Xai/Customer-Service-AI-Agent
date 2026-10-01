@@ -1,0 +1,74 @@
+# 非敏感配置（ConfigMap）。敏感值一律放 Secret（见 secret.example.yaml）。
+#
+# 说明：本文件是「最小可验证 K8s 部署」的配置样例。
+# - PostgreSQL / Redis / Qdrant：演示环境可用 deploy/k8s/demo/dependencies.yaml，
+#   生产建议使用 managed / external service，并只修改这里的 host/port。
+# - 应用不在 Pod 本地保存 checkpoint / session / AgentRun / result：
+#   这些分别来自 PostgreSQL（agent_runs + LangGraph checkpoint）、Redis（session /
+#   broker / thread-lock / event stream）、Qdrant（向量）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customer-ai-config
+  namespace: customer-ai
+  labels:
+    app.kubernetes.io/name: customer-ai-agent
+data:
+  # ---- 运行时 ----
+  APP_MODE: "prod"
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+  LOG_DIR: "/app/logs"
+  # ---- LLM ----
+  LLM_PROVIDER: "siliconflow"
+  OPENAI_BASE_URL: "https://api.siliconflow.cn/v1"
+  OPENAI_MODEL: "Qwen/Qwen3-8B"
+  # ---- Embedding / Reranker（API Key 在 Secret）----
+  EMBEDDING_BASE_URL: "https://api.siliconflow.cn/v1"
+  EMBEDDING_MODEL: "BAAI/bge-large-zh-v1.5"
+  EMBEDDING_DIM: "1024"
+  RERANKER_BASE_URL: "https://api.siliconflow.cn/v1"
+  RERANKER_MODEL: "BAAI/bge-reranker-v2-m3"
+  # ---- 会话 / 缓存（生产必须 redis，不能进程内）----
+  SESSION_STORAGE_BACKEND: "redis"
+  SESSION_WINDOW_SIZE: "10"
+  SESSION_MAX_TOKENS: "4000"
+  SESSION_SUMMARY_MAX_CHARS: "500"
+  SESSION_IDLE_TTL: "3600"
+  MAX_SESSIONS: "10000"
+  # ---- CORS（生产填真实域名，禁止 *）----
+  CORS_ORIGINS: "https://customer-ai.example.com"
+  ALLOWED_ORIGINS: "https://customer-ai.example.com"
+  API_KEY_ENABLED: "true"
+  # ---- ERP ----
+  ERP_MODE: "mock"
+  # ---- LangGraph Checkpoint（PostgreSQL，禁止 MemorySaver）----
+  LANGGRAPH_CHECKPOINT_BACKEND: "postgres"
+  LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE: "1"
+  LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE: "10"
+  LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT: "15.0"
+  # ---- 分布式 Agent Run（API 只入队，worker 执行）----
+  AGENT_RUN_DISPATCH: "celery"
+  AGENT_RUN_QUEUE: "agent_runs"
+  AGENT_RUN_MAX_ATTEMPTS: "3"
+  AGENT_RUN_THREAD_LOCK_ENABLED: "true"
+  AGENT_RUN_THREAD_LOCK_BACKEND: "redis"
+  AGENT_RUN_THREAD_LOCK_TTL_SECONDS: "300"
+  AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS: "5"
+  AGENT_RUN_LEASE_SECONDS: "180"
+  AGENT_RUN_HEARTBEAT_SECONDS: "30"
+  AGENT_RUN_RETRY_BASE_DELAY: "2"
+  AGENT_RUN_RETRY_MAX_DELAY: "60"
+  AGENT_RUN_RETRY_JITTER: "0.3"
+  # ---- 跨进程事件流（worker 发布 -> API SSE 读取）----
+  RUN_EVENT_STREAM_ENABLED: "true"
+  RUN_EVENT_STREAM_BACKEND: "redis"
+  RUN_EVENT_STREAM_MAXLEN: "1000"
+  RUN_EVENT_STREAM_TTL_SECONDS: "3600"
+  # ---- Human-in-the-loop 高风险审批 ----
+  HITL_ENABLED: "true"
+  # ---- Qdrant（生产改为 managed/external host）----
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6333"
+  VECTOR_DB_MODE: "qdrant_only"
+  HYBRID_SEARCH_ENABLED: "true"

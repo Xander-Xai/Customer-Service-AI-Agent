@@ -1,0 +1,36 @@
+# Ingress（nginx）：SSE / WebSocket 需要关闭缓冲并放宽超时。
+# 生产请替换 host / TLS secret，并按需增加 cert-manager。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: customer-ai
+  namespace: customer-ai
+  labels:
+    app.kubernetes.io/name: customer-ai-agent
+  annotations:
+    # SSE 长连接：关闭代理缓冲，放宽读写超时
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    # WebSocket 升级（/ws/chat）
+    nginx.ingress.kubernetes.io/websocket-services: "api"
+    # 多模态上传大小
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  # 生产启用 TLS（替换为真实 secret）：
+  # tls:
+  #   - hosts: ["customer-ai.example.com"]
+  #     secretName: customer-ai-tls
+  rules:
+    - host: customer-ai.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  name: http

@@ -1,0 +1,45 @@
+# Worker HPA：先用标准指标（CPU / memory）作为可部署基线。
+#
+# 最理想的 worker 扩缩依据是「队列深度 / pending runs」，而不是 CPU：
+# Celery worker 大部分时间在等 LLM/网络 IO，CPU 往往很低。
+#
+# 现状（本 PR 边界）：
+#   - 仓库已有 run 相关 Prometheus 指标（如 agent_run_queue_wait_seconds /
+#     agent_run_total{status} / agent_worker_active），但没有「队列深度」指标，
+#     也没有 KEDA / prometheus-adapter。
+#   - 因此本文件只提供标准指标 HPA；基于队列深度的 custom-metric autoscaling
+#     （KEDA redis scaler 或 prometheus-adapter + 队列深度 gauge）是后续项，
+#     本 PR 不引入 KEDA/Prometheus Adapter 等额外平台（避免过度工程）。
+#
+# 后续接入 custom metrics 时：
+#   1. 暴露队列深度 gauge（如 celery queue length 或 agent_runs WHERE status='QUEUED'）；
+#   2. 安装 KEDA / prometheus-adapter；
+#   3. 把下面的 metrics 换成 External/Pods 类型并指向该 gauge。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: worker
+  namespace: customer-ai
+  labels:
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: worker
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 60

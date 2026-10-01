@@ -6,7 +6,7 @@
 >
 > - Runtime version 由 `core/config.py::VERSION` 决定（当前 `6.3`）；未声明 `v6.4` release。
 > - Current entry point: [docs/reference/current-state.md](docs/reference/current-state.md)。当前 HEAD 用 `git rev-parse HEAD` 获取；**Snapshot SHA != Current HEAD**，带日期的历史审计报告位于 `docs/reports/`，只代表其执行时点。
-> - Response Cache（L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退）与 Tool Result Cache、Tool Result Store、压缩、Session Memory 是**相互独立的机制**（ADR-006）。
+> - Response Cache（L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退）与 Tool Result Cache、Tool Result Store、压缩、Session Memory、**LangGraph Checkpoint** 是**相互独立的机制**（ADR-006）。
 > - Tool Result Context Engineering：确定性压缩、Top-K/budget、历史 compaction、专用 compressor、可选 offload/recovery、可选 semantic summary、scope-safe exact reuse。
 > - RAG：rewrite/filter → vector + BM25 → retrieval contract → RRF 融合 → rerank → context；BM25 lifecycle 与确定性 Qdrant point ID/迁移见 `rag/`。
 > - Provider authentication、provider token/billing、生产延迟均属 `NOT_VERIFIED` / `NOT_MEASURED`，除非链接当前带 provenance 的 artifact。
@@ -16,7 +16,7 @@
 >
 > 历史版本（v5.0–v6.3）逐条变更记录见 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)；README 不再展开逐版本历史。
 
-核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25 混合检索 + RRF 融合 + API 重排 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离 · **Argon2id密码哈希** · **分级告警升级** · **业务指标监控**
+核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25 混合检索 + RRF 融合 + API 重排 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离 · **生产 PostgreSQL LangGraph Checkpoint 持久化** · **分布式 Agent Runtime（Celery worker + Redis Stream SSE）** · **MCP 外部工具适配（叠加在 ToolRegistry）** · **Human-in-the-loop 高风险操作人工审批** · **Argon2id密码哈希** · **分级告警升级** · **业务指标监控**
 
 ---
 
@@ -486,6 +486,13 @@ flowchart LR
 
 工具注册中心（`ToolRegistry`）以 OpenAI Function Calling 格式管理，`ReActAgent` 通过 `_process_with_tools()` 多轮调用，最多 `TOOL_MAX_ROUNDS=3` 轮。
 
+**MCP 外部工具（可选，`MCP_ENABLED=false` 默认关闭）**：在同一个 `ToolRegistry`
+上叠加 MCP Adapter（`tools/mcp_adapter.py`），把外部/第三方 MCP server 的工具
+（discover / schema 归一化 / invoke / timeout / 错误映射）统一为相同 ToolDefinition；
+native 与 MCP 工具对 Agent 无差别。安全 fail closed（`MCP_SERVERS` allowlist、
+transport 白名单、payload/timeout 限制、只读优先）。详见
+[docs/design/mcp-tool-adapter.md](docs/design/mcp-tool-adapter.md)。
+
 ### ReAct 推理链
 
 ```
@@ -648,16 +655,21 @@ make prod
 # 方式二：Docker Compose 直接启动
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d
 
-# 方式三：开发环境（热重载）
+# 方式三：Kubernetes 最小部署（API / Worker 独立扩缩，状态外置）
+#   见 deploy/k8s/README.md；secret 只能用占位符，未替换会 fail fast
+kubectl apply -f deploy/k8s/secret.yaml   # 先由 secret.example.yaml 复制并替换占位符
+kubectl apply -k deploy/k8s/
+
+# 方式四：开发环境（热重载）
 make dev
 
-# 方式四：HTTPS 开发环境（支持麦克风等安全上下文功能）
+# 方式五：HTTPS 开发环境（支持麦克风等安全上下文功能）
 make dev-https
 
-# 方式五：直接运行（仅开发，需已安装依赖）
+# 方式六：直接运行（仅开发，需已安装依赖）
 uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload
 
-# 方式六：仅运行测试（无需 API Key）
+# 方式七：仅运行测试（无需 API Key）
 make test
 ```
 
@@ -667,7 +679,7 @@ make test
 |------|------|
 | http://localhost:8000 | 前端界面（暗色主题，含对话 + 监控仪表盘） |
 | http://localhost:8000/docs | FastAPI 自动生成的 API 文档（Swagger UI） |
-| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器状态） |
+| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器 / LangGraph checkpoint 状态） |
 | http://localhost:3000 | Grafana 仪表盘（admin / `<GRAFANA_PASSWORD>`） |
 | http://localhost:9090 | Prometheus UI |
 
@@ -687,6 +699,8 @@ make env-check   # 查看当前环境配置摘要
 | 类别 | 端点数 | 说明 |
 |------|--------|------|
 | 聊天 | 8 | REST + SSE 流式 + 多模态图片 + 图片流式 + 语音 + 文件上传 + TTS + TTS 声音列表 |
+| 异步 Run | 5 | 创建（202）/ 查询 / 取消 / DEAD 观测 / 事件流 SSE（Celery worker 执行，见 [分布式运行时](docs/design/distributed-agent-runtime.md)） |
+| 高风险审批 | 4 | 待审批列表 / 详情 / 通过 / 拒绝（RBAC，见 [Human-in-the-loop](docs/design/human-in-the-loop.md)） |
 | 会话 | 6 | 列表 / 详情 / 删除 / Checkpoint / 历史 / 消息 |
 | 认证 | 8 | 注册 / 登录 / 刷新 / 登出 / 当前用户 / 用户列表 / 审计 / 角色更新 |
 | 知识库 | 4 | 统计 / 种子 / 添加 / 同步 |
@@ -698,8 +712,8 @@ make env-check   # 查看当前环境配置摘要
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
 **合计：`docs/openapi.json` 快照由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 53 个 HTTP 路径 / 55 个操作，
-其中 49 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。**
+HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 62 个 HTTP 路径 / 64 个操作，
+其中 58 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -710,10 +724,12 @@ HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出�
 ```
 customer-service-ai-agent/
 ├── agents/            # 9 个 AI Agent 角色（7 领域 + ReAct + Response）+ Evaluator
+├── core/hitl/         # Human-in-the-loop 风险策略 + 审批服务 + 风险闸门
 ├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试/Token追踪/Token配额/黑板）
 │   └── session/       # 会话管理器 + 漂移检测器 + Token 计数器
 ├── api/               # FastAPI 服务层（工厂/中间件/路由/SSE/WebSocket/依赖注入）
-│   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts）
+│   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts/runs）
+├── runtime/           # 分布式 Agent Runtime（AgentRun 服务层 + Celery app/worker + bootstrap）
 ├── auth/              # JWT 认证（Argon2id + Redis 黑名单 + Refresh Token + RBAC）
 ├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
 ├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
@@ -721,7 +737,7 @@ customer-service-ai-agent/
 ├── cache/             # Response Cache 三层（L1 Redis MD5 + L2 Qdrant 向量 + L3 Jaccard 回退）；与 Tool Result Cache/Store 分离
 ├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
 ├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
-├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具）
+├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具 + MCP Adapter）
 ├── llm/               # LLM 客户端（重试 + 熔断 + FC + SSE 流式 + 连接池 + Token 配额）+ 规则兜底 LLM
 ├── media/             # 多模态处理（图片/音频/视频/文档/TTS 5 个处理器）
 ├── alerts/            # 告警通知（Webhook 钉钉/企微/飞书 + SMTP）
@@ -731,6 +747,7 @@ customer-service-ai-agent/
 │   ├── styles/        # 14 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
 ├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
+├── deploy/k8s/        # Kubernetes 最小部署（API/Worker 独立 Deployment + HPA + Ingress）
 ├── tests/             # 测试套件（pytest unit/integration/e2e/stress + eval 资产；数量以 pytest --collect-only -q 为准）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）
@@ -836,6 +853,12 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `SESSION_SUMMARY_MAX_CHARS` | 500 | 历史摘要最大字符数 |
 | `SESSION_IDLE_TTL` | 3600 | 会话空闲过期时间（秒） |
 | `MAX_SESSIONS` | 10000 | 最大内存会话数 |
+| **LangGraph Checkpoint** | | |
+| `LANGGRAPH_CHECKPOINT_BACKEND` | 空（自动） | `memory` / `postgres`；留空开发→memory、生产→postgres |
+| `LANGGRAPH_CHECKPOINT_DATABASE_URL` | 空 | checkpoint 专用 PG DSN；留空安全复用 `DATABASE_URL`（仅 postgres 协议） |
+| `LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE` | 1 | psycopg 异步连接池最小连接数 |
+| `LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE` | 10 | psycopg 异步连接池最大连接数 |
+| `LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT` | 15.0 | 首次 `setup()`/连接池 open 超时（秒） |
 | **漂移检测** | | |
 | `DRIFT_TOPIC_JACCARD_THRESHOLD` | 0.15 | 话题漂移阈值（jieba Jaccard） |
 | `DRIFT_REPETITION_THRESHOLD` | 0.8 | 重复提问阈值 |
@@ -863,6 +886,12 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | **ReAct** | | |
 | `REACT_MAX_ITERATIONS` | 3 | ReAct 最大推理步数 |
 | `TOOL_MAX_ROUNDS` | 3 | Function Calling 最大轮数 |
+| **MCP（外部工具，可选）** | | |
+| `MCP_ENABLED` | false | MCP 总开关（fail closed） |
+| `MCP_SERVERS` | 空 | server/tool allowlist（JSON 数组） |
+| `MCP_DEFAULT_TIMEOUT_SECONDS` | 15 | MCP 调用超时（秒） |
+| `MCP_MAX_PAYLOAD_BYTES` | 32768 | MCP 调用 payload 上限 |
+| `MCP_FAIL_CLOSED` | false | MCP 初始化失败是否阻断启动 |
 | **安全** | | |
 | `MAX_QUERY_LENGTH` | 2000 | 用户查询最大字符数 |
 | `WS_MAX_CONNECTIONS_PER_IP` | 5 | 每 IP 最大 WebSocket 连接数 |

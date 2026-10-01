@@ -20,6 +20,12 @@
 - [ ] Tool Result feature flags、rollback switches、Redis store/TTL 已验证
 - [ ] Tool Result scope isolation、cache safety 已验证
 - [ ] BM25 lifecycle restart、Qdrant point-id migration dry-run/rollback 已验证
+- [ ] **LangGraph checkpoint 持久化**：生产 `LANGGRAPH_CHECKPOINT_BACKEND=postgres`、
+      官方 saver `setup()` 成功、连接失败 fail closed（本地/受控环境验证；真实多副本
+      恢复仍属 PRODUCTION NOT_VERIFIED）
+- [ ] **分布式 Agent Runtime**：API/Worker 双进程、`POST /api/runs` → 202 →
+      worker 消费 → SUCCEEDED → GET 结果（本地/集成验证；目标环境
+      `docker compose up` 双进程行为仍属 PRODUCTION NOT_VERIFIED）
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -32,7 +38,7 @@
 
 - [x] 前端单测可运行：`npm test`（当前 7 个 Vitest 测试文件；通过数以命令输出为准）
 - [x] 前端生产构建通过：`npm run build`
-- [x] OpenAPI 当前可正常生成：`app.openapi()` = `53` 个 HTTP 路径（校验命令 `make openapi-check`；v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`）
+- [x] OpenAPI 当前可正常生成：`app.openapi()` = `62` 个 HTTP 路径（校验命令 `make openapi-check`；v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`；异步 Run API 新增 `/api/runs` 等 5 条 + HITL 审批 `/api/approvals` 4 条）
 - [x] 前后端上传约束已对齐：统一 `5MB` 上限
 - [x] 前后端图片白名单已对齐：`JPEG/PNG/WebP`
 - [x] `/api/chat/voice` 已修复 MIME 传递错误，非法音频改为 4xx/5xx 显式返回，而不是误把 `filename` 当 `content_type`
@@ -45,7 +51,7 @@
 - [x] 后端已有 Knowledge Base 5000 条文档（成分数据 1500+ / FAQ 2500+ / 场景文档 1000+）
 - [x] LLM 客户端已实现指数退避 + 全抖动重试策略
 - [x] `POST /api/cache/invalidate` 端点已实现主动缓存失效
-- [x] OpenAPI 重新生成：`docs/openapi.json` = 53 个 HTTP 路径（47 个 `/api/*` + `/metrics/prometheus` + 5 个页面路径；操作数 55，快照由 `scripts/generate_openapi.py` 生成）
+- [x] OpenAPI 重新生成：`docs/openapi.json` = 62 个 HTTP 路径（56 个 `/api/*` + `/metrics/prometheus` + 5 个页面路径；操作数 64，快照由 `scripts/generate_openapi.py` 生成）
 - [x] admin.html 版本号同步至 v6.3
 - [x] _revoked_jtis 已吊销 JTI 集合新增容量限制 10000，防止内存泄漏
 - [x] mypy 已从 requirements.txt 移除，移到 requirements-dev.txt
@@ -73,6 +79,51 @@
       `scripts/import_eval_corpus.py`（幂等导入 + manifest）、Make 目标
       `rag-eval-import/-preflight/-smoke/rag-eval-649`；提交有 preflight v1
       证据与 import manifest (PR #19)
+- [x] LangGraph Checkpoint 后端生命周期已实现（`core/checkpointer.py`）：
+      开发/测试 MemorySaver、生产官方 `langgraph-checkpoint-postgres`
+      (`AsyncPostgresSaver` + psycopg 异步连接池)；生产初始化失败 fail closed，
+      不静默回退；`/api/health` 暴露脱敏 `langgraph_checkpoint` 状态
+      （本地单测 + 可选真实 PostgreSQL 集成测试；真实多副本恢复仍 PRODUCTION NOT_VERIFIED）
+- [x] 分布式 Agent Runtime 已实现（`runtime/`）：`AgentRun`（PostgreSQL 真相源）+
+      Celery worker + `/api/runs` 异步 API；队列只传 `run_id`；状态机与原子迁移；
+      失败重试/DEAD、取消、broker 失败 503；`AGENT_RUN_DISPATCH=inline` 开发 fallback
+      （本地单测 + 集成测试；Kubernetes / 真实生产 HA 未验证）
+- [x] Run 可靠性已实现：同一 thread 串行（Redis 分布式锁 owner+TTL+Lua
+      compare-and-delete，竞争 QUEUED 延迟重调度）、不同 thread 并行；HTTP
+      `Idempotency-Key`（user+endpoint 作用域）+ DB 唯一约束；worker lease/heartbeat
+      防重复投递；写操作工具 `tool_side_effects` 应用层幂等（崩溃重投不重复退款）；
+      transient 指数退避 retry / permanent 不 retry / attempts 用尽 DEAD；
+      `GET /api/runs/dead` 管理员观测；投递语义为 at-least-once + application-level
+      idempotency（本地单测 + 集成测试 + 真实 Redis 锁；**不声称端到端 exactly-once**）
+- [x] 跨进程 Agent 事件流已实现（`runtime/events.py` / `event_stream.py` /
+      `event_publisher.py`）：worker 把 graph `stream_callback` 事件写入 Redis
+      Streams（XADD MAXLEN + TTL + 大小/敏感字段限制），API
+      `GET /api/runs/{id}/stream` 转 SSE，支持 `Last-Event-ID` 续读；Stream 过期后
+      回退 PostgreSQL 终态；SSE 校验 run ownership；legacy `/api/chat/stream` 保持
+      兼容（本地单测 + 真实 Redis Streams 集成测试；生产 HA 未验证）
+- [x] 分布式 runtime 故障注入/恢复测试套件（`tests/integration/distributed_runtime/`）：
+  worker crash→checkpoint 恢复（含跨 worker PostgreSQL）、API restart 不丢 run、
+  duplicate delivery 不重复执行、same/different thread、side-effect 崩溃重放去重、
+  SSE reconnect、可观测性（trace/metrics/不泄露 query）。验证报告：
+  [2026-10-02 分布式 runtime 验证](../reports/audit/2026-10-02-distributed-runtime-verification.md)
+  （`LOCALLY VERIFIED`；容器级/K8s/生产 HA 仍 `NOT_VERIFIED`）
+- [x] MCP 外部工具适配已实现（`tools/mcp_adapter.py`，叠加在现有 `ToolRegistry`，
+      不替代 native Function Calling）：discover / schema 归一化 / invoke / timeout /
+      错误映射；`MCP_ENABLED`（默认 false）、`MCP_SERVERS` allowlist、transport 白名单、
+      payload 上限、只读优先；`mcp_tool_call_total`/`mcp_tool_error_total`/
+      `mcp_tool_duration_seconds`；本地单测 + 真实 MCP stdio server 集成测试
+      （真实第三方 MCP server / 生产连通性 `NOT_VERIFIED`）
+- [x] Human-in-the-loop 高风险操作人工审批已实现（`core/hitl/` + `human_approvals`）：
+  仅 HIGH 风险 Tool（退款/改单/高额赔付/投诉升级/ERP 写操作）拦截，普通问答不审批；
+  LangGraph `interrupt()` + PostgreSQL Checkpointer 暂停（`AgentRun=WAITING_APPROVAL`），
+  RBAC 审批 API（supervisor/admin，不能自审）approve/reject/edit 后
+  `Command(resume=...)` 恢复；approve 后仍经 Tool idempotency；本地单测 + 真实
+  interrupt/Command 集成测试（真实多副本跨进程 resume `NOT_VERIFIED`）
+- [x] Kubernetes 最小部署清单已提供（`deploy/k8s/`）：API 与 worker 独立
+  Deployment/Service/HPA、Ingress（SSE/WS 注解）、ConfigMap + Secret 示例（仅占位符）、
+  演示依赖（PG/Redis/Qdrant，单副本 emptyDir）；状态全部外置，无本地 PVC/hostPath；
+  清单结构本地校验（`tests/unit/test_k8s_manifests.py`）；worker 队列深度
+  custom-metric autoscaling 明确为后续项（未引入 KEDA/Prometheus Adapter）
 
 ## 2. 当前仍不能直接宣称"真实上线就绪"的项目
 
@@ -94,6 +145,18 @@
 - [ ] CORS_ORIGINS 在生产环境未配置时将导致前端跨域请求失败
 - [ ] 仍无真实生产密钥/域名/证书的验证记录
 - [ ] Qdrant、Redis、PostgreSQL 尚未在真实部署环境下验证
+- [ ] LangGraph checkpoint 的多副本共享/进程重启恢复尚未在真实生产环境验证
+      （本地/受控 PostgreSQL 集成测试通过，但不等于生产验证）
+- [ ] 分布式 Agent Runtime 的 API/Worker 双进程行为、Celery broker 故障恢复、
+      worker 崩溃重投递尚未在目标环境验证；未宣称 Kubernetes / 生产 HA
+- [ ] 端到端 exactly-once 未实现（仅 at-least-once + 应用层幂等）；远程副作用成功与
+      本地记录提交之间的极小窗口未在生产验证
+- [ ] MCP 真实第三方 server（SSE/远程鉴权）与写操作 MCP 工具幂等未验证；
+      当前仅本地真实 stdio server 集成测试（`NOT_VERIFIED`）
+- [ ] HITL 真实多副本 PostgreSQL 跨进程「第二天审批 resume」未验证（本地用
+      MemorySaver 模拟 graph 重启；PG gated 测试仅覆盖 checkpoint 跨进程）
+- [ ] Kubernetes 清单未在真实集群验证（`kubectl apply` / HPA / Ingress SSE/WS /
+      `kubectl delete pod` 故障演练均 `NOT_VERIFIED`）；镜像未发布到 registry
 - [ ] `rag/api_embedding.py` 的 embedding API Key 复用 `OPENAI_API_KEY`，生产环境应配置独立视角的 embedding 服务
 - [ ] CORS_ORIGINS 为空时已在生产启动校验中阻断启动
 
@@ -107,6 +170,15 @@
 - [ ] 确认 `VECTOR_DB_MODE`、`DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`SESSION_TOKEN_SECRET`、`API_KEY`、`MONITORING_ADMIN_TOKEN` 已按生产值配置
       （`EMBEDDING_API_KEY` / `RERANKER_API_KEY` 可独立配置；向量化与重排凭据必须实际可用
       ——embedding 未单独配置时会复用 `LLM` 的 `OPENAI_API_KEY`，见 `core/config.py`）
+- [ ] 确认 `LANGGRAPH_CHECKPOINT_BACKEND=postgres` 且 checkpoint 表
+      （由官方 saver `setup()` 创建）在目标 PostgreSQL 上初始化成功；健康检查
+      `langgraph_checkpoint.status=healthy`
+- [ ] 验证 `docker compose up` 后 API 与 Worker 为两个独立进程：
+      `POST /api/runs` 返回 202 → worker 执行 → `GET /api/runs/{id}` 为 SUCCEEDED；
+      停止 API 容器不影响 worker 中已开始的 run
+- [ ] 验证跨进程事件流：`GET /api/runs/{id}/stream` 在 API/Worker 分进程下收到
+      worker 事件；断线重连 `Last-Event-ID` 续读；Stream 过期后仍能从
+      `GET /api/runs/{id}` 读到最终结果（目标环境验证；本地已用真实 Redis 验证）
 - [ ] 验证 `/api/health`、`/api/metrics`、`/api/kpi`、`/metrics/prometheus` 在目标环境下的权限和返回格式
 - [ ] 验证上传链路在 Nginx / 反向代理 / FastAPI 三级限制下仍保持一致
 - [ ] 复核备份、恢复、告警路由和通知通道，而不是只看文档说明
@@ -130,5 +202,7 @@
 - [生产证据边界](../evaluation/production-evidence.md)
 - [API 参考](../reference/api-reference.md)
 - [生产运维手册](../operations/production-operations-guide.md)
+- [分布式 Runtime 运维 Runbook](../operations/distributed-runtime-runbook.md)
+- [分布式 Agent Runtime 设计](../design/distributed-agent-runtime.md)
 - [2026-09-30 文档收敛审计 v3](../reports/audit/2026-09-30-documentation-convergence-v3.md)
 - [2026-09-29 全仓对齐审计](../reports/plans/2026-09-29-code-doc-alignment.md)（历史快照）

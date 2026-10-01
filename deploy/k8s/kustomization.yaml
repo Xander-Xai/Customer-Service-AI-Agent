@@ -1,0 +1,17 @@
+# 最小可验证部署（不含 Secret）。
+# 用法：
+#   1) cp secret.example.yaml secret.yaml && 编辑（secret.yaml 已 gitignore）
+#   2) kubectl apply -f secret.yaml
+#   3) kubectl apply -k deploy/k8s/
+# 演示依赖（PostgreSQL/Redis/Qdrant）：kubectl apply -f deploy/k8s/demo/dependencies.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - api-deployment.yaml
+  - api-service.yaml
+  - worker-deployment.yaml
+  - ingress.yaml
+  - hpa-api.yaml
+  - hpa-worker.yaml

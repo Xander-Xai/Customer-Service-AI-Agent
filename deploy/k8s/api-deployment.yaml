@@ -1,0 +1,87 @@
+# API Deployment：只跑 FastAPI/gunicorn，不跑 Celery worker。
+# 状态（checkpoint / session / AgentRun / result）全部来自外部 PostgreSQL/Redis/Qdrant，
+# 因此 API Pod 无本地持久化，可随意滚动/删除。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: customer-ai
+  labels:
+    app: api
+    app.kubernetes.io/name: customer-ai-agent
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: api
+          image: customer-ai-agent:6.3   # 替换为你的 registry 镜像
+          imagePullPolicy: IfNotPresent
+          command: ["gunicorn", "api.app_factory:app", "-c", "gunicorn.conf.py"]
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: customer-ai-config
+            - secretRef:
+                name: customer-ai-secrets
+          env:
+            - name: GUNICORN_WORKERS
+              value: "2"
+            - name: GUNICORN_BIND
+              value: "0.0.0.0:8000"
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        # 仅日志使用临时卷；业务状态不落本地磁盘
+        - name: logs
+          emptyDir: {}

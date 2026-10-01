@@ -1,0 +1,106 @@
+# Worker Deployment：独立于 API 的 Celery worker（不在 API Pod 内启动）。
+# - 可独立扩缩（replicas / HPA）。
+# - 优雅关闭：SIGTERM -> Celery warm shutdown（停止消费新任务，等待当前任务结束），
+#   terminationGracePeriodSeconds 需 > AGENT_RUN_TASK_TIME_LIMIT（默认 180s）。
+# - 崩溃安全：task_acks_late + task_reject_on_worker_lost + tool idempotency。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: customer-ai
+  labels:
+    app: worker
+    app.kubernetes.io/name: customer-ai-agent
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+        app.kubernetes.io/component: worker
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 240
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: worker
+          image: customer-ai-agent:6.3   # 替换为你的 registry 镜像
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - runtime.celery_app:celery_app
+            - worker
+            - -Q
+            - agent_runs
+            - -l
+            - info
+            - --concurrency=2
+            - --max-tasks-per-child=200
+          envFrom:
+            - configMapRef:
+                name: customer-ai-config
+            - secretRef:
+                name: customer-ai-secrets
+          env:
+            - name: WORKER_CONCURRENCY
+              value: "2"
+          readinessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - runtime.celery_app:celery_app
+                - inspect
+                - ping
+                - -t
+                - "5"
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - runtime.celery_app:celery_app
+                - inspect
+                - ping
+                - -t
+                - "5"
+            initialDelaySeconds: 40
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: logs
+          emptyDir: {}
