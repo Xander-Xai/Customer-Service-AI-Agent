@@ -33,14 +33,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install argon2-cffi  # 确保 Argon2id 可用 (OS-level dep conflict)
-          # P0-01 AC8 reproducibility: the ENTIRE coverage toolchain is pinned,
-          # not just pytest/pytest-asyncio. pytest-cov and coverage are what
-          # actually compute the coverage number — leaving them floating made
-          # the gate irreproducible (78.08% / 78.65% / 78.72% were three
-          # different toolchains: local pytest 8.4.2 vs CI 7.4.4, and
-          # coverage floating between 7.4.4 and 7.14.x). A contract test
+          # LANE A — canonical coverage evidence toolchain (deliberately pinned;
+          # do NOT float these to pytest 8). The committed coverage figure is
+          # only reproducible against one toolchain. P0-01 AC8: the ENTIRE
+          # coverage toolchain is pinned, not just pytest/pytest-asyncio.
+          # pytest-cov and coverage are what actually compute the coverage
+          # number — leaving them floating made the gate irreproducible
+          # (78.08% / 78.65% / 78.72% were three different toolchains: local
+          # pytest 8.4.2 vs CI 7.4.4, and coverage floating between 7.4.4 and
+          # 7.14.x). A contract test
           # (test_install_step_pins_full_coverage_toolchain) enforces that all
-          # four packages stay pinned.
+          # four packages stay pinned. The supported pytest-8 compatibility
+          # surface is exercised separately by the `dev-compat` job (LANE B,
+          # requirements-dev.txt).
           pip install pytest==7.4.4 pytest-asyncio==0.21.1 pytest-cov==5.0.0 coverage==7.4.4
 
       - name: Debug - Check Python and packages
@@ -140,6 +145,55 @@ jobs:
           set -o pipefail
           echo "=== Test Summary ==="
           python -m pytest tests/ --co -q 2>&1 | tail -5
+
+  # LANE B — supported development compatibility (pytest 8 era).
+  #
+  # Deliberately separate from the `test` job's LANE A pinned coverage
+  # toolchain. This lane installs requirements.txt + requirements-dev.txt and
+  # asserts a fresh resolver picks a pytest/pytest-asyncio pair that can
+  # collect and run the unit suite. It is the regression guard for PR #21:
+  # pytest>=8 combined with pytest-asyncio 0.23.0–0.23.3 raised
+  # `AttributeError: 'FixtureDef' object has no attribute 'unittest'` during
+  # async fixture setup. requirements-dev.txt floors pytest-asyncio at 0.23.4;
+  # this job proves the floor is installable and sufficient in a clean env.
+  dev-compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Setup test environment
+        run: cp .env.test .env
+
+      - name: Install dev compatibility dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Verify pytest-asyncio compatibility floor
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          from packaging.version import Version
+          pytest_v = version("pytest")
+          pa_v = Version(version("pytest-asyncio"))
+          assert pa_v >= Version("0.23.4"), (
+              f"pytest-asyncio {pa_v} is below the supported floor 0.23.4; "
+              "pytest>=8 async fixtures would fail to collect (PR #21)."
+          )
+          print(f"pytest={pytest_v} pytest-asyncio={pa_v}")
+          PY
+
+      - name: Collect tests
+        run: python -m pytest --collect-only -q
+
+      - name: Run unit tests
+        run: python -m pytest tests/unit/ -q -m "not real_llm and not stress"
 
   # P2-5: 安全扫描
   security:
