@@ -24,9 +24,13 @@ logger = get_logger("db")
 # 优先使用 config.DATABASE_URL（环境变量 DATABASE_URL），为空则回退 SQLite
 try:
     from core.config import (
-        ConfigurationError as _ConfigurationError,
         DATABASE_URL as _CFG_DATABASE_URL,
+    )
+    from core.config import (
         DEV_MODE as _DEV_MODE,
+    )
+    from core.config import (
+        ConfigurationError as _ConfigurationError,
     )
 except ImportError:
     class _ConfigurationError(RuntimeError):

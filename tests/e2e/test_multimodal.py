@@ -10,7 +10,6 @@
 """
 
 import io
-import json
 
 import pytest
 

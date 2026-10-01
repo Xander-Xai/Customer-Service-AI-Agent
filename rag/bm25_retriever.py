@@ -78,11 +78,13 @@ class BM25Retriever:
             self._doc_term_count[collection] = []
             self._doc_term_freq[collection] = []
 
-        for doc_id, content, meta in zip(ids, documents, metadatas):
+        # Preserve historical behavior: if a caller passes a shorter ids /
+        # metadatas list, the extra documents are silently truncated (explicit
+        # strict=False rather than introducing a new runtime error).
+        for doc_id, content, meta in zip(ids, documents, metadatas, strict=False):
             tokens = self._tokenize(content)
             if not tokens:
                 continue
-            doc_idx = len(self._docs[collection])
             self._docs[collection].append((doc_id, content, meta))
 
             # 当前文档的 term 频率

@@ -5,8 +5,9 @@ ChromaDB → Qdrant 兼容性测试（v6.0）
 行为与 KnowledgeBaseProtocol 一致。
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
@@ -71,7 +72,7 @@ class TestKnowledgeBaseAPIBehavior:
     def mock_qdrant_client(self):
         with (
             patch("rag.qdrant_knowledge_base.QdrantClient") as mock_client_cls,
-            patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()) as mock_ef,
+            patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()),
         ):
             mock_client = MagicMock()
             mock_client_cls.return_value = mock_client

@@ -1,6 +1,5 @@
 """Trace middleware 功能测试。"""
 
-import pytest
 
 
 class TestTraceMiddleware:
@@ -22,7 +21,6 @@ class TestTraceMiddleware:
     def test_middleware_package_has_init(self):
         """验证 api/middleware/ 目录有 __init__.py"""
         import os
-        import sys
 
         # 相对于项目根目录
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
