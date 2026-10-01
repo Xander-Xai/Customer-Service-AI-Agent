@@ -127,10 +127,48 @@ def compute_coverage(corpus_ids: set[str], benchmark_path: Path) -> dict[str, An
     }
 
 
+def _collection_payload_index(kb, collection: str) -> dict[str, str | None]:
+    """Scroll one collection and return ``{logical doc_id: eval_corpus_hash}``.
+
+    Uses the logical ``doc_id`` stored in the payload (never the storage Point
+    ID) so identity can be verified against the requested corpus.
+    """
+    index: dict[str, str | None] = {}
+    offset = None
+    while True:
+        result = kb._client.scroll(
+            collection_name=collection, limit=1000, offset=offset,
+            with_payload=True, with_vectors=False,
+        )
+        points = (
+            list(result[0]) if isinstance(result, tuple)
+            else list(getattr(result, "points", []) or [])
+        )
+        offset = (
+            result[1] if isinstance(result, tuple)
+            else getattr(result, "next_page_offset", None)
+        )
+        for point in points:
+            payload = getattr(point, "payload", None) or {}
+            doc_id = payload.get("doc_id")
+            if isinstance(doc_id, str) and doc_id:
+                marker = payload.get("eval_corpus_hash")
+                index[doc_id] = marker if isinstance(marker, str) else None
+        if offset is None:
+            break
+    return index
+
+
 async def import_corpus(
-    kb, docs: list[dict[str, Any]], batch_size: int, skip_existing: bool
-) -> dict[str, int]:
-    """分批幂等导入，返回各 collection 导入文档数。"""
+    kb, docs: list[dict[str, Any]], batch_size: int, corpus_sha256: str
+) -> tuple[dict[str, int], dict[str, dict[str, Any]]]:
+    """分批幂等导入，返回 (各 collection 计数, 逐 collection identity 报告)。
+
+    Crucially, a collection is skipped ONLY when its logical document identity
+    verifies against the requested corpus (every expected doc_id present with a
+    matching ``eval_corpus_hash``). A count-only check would accept a stale or
+    foreign collection that happens to have enough points.
+    """
     per_collection: dict[str, list[dict[str, Any]]] = {c: [] for c in EVAL_COLLECTIONS}
     unmapped: list[str] = []
     for d in docs:
@@ -141,6 +179,7 @@ async def import_corpus(
         per_collection[coll].append(d)
 
     counts: dict[str, int] = {}
+    identity: dict[str, dict[str, Any]] = {}
     t0 = time.monotonic()
     total_batches = sum(
         (len(ds) + batch_size - 1) // batch_size for ds in per_collection.values()
@@ -148,44 +187,69 @@ async def import_corpus(
     done_batches = 0
     for coll in EVAL_COLLECTIONS:
         ds = per_collection[coll]
-        existing = kb.get_collection_count(coll) if skip_existing else 0
-        if skip_existing and existing >= len(ds):
-            counts[coll] = existing
+        expected_ids = {d["id"] for d in ds}
+        existing = _collection_payload_index(kb, coll)
+        present = expected_ids & set(existing)
+        missing = expected_ids - set(existing)
+        hash_mismatch = {
+            doc_id for doc_id in present if existing.get(doc_id) != corpus_sha256
+        }
+        foreign = set(existing) - expected_ids
+        identity_clean = not missing and not hash_mismatch and not foreign
+
+        if identity_clean:
+            counts[coll] = kb.get_collection_count(coll)
             done_batches += (len(ds) + batch_size - 1) // batch_size
-            continue
-        for i in range(0, len(ds), batch_size):
-            chunk = ds[i : i + batch_size]
-            await asyncio.to_thread(
-                kb.add_documents,
-                coll,
-                [d["content"] for d in chunk],
-                [
-                    {
-                        "doc_id": d["id"],
-                        "title": d.get("title", ""),
-                        "category": d.get("category", ""),
-                        "scene": d.get("scene", []),
-                        "tags": ",".join(d.get("tags", []) or []),
-                        "source": d.get("source", "eval_corpus"),
-                    }
-                    for d in chunk
-                ],
-                [d["id"] for d in chunk],
-            )
-            done_batches += 1
-            pct = done_batches / max(total_batches, 1) * 100
-            elapsed = time.monotonic() - t0
-            sys.stdout.write(
-                f"\r  导入进度: [{('#' * int(pct // 5)).ljust(20)}] "
-                f"{done_batches}/{total_batches} 批 ({pct:.0f}%) {elapsed:.0f}s"
-            )
-            sys.stdout.flush()
-            await asyncio.sleep(0.15)  # 限速：避免触发 provider 限流
-        counts[coll] = kb.get_collection_count(coll)
+            action = "skipped"
+        else:
+            for i in range(0, len(ds), batch_size):
+                chunk = ds[i : i + batch_size]
+                await asyncio.to_thread(
+                    kb.add_documents,
+                    coll,
+                    [d["content"] for d in chunk],
+                    [
+                        {
+                            "doc_id": d["id"],
+                            "title": d.get("title", ""),
+                            "category": d.get("category", ""),
+                            "scene": d.get("scene", []),
+                            "tags": ",".join(d.get("tags", []) or []),
+                            "source": d.get("source", "eval_corpus"),
+                            # Corpus-provenance marker: identity verification
+                            # rejects collections imported from a different
+                            # corpus version even when the count matches.
+                            "eval_corpus_hash": corpus_sha256,
+                        }
+                        for d in chunk
+                    ],
+                    [d["id"] for d in chunk],
+                )
+                done_batches += 1
+                pct = done_batches / max(total_batches, 1) * 100
+                elapsed = time.monotonic() - t0
+                sys.stdout.write(
+                    f"\r  导入进度: [{('#' * int(pct // 5)).ljust(20)}] "
+                    f"{done_batches}/{total_batches} 批 ({pct:.0f}%) {elapsed:.0f}s"
+                )
+                sys.stdout.flush()
+                await asyncio.sleep(0.15)  # 限速：避免触发 provider 限流
+            counts[coll] = kb.get_collection_count(coll)
+            action = "imported"
+
+        identity[coll] = {
+            "expected_logical_ids": len(expected_ids),
+            "present_before": len(present),
+            "missing_before": len(missing),
+            "hash_mismatch_before": len(hash_mismatch),
+            "foreign_before": len(foreign),
+            "identity_clean": identity_clean,
+            "action": action,
+        }
     print()
     if unmapped:
         print(f"  [WARN] {len(unmapped)} 条文档无可映射 collection（前 5: {unmapped[:5]}）")
-    return counts
+    return counts, identity
 
 
 async def main() -> int:
@@ -205,14 +269,27 @@ async def main() -> int:
         return 1
 
     docs = load_corpus(corpus_path)
-    print(f"语料: {corpus_path.name} -> {len(docs)} docs (sha256={_sha256_file(corpus_path)[:16]}…)")
+    corpus_sha256 = _sha256_file(corpus_path)
+    print(f"语料: {corpus_path.name} -> {len(docs)} docs (sha256={corpus_sha256[:16]}…)")
 
-    from core.config import EMBEDDING_DIM, EMBEDDING_MODEL
+    from core.config import (
+        EMBEDDING_DIM,
+        EMBEDDING_MODEL,
+        QDRANT_API_KEY,
+        QDRANT_HOST,
+        QDRANT_PORT,
+    )
     from rag.qdrant_knowledge_base import BM25Readiness, QdrantKnowledgeBase
 
-    kb = QdrantKnowledgeBase(host="localhost", port=6333)
+    # Canonical endpoint: same QDRANT_HOST/PORT (+ optional API key) as
+    # scripts/evaluate_rag.py. A hardcoded localhost:6333 would silently import
+    # into a different database whenever the deployment overrides the host
+    # (e.g. Docker Compose service name `qdrant`).
+    kb = QdrantKnowledgeBase(
+        host=QDRANT_HOST, port=QDRANT_PORT, api_key=QDRANT_API_KEY or ""
+    )
     if not kb.available:
-        print("[FATAL] Qdrant 不可达 (localhost:6333)")
+        print(f"[FATAL] Qdrant 不可达 ({QDRANT_HOST}:{QDRANT_PORT})")
         return 1
     if not kb.embedding_available:
         print("[FATAL] EMBEDDING_API_KEY 未配置，向量导入无法进行（fail-closed）")
@@ -232,10 +309,16 @@ async def main() -> int:
         "git_sha": _git_sha(),
         "corpus": {
             "path": str(corpus_path.relative_to(PROJECT_ROOT)),
-            "sha256": _sha256_file(corpus_path),
+            "sha256": corpus_sha256,
             "declared_docs": len(docs),
+            "expected_logical_ids": len({d["id"] for d in docs}),
         },
         "embedding": {"model": EMBEDDING_MODEL, "dim": EMBEDDING_DIM},
+        "qdrant": {
+            "host": QDRANT_HOST,
+            "port": QDRANT_PORT,
+            "collections": EVAL_COLLECTIONS,
+        },
         "scene_mapping": SCENE_TO_COLLECTION,
         "dry_run": args.dry_run,
     }
@@ -250,10 +333,13 @@ async def main() -> int:
         manifest["coverage"] = coverage
         print("dry-run 映射结果:", json.dumps(mapped, ensure_ascii=False))
     else:
-        print("开始导入（幂等，确定性 point id）...")
-        counts = await import_corpus(kb, docs, args.batch_size, skip_existing=True)
+        print("开始导入（幂等，确定性 point id；按 logical identity 校验）...")
+        counts, identity = await import_corpus(
+            kb, docs, args.batch_size, corpus_sha256
+        )
         manifest["imported_counts"] = counts
         manifest["total_indexed"] = sum(counts.values())
+        manifest["identity"] = identity
         manifest["coverage"] = coverage
         print(f"导入完成: {json.dumps(counts, ensure_ascii=False)}")
 
