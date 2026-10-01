@@ -1,9 +1,16 @@
 # 客服 AI Agent 项目生产准备度检查清单
 
-> 本清单于 2026-09-30 重新审计。Runtime version 仍为 v6.3；下方旧日期/旧数字均为历史快照，不能替代本次执行结果。
+> 本清单于 2026-09-30 重新审计，2026-10-01 复核。Runtime version 仍为 v6.3；下方旧日期/旧数字均为历史快照，不能替代本次执行结果。
 > 口径：本清单只记录**要执行的 gate 与要复核的项**；动态 PASS/计数结果不在此写死，
 > 进入带日期的 audit 报告（`docs/reports/audit/**`）。测试数量一律以
 > `pytest --collect-only -q` / `npm test` 当前输出为准。
+>
+> **证据分级（每项必须能对应到其中一级，禁止把低级别冒充高级别）**：
+> `IMPLEMENTED`（代码存在）→ `LOCALLY VERIFIED`（本地命令通过）→
+> `CI VERIFIED`（CI lane 通过）→ `CONTROLLED STAGING`（受控 provider 调用）→
+> `PRODUCTION NOT_VERIFIED`（无生产 artifact）。
+> **当前 provider auth / provider billing / 生产延迟 / 真实 Redis / 真实 ERP /
+> 正式 649-query RAG metrics 均为 PRODUCTION NOT_VERIFIED（无 artifact）。**
 
 ## 0. Current HEAD gates
 
@@ -21,7 +28,7 @@
 - [ ] production evidence harness 已生成脱敏且带 provenance 的 artifact
 - [ ] provider auth/staging 已验证；HTTP 401、token usage/billing unavailable 仍是 **NOT_VERIFIED**
 
-## 1. 当前已验证（结构性事实，复现命令见括号）
+## 1. 结构性实现事实（IMPLEMENTED / LOCALLY VERIFIED；不构成 production validation）
 
 - [x] 前端单测可运行：`npm test`（当前 7 个 Vitest 测试文件；通过数以命令输出为准）
 - [x] 前端生产构建通过：`npm run build`

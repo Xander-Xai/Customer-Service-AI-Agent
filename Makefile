@@ -207,8 +207,14 @@ clean: ## 清理构建产物
 	@echo "✅ 清理完成"
 
 # ===== 依赖快照（非权威）=====
-# 生产/CI/开发的唯一依赖契约是 requirements.txt（Docker builder stage 亦用它）。
-# requirements-lock.txt 是被冻结的历史快照（保留其非权威 header），工具不会重写它；
+# 依赖契约分层（每层语义不同，不要把它们混为一谈）：
+#   Deployment（生产）  : requirements.txt + Dockerfile 是 canonical production contract。
+#   CI Lane A（coverage reproducibility）: requirements.txt + pinned pytest /
+#                         pytest-asyncio / pytest-cov / coverage。
+#   Dev compatibility Lane B: requirements.txt + requirements-dev.txt。
+#   requirements-lock.txt       : HISTORICAL / NON-AUTHORITATIVE 快照（保留其 header，
+#                                 工具不会重写它）。
+#   requirements-lock.local.txt : untracked 本地快照（gitignored）。
 # `make lock` 只把本地环境快照写到未跟踪的 requirements-lock.local.txt。
 lock: ## 生成本地依赖快照（非权威，不用于部署）
 	@echo "🔒 生成 requirements-lock.local.txt 本地快照（非权威）..."
