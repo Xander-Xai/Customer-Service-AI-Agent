@@ -20,7 +20,7 @@
 #   Dockerfile 的 builder stage 同样 `COPY requirements.txt` 安装。
 #
 # 保留原因: 仅作历史证据（依赖清单随时间的变化）。不要用于部署、CI 或开发安装。
-# Makefile `make lock` 只会生成本地环境快照，同样不具备权威性。
+# 本文件已冻结：`make lock` 不会重写它，只会写 requirements-lock.local.txt。
 #
 # 生成方式: pip freeze --exclude-editable > requirements-lock.txt
 # 生成环境: Python 3.10 / Ubuntu 22.04

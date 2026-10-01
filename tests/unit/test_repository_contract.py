@@ -143,6 +143,19 @@ class TestDependencyContract:
         block = m.group(0)
         assert "非权威" in block, "make lock no longer states it is non-authoritative"
         assert "生成依赖锁定文件" not in block
+        # `make lock` must not clobber the frozen historical snapshot (whose
+        # SUPERSEDED header is guarded here); it writes an untracked local file.
+        assert "requirements-lock.local.txt" in block
+        assert not re.search(r">\s*requirements-lock\.txt\b", block), (
+            "make lock overwrites requirements-lock.txt, destroying its "
+            "non-authoritative header"
+        )
+
+    def test_local_lock_snapshot_is_gitignored(self):
+        gitignore = _read(".gitignore")
+        assert any(
+            line.strip() == "requirements-lock.local.txt" for line in gitignore.splitlines()
+        ), "requirements-lock.local.txt is not gitignored"
 
 
 class TestHistoricalAuthority:
