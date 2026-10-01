@@ -3,8 +3,9 @@ Unit tests for _process_with_tools streaming events.
 v6.0: 验证 thinking / tool_call / tool_result 事件的正确发射。
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from agents.base_agent import BaseAgent
 
@@ -72,7 +73,7 @@ async def test_process_with_tools_emits_thinking_and_tool_call():
         "session_id": "test-session",
     }
 
-    result = await agent._process_with_tools(state, "你是一个产品专家")
+    await agent._process_with_tools(state, "你是一个产品专家")
 
     event_types = [e["type"] for e in events]
     assert "thinking" in event_types, f"缺少 thinking 事件, got {event_types}"

@@ -265,7 +265,7 @@ def create_app(
         from api.routes.ws import periodic_ws_cleanup
 
         cleanup_task = asyncio.create_task(periodic_ws_cleanup())
-        
+
         # 周期性限流清理 (由 setup_middleware 注入)
         rate_limit_cleanup_task = None
         if hasattr(app.state, "start_rate_limit_cleanup"):
@@ -283,7 +283,7 @@ def create_app(
         cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await cleanup_task
-            
+
         if rate_limit_cleanup_task:
             rate_limit_cleanup_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
