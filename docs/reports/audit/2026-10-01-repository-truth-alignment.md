@@ -42,7 +42,7 @@ Branch cleanup result:
 | `requirements-dev.txt` | `pytest-asyncio>=0.23.0` + "floor 0.23" comment | must be `>=0.23.4` for pytest 8 | floor raised; comment corrected |
 | `.github/workflows/ci.yml` | one implicit pytest contract | LANE A (pinned coverage) vs LANE B (dev compat) | lanes documented; `dev-compat` job added |
 | `requirements-lock.txt` | claimed "生产部署" install entry but unused by Docker; missing 9 direct deps; stale Jinja2/MarkupSafe | non-authoritative snapshot; `requirements.txt`+Dockerfile canonical | reclassified SUPERSEDED / NON-AUTHORITATIVE |
-| `Makefile` `lock` | "生成依赖锁定文件" (authoritative framing) | local snapshot only | relabeled non-authoritative |
+| `Makefile` `lock` | "生成依赖锁定文件" (authoritative framing) | writes an untracked local snapshot; never rewrites the frozen file | relabeled non-authoritative; output → `requirements-lock.local.txt` |
 | `Dockerfile` | installs `requirements.txt` (undocumented) | canonical deployment contract | comment documents contract |
 | `pyproject.toml` | `6.0` | `6.3` | synchronized |
 | `package.json` | `6.1` + description claims v6.1 | `6.3` | synchronized |
@@ -61,7 +61,8 @@ Branch cleanup result:
 - **`requirements-lock.txt`:** 2026-06-06 local `pip freeze` snapshot, **NOT** used by Docker/CI/install. Labeled `SUPERSEDED / NON-AUTHORITATIVE`. Not a reproducible lock (no resolve-from-clean-env, no hashes; missing direct deps).
 - **`requirements-optional.txt`:** optional media extras (subset of `requirements.txt`).
 - **`requirements-dev.txt`:** LANE B dev compatibility surface.
-- **Decision:** Plan B (no tooling for a hermetic transitive lock). Recorded in file headers + `make lock` relabel + guard tests.
+- **Decision:** Plan B (no tooling for a hermetic transitive lock). Recorded in file headers + `make lock` (writes an untracked `requirements-lock.local.txt`, never rewrites the frozen historical file) + guard tests.
+- **CI lanes:** LANE A pinned coverage toolchain (`test` job); LANE B supported dev compatibility (`dev-compat` job), which also pins and exercises the exact `pytest-asyncio==0.23.4` floor (P2 review on PR #22).
 
 ## Version contract (final definition)
 
