@@ -14,10 +14,9 @@ import argparse
 import re
 import subprocess
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 _PEM_BEGIN = "-" * 5 + "BEGIN "
 _PEM_END = "-" * 5
@@ -27,6 +26,20 @@ _PRIVATE_KEY_RE = re.compile(
 _OPENAI_KEY_RE = re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")
 _AWS_KEY_RE = re.compile(r"\bAKIA[0-9A-Z]{16}\b")
 _GITHUB_TOKEN_RE = re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")
+# Generic ``API_KEY=...`` assignment, including quoted and case-varied forms:
+#   api_key=abcdefghijklmnopqrstuv
+#   api_key="abcdefghijklmnopqrstuv"
+#   API_KEY = 'abcdefghijklmnopqrstuv'
+_API_KEY_ASSIGNMENT_RE = re.compile(
+    r"(?im)^[ \t]*(?:export[ \t]+)?[A-Za-z0-9_]*api[_-]?key[A-Za-z0-9_]*[ \t]*=[ \t]*"
+    r"[\"']?([A-Za-z0-9_./+\-]{20,})"
+)
+# Documentation/template placeholders must not be reported as live secrets.
+_PLACEHOLDER_VALUE_RE = re.compile(
+    r"placeholder|change[_-]?me|your[_-]|example|dummy|sample|do[_-]?not[_-]?use|"
+    r"test[_-]?key|redacted",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -55,6 +68,11 @@ def scan_text(location: str, text: str) -> list[Finding]:
     for category, pattern in patterns:
         if pattern.search(text):
             findings.append(Finding(location, category))
+    if any(
+        not _PLACEHOLDER_VALUE_RE.search(match.group(1))
+        for match in _API_KEY_ASSIGNMENT_RE.finditer(text)
+    ):
+        findings.append(Finding(location, "generic-api-key"))
     return findings
 
 

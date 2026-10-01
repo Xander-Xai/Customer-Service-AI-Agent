@@ -53,6 +53,8 @@ __all__ = [
 ]
 
 _SCROLL_LIMIT = 500
+# Bounded upsert/delete request size for the rebuild (never collection-sized).
+_BATCH_SIZE = 128
 
 
 def _scroll_all(client: QdrantClient, collection_name: str, *, with_vectors: bool):
@@ -175,6 +177,7 @@ def rebuild_collection_point_ids(
     collection_name: str,
     *,
     dry_run: bool = True,
+    batch_size: int = _BATCH_SIZE,
 ) -> RebuildReport:
     """Rebuild Point IDs in place.
 
@@ -211,22 +214,22 @@ def rebuild_collection_point_ids(
     """
     from qdrant_client.http import models
 
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
     report = RebuildReport(collection=collection_name, dry_run=dry_run)
-    records = list(_scroll_all(client, collection_name, with_vectors=True))
-    report.scrolled = len(records)
 
-    to_upsert: list[models.PointStruct] = []
+    # ---- Pass 1 (compact, no vectors): classify + preflight ----
+    # Only compact state is retained (ids, counts, doc_id sets) so a large
+    # collection never materializes its full vector payload in process memory.
     stable_ids_set: set[int] = set()
     legacy_to_delete: list[int] = []
-    # doc_id -> list of records carrying it (detect duplicates)
-    doc_id_records: dict[Any, list[Any]] = {}
-    # stable_id -> list of distinct doc_ids mapping to it (detect conflicts)
+    doc_id_counts: dict[Any, int] = {}
     stable_id_doc_ids: dict[int, list[Any]] = {}
-    # stable ids we intend to write, that are already occupied by an
-    # unmappable legacy point (no doc_id) — refused overwrite.
     unmappable_occupied: set[int] = set()
+    mappable_count = 0
 
-    for rec in records:
+    for rec in _scroll_all(client, collection_name, with_vectors=False):
+        report.scrolled += 1
         payload = getattr(rec, "payload", None) or {}
         doc_id = payload.get("doc_id") if isinstance(payload, dict) else None
         if not doc_id:
@@ -238,16 +241,14 @@ def rebuild_collection_point_ids(
             continue
         stable_id = document_id_to_point_id(collection_name, doc_id)
         stable_ids_set.add(stable_id)
-        vector = getattr(rec, "vector", None)
-        to_upsert.append(models.PointStruct(id=stable_id, vector=vector, payload=payload))
+        mappable_count += 1
         if rec.id != stable_id:
             legacy_to_delete.append(rec.id)
-        doc_id_records.setdefault(doc_id, []).append(rec)
+        doc_id_counts[doc_id] = doc_id_counts.get(doc_id, 0) + 1
         stable_id_doc_ids.setdefault(stable_id, []).append(doc_id)
 
-    # Preflight: surface blocking conflicts.
     report.blocking_duplicates = sorted(
-        str(d) for d, recs in doc_id_records.items() if len(recs) > 1
+        str(d) for d, count in doc_id_counts.items() if count > 1
     )
     report.blocking_conflicts = [
         (sid, sorted(str(x) for x in set(dids)))
@@ -259,10 +260,15 @@ def rebuild_collection_point_ids(
         pid for pid in unmappable_occupied if pid in stable_ids_set
     )
 
+    # Never delete an id that is also a stable id for another document (rare
+    # truncation collision). The dry-run preview uses the SAME filter as
+    # execution so the operator preview cannot over-report deletions.
+    safe_to_delete = [pid for pid in legacy_to_delete if pid not in stable_ids_set]
+
     if dry_run:
-        report.upserted = len(to_upsert)
-        report.deleted_legacy = len(legacy_to_delete)
-        report.legacy_point_ids = legacy_to_delete
+        report.upserted = mappable_count
+        report.deleted_legacy = len(safe_to_delete)
+        report.legacy_point_ids = safe_to_delete
         return report
 
     # Execute preflight: abort before any write if blocking conflicts exist.
@@ -274,16 +280,53 @@ def rebuild_collection_point_ids(
         report.aborted = True
         return report
 
-    if to_upsert:
-        client.upsert(collection_name=collection_name, points=to_upsert)
-        report.upserted = len(to_upsert)
-    # Never delete an id that is also a stable id for another document.
-    safe_to_delete = [pid for pid in legacy_to_delete if pid not in stable_ids_set]
-    if safe_to_delete:
-        client.delete(
-            collection_name=collection_name,
-            points_selector=models.PointIdsList(points=safe_to_delete),
+    # ---- Pass 2 (bounded batches): re-upsert at stable id, delete legacy ----
+    # Vectors are held only for one batch; upsert/delete requests are bounded
+    # by ``batch_size`` rather than the whole collection.
+    safe_to_delete_set = set(safe_to_delete)
+    batch: list[models.PointStruct] = []
+    pending_deletes: list[int] = []
+    upserted = 0
+    deleted_ids: list[int] = []
+    # A stable id may be created ahead of the live scroll offset; if scroll
+    # later reaches it, process each stable id once (the upsert is idempotent).
+    processed_stable: set[int] = set()
+
+    def _flush() -> None:
+        nonlocal batch, pending_deletes, upserted
+        if batch:
+            client.upsert(collection_name=collection_name, points=batch)
+            upserted += len(batch)
+            batch = []
+        if pending_deletes:
+            client.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(points=pending_deletes),
+            )
+            deleted_ids.extend(pending_deletes)
+            pending_deletes = []
+
+    for rec in _scroll_all(client, collection_name, with_vectors=True):
+        payload = getattr(rec, "payload", None) or {}
+        doc_id = payload.get("doc_id") if isinstance(payload, dict) else None
+        if not doc_id:
+            continue
+        stable_id = document_id_to_point_id(collection_name, doc_id)
+        if stable_id in processed_stable:
+            continue
+        processed_stable.add(stable_id)
+        batch.append(
+            models.PointStruct(
+                id=stable_id, vector=getattr(rec, "vector", None), payload=payload
+            )
         )
-        report.deleted_legacy = len(safe_to_delete)
-    report.legacy_point_ids = safe_to_delete
+        if rec.id in safe_to_delete_set:
+            pending_deletes.append(rec.id)
+        if len(batch) + len(pending_deletes) >= batch_size:
+            _flush()
+    _flush()
+
+    report.upserted = upserted
+    report.deleted_legacy = len(deleted_ids)
+    report.legacy_point_ids = deleted_ids
     return report

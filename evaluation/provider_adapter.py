@@ -150,7 +150,15 @@ def probe_chat_completion(
         response_nonempty = False
         response_model: str | None = None
         if response.status_code == 200:
-            body = response.json()
+            try:
+                body = response.json()
+            except (ValueError, TypeError):
+                # HTTP 200 with an empty/HTML/malformed body must not traceback;
+                # mirror the auth probe's INVALID_PROVIDER_RESPONSE semantics.
+                return ChatProbeResult(
+                    200, "INVALID_PROVIDER_RESPONSE", False, 1,
+                    _trace_id(response.headers), None, None, False,
+                )
             if not isinstance(body, Mapping):
                 return ChatProbeResult(200, "INVALID_PROVIDER_RESPONSE", False, 1, _trace_id(response.headers), None, None, False)
             usage = normalize_provider_response(body, provider="siliconflow", fallback_model=model)
@@ -185,11 +193,24 @@ def _number(value: Any) -> int | float | None:
 
 
 def _nested(mapping: Mapping[str, Any], *keys: str | int) -> Any:
+    """Traverse a mixed mapping/list structure.
+
+    OpenAI-compatible SSE events look like
+    ``{"choices": [{"delta": {"content": "..."}}]}``: the traversal must index
+    into the ``choices`` list (integer keys), not only walk mappings. A
+    mapping-only walker silently returns ``None`` for every streamed event, so
+    ``response_nonempty``/TTFT would never be observed.
+    """
     current: Any = mapping
     for key in keys:
-        if not isinstance(current, Mapping):
+        if isinstance(key, int):
+            if not isinstance(current, (list, tuple)) or not 0 <= key < len(current):
+                return None
+            current = current[key]
+        elif isinstance(current, Mapping):
+            current = current.get(key)
+        else:
             return None
-        current = current.get(key)
     return current
 
 
@@ -324,7 +345,7 @@ class ProviderAdapter:
                                 final_payload["id"] = event["id"]
                             if event.get("model"):
                                 final_payload["model"] = event["model"]
-                            delta = _nested(event, "choices", 0, "delta") if isinstance(_nested(event, "choices"), list) else None
+                            delta = _nested(event, "choices", 0, "delta")
                             if isinstance(delta, Mapping) and delta.get("content"):
                                 response_nonempty = True
                                 if first_token_at is None:

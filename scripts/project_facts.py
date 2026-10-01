@@ -24,6 +24,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,26 +33,41 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
+from config_fallback import extract_fallback_defaults  # noqa: E402
+from eval_contract import (  # noqa: E402
+    EXPERIMENT_NAMES,
+    FAILURE_TAXONOMY,
+    METRIC_FAMILIES,
+    POPULATION_VIEWS,
+    REPORT_SCHEMA_VERSION,
+)
 from rag_evidence_status import claimed_doc_formal_status, derive_rag_formal_status  # noqa: E402
 
 BENCHMARK_PATH = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
+CONFIG_PATH = PROJECT_ROOT / "core" / "config.py"
 EVAL_SCRIPT = PROJECT_ROOT / "scripts" / "evaluate_rag.py"
 MAKEFILE_PATH = PROJECT_ROOT / "Makefile"
 
 
 def _llm_facts() -> dict:
-    import core.config as cfg
+    """Canonical runtime *fallback* facts (AST-extracted, env independent).
 
+    ``core/config.py`` executes ``load_dotenv(override=True)`` on import, so
+    reading the module attributes would leak the developer's local ``.env``
+    into a doc guard that is documented as comparing against source fallback
+    literals. The AST default is the canonical fallback.
+    """
+    fallback = extract_fallback_defaults(CONFIG_PATH)
     return {
-        "runtime_version": cfg.VERSION,
-        "llm_provider_default": cfg.LLM_PROVIDER,
-        "llm_model": cfg.OPENAI_MODEL,
-        "llm_base_url": cfg.OPENAI_BASE_URL,
-        "embedding_model": cfg.EMBEDDING_MODEL,
-        "embedding_dim": cfg.EMBEDDING_DIM,
-        "reranker_model": cfg.RERANKER_MODEL,
-        "vector_db_mode": cfg.VECTOR_DB_MODE,
-        "hybrid_search_enabled": cfg.HYBRID_SEARCH_ENABLED,
+        "runtime_version": fallback.get("VERSION"),
+        "llm_provider_default": fallback.get("LLM_PROVIDER"),
+        "llm_model": fallback.get("OPENAI_MODEL"),
+        "llm_base_url": fallback.get("OPENAI_BASE_URL"),
+        "embedding_model": fallback.get("EMBEDDING_MODEL"),
+        "embedding_dim": fallback.get("EMBEDDING_DIM"),
+        "reranker_model": fallback.get("RERANKER_MODEL"),
+        "vector_db_mode": fallback.get("VECTOR_DB_MODE"),
+        "hybrid_search_enabled": fallback.get("HYBRID_SEARCH_ENABLED"),
     }
 
 
@@ -100,49 +116,25 @@ def _benchmark_query_count(root: Path = PROJECT_ROOT) -> tuple[int, int]:
 
 
 def _evaluation_facts(root: Path = PROJECT_ROOT) -> dict:
-    eval_script = root / "scripts" / "evaluate_rag.py"
-    src = eval_script.read_text(encoding="utf-8", errors="replace") if eval_script.exists() else ""
-
-    seen: set[str] = set()
-    experiment_names = [
-        e for e in _EXPERIMENT_NAME_RE.findall(src) if not (e in seen or seen.add(e))
-    ]
-
-    metric_names = ["hit@k", "recall@k", "precision@k", "ndcg@k", "mrr@k"]
-
-    pop_match = re.search(r"POPULATION_VIEWS\s*=\s*\(([^)]*)\)", src, re.DOTALL)
-    populations = re.findall(r'"([a-z_]+)"', pop_match.group(1)) if pop_match else []
-
-    ks_match = re.search(r"DEFAULT_KS\s*=\s*\(([^)]*)\)", src)
-    ks = re.findall(r"\d+", ks_match.group(1)) if ks_match else []
-
-    schema_match = re.search(r'REPORT_SCHEMA_VERSION\s*=\s*"([^"]+)"', src)
-    schema_version = schema_match.group(1) if schema_match else None
-
-    failure_match = re.search(r"FAILURE_TAXONOMY\s*=\s*\(([^)]*)\)", src, re.DOTALL)
-    failure_taxonomy = (
-        re.findall(r'"([A-Z_]+)"', failure_match.group(1)) if failure_match else []
-    )
-
+    # Evaluation-harness capabilities come from the shared canonical contract
+    # (scripts/eval_contract.py), imported by the evaluator too. Deriving them
+    # here by parsing evaluate_rag.py source was fragile (a renamed metric or a
+    # new population could silently drift out of the guard).
+    #
     # Formal-metric status is derived from provenance-bearing evidence
     # artifacts ONLY — never from Markdown text. Docs are verified against
     # this derived state by check_doc()/audit_doc_consistency.py.
     formal = derive_rag_formal_status(root)
 
     return {
-        "evaluation_experiments": experiment_names,
-        "evaluation_metric_names": metric_names,
-        "evaluation_metric_ks": [int(k) for k in ks],
-        "evaluation_populations": populations,
-        "evaluation_failure_taxonomy": failure_taxonomy,
-        "evaluation_report_schema_version": schema_version,
+        "evaluation_experiments": list(EXPERIMENT_NAMES),
+        "evaluation_metric_names": list(METRIC_FAMILIES),
+        "evaluation_metric_ks": [1, 3, 5, 8],
+        "evaluation_populations": list(POPULATION_VIEWS),
+        "evaluation_failure_taxonomy": list(FAILURE_TAXONOMY),
+        "evaluation_report_schema_version": REPORT_SCHEMA_VERSION,
         **formal,
     }
-
-
-_EXPERIMENT_NAME_RE = re.compile(
-    r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', re.MULTILINE
-)
 
 
 def _makefile_targets() -> list[str]:
@@ -165,51 +157,135 @@ def collect(root: Path = PROJECT_ROOT) -> dict:
     return facts
 
 
-# Canonical static lines inside docs/reference/current-state.md.
-# Values are re-rendered dynamically; a mismatch means the doc drifted.
-CHECK_LINES = {
-    "runtime_version": "Runtime version (`core/config.py::VERSION`)",
-    "llm_model": "Default LLM (`core/config.py::OPENAI_MODEL`)",
-    "embedding_model": "Default embedding (`core/config.py::EMBEDDING_MODEL`)",
-    "reranker_model": "Default reranker (`core/config.py::RERANKER_MODEL`)",
+# Field-to-field checks: each documented fact is matched by a pattern bound to
+# its labeled line, and the captured value is compared to the runtime fact.
+# A global token search is unsafe (e.g. expected agent count 10 found inside
+# the embedding dimension 1024). Add a field here when current-state.md gains
+# a runtime-derived number.
+CHECK_FIELDS: dict[str, dict[str, Any]] = {
+    "runtime_version": {
+        "pattern": re.compile(
+            r"Runtime version \(`core/config\.py::VERSION`\): \*\*`([^`]+)`\*\*"
+        ),
+        "fact": "runtime_version",
+    },
+    "llm_model": {
+        "pattern": re.compile(
+            r"Default LLM \(`core/config\.py::OPENAI_MODEL`\): \*\*`([^`]+)`\*\*"
+        ),
+        "fact": "llm_model",
+    },
+    "embedding_model": {
+        "pattern": re.compile(
+            r"Default embedding \(`core/config\.py::EMBEDDING_MODEL`\): \*\*`([^`]+)`\*\*"
+        ),
+        "fact": "embedding_model",
+    },
+    "reranker_model": {
+        "pattern": re.compile(
+            r"Default reranker \(`core/config\.py::RERANKER_MODEL`\): \*\*`([^`]+)`\*\*"
+        ),
+        "fact": "reranker_model",
+    },
+    "vector_db_mode": {
+        "pattern": re.compile(
+            r"Vector DB \(`core/config\.py::VECTOR_DB_MODE`\): `([^`]+)`"
+        ),
+        "fact": "vector_db_mode",
+    },
+    "hybrid_search_enabled": {
+        "pattern": re.compile(
+            r"Hybrid retrieval \(`core/config\.py::HYBRID_SEARCH_ENABLED`\): `([^`]+)`"
+        ),
+        "fact": "hybrid_search_enabled",
+    },
+    "agent_role_count": {
+        "pattern": re.compile(
+            r"Agent roles \(`core/container\.py::_init_agents`\): \*\*(\d+)\*\*"
+        ),
+        "fact": "agent_role_count",
+    },
+    "openapi_path_count": {
+        "pattern": re.compile(r"OpenAPI HTTP paths[^\n]*?: \*\*`?(\d+)`?\*\*"),
+        "fact": "openapi_path_count",
+    },
+    "rag_benchmark_query_count": {
+        "pattern": re.compile(r"RAG benchmark queries[^\n]*?: \*\*`?(\d+)`?\*\*"),
+        "fact": "rag_benchmark_query_count",
+    },
 }
+
+# Canonical make targets the RAG evidence workflow documents.
+CANONICAL_RAG_TARGETS = (
+    "rag-eval-import",
+    "rag-eval-649-preflight",
+    "rag-eval-649-smoke",
+    "rag-eval-649",
+)
 
 
 def check_doc(doc_path: Path, root: Path = PROJECT_ROOT) -> int:
     facts = collect(root)
     text = doc_path.read_text(encoding="utf-8")
     problems: list[str] = []
-    for marker in CHECK_LINES.values():
-        if marker not in text:
-            problems.append(f"missing line: {marker}")
-    for token in (
-        facts["runtime_version"],
-        facts["llm_model"],
-        facts["embedding_model"],
-        facts["reranker_model"],
-        str(facts["openapi_path_count"]),
-        str(facts["rag_benchmark_query_count"]),
-        str(facts["agent_role_count"]),
-    ):
-        if token not in text:
-            problems.append(f"stale fact: expected `{token}` in {doc_path.name}")
+
+    # 1. Field-to-field: documented value must equal the runtime fact.
+    for field, spec in CHECK_FIELDS.items():
+        match = spec["pattern"].search(text)
+        if match is None:
+            problems.append(
+                f"missing field marker `{field}` in {doc_path.name}"
+            )
+            continue
+        documented = match.group(1)
+        expected = str(facts[spec["fact"]])
+        if documented != expected:
+            problems.append(
+                f"stale field `{field}`: {doc_path.name} renders `{documented}` "
+                f"but runtime fallback fact is `{expected}`"
+            )
+
+    # 2. LLM base URL + provider are documented on one line; validate both.
+    base_match = re.search(
+        r"Default LLM base URL: `([^`]+)`（provider: `([^`]+)`）", text
+    )
+    if base_match is None:
+        problems.append(f"missing field marker `llm_base_url` in {doc_path.name}")
+    else:
+        if base_match.group(1) != str(facts["llm_base_url"]):
+            problems.append(
+                f"stale field `llm_base_url`: {doc_path.name} renders "
+                f"`{base_match.group(1)}` but runtime fallback is `{facts['llm_base_url']}`"
+            )
+        if base_match.group(2) != str(facts["llm_provider_default"]):
+            problems.append(
+                f"stale field `llm_provider_default`: {doc_path.name} renders "
+                f"`{base_match.group(2)}` but runtime fallback is "
+                f"`{facts['llm_provider_default']}`"
+            )
+
     if not facts["rag_benchmark_metadata_consistent"]:
         problems.append("rag benchmark metadata inconsistent (total_queries != len(queries))")
-    # Evaluation-harness drift guards (machine-derived from evaluate_rag.py):
+
+    # 3. Canonical evaluation surfaces (derived, so adding/renaming a fact in
+    # the contract forces this guard to require the new value).
     for experiment in facts["evaluation_experiments"]:
         if experiment not in text:
             problems.append(
-                f"stale evaluation fact: canonical experiment `{experiment}` missing from {doc_path.name}"
+                f"stale evaluation fact: canonical experiment `{experiment}` "
+                f"missing from {doc_path.name}"
             )
-    for population in ("all_queries", "retrieval_eligible", "full_gold_covered"):
+    for population in facts["evaluation_populations"]:
         if population not in text:
             problems.append(
-                f"stale evaluation fact: population `{population}` missing from {doc_path.name}"
+                f"stale evaluation fact: canonical population `{population}` "
+                f"missing from {doc_path.name}"
             )
-    for target in ("rag-eval-import", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-649"):
+    for target in CANONICAL_RAG_TARGETS:
         if target not in text:
             problems.append(
-                f"stale evaluation fact: canonical make target `{target}` missing from {doc_path.name}"
+                f"stale evaluation fact: canonical make target `{target}` "
+                f"missing from {doc_path.name}"
             )
     problems.extend(check_formal_status_claims(text, doc_path, root))
     canonical_rag_doc = root / "docs" / "reference" / "rag-evaluation.md"

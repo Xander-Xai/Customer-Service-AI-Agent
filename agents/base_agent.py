@@ -703,6 +703,10 @@ class BaseAgent(ABC):
                         and cache_policy.enabled
                         and cache_policy.ttl_seconds > 0
                         and (not cache_policy.require_scope or cache_scope)
+                        # Private resources must re-run their in-handler
+                        # authorization boundary; never serve a stale
+                        # authorized result from cache.
+                        and not cache_policy.authorization_required
                     )
                     result = None
                     cache_hit = False

@@ -99,14 +99,24 @@ def run_provider_staging(
         raise RuntimeError("request cap includes worst-case provider retry attempts; no request made")
     if estimated_input_cost_per_1k is None or estimated_output_cost_per_1k is None:
         raise RuntimeError("estimated cost rates are required for the cost cap; no price lookup is performed")
-    planned_input = sum(_estimate_input_tokens(case.query) for case in cases) * (repeat + warmup)
+    # Worst case every planned request is retried up to max_attempts: warmup
+    # and retried attempts are billable too. Guarding only the measured repeats
+    # undercounted real spend several-fold.
+    planned_input = (
+        sum(_estimate_input_tokens(case.query) for case in cases)
+        * (repeat + warmup)
+        * max_attempts
+    )
     if planned_input > max_input_tokens:
         raise RuntimeError("planned estimated input-token cap would be exceeded; no request made")
-    planned_estimated_cost = sum(
-        (_estimate_input_tokens(case.query) / 1000) * estimated_input_cost_per_1k
-        + (max_output_tokens / 1000) * estimated_output_cost_per_1k
-        for case in cases
-        for _ in range(repeat)
+    planned_estimated_cost = (
+        sum(
+            (_estimate_input_tokens(case.query) / 1000) * estimated_input_cost_per_1k
+            + (max_output_tokens / 1000) * estimated_output_cost_per_1k
+            for case in cases
+        )
+        * (repeat + warmup)
+        * max_attempts
     )
     if planned_estimated_cost > estimated_cost_cap:
         raise RuntimeError("planned estimated cost cap would be exceeded; no request made")
@@ -125,6 +135,7 @@ def run_provider_staging(
     measured_results: list[ProviderCallResult] = []
     input_budget = 0
     output_budget = 0
+    warmup_count = len(cases) * warmup
     for index in range(total_requests):
         case = cases[index % len(cases)]
         prompt = case.query
@@ -137,24 +148,37 @@ def run_provider_staging(
             output_budget += int(result.usage.output_tokens.value)
         if output_budget > max_requests * max_output_tokens:
             raise RuntimeError("provider output-token safety budget exceeded")
-        if index >= len(cases) * warmup:
+        is_warmup = index < warmup_count
+        if not is_warmup:
             measured_results.append(result)
         if result.error_category in {"AUTH_FAILED", "FORBIDDEN"}:
+            # A terminating auth failure is accounted even when it happened
+            # during warmup; otherwise measured_results is empty and the run
+            # would look like a zero-request PASS while the breaker fired.
+            if is_warmup:
+                measured_results.append(result)
             break
+    authentication_blocked = any(
+        result.error_category in {"AUTH_FAILED", "FORBIDDEN"} for result in results
+    )
     e2e = [result.e2e_ms for result in measured_results]
     ttft = [result.ttft_ms for result in measured_results if result.ttft_ms is not None]
     latency = summarize_latency(e2e, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED)
     ttft_summary = summarize_latency(ttft, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED)
     successes = sum(result.final_status == "SUCCESS" and result.response_nonempty for result in measured_results)
     failures = len(measured_results) - successes
+    if authentication_blocked:
+        final_status = "BLOCKED_BY_AUTHENTICATION"
+    elif successes == 0:
+        # Zero successful requests is never "partial success".
+        final_status = "FAILED"
+    elif failures == 0:
+        final_status = "PASS"
+    else:
+        final_status = "PARTIAL"
     costs = _aggregate_measurements(measured_results, "provider_cost", "provider_currency")
     estimated_cost = Measurement(
-        sum(
-            (_estimate_input_tokens(case.query) / 1000) * estimated_input_cost_per_1k
-            + (max_output_tokens / 1000) * estimated_output_cost_per_1k
-            for case in cases
-            for _ in range(repeat)
-        ),
+        planned_estimated_cost,
         EvidenceSource.ESTIMATED,
         unit="configured_currency",
     )
@@ -187,18 +211,26 @@ def run_provider_staging(
         attempt_count=sum(result.attempt_count for result in measured_results),
         retry_count=sum(result.retry_count for result in measured_results),
         timeout_count=sum(result.timeout_count for result in measured_results),
-        provider_error_code=next((result.error_code for result in measured_results if result.error_code), None),
-        final_status="PASS" if failures == 0 else "PARTIAL",
+        provider_error_code=next(
+            (
+                result.error_code
+                for result in (*measured_results, *results)
+                if result.error_code
+            ),
+            None,
+        ),
+        final_status=final_status,
         metadata={
             "python": sys.version.split()[0],
             "os": platform.platform(),
-            "warmup_count": len(cases) * warmup,
+            "warmup_count": warmup_count,
             "measured_count": len(measured_results),
             "planned_attempts": planned_attempts,
+            "planned_worst_case_input_tokens": planned_input,
+            "planned_worst_case_estimated_cost": planned_estimated_cost,
+            "estimated_cost_semantics": "worst-case plan over cases x (warmup+repeat) x max_attempts",
             "external_calls": sum(result.attempt_count for result in results),
-            "authentication_circuit_breaker": any(
-                result.error_category in {"AUTH_FAILED", "FORBIDDEN"} for result in results
-            ),
+            "authentication_circuit_breaker": authentication_blocked,
             "preflight": preflight,
             "artifact_privacy": "metrics_only_no_prompt_or_response",
         },
