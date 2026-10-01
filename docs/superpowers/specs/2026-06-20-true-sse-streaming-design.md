@@ -1,5 +1,9 @@
 # 全链路真流式 SSE Streaming 设计文档
 
+> **HISTORICAL DESIGN SNAPSHOT (2026-06-20)**
+> 这是带日期的设计文档，记录作者当时的设计意图，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；仅作历史留档。
+
 > 日期：2026-06-20
 > 状态：设计阶段
 > 影响范围：api/routes/chat.py, agents/base_agent.py, core/graph_builder.py, rag/, web/src/

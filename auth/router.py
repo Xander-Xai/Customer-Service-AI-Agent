@@ -1,6 +1,7 @@
 """
 用户认证路由：注册 / 登录 / Token 刷新（v5.0）
-- PBKDF2-SHA256 密码哈希（OWASP 最低标准）
+- Argon2id 密码哈希（v5.4 起为默认主路径，OWASP 2023 推荐）；
+  PBKDF2-SHA256 仅用于旧哈希的向后兼容校验与自动迁移
 - JWT Access + Refresh Token 双令牌机制
 - 管理员首次登录强制改密
 - v5.0: 密码复杂度校验（至少两类字符）

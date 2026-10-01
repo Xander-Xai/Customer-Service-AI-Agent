@@ -1,5 +1,9 @@
 # 缓存架构重构 Implementation Plan
 
+> **HISTORICAL PLAN SNAPSHOT (2026-06-24)**
+> 这是带日期的设计/实施计划，记录作者当时的工作单，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；重构已完成，仅作历史留档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将响应缓存从「内存 MD5 + 伪语义 Jaccard」重构为「Redis 精确缓存 + Qdrant(BGE) 语义缓存 + Jaccard 降级」三层漏斗模型

@@ -98,3 +98,6 @@ CLAUDE.md
 .tmp-skills/
 skills-lock.json
 .opencode
+
+# ===== 非权威依赖快照（make lock 输出；权威契约是 requirements.txt）=====
+requirements-lock.local.txt

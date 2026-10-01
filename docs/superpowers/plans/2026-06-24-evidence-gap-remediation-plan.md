@@ -1,5 +1,9 @@
 # 证据缺口修复实施计划
 
+> **HISTORICAL PLAN SNAPSHOT (2026-06-24)**
+> 这是带日期的设计/实施计划，记录作者当时的工作单，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；相关修复已完成，仅作历史留档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 修复 15 项未实现/证据不足的功能声明，覆盖知识库、多模态、业务场景、RAG 评测、监控指标、A/B 测试六大模块。

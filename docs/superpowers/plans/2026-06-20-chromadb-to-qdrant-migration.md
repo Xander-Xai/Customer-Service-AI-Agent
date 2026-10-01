@@ -1,5 +1,9 @@
 # ChromaDB → Qdrant 向量知识库迁移计划
 
+> **HISTORICAL PLAN SNAPSHOT (2026-06-20)**
+> 这是带日期的设计/实施计划，记录作者当时的工作单，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；迁移已完成，仅作历史留档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将项目核心 RAG 知识库从 ChromaDB 迁移到 Qdrant，保持外部 API 不变，提升并发性能和生产就绪度。

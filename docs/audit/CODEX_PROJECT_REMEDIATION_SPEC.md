@@ -1,14 +1,27 @@
 # Customer AI Agent Project Remediation Spec
 
-> **Status:** Proposed remediation specification  
-> **Created:** 2026-08-13  
-> **Scope:** customer-service-ai-agent  
-> **Source:** supplied cross-audit assessment plus current repository path verification  
+> **HISTORICAL AUDIT SNAPSHOT / SUPERSEDED**
+> This document does not describe current runtime state and is **not** the current unique execution spec.
+> It records the remediation specification authored on 2026-08-13; its authority has since been
+> superseded by the current-state entry point, the evidence pipeline, and later convergence work.
+> It is retained for historical traceability.
+>
+> - Current Truth: [`docs/reference/current-state.md`](../reference/current-state.md)
+> - Current evidence: [`docs/evaluation/production-evidence.md`](../evaluation/production-evidence.md), [`docs/reference/rag-evaluation.md`](../reference/rag-evaluation.md)
+
+> **Status:** SUPERSEDED / HISTORICAL AUDIT SPEC
+> **Created:** 2026-08-13
+> **Scope:** customer-service-ai-agent
+> **Source:** supplied cross-audit assessment plus current repository path verification
 > **Important:** numbers and findings quoted from the supplied assessment are audit snapshots. They are not completion evidence until the corresponding command, test, or benchmark artifact is rerun from the target checkout.
 
 ## 0. 文档目标
 
-本文件是项目整改的唯一执行规格。目标不是继续扩充模拟题，而是完成一次 Project Truth Alignment：
+本文件是 **2026-08-13 时点** 的整改执行规格；它已被后续的
+[`docs/reference/current-state.md`](../reference/current-state.md)（当前事实入口）与 evidence pipeline
+（[`docs/evaluation/production-evidence.md`](../evaluation/production-evidence.md)、
+[`docs/reference/rag-evaluation.md`](../reference/rag-evaluation.md)）**supersede**，
+不再是"唯一执行规格"。目标不是继续扩充模拟题，而是完成一次 Project Truth Alignment：
 
     代码事实 → 整改 → 真实测试 → Benchmark Artifact → Claim Matrix → 简历 → 面试 Q&A
 

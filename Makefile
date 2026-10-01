@@ -206,12 +206,16 @@ clean: ## 清理构建产物
 	rm -rf .pytest_cache htmlcov .coverage
 	@echo "✅ 清理完成"
 
-# ===== 依赖锁定 =====
-lock: ## 生成依赖锁定文件
-	@echo "🔒 生成 requirements-lock.txt..."
+# ===== 依赖快照（非权威）=====
+# 生产/CI/开发的唯一依赖契约是 requirements.txt（Docker builder stage 亦用它）。
+# requirements-lock.txt 是被冻结的历史快照（保留其非权威 header），工具不会重写它；
+# `make lock` 只把本地环境快照写到未跟踪的 requirements-lock.local.txt。
+lock: ## 生成本地依赖快照（非权威，不用于部署）
+	@echo "🔒 生成 requirements-lock.local.txt 本地快照（非权威）..."
 	pip install -r requirements.txt 2>/dev/null
-	pip freeze --exclude-editable > requirements-lock.txt
-	@echo "✅ requirements-lock.txt 已生成（请检查并提交）"
+	pip freeze --exclude-editable > requirements-lock.local.txt
+	@echo "⚠️  这是本地快照，不是可复现 lock；部署请使用 requirements.txt"
+	@echo "ℹ️  requirements-lock.txt 为冻结的历史快照，本命令不会重写它"
 
 # ===== v6.0: Qdrant 运维 =====
 
