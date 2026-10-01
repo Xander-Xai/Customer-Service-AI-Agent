@@ -20,7 +20,7 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`53`**
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`56`**
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
 ## RAG evaluation / evidence state
@@ -99,6 +99,47 @@ python3 scripts/audit_doc_consistency.py
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。
+
+## 分布式 Agent Runtime（异步 Run + Celery Worker）
+
+- **Hybrid Architecture**：实时快路径 `POST /api/chat` / `/api/chat/stream`
+  （FastAPI → LangGraph → SSE）保持不变；长任务走异步路径
+  `POST /api/runs`（创建 Run + 入队，立即返回）→ Celery worker →
+  `GET /api/runs/{run_id}` polling。见 `runtime/`、`api/routes/runs.py`。
+- **三个 ID 严格区分**：
+  - `thread_id`：对话级 ID（当前 `thread_id == session_id == LangGraph thread`），
+    同一多轮会话复用；
+  - `run_id`（`agent_runs.id`）：单轮 Graph 执行 ID，每次请求唯一；
+  - `task_id`：队列消息 / Worker 执行 ID（Celery task id）。
+  禁止"每个请求新建 thread_id"。
+- **业务状态真相源**：数据库 `agent_runs` 表（canonical），状态
+  `QUEUED → RUNNING → SUCCEEDED | FAILED | RETRYING → RUNNING | DEAD_LETTER`。
+  Celery result backend **不是**真相源（`task_ignore_result=True`）。
+- **Checkpoint**：生产 `postgres`（`AsyncPostgresSaver`）跨 worker/副本共享，
+  见上；API 快路径与 worker 异步路径共享同一 checkpoint 后端。
+- **Thread lock**：Redis `agent:thread-lock:{thread_id}`（owner token + TTL +
+  原子 compare-and-delete 释放）；同一 thread 串行，不同 thread 并发。
+- **Reliability 语义（能力边界）**：
+  - at-least-once task delivery（`task_acks_late` + `task_reject_on_worker_lost`
+    + Redis `visibility_timeout`），**不是** exactly-once；
+  - application-level run 幂等（终态重复投递 no-op；`idempotency_key` 唯一约束）；
+  - per-thread distributed mutual exclusion（单 Redis，非 Redlock 集群）；
+  - external PostgreSQL checkpoint persistence；
+  - node/checkpoint-boundary durable execution（失败节点可能重新执行，节点副作用
+    需幂等）；**不**宣称任意 Python 指令级无损恢复；
+  - application-level dead-letter（`agent_dead_letters` 表，retry 用尽后可查询
+    哪个 run / 失败几次 / 最后错误 / 何时进入 DLQ），**不是** broker-native DLX。
+  - 工具侧幂等 ledger（`tool_side_effects`，`run_id + tool_call_id`）已提供接口与
+    DB 唯一约束；外部系统端到端幂等仍需下游 API 接受 idempotency key。
+- **验证命令**（需要真实 Redis/PostgreSQL；默认 skip）：
+  ```bash
+  TEST_REDIS_URL=redis://localhost:6379 \
+  TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
+      pytest tests/integration/test_worker_crash_recovery.py tests/integration/test_thread_lock_redis.py -q
+  # 或脚本
+  scripts/repro_worker_crash_recovery.sh
+  ```
+  设计细节：[docs/design/distributed-agent-runtime.md](../design/distributed-agent-runtime.md)。
 
 ## 配置层级语义（runtime fallback ≠ 模板推荐值）
 
