@@ -1,5 +1,9 @@
 # 流式优先 + 缓存预热：LLM 响应加速设计
 
+> **HISTORICAL DESIGN SNAPSHOT (2026-06-17)**
+> 这是带日期的设计文档，记录作者当时的设计意图，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；仅作历史留档。
+
 > 日期: 2026-06-17
 > 目标: 首字响应 5-8s 以内（当前 15-40s）
 > 方案: A(流式优先+路由捷径) + C(缓存预热)

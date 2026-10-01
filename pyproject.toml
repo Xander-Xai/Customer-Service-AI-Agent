@@ -1,6 +1,6 @@
 [project]
 name = "customer-service-ai-agent"
-version = "6.0"
+version = "6.3"
 description = "药妆智多星多智能体客服系统"
 requires-python = ">=3.10"
 license = {text = "AGPL-3.0"}
