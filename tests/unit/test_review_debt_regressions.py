@@ -431,63 +431,100 @@ class _FakePoint:
 
 
 class _FakeScrollClient:
-    def __init__(self, payloads):
-        self._payloads = payloads
+    def __init__(self, store):
+        self._store = store  # collection -> list[payload]
 
-    def scroll(self, **kwargs):
-        return ([_FakePoint(p) for p in self._payloads], None)
+    def scroll(self, collection_name=None, **kwargs):
+        return ([_FakePoint(p) for p in self._store.get(collection_name, [])], None)
 
 
 class _FakeImportKB:
-    def __init__(self, payloads, count):
-        self._client = _FakeScrollClient(payloads)
-        self._count = count
+    """Stateful, collection-aware fake: upsert/delete mutate the payload store
+    in place so post-import identity verification sees the repaired collection."""
+
+    def __init__(self, payloads_by_collection=None):
+        self._store: dict[str, list] = {
+            c: list(v) for c, v in (payloads_by_collection or {}).items()
+        }
+        self._client = _FakeScrollClient(self._store)
         self.added: list[str] = []
+        self.removed: list[str] = []
 
     def get_collection_count(self, collection):
-        return self._count
+        return len(self._store.get(collection, []))
 
     def add_documents(self, collection, documents, metadatas, ids):
         self.added.extend(ids)
+        bucket = self._store.setdefault(collection, [])
+        id_set = set(ids)
+        bucket[:] = [p for p in bucket if p.get("doc_id") not in id_set]
+        for meta, id_ in zip(metadatas, ids, strict=False):
+            bucket.append({"doc_id": id_, **meta})
+
+    def delete_documents(self, collection, ids):
+        id_set = set(ids)
+        bucket = self._store.setdefault(collection, [])
+        bucket[:] = [p for p in bucket if p.get("doc_id") not in id_set]
+        self.removed.extend(ids)
 
 
-def test_import_corpus_reimports_foreign_collection_with_matching_count() -> None:
+def _load_import_module(name):
     import importlib.util
 
     spec = importlib.util.spec_from_file_location(
-        "import_eval_corpus", PROJECT_ROOT / "scripts" / "import_eval_corpus.py"
+        name, PROJECT_ROOT / "scripts" / "import_eval_corpus.py"
     )
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["import_eval_corpus"] = mod
+    sys.modules[name] = mod
     spec.loader.exec_module(mod)
+    return mod
 
+
+def test_import_corpus_reimports_and_prunes_foreign_points() -> None:
+    mod = _load_import_module("import_eval_corpus")
     docs = [
         {"id": "d1", "content": "c1", "scene": ["售前咨询"]},
         {"id": "d2", "content": "c2", "scene": ["售前咨询"]},
     ]
     # Same point COUNT as expected, but foreign identities/payload hash.
-    foreign = _FakeImportKB([{"doc_id": "old1"}, {"doc_id": "old2"}], count=2)
+    foreign = _FakeImportKB({"product_knowledge": [{"doc_id": "old1"}, {"doc_id": "old2"}]})
     counts, identity = asyncio.run(mod.import_corpus(foreign, docs, 64, "newhash"))
-    assert identity["product_knowledge"]["action"] == "imported"
-    assert identity["product_knowledge"]["missing_before"] == 2
+    info = identity["product_knowledge"]
+    assert info["action"] == "imported"
+    assert info["missing_before"] == 2
     assert set(foreign.added) == {"d1", "d2"}
+    # Foreign points must be removed, not merely shadowed.
+    assert set(foreign.removed) == {"old1", "old2"}
+    assert info["foreign_removed"] == 2
+    # Post-import identity must be verified clean.
+    assert info["foreign_after"] == 0
+    assert info["missing_after"] == 0
+    assert info["identity_clean_after"] is True
+    assert counts["product_knowledge"] == 2
 
 
 def test_import_corpus_skips_only_on_verified_identity() -> None:
-    import importlib.util
-
-    spec = importlib.util.spec_from_file_location(
-        "import_eval_corpus2", PROJECT_ROOT / "scripts" / "import_eval_corpus.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["import_eval_corpus2"] = mod
-    spec.loader.exec_module(mod)
-
+    mod = _load_import_module("import_eval_corpus2")
     docs = [{"id": "d1", "content": "c1", "scene": ["售前咨询"]}]
-    matching = _FakeImportKB([{"doc_id": "d1", "eval_corpus_hash": "hash1"}], count=1)
+    matching = _FakeImportKB({"product_knowledge": [{"doc_id": "d1", "eval_corpus_hash": "hash1"}]})
     _, identity = asyncio.run(mod.import_corpus(matching, docs, 64, "hash1"))
-    assert identity["product_knowledge"]["action"] == "skipped"
+    info = identity["product_knowledge"]
+    assert info["action"] == "skipped"
     assert matching.added == []
+    assert matching.removed == []
+    assert info["identity_clean_after"] is True
+
+
+def test_import_corpus_hash_mismatch_is_repaired() -> None:
+    mod = _load_import_module("import_eval_corpus3")
+    docs = [{"id": "d1", "content": "c1", "scene": ["售前咨询"]}]
+    stale = _FakeImportKB({"product_knowledge": [{"doc_id": "d1", "eval_corpus_hash": "oldhash"}]})
+    _, identity = asyncio.run(mod.import_corpus(stale, docs, 64, "newhash"))
+    info = identity["product_knowledge"]
+    assert info["hash_mismatch_before"] == 1
+    assert info["action"] == "imported"
+    assert info["hash_mismatch_after"] == 0
+    assert info["identity_clean_after"] is True
 
 
 def test_import_eval_corpus_uses_configured_qdrant_endpoint() -> None:
@@ -517,6 +554,52 @@ def test_migration_dry_run_matches_execute_deletion_filter(monkeypatch: pytest.M
     report = mig.rebuild_collection_point_ids(client, "c", dry_run=True)
     # Execution protects docB's stable id; the dry-run preview must too.
     assert stable_b not in report.legacy_point_ids
+
+
+def test_bm25_filter_applied_before_truncation() -> None:
+    from rag.bm25_retriever import BM25Retriever
+
+    retriever = BM25Retriever()
+    retriever.add_documents(
+        ["退货 退货 退货", "退货 规则"],
+        collection="faq",
+        ids=["high", "valid"],
+        metadatas=[{"scene": ["售后支持"]}, {"scene": ["售前咨询"]}],
+    )
+    # Without a filter the high-scoring (but out-of-scope) doc wins top_k=1.
+    assert [r["id"] for r in retriever.search("退货", top_k=1, collection="faq")] == ["high"]
+    # The predicate must run before the per-collection top_k truncation, so the
+    # valid lower-ranked document is returned instead of a false miss.
+    filtered = retriever.search(
+        "退货",
+        top_k=1,
+        collection="faq",
+        metadata_filter=lambda m: "售前咨询" in (m.get("scene") or []),
+    )
+    assert [r["id"] for r in filtered] == ["valid"]
+
+
+def test_bm25_metadata_filter_matches_list_and_scalar_fields() -> None:
+    from rag.qdrant_knowledge_base import QdrantKnowledgeBase
+
+    matches = QdrantKnowledgeBase._metadata_matches_filters
+    assert matches({"scene": ["售前咨询"]}, "售前咨询", None) is True
+    assert matches({"scene": ["售后支持"]}, "售前咨询", None) is False
+    assert matches({"category": "faq"}, None, {"category": "faq"}) is True
+    assert matches({"category": "kb"}, None, {"category": "faq"}) is False
+    assert matches({"scene": ["a"], "category": "faq"}, "a", {"category": "faq"}) is True
+
+
+def test_config_fallback_boolean_flags_use_getenv_default() -> None:
+    from scripts.config_fallback import extract_fallback_defaults
+
+    defaults = extract_fallback_defaults(PROJECT_ROOT / "core" / "config.py")
+    # false-by-default flags must not be reported as true just because the
+    # comparator literal is "true".
+    assert defaults["QDRANT_PREFER_GRPC"] == "false"
+    assert defaults["TOOL_RESULT_CACHE_ENABLED"] == "false"
+    assert defaults["REACT_SELF_REFLECTION"] == "false"
+    assert defaults["HYBRID_SEARCH_ENABLED"] == "true"
 
 
 def test_pre_commit_hook_pattern_catches_quoted_key(tmp_path: Path) -> None:
