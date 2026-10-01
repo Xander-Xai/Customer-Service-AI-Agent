@@ -25,6 +25,10 @@ def upgrade() -> None:
     """将 Float 时间戳转换为 DateTime（timezone=True）"""
 
     # ── users 表 ──
+    # last_login_at 在 001 中带 Float server_default='0.0'；Postgres 无法把该
+    # default 自动 cast 到 timestamptz，必须先 DROP DEFAULT 再改类型。
+    # ORM 侧使用 Python default（_utcnow），不需要 server default。
+    op.alter_column("users", "last_login_at", server_default=None)
     op.alter_column(
         "users",
         "created_at",
