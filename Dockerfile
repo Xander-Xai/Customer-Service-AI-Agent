@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # 安装 Python 依赖（利用 Docker 层缓存）
+# requirements.txt 是当前唯一权威的部署依赖契约（含安全 floor）。
+# requirements-lock.txt 是 2026-06-06 的本地快照，已明确为非权威，刻意不在此使用。
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
