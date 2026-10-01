@@ -100,7 +100,11 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             },
         },
         handler=_query_order,
-        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=30),
+        # Private resource: ownership is resolved per request inside the
+        # handler; never reuse a cached result across an authorization change.
+        cache_policy=ToolCachePolicy(
+            enabled=True, ttl_seconds=30, authorization_required=True
+        ),
     )
 
     # ---- query_customer ----
@@ -125,7 +129,10 @@ def create_erp_tools(erp_adapter) -> ToolRegistry:
             "required": ["customer_id"],
         },
         handler=_query_customer,
-        cache_policy=ToolCachePolicy(enabled=True, ttl_seconds=30),
+        # Private resource: same re-authorization requirement as query_order.
+        cache_policy=ToolCachePolicy(
+            enabled=True, ttl_seconds=30, authorization_required=True
+        ),
     )
 
     logger.info(f"ERP 工具注册完成: {registry.list_tools()}")

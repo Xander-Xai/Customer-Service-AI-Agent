@@ -404,7 +404,11 @@ class QdrantKnowledgeBase:
             models.PointStruct(
                 id=pid,
                 vector=vector,
-                payload={"doc_id": id_, "content": doc, **meta},
+                # Explicit identity wins: a caller-supplied metadata ``doc_id``
+                # must never overwrite the logical id used to derive/verify the
+                # Point ID (otherwise the stored payload owner disagrees with
+                # the collision guard and later idempotent writes get rejected).
+                payload={**meta, "doc_id": id_, "content": doc},
             )
             for pid, id_, doc, vector, meta in zip(  # noqa: B905 - preserve ingestion semantics
                 point_ids, ids, documents, vectors, cleaned_metadatas
@@ -670,7 +674,13 @@ class QdrantKnowledgeBase:
             try:
                 bm25_results = await loop.run_in_executor(
                     None,
-                    lambda: self._bm25_search(canonical, request.collections, top_k=bm25_top_k),
+                    lambda: self._bm25_search(
+                        canonical,
+                        request.collections,
+                        top_k=bm25_top_k,
+                        scene=request.scene,
+                        metadata_filters=request.metadata_filters,
+                    ),
                 )
             except Exception as e:
                 logger.debug(f"retrieve() BM25 检索异常: {e}")
@@ -1166,7 +1176,19 @@ class QdrantKnowledgeBase:
                         )
                         return self._mark_bm25_degraded(REASON_REBUILD_TIMEOUT)
                     if not self._ensure_collection(coll):
-                        continue
+                        # A configured collection that cannot be opened must not
+                        # be silently skipped: publishing READY would advertise
+                        # a complete hybrid channel while an entire configured
+                        # corpus is absent. Fail the rebuild as DEGRADED.
+                        bm25_rebuild_failures_total.labels(
+                            reason=REASON_REBUILD_SCROLL_FAILED
+                        ).inc()
+                        logger.warning(
+                            f"BM25 rebuild 失败：collection `{coll}` 无法打开"
+                            "（Qdrant 不可用 / 权限 / 建集合失败），进入 DEGRADED，"
+                            "不发布 READY candidate"
+                        )
+                        return self._mark_bm25_degraded(REASON_REBUILD_SCROLL_FAILED)
                     docs, ids, metadatas, skipped = self._scroll_collection_for_bm25(coll)
                     skipped_invalid += skipped
                     if docs:
@@ -1231,16 +1253,52 @@ class QdrantKnowledgeBase:
             )
             return self._bm25_meta
 
+    @staticmethod
+    def _metadata_matches_filters(
+        metadata: dict[str, Any] | None,
+        scene: str | None,
+        metadata_filters: dict[str, Any] | None,
+    ) -> bool:
+        """Python equivalent of ``_build_retrieve_filter`` for BM25 candidates.
+
+        Qdrant's ``MatchValue`` on a list field matches when the list contains
+        the value, so list-valued payload fields (e.g. ``scene``) are handled
+        the same way here.
+        """
+        if not scene and not metadata_filters:
+            return True
+        meta = metadata or {}
+
+        def _matches(stored: Any, expected: Any) -> bool:
+            if isinstance(stored, (list, tuple, set)):
+                return expected in stored
+            return stored == expected
+
+        if scene and not _matches(meta.get("scene"), scene):
+            return False
+        if metadata_filters:
+            for key, value in metadata_filters.items():
+                if not _matches(meta.get(key), value):
+                    return False
+        return True
+
     def _bm25_search(
         self,
         query: str,
         collection_names: list[str],
         top_k: int = 8,
+        scene: str | None = None,
+        metadata_filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """BM25 检索（同步，供 run_in_executor 调用）。
 
         P1-02 BM25-2: 仅当 readiness == READY 时返回结果；否则返回空列表，
         让 ``query_multiple`` 的 hybrid truthfulness 逻辑标注降级。
+
+        P1-01 parity: the same ``scene`` / ``metadata_filters`` semantics that
+        constrain the dense channel must constrain BM25 — otherwise an
+        unfiltered lexical hit can enter RRF (or become the sole evidence when
+        the vector channel is degraded) despite failing the request filter.
         """
         if self.bm25_readiness() is not BM25Readiness.READY:
             return []
@@ -1248,12 +1306,25 @@ class QdrantKnowledgeBase:
         if not bm25:
             return []
 
+        # Filter-before-limit parity with the dense channel: the predicate is
+        # applied inside BM25Retriever before its per-collection top_k
+        # truncation, so filtered-out high scorers cannot evict valid
+        # lower-ranked candidates.
+        metadata_filter = None
+        if scene or metadata_filters:
+            metadata_filter = lambda meta: self._metadata_matches_filters(  # noqa: E731
+                meta, scene, metadata_filters
+            )
+
         all_results: list[dict[str, Any]] = []
         for coll in collection_names:
             if bm25.collection_size(coll) == 0:
                 continue
             try:
-                results = bm25.search(query, top_k=top_k, collection=coll)
+                results = bm25.search(
+                    query, top_k=top_k, collection=coll,
+                    metadata_filter=metadata_filter,
+                )
                 all_results.extend(results)
             except Exception as e:
                 logger.debug(f"BM25 检索失败 [{coll}]: {e}")
