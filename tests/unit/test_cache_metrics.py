@@ -5,16 +5,16 @@ import pytest
 try:
     from core.monitoring import (
         MetricsCollector,
+        active_components_total,
+        cache_fallback_total,
         cache_l1_hits_total,
         cache_l2_hits_total,
         cache_l3_hits_total,
-        cache_fallback_total,
-        stream_ttfb_seconds,
-        trace_spans_total,
         rag_queries_total,
         rag_recall_at_3,
         scene_routing_total,
-        active_components_total,
+        stream_ttfb_seconds,
+        trace_spans_total,
     )
     PROMETHEUS_AVAILABLE = True
 except (ImportError, NameError):

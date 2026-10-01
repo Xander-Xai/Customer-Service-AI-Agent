@@ -98,19 +98,19 @@ _denylist = _TokenDenylist()
 def hash_password(password: str) -> str:
     """
     密码哈希（v5.4: Argon2id, OWASP 2023推荐标准）
-    
+
     Argon2id优势：
     - 抗GPU/ASIC攻击能力更强
     - 内存硬函数，增加暴力破解成本
     - 同时抵抗侧信道攻击和时间-空间权衡攻击
-    
+
     参数配置：
     - time_cost=3: 迭代次数
     - memory_cost=65536: 内存使用64MB
     - parallelism=4: 并行度
     - hash_len=32: 输出长度32字节
     - salt_len=16: 盐长度16字节
-    
+
     迁移策略：
     - 新用户密码使用Argon2id
     - 旧用户登录验证成功后自动重新哈希
@@ -118,8 +118,7 @@ def hash_password(password: str) -> str:
     """
     try:
         from argon2 import PasswordHasher
-        from argon2.exceptions import VerificationError
-        
+
         # v5.4: 使用Argon2id（默认模式）
         ph = PasswordHasher(
             time_cost=3,
@@ -128,13 +127,13 @@ def hash_password(password: str) -> str:
             hash_len=32,
             salt_len=16
         )
-        
+
         return ph.hash(password)
     except ImportError:
         # 降级方案：如果argon2-cffi未安装，回退到PBKDF2-SHA256
         logger.warning("argon2-cffi 未安装，回退到 PBKDF2-SHA256")
         import os
-        
+
         salt = os.urandom(16).hex()
         dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600000)
         return f"{salt}${dk.hex()}"
@@ -143,16 +142,16 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     """
     验证密码（支持Argon2id和PBKDF2-SHA256）
-    
+
     验证流程：
     1. 尝试Argon2id验证（新格式）
     2. 失败则尝试PBKDF2-SHA256（旧格式，向后兼容）
     3. PBKDF2验证成功后标记需要迁移
-    
+
     Args:
         password: 明文密码
         password_hash: 存储的哈希值
-        
+
     Returns:
         bool: 密码是否匹配
     """
@@ -161,14 +160,14 @@ def verify_password(password: str, password_hash: str) -> bool:
         try:
             from argon2 import PasswordHasher
             from argon2.exceptions import VerificationError
-            
+
             ph = PasswordHasher()
-            
+
             # 验证密码
             if ph.verify(password_hash, password):
                 # 检查是否需要重新哈希（参数变更时）
                 if ph.check_needs_rehash(password_hash):
-                    logger.info(f"检测到需要重新哈希的用户密码")
+                    logger.info("检测到需要重新哈希的用户密码")
                     # 注意：实际重新哈希应在登录成功后执行
                 return True
             return False
@@ -177,7 +176,7 @@ def verify_password(password: str, password_hash: str) -> bool:
         except ImportError:
             logger.error("argon2-cffi 未安装，无法验证 Argon2id 哈希")
             return False
-    
+
     # 降级方案：PBKDF2-SHA256验证（向后兼容）
     try:
         salt, stored_hash = password_hash.split("$", 1)

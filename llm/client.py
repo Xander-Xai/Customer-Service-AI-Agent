@@ -167,7 +167,6 @@ class OpenAICompatibleClient:
     @staticmethod
     def _retry_delay(attempt: int, base_delay: float = 1.0, backoff_factor: int = 2, max_delay: float = 30.0) -> float:
         """指数退避 + 全抖动（Full Jitter）"""
-        import random
 
         delay = min(base_delay * (backoff_factor**attempt), max_delay)
         return random.uniform(0, delay)

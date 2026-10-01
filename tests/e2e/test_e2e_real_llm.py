@@ -16,9 +16,9 @@ v6.3: 改为双模式：
 import asyncio
 import os
 import sys
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -148,14 +148,10 @@ def graph_app_mock():
             GeneralAgent,
             ProductAgent,
             ReActAgent,
+            ResponseAgent,
             SalesAgent,
             TechAgent,
-            ResponseAgent,
         )
-        from agents.evaluator import ResponseEvaluator
-
-        evaluator = ResponseEvaluator()
-
         agent_classes = {
             "product_agent": ProductAgent,
             "tech_agent": TechAgent,

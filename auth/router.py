@@ -7,9 +7,7 @@
 - v5.0: 密码复杂度校验（至少两类字符）
 """
 
-import secrets
-import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
@@ -17,19 +15,10 @@ from pydantic import BaseModel, Field, field_validator
 from auth.service import (
     authenticate_user,
     get_current_user,
-    hash_password,
     refresh_access_token,
     register_user,
     revoke_token,
-    verify_password,
 )
-from core.config import (
-    DEV_MODE,
-    JWT_EXPIRE_HOURS,
-    JWT_REFRESH_EXPIRE_HOURS,
-    JWT_SECRET,
-)
-from core.logger import get_logger
 from db.database import get_db
 from db.models import AuditLog, User
 

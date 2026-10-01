@@ -1,6 +1,5 @@
 """知识库生成集成测试。"""
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -44,7 +43,7 @@ async def test_generate_script_runs():
             cat = doc.get("category", "unknown")
             categories[cat] = categories.get(cat, 0) + 1
 
-        print(f"\n  知识库生成验证:")
+        print("\n  知识库生成验证:")
         print(f"  总文档数: {len(docs)}")
         print(f"  分类分布: {json.dumps(categories, ensure_ascii=False)}")
         assert "成分知识" in categories, "缺少成分知识分类"

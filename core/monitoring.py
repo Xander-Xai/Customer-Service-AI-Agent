@@ -423,7 +423,7 @@ class MetricsCollector:
         """
         v3.4: 改为 async，使用 asyncio.Lock 保护并发写入
         v5.4: 新增业务指标记录（query_type, satisfaction_score）
-        
+
         Args:
             elapsed: 请求耗时（秒）
             agent: 处理的Agent名称
@@ -529,7 +529,7 @@ class MetricsCollector:
     async def update_business_metrics(self):
         """
         v5.4: 更新业务指标Gauge（解决率、升级率等）
-        
+
         建议每60秒调用一次，或在关键事件后调用
         """
         async with self._ensure_lock():
@@ -876,18 +876,18 @@ class CircuitBreaker:
 class SLAAlertManager:
     """
     SLA 告警管理器（v5.4 - 分级告警 + 升级机制）
-    
+
     核心功能：
     1. 基于滑动窗口检测SLA违约率
     2. 超过阈值时发布分级告警（warning/critical/emergency）
     3. 支持冷却机制避免告警风暴
     4. v5.4新增：告警升级检查（无人响应时自动升级）
-    
+
     告警分级策略：
     - warning: 违约率 > 30%
     - critical: 违约率 > 60%
     - emergency: 违约率 > 90% 或 critical持续30分钟
-    
+
     使用示例：
         >>> manager = SLAAlertManager(bus=message_bus)
         >>> alert = await manager.check_and_alert(metrics_collector)
@@ -908,10 +908,10 @@ class SLAAlertManager:
     async def check_and_alert(self, metrics: MetricsCollector) -> dict[str, Any] | None:
         """
         检查SLA违约率并发布告警
-        
+
         Args:
             metrics: 指标收集器实例
-            
+
         Returns:
             dict | None: 如果触发告警返回告警信息，否则返回None
         """
@@ -988,10 +988,10 @@ class SLAAlertManager:
     async def check_and_upgrade(self):
         """
         v5.4: 检查并升级活动告警
-        
+
         调用此方法定期检查是否有告警需要升级
         建议在后台任务中每5分钟调用一次
-        
+
         Returns:
             list: 已升级的告警列表
         """
