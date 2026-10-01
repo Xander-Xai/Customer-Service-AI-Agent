@@ -54,6 +54,10 @@ langgraph-checkpoint-postgres>=3.1.0
 psycopg[binary]>=3.1.0
 psycopg-pool>=3.2.0
 
+# ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
+# Broker 复用已有 Redis；Celery result backend 不是业务状态真相源。
+celery>=5.3.0
+
 # ===== 安全依赖升级（防止传递依赖漏洞）=====
 # python-jose CVE: key verification bypass (PYSEC-2024-232/233)
 # Jinja2 CVE: HTML sanitization bypass (CVE-2024-22195)

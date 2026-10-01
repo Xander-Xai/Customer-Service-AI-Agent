@@ -12,6 +12,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -325,6 +326,7 @@ def create_app(
             "X-Admin-Token",
             "X-Session-Token",
             "X-CSRF-Token",
+            "Idempotency-Key",
             "Content-Type",
             "Authorization",
         ],
@@ -336,6 +338,7 @@ def create_app(
     from api.routes.chat_multimodal import router as chat_multimodal_router
     from api.routes.feedback import router as feedback_router
     from api.routes.monitoring import router as monitoring_router
+    from api.routes.runs import router as runs_router
     from api.routes.sessions import router as sessions_router
     from api.routes.ws import router as ws_router
 
@@ -344,6 +347,7 @@ def create_app(
     app.include_router(feedback_router)
     app.include_router(chat_router)
     app.include_router(chat_multimodal_router)
+    app.include_router(runs_router)
     app.include_router(ws_router)
 
     # ── 静态资源（使用缓存包装器，不依赖中间件）──
