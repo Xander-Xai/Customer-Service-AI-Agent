@@ -73,3 +73,34 @@ async def test_checkpoint_survives_runtime_restart():
         await runtime2.checkpointer.adelete_thread(thread_b)
     finally:
         await close_checkpoint_runtime(runtime2)
+
+
+async def test_checkpoint_visible_across_two_live_instances():
+    """实例 A 写入 -> 同时存活的实例 B 读取同一 thread 状态（真跨实例）。"""
+    from core.checkpointer import build_postgres_checkpointer, close_checkpoint_runtime
+
+    thread = f"it-live-{uuid.uuid4().hex}"
+    config = {"configurable": {"thread_id": thread}}
+
+    runtime_a = await build_postgres_checkpointer(CHECKPOINT_URL, setup_timeout=10.0)
+    runtime_b = await build_postgres_checkpointer(CHECKPOINT_URL, setup_timeout=10.0)
+    try:
+        graph_a = _build_tiny_graph(runtime_a.checkpointer)
+        graph_b = _build_tiny_graph(runtime_b.checkpointer)
+
+        await graph_a.ainvoke({"value": 41}, config=config)
+
+        # B 与 A 同时存活，从共享 PostgreSQL 读到 A 写入的 checkpoint
+        state_b = await graph_b.aget_state(config)
+        assert state_b.values["value"] == 42
+
+        # B 继续同 thread 执行，A 也能看到最新值
+        result_b = await graph_b.ainvoke({"value": 42}, config=config)
+        assert result_b["value"] == 43
+        assert (await graph_a.aget_state(config)).values["value"] == 43
+    finally:
+        try:
+            await runtime_a.checkpointer.adelete_thread(thread)
+        finally:
+            await close_checkpoint_runtime(runtime_a)
+            await close_checkpoint_runtime(runtime_b)
