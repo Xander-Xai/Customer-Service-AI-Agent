@@ -126,7 +126,9 @@ graph TB
         WS[WebSocket /ws/chat]
         REST[REST API /api/chat]
         SSE[SSE /api/chat/stream]
-        IMG[多模态 /api/chat/image]
+        MM["统一多模态入口 /api/chat/multimodal（自动文件类型路由）"]
+        MMS[多模态 SSE 流 /api/chat/multimodal/stream]
+        IMG["legacy/specialized 图片路由 /api/chat/image"]
     end
 
     subgraph Middleware["中间件层（5 层）"]

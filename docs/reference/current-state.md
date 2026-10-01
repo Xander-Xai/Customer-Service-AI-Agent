@@ -8,7 +8,7 @@
 
 ## Runtime facts (generated)
 
-以下值由 `python3 scripts/project_facts.py` 在当前 checkout 动态生成（2026-09-30 验证）：
+以下值由 `python3 scripts/project_facts.py` 在当前 checkout 动态生成（以命令当前输出为准，不绑定验证日期；`.env` 本地覆盖不改变此处的 runtime fallback facts）：
 
 - Runtime version (`core/config.py::VERSION`): **`6.3`**
 - Default LLM (`core/config.py::OPENAI_MODEL`): **`Qwen/Qwen3-8B`**
@@ -23,7 +23,7 @@
 - OpenAPI HTTP paths (`app.openapi()["paths"]`): **`53`**
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
-## RAG evaluation / evidence state（2026-09-30）
+## RAG evaluation / evidence state
 
 - **当前 649-query 正式指标（Hit@K / Recall@K / Precision@K / NDCG@K / MRR@K）：NOT_VERIFIED。**
   在 preflight 通过并产生正式 artifact 之前，不得把任何百分比写成当前事实。

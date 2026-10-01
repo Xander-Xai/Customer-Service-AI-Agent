@@ -73,9 +73,11 @@
 | 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
 | 版本历史 | [reports/releases/](reports/releases/) | 🟡 SNAPSHOT（旧版本章节永不重写） |
 
-### 生命周期图例
+### 生命周期图例（canonical，唯一一套）
 
-每个目录都有且只有一个生命周期；不允许"有大量文档但不知道是否还有效"。
+每个**文档**必须有且只有一个 lifecycle；同一目录内不同文件可以是不同
+lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日期的
+模型对比快照是 HISTORICAL AUDIT）。不允许"有大量文档但不知道是否还有效"。
 
 | 标记 | 生命周期 | 含义 |
 |---|---|---|
@@ -86,6 +88,10 @@
 | 🟡 | HISTORICAL AUDIT | 带日期的审计/对齐/迁移快照，仅执行时点有效 |
 | ⚪ | SUPERSEDED | 已被后续文档取代，保留历史身份，不再具权威 |
 | 🔴 | ARCHIVE | 归档，不再维护 |
+
+> 已废弃的旧标签（Active / Stable / Disposable / Snapshot）不再是独立
+> lifecycle；它们只能是上表某一项的别名。机器 guard 见
+> `scripts/audit_doc_consistency.py::check_lifecycle_vocabulary`。
 
 ### 🆕 新人
 - 项目总览 → [../README.md](../README.md)
@@ -103,7 +109,7 @@
 
 ### `design/` — 系统设计文档
 
-> 🟢 Active — 活的、随代码同步更新
+> 🔵 DESIGN / ADR — 活的设计文档，随代码同步更新
 
 | 文件 | 说明 | 读者 |
 |---|---|---|
@@ -117,7 +123,7 @@
 
 ### `standards/` — 规范与约定
 
-> 🟢 Active — 规则变更时更新
+> 🟢 CURRENT — 规则变更时更新
 
 | 文件 | 说明 | 读者 |
 |---|---|---|
@@ -128,7 +134,7 @@
 
 ### `decisions/` — 架构决策记录 (ADR)
 
-> 🔵 Stable — 一旦采纳永不修改
+> 🔵 DESIGN / ADR — 一旦采纳永不修改（被取代只更新 Status）
 
 | 文件 | 说明 |
 |---|---|
@@ -145,20 +151,20 @@
 
 ### `reference/` — 参考手册
 
-> 🔵 Stable — 接口变更时更新
+> 逐文件 lifecycle（`reference/` 不是单一 lifecycle）：
 
-| 文件 | 说明 | 读者 |
-|---|---|---|
-| [api-reference.md](reference/api-reference.md) | API 端点速查 | 开发者 |
-| [current-state.md](reference/current-state.md) | 当前事实入口（版本/模型/验证命令） | 开发者、审计者 |
-| [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 |
-| [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 |
+| 文件 | 说明 | 读者 | Lifecycle |
+|---|---|---|---|
+| [api-reference.md](reference/api-reference.md) | API 端点速查 | 开发者 | 🟢 CURRENT / REFERENCE |
+| [current-state.md](reference/current-state.md) | 当前事实入口（版本/模型/验证命令） | 开发者、审计者 | 🟢 CURRENT |
+| [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 | 🟡 HISTORICAL AUDIT（含 CURRENT 配置小结） |
+| [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 | 🟢 CURRENT（历史小节单独标注） |
 
 ---
 
 ### `operations/` — 运维与操作指南
 
-> 🟢 Active — 环境变更时更新
+> 🟠 RUNBOOK — 操作/运维入口
 
 | 文件 | 说明 | 读者 |
 |---|---|---|
@@ -180,7 +186,7 @@
 
 ### `checklists/` — 检查清单
 
-> 🟠 Disposable — 使用后即过时
+> 🟠 RUNBOOK — 检查清单（执行后可能过时，仍是操作入口）
 
 | 文件 | 说明 | 场景 |
 |---|---|---|
@@ -194,7 +200,7 @@
 
 ### `reports/` — 报告与版本
 
-> 🟡 Snapshot — 写完后永不更新
+> 🟡 HISTORICAL AUDIT — 阶段/发布快照，写完后永不更新
 
 #### `reports/milestone/` — 阶段完成报告
 
@@ -280,7 +286,7 @@
 
 ### `archive/` — 历史归档
 
-> 🔴 Archive — 不再维护
+> 🔴 ARCHIVE — 不再维护
 
 | 文件 | 说明 |
 |---|---|
@@ -307,20 +313,18 @@
 ```
 创建期 → 保留期 → 归档期 → 删除期
   ↓         ↓          ↓
-draft   design/   archive/
-        standards/
-        decisions/
-        reference/
-        operations/
-        checklists/
-        reports/
+CURRENT  DESIGN/ADR  ARCHIVE
+         RUNBOOK
+         EVIDENCE
+         HISTORICAL AUDIT
+         SUPERSEDED
 ```
 
 **关键规则**：
-- Active → Archive：设计已过时 / 新设计已替代旧设计
-- Checklists → Archive：已使用过的清单，确认执行完毕
-- Reports → Archive：报告超过 3 个版本迭代后
-- Archive → Delete：归档超过 1 年且无人查阅
+- CURRENT / DESIGN / RUNBOOK → ARCHIVE：设计已过时 / 新设计已替代旧设计
+- RUNBOOK → ARCHIVE：已使用过的清单，确认执行完毕
+- HISTORICAL AUDIT → ARCHIVE：报告超过 3 个版本迭代后
+- ARCHIVE → Delete：归档超过 1 年且无人查阅
 - **禁止逆向流转**：一旦归档，不重新激活——需要时创建新文档
 
 ---
