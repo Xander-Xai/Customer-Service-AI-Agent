@@ -1152,4 +1152,40 @@ def test_real_repo_passes_closeout_guards():
     audit.check_production_claims(docs, errors, root=REAL_ROOT)
     audit.check_makefile_doc_targets(errors, root=REAL_ROOT, docs=docs)
     audit.check_env_references(docs, errors, root=REAL_ROOT)
+    audit.check_lifecycle_vocabulary(docs, errors, root=REAL_ROOT)
+    audit.check_no_v64_claim(docs, errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------- T. lifecycle vocabulary
+
+
+def test_retired_lifecycle_label_is_detected(tmp_repo: Path):
+    doc = write(tmp_repo, "docs/design/note.md", "> 🟢 Active — 活的\n")
+    errors: list[str] = []
+    audit.check_lifecycle_vocabulary([doc], errors, root=tmp_repo)
+    assert any("retired lifecycle label" in e for e in errors)
+
+
+def test_canonical_lifecycle_label_passes(tmp_repo: Path):
+    doc = write(tmp_repo, "docs/design/note.md", "> 🟢 CURRENT — 活的\n")
+    errors: list[str] = []
+    audit.check_lifecycle_vocabulary([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------- U. no v6.4 claim
+
+
+def test_v64_claim_is_detected(tmp_repo: Path):
+    doc = write(tmp_repo, "README.md", "当前 runtime version v6.4\n")
+    errors: list[str] = []
+    audit.check_no_v64_claim([doc], errors, root=tmp_repo)
+    assert any("v6.4" in e for e in errors)
+
+
+def test_negated_v64_statement_passes(tmp_repo: Path):
+    doc = write(tmp_repo, "README.md", "当前 `6.3`；未声明 v6.4 release。\n")
+    errors: list[str] = []
+    audit.check_no_v64_claim([doc], errors, root=tmp_repo)
     assert errors == []
