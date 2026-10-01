@@ -234,11 +234,45 @@ try:
     tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
     tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
+    # v6.4: 分布式 Agent Run 可靠性 + 可观测性
+    agent_runs_total = _counter("agent_runs_total", "AgentRun outcomes by status", ["status"])
+    agent_run_retry_total = _counter("agent_run_retry_total", "AgentRun retries scheduled")
+    agent_run_dead_letter_total = _counter(
+        "agent_run_dead_letter_total", "AgentRun retry exhausted -> DEAD_LETTER"
+    )
+    agent_run_duration_seconds = _histogram(
+        "agent_run_duration_seconds",
+        "AgentRun execution duration (RUNNING -> terminal)",
+        buckets=[0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+    )
+    agent_run_queue_wait_seconds = _histogram(
+        "agent_run_queue_wait_seconds",
+        "AgentRun queue wait (queued_at -> started_at)",
+        buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300],
+    )
+    agent_worker_active = _gauge("agent_worker_active", "Active worker tasks")
+    agent_worker_task_total = _counter(
+        "agent_worker_task_total", "Worker task outcomes", ["status"]
+    )
+    agent_thread_lock_contention_total = _counter(
+        "agent_thread_lock_contention_total", "Same-thread lock contention deferrals"
+    )
+    agent_thread_lock_wait_seconds = _histogram(
+        "agent_thread_lock_wait_seconds",
+        "Time spent acquiring the thread lock",
+        buckets=[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
+    )
+    idempotency_hit_total = _counter("idempotency_hit_total", "HTTP idempotency key hits")
+    tool_idempotency_hit_total = _counter(
+        "tool_idempotency_hit_total", "Side-effect tool idempotency hits"
+    )
+
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
     # Prometheus 未安装，降级为无操作
     class _NoopMetric:
         def inc(self, *args, **kwargs): pass
+        def dec(self, *args, **kwargs): pass
         def set(self, *args, **kwargs): pass
         def observe(self, *args, **kwargs): pass
         def labels(self, *args, **kwargs): return self
@@ -292,6 +326,17 @@ except ImportError:
     tool_result_cache_errors_total = _NoopMetric()
     tool_result_cache_bypass_total = _NoopMetric()
     tool_result_cache_latency_seconds = _NoopMetric()
+    agent_runs_total = _NoopMetric()
+    agent_run_retry_total = _NoopMetric()
+    agent_run_dead_letter_total = _NoopMetric()
+    agent_run_duration_seconds = _NoopMetric()
+    agent_run_queue_wait_seconds = _NoopMetric()
+    agent_worker_active = _NoopMetric()
+    agent_worker_task_total = _NoopMetric()
+    agent_thread_lock_contention_total = _NoopMetric()
+    agent_thread_lock_wait_seconds = _NoopMetric()
+    idempotency_hit_total = _NoopMetric()
+    tool_idempotency_hit_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 

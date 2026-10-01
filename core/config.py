@@ -428,6 +428,47 @@ def validate_checkpoint_settings(
         )
     return problems
 
+
+# ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
+# AgentRun 业务状态真相源是数据库；Redis/Celery 仅调度。
+# dispatch: celery（生产，解耦到 worker）| inline（开发/测试 fallback，进程内执行）
+AGENT_RUN_DISPATCH = os.getenv("AGENT_RUN_DISPATCH", "celery").strip().lower()
+AGENT_RUN_QUEUE = os.getenv("AGENT_RUN_QUEUE", "agent_runs").strip() or "agent_runs"
+AGENT_RUN_MAX_ATTEMPTS = _int_env("AGENT_RUN_MAX_ATTEMPTS", 3)
+AGENT_RUN_TASK_SOFT_TIME_LIMIT = _int_env("AGENT_RUN_TASK_SOFT_TIME_LIMIT", 120)
+AGENT_RUN_TASK_TIME_LIMIT = _int_env("AGENT_RUN_TASK_TIME_LIMIT", 180)
+# Redis broker 未 ACK 消息的 visibility timeout（秒）；需 > 最长任务时间
+AGENT_RUN_VISIBILITY_TIMEOUT = _int_env("AGENT_RUN_VISIBILITY_TIMEOUT", 3600)
+# Celery broker 默认复用 REDIS_URL；result backend 留空表示不落结果（非真相源）
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "").strip() or REDIS_URL
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "").strip()
+
+if AGENT_RUN_DISPATCH not in ("celery", "inline"):
+    raise ConfigurationError(
+        f"AGENT_RUN_DISPATCH 非法: {AGENT_RUN_DISPATCH!r}（仅支持 celery | inline）"
+    )
+
+# Thread 串行执行锁（同一 thread 的 Run 不得并发；不同 thread 可并发）
+AGENT_RUN_THREAD_LOCK_ENABLED = os.getenv("AGENT_RUN_THREAD_LOCK_ENABLED", "true").lower() == "true"
+AGENT_RUN_THREAD_LOCK_BACKEND = os.getenv("AGENT_RUN_THREAD_LOCK_BACKEND", "redis").strip().lower()
+AGENT_RUN_THREAD_LOCK_TTL_SECONDS = _float_env("AGENT_RUN_THREAD_LOCK_TTL_SECONDS", 300.0)
+AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS = _float_env(
+    "AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS", 5.0
+)
+# worker ownership lease / heartbeat（崩溃后 lease 过期可被接管）
+AGENT_RUN_LEASE_SECONDS = _float_env("AGENT_RUN_LEASE_SECONDS", 180.0)
+AGENT_RUN_HEARTBEAT_SECONDS = _float_env("AGENT_RUN_HEARTBEAT_SECONDS", 30.0)
+# 重试退避（指数 + jitter）
+AGENT_RUN_RETRY_BASE_DELAY = _float_env("AGENT_RUN_RETRY_BASE_DELAY", 2.0)
+AGENT_RUN_RETRY_MAX_DELAY = _float_env("AGENT_RUN_RETRY_MAX_DELAY", 60.0)
+AGENT_RUN_RETRY_JITTER = _float_env("AGENT_RUN_RETRY_JITTER", 0.3)
+
+if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
+    raise ConfigurationError(
+        f"AGENT_RUN_THREAD_LOCK_BACKEND 非法: {AGENT_RUN_THREAD_LOCK_BACKEND!r}"
+        "（仅支持 redis | memory）"
+    )
+
 # ===== v4.1: SSE 流式输出配置 =====
 SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
 SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
@@ -567,6 +608,16 @@ def validate_required_config():
     _embedding_raw = os.getenv("EMBEDDING_API_KEY", "")
     if not _DEV_MODE and not _embedding_raw:
         warnings.append("EMBEDDING_API_KEY not set, reusing OPENAI_API_KEY for embedding service — configure a dedicated key for production")
+    if not _DEV_MODE and AGENT_RUN_DISPATCH == "inline":
+        warnings.append(
+            "AGENT_RUN_DISPATCH=inline in production: runs execute inside the API "
+            "process (no worker decoupling). Use 'celery' for production."
+        )
+    if not _DEV_MODE and AGENT_RUN_THREAD_LOCK_BACKEND == "memory":
+        warnings.append(
+            "AGENT_RUN_THREAD_LOCK_BACKEND=memory in production: thread lock is "
+            "process-local, not shared across workers/replicas. Use 'redis'."
+        )
 
     for w in warnings:
         logging.getLogger("config").warning(f"[config] {w}")
