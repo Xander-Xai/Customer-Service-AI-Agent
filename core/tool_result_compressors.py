@@ -42,7 +42,10 @@ def _clean_url(url: str) -> str:
     try:
         parts = urlsplit(url)
         query = [(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith(("utm_", "fbclid", "gclid"))]
-        return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query if not query else urlencode(query), ""))
+        # Always emit the filtered query: restoring ``parts.query`` when every
+        # parameter was tracking-only would keep the tracking string in the
+        # ToolMessage and defeat deduplication.
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
     except ValueError:
         return url
 
