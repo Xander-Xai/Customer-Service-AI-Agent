@@ -330,6 +330,28 @@ sequenceDiagram
 
 ## 🤖 功能模块详解
 
+### 分布式 Agent Runtime（异步 Run + Celery Worker）
+
+在保留实时 `/api/chat`、`/api/chat/stream`（SSE）快路径的同时，新增长任务异步路径：
+
+- `POST /api/runs` 创建 RunRecord(`QUEUED`) 并入队，**立即返回** `run_id`（不等待 Graph 完成）；
+- `GET /api/runs/{run_id}` polling 查询状态与结果；
+- Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是数据库
+  `agent_runs` 表（Celery result backend 不是真相源）。
+
+**三个 ID**：`thread_id`（对话级，多轮复用） / `run_id`（单轮执行，唯一） /
+`task_id`（队列消息 / Worker 执行 ID）。
+
+**可靠性能力（诚实边界）**：at-least-once delivery + application-level run 幂等；
+per-thread 分布式互斥（Redis 锁）；external PostgreSQL checkpoint；transient retry
+（指数退避 + jitter，上限 `AGENT_RUN_MAX_ATTEMPTS`）；retry 用尽进入
+application-level DLQ（`agent_dead_letters` 可查询）；worker 崩溃后经 broker
+redelivery 恢复。**不**宣称 exactly-once、任意指令级无损恢复或 broker-native DLX。
+
+配置与设计见 [.env.example](.env.example)、
+[docs/design/distributed-agent-runtime.md](docs/design/distributed-agent-runtime.md)。
+崩溃恢复复现：`scripts/repro_worker_crash_recovery.sh`（需真实 Redis + PostgreSQL）。
+
 ### Agent 系统（9 个 Agent 角色 + 评估器）
 
 > 口径：**9 个运行时 Agent 角色** = 7 领域 Agent（Product/Tech/Billing/Complaint/General/Sales/Aftersales）+ ReActAgent + ResponseAgent；
@@ -694,12 +716,13 @@ make env-check   # 查看当前环境配置摘要
 | 监控 | 11 | 健康 / 指标 / KPI / 缓存 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token Quota / Token 追踪 |
 | Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
 | 反馈 | 2 | 提交 / 统计 |
+| 异步 Run | 3 | 创建 / 查询 / DLQ 列表 |
 | 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
 **合计：`docs/openapi.json` 快照由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 53 个 HTTP 路径 / 55 个操作，
-其中 49 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。**
+HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 56 个 HTTP 路径 / 58 个操作，
+其中 52 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -713,13 +736,14 @@ customer-service-ai-agent/
 ├── core/              # 核心基础设施（配置/DI容器/图构建/消息总线/监控/会话/漂移检测/Prompt管理/A/B测试/Token追踪/Token配额/黑板）
 │   └── session/       # 会话管理器 + 漂移检测器 + Token 计数器
 ├── api/               # FastAPI 服务层（工厂/中间件/路由/SSE/WebSocket/依赖注入）
-│   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts）
+│   └── routes/        # 路由模块（chat/sessions/monitoring/ws/chat_multimodal/prompts/runs）
 ├── auth/              # JWT 认证（Argon2id + Redis 黑名单 + Refresh Token + RBAC）
 ├── router/            # 双层查询路由（LLM + 规则并行 + 熔断器降级）
 ├── collaboration/     # 5 种协作模式 + 模式选择器 + 升级重试
 ├── rag/               # RAG 知识库（Qdrant v6.0 + 查询改写 + BM25 混合检索 + ApiReranker 重排 + RRF 融合 + 种子数据）
 ├── cache/             # Response Cache 三层（L1 Redis MD5 + L2 Qdrant 向量 + L3 Jaccard 回退）；与 Tool Result Cache/Store 分离
-├── db/                # SQLAlchemy 模型 + Alembic 迁移（5 表：User/ChatHistory/AuditLog/Feedback/PromptVersion）
+├── db/                # SQLAlchemy 模型 + Alembic 迁移（业务表 + AgentRun/DeadLetter/ToolSideEffect）
+├── runtime/           # 分布式 Agent Runtime（AgentRun 状态机/thread lock/Celery worker/retry/DLQ）
 ├── erp/               # 金蝶 ERP 适配器（Mock + Real API + HMAC 认证 + 重试 + 分页）
 ├── tools/             # Function Calling 工具注册（OpenAI 格式 + 4 个 ERP 工具）
 ├── llm/               # LLM 客户端（重试 + 熔断 + FC + SSE 流式 + 连接池 + Token 配额）+ 规则兜底 LLM
