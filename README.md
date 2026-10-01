@@ -6,7 +6,7 @@
 >
 > - Runtime version 由 `core/config.py::VERSION` 决定（当前 `6.3`）；未声明 `v6.4` release。
 > - Current entry point: [docs/reference/current-state.md](docs/reference/current-state.md)。当前 HEAD 用 `git rev-parse HEAD` 获取；**Snapshot SHA != Current HEAD**，带日期的历史审计报告位于 `docs/reports/`，只代表其执行时点。
-> - Response Cache（L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退）与 Tool Result Cache、Tool Result Store、压缩、Session Memory 是**相互独立的机制**（ADR-006）。
+> - Response Cache（L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退）与 Tool Result Cache、Tool Result Store、压缩、Session Memory、**LangGraph Checkpoint** 是**相互独立的机制**（ADR-006）。
 > - Tool Result Context Engineering：确定性压缩、Top-K/budget、历史 compaction、专用 compressor、可选 offload/recovery、可选 semantic summary、scope-safe exact reuse。
 > - RAG：rewrite/filter → vector + BM25 → retrieval contract → RRF 融合 → rerank → context；BM25 lifecycle 与确定性 Qdrant point ID/迁移见 `rag/`。
 > - Provider authentication、provider token/billing、生产延迟均属 `NOT_VERIFIED` / `NOT_MEASURED`，除非链接当前带 provenance 的 artifact。
@@ -16,7 +16,7 @@
 >
 > 历史版本（v5.0–v6.3）逐条变更记录见 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)；README 不再展开逐版本历史。
 
-核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25 混合检索 + RRF 融合 + API 重排 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离 · **Argon2id密码哈希** · **分级告警升级** · **业务指标监控**
+核心能力：SiliconFlow/DeepSeek/OpenAI 兼容 LLM · 依赖注入容器 · SSE 真流式 · PostgreSQL + Alembic · Redis JWT 黑名单 · 反馈系统 · 多模态 · RAG 知识库 · Function Calling · ReAct 推理 · 查询改写 · BM25 混合检索 + RRF 融合 + API 重排 · CLIP 图片检索 · Token 用量追踪 · Prompt 版本管理 · Token 配额 · FeatureFlags · OpenTelemetry · 会话数据加密 · 黑板 Session 隔离 · **生产 PostgreSQL LangGraph Checkpoint 持久化** · **Argon2id密码哈希** · **分级告警升级** · **业务指标监控**
 
 ---
 
@@ -667,7 +667,7 @@ make test
 |------|------|
 | http://localhost:8000 | 前端界面（暗色主题，含对话 + 监控仪表盘） |
 | http://localhost:8000/docs | FastAPI 自动生成的 API 文档（Swagger UI） |
-| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器状态） |
+| `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器 / LangGraph checkpoint 状态） |
 | http://localhost:3000 | Grafana 仪表盘（admin / `<GRAFANA_PASSWORD>`） |
 | http://localhost:9090 | Prometheus UI |
 
@@ -836,6 +836,12 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `SESSION_SUMMARY_MAX_CHARS` | 500 | 历史摘要最大字符数 |
 | `SESSION_IDLE_TTL` | 3600 | 会话空闲过期时间（秒） |
 | `MAX_SESSIONS` | 10000 | 最大内存会话数 |
+| **LangGraph Checkpoint** | | |
+| `LANGGRAPH_CHECKPOINT_BACKEND` | 空（自动） | `memory` / `postgres`；留空开发→memory、生产→postgres |
+| `LANGGRAPH_CHECKPOINT_DATABASE_URL` | 空 | checkpoint 专用 PG DSN；留空安全复用 `DATABASE_URL`（仅 postgres 协议） |
+| `LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE` | 1 | psycopg 异步连接池最小连接数 |
+| `LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE` | 10 | psycopg 异步连接池最大连接数 |
+| `LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT` | 15.0 | 首次 `setup()`/连接池 open 超时（秒） |
 | **漂移检测** | | |
 | `DRIFT_TOPIC_JACCARD_THRESHOLD` | 0.15 | 话题漂移阈值（jieba Jaccard） |
 | `DRIFT_REPETITION_THRESHOLD` | 0.8 | 重复提问阈值 |
