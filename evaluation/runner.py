@@ -87,12 +87,10 @@ def run_local(*, repeat: int = 3, warmup: int = 1) -> EvidenceRecord:
     latencies: list[float] = []
     outcomes: list[bool] = []
     recoverability = Counter[str]()
-    channels = Counter({
-        "vector_only_hit": 0,
-        "bm25_only_hit": 0,
-        "both_hit": 0,
-        "neither_hit": 0,
-    })
+    hit_sum = 0.0
+    recall_sum = 0.0
+    mrr_sum = 0.0
+    retrieval_sample_count = 0
     for _ in range(warmup + repeat):
         for case in workloads:
             started = time.perf_counter()
@@ -103,17 +101,29 @@ def run_local(*, repeat: int = 3, warmup: int = 1) -> EvidenceRecord:
                 recoverability[case.recoverability] += 1
                 if case.expected_doc_ids:
                     metrics = retrieval_metrics(case.expected_doc_ids, case.ranked_doc_ids, top_k=3)
-                    if metrics["hit_at_k"]:
-                        channels["hit_at_k"] += 1
-                    if case.scenario == "degraded_embedding" and metrics["hit_at_k"]:
-                        channels["bm25_only_hit"] += 1
-                    elif case.scenario == "hybrid_retrieval" and metrics["hit_at_k"]:
-                        channels["both_hit"] += 1
-                    elif metrics["hit_at_k"]:
-                        channels["vector_only_hit"] += 1
-                    else:
-                        channels["neither_hit"] += 1
+                    hit_sum += metrics["hit_at_k"]
+                    recall_sum += metrics["recall_at_k"] or 0.0
+                    mrr_sum += metrics["mrr"]
+                    retrieval_sample_count += 1
     measured_samples = len(workloads) * repeat
+    # Hit@K / Recall@K / MRR are preserved with their sample count. The
+    # per-channel (vector/BM25) attribution is genuinely NOT_MEASURED: a
+    # WorkloadCase carries only one combined ranked_doc_ids list, so claiming
+    # vector_only/bm25_only outcomes would be fabricated attribution.
+    channels: dict[str, int | float | str | None] = {
+        "hit_at_k": round(hit_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
+        "recall_at_k": round(recall_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
+        "mrr": round(mrr_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
+        "retrieval_sample_count": retrieval_sample_count,
+        "vector_only_hit": "NOT_MEASURED",
+        "bm25_only_hit": "NOT_MEASURED",
+        "both_hit": "NOT_MEASURED",
+        "neither_hit": "NOT_MEASURED",
+        "per_channel_note": (
+            "per-channel vector/BM25 attribution is NOT_MEASURED: WorkloadCase "
+            "exposes only a combined ranked_doc_ids list"
+        ),
+    }
     latency = summarize_latency(
         latencies,
         warmup_count=len(workloads) * warmup,
@@ -172,13 +182,49 @@ def run_local(*, repeat: int = 3, warmup: int = 1) -> EvidenceRecord:
     return record
 
 
+def _provider_measurement_present(payload: dict[str, Any]) -> bool:
+    for key in ("provider_cost", "input_tokens", "output_tokens", "cached_tokens"):
+        measurement = payload.get(key)
+        if isinstance(measurement, dict) and measurement.get("source") == "PROVIDER_REPORTED":
+            return True
+    return False
+
+
 def render_markdown(payload: dict[str, Any]) -> str:
+    """Render Markdown from the payload, never from hardcoded assumptions.
+
+    The JSON and Markdown artifacts must agree on environment, run id, git SHA,
+    request/success/failure counts, status and provider-measurement
+    availability. A controlled staging run that collected provider-reported
+    measurements must not print "NOT_VERIFIED"; a local fixture must not imply
+    production evidence.
+    """
     latency = payload["latency"]
+    environment = payload.get("environment", "UNKNOWN")
+    final_status = payload.get("final_status")
+    if environment == "LOCAL_FIXTURE":
+        status = "LOCAL_ONLY"
+    elif final_status:
+        status = final_status
+    else:
+        status = environment
+    if _provider_measurement_present(payload):
+        boundary = (
+            "Provider-reported token/usage measurements are present for this controlled "
+            "staging run; provider billing, production latency/SLA and production "
+            "task-success remain `NOT_VERIFIED`."
+        )
+    else:
+        boundary = (
+            "Provider tokens, provider billing, Redis, ERP, Qdrant migration, and "
+            "production behavior remain `NOT_VERIFIED`."
+        )
     return "\n".join(
         [
             "# Production Evidence Run",
             "",
-            "- status: `LOCAL_ONLY`",
+            f"- status: `{status}`",
+            f"- environment: `{environment}`",
             f"- run_id: `{payload['run_id']}`",
             f"- git_sha: `{payload['git_sha']}`",
             f"- workload: `{payload['workload_id']}`",
@@ -187,7 +233,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             f"- latency source: `{latency['source']}`",
             f"- latency P50/P95/P99 ms: `{latency['p50_ms']}` / `{latency['p95_ms']}` / `{latency['p99_ms']}`",
             "",
-            "Provider tokens, provider billing, Redis, ERP, Qdrant migration, and production behavior remain `NOT_VERIFIED`.",
+            boundary,
             "",
         ]
     )
