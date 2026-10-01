@@ -41,16 +41,74 @@ def _call_default(call: ast.Call) -> object | None:
     return None
 
 
-def _bool_from_compare(node: ast.Compare) -> bool | None:
-    """Recognize ``X.lower() == "true"`` / ``X == "1"`` style flags."""
-    comparators = [getattr(c, "value", None) for c in node.comparators]
-    if not comparators:
+def _dotted_call_name(call: ast.Call) -> str:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return f"{getattr(func.value, 'id', '')}.{func.attr}"
+    return getattr(func, "id", "")
+
+
+def _is_env_call(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and _dotted_call_name(node) in _ENV_HELPERS
+
+
+def _unwrap_env_call(node: ast.AST) -> ast.Call | None:
+    """Return the underlying env-helper call, unwrapping string methods.
+
+    ``os.getenv("K", "false").lower()`` is an ``ast.Call`` whose func is the
+    ``.lower`` attribute of the env call, so a naive unwrap would step past the
+    env call to the ``os`` name. This walks method wrappers (``.lower()`` /
+    ``.strip()``) until it reaches the env helper itself.
+    """
+    while isinstance(node, ast.Call):
+        if _is_env_call(node):
+            return node
+        if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Call):
+            node = node.func.value
+            continue
         return None
-    raw = comparators[0]
-    if isinstance(raw, str):
-        return raw.strip().lower() in {"true", "1", "yes", "on"}
-    if isinstance(raw, bool):
-        return raw
+    return None
+
+
+_TRUE_STRINGS = {"true", "1", "yes", "on"}
+_FALSE_STRINGS = {"false", "0", "no", "off"}
+
+
+def _as_bool(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in _TRUE_STRINGS:
+            return True
+        if normalized in _FALSE_STRINGS:
+            return False
+    return None
+
+
+def _bool_from_compare(node: ast.Compare) -> bool | None:
+    """Evaluate a boolean flag from the ``getenv`` fallback, not the literal.
+
+    For ``os.getenv("QDRANT_PREFER_GRPC", "false").lower() == "true"`` the
+    canonical fallback is ``false`` (evaluate the *default* against the
+    comparator), not ``true`` from the comparison target.
+    """
+    if len(node.ops) != 1 or len(node.comparators) != 1:
+        return None
+    env_call = _unwrap_env_call(node.left)
+    if env_call is None:
+        return None
+    default_bool = _as_bool(_call_default(env_call))
+    comparator_bool = _as_bool(getattr(node.comparators[0], "value", None))
+    if default_bool is None or comparator_bool is None:
+        return None
+    op = node.ops[0]
+    if isinstance(op, ast.Eq):
+        return default_bool == comparator_bool
+    if isinstance(op, ast.NotEq):
+        return default_bool != comparator_bool
     return None
 
 
@@ -59,15 +117,7 @@ def _resolve(node: ast.AST) -> object | None:
         return node.value
     if isinstance(node, ast.Compare):
         return _bool_from_compare(node)
-    if isinstance(node, ast.Call):
-        func = node.func
-        dotted = (
-            f"{getattr(func.value, 'id', '')}.{func.attr}"
-            if isinstance(func, ast.Attribute)
-            else getattr(func, "id", "")
-        )
-        if dotted not in _ENV_HELPERS:
-            return None
+    if _is_env_call(node):
         return _call_default(node)
     return None
 

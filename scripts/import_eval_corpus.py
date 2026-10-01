@@ -197,6 +197,7 @@ async def import_corpus(
         foreign = set(existing) - expected_ids
         identity_clean = not missing and not hash_mismatch and not foreign
 
+        foreign_removed = 0
         if identity_clean:
             counts[coll] = kb.get_collection_count(coll)
             done_batches += (len(ds) + batch_size - 1) // batch_size
@@ -234,8 +235,33 @@ async def import_corpus(
                 )
                 sys.stdout.flush()
                 await asyncio.sleep(0.15)  # 限速：避免触发 provider 限流
+            # Repair must remove foreign points too, otherwise the collection
+            # stays identity-dirty, can return stale documents during
+            # evaluation, and is re-embedded on every subsequent import.
+            if foreign:
+                await asyncio.to_thread(kb.delete_documents, coll, sorted(foreign))
+                foreign_removed = len(foreign)
+                print()
+                print(
+                    f"  [PRUNE] {coll}: removed {foreign_removed} foreign/legacy "
+                    f"point(s) not in the requested corpus"
+                )
             counts[coll] = kb.get_collection_count(coll)
             action = "imported"
+
+        # Post-import identity verification: never report completion on a
+        # collection that still does not match the requested corpus.
+        after = existing if action == "skipped" else _collection_payload_index(kb, coll)
+        missing_after = expected_ids - set(after)
+        hash_mismatch_after = {
+            doc_id
+            for doc_id in (expected_ids & set(after))
+            if after.get(doc_id) != corpus_sha256
+        }
+        foreign_after = set(after) - expected_ids
+        identity_clean_after = (
+            not missing_after and not hash_mismatch_after and not foreign_after
+        )
 
         identity[coll] = {
             "expected_logical_ids": len(expected_ids),
@@ -243,7 +269,12 @@ async def import_corpus(
             "missing_before": len(missing),
             "hash_mismatch_before": len(hash_mismatch),
             "foreign_before": len(foreign),
-            "identity_clean": identity_clean,
+            "identity_clean_before": identity_clean,
+            "foreign_removed": foreign_removed,
+            "missing_after": len(missing_after),
+            "hash_mismatch_after": len(hash_mismatch_after),
+            "foreign_after": len(foreign_after),
+            "identity_clean_after": identity_clean_after,
             "action": action,
         }
     print()
@@ -342,6 +373,26 @@ async def main() -> int:
         manifest["identity"] = identity
         manifest["coverage"] = coverage
         print(f"导入完成: {json.dumps(counts, ensure_ascii=False)}")
+
+        dirty = [
+            coll for coll, info in identity.items() if not info["identity_clean_after"]
+        ]
+        if dirty:
+            manifest["post_import_identity_clean"] = False
+            print(
+                f"[ERROR] post-import identity 未通过: {dirty}；"
+                "collection 仍包含 foreign/missing/hash-mismatch 文档，"
+                "拒绝报告导入完成"
+            )
+            # Persist the manifest before failing so the audit trail is intact.
+            manifest_dir = Path(args.manifest_dir)
+            manifest_dir.mkdir(parents=True, exist_ok=True)
+            out = manifest_dir / f"import_manifest_{manifest['run_id']}.json"
+            with open(out, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+            print(f"manifest 已保存: {out}")
+            return 1
+        manifest["post_import_identity_clean"] = True
 
         if not args.skip_bm25:
             print("执行 BM25 全量 rebuild ...")

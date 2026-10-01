@@ -13,6 +13,7 @@ BM25 检索器（internal feature milestone: hybrid retrieval）
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from core.logger import get_logger
@@ -114,6 +115,8 @@ class BM25Retriever:
         query: str,
         top_k: int = 5,
         collection: str | None = None,
+        *,
+        metadata_filter: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
         """BM25 检索入口。
 
@@ -121,6 +124,9 @@ class BM25Retriever:
             query: 查询文本
             top_k: 返回结果数
             collection: 限定 collection（None 则搜所有集合）
+            metadata_filter: 可选的 payload 谓词。谓词在 **每个 collection
+                截断到 top_k 之前** 应用，与 dense 通道的 filter-before-limit
+                语义一致；否则高分但被过滤的文档会挤掉真正匹配的候选。
 
         Returns:
             结果列表，每项含 id/content/metadata/bm25_score
@@ -139,7 +145,9 @@ class BM25Retriever:
 
         all_results: list[dict[str, Any]] = []
         for coll in collections:
-            results = self._search_collection(query_tokens, coll, top_k)
+            results = self._search_collection(
+                query_tokens, coll, top_k, metadata_filter
+            )
             # 标记来源 collection
             for r in results:
                 r["_collection"] = coll
@@ -197,8 +205,14 @@ class BM25Retriever:
         query_tokens: list[str],
         collection: str,
         top_k: int,
+        metadata_filter: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
-        """在单个 collection 内执行 BM25 检索"""
+        """在单个 collection 内执行 BM25 检索
+
+        ``metadata_filter`` is applied to the scored candidates *before* the
+        ``top_k`` truncation so a filtered-out high scorer cannot evict a valid
+        lower-ranked document.
+        """
         n_docs = self._total_docs.get(collection, 0)
         if n_docs == 0:
             return []
@@ -236,6 +250,14 @@ class BM25Retriever:
 
         # 按 BM25 得分降序排列
         scored.sort(key=lambda x: x[0], reverse=True)
+        # Filter-before-truncation: a filtered-out high scorer must not consume
+        # a top_k slot that belongs to a valid lower-ranked candidate.
+        if metadata_filter is not None:
+            scored = [
+                (score, idx)
+                for score, idx in scored
+                if metadata_filter(self._docs[collection][idx][2] or {})
+            ]
         scored = scored[:top_k]
 
         results = []

@@ -1306,23 +1306,29 @@ class QdrantKnowledgeBase:
         if not bm25:
             return []
 
+        # Filter-before-limit parity with the dense channel: the predicate is
+        # applied inside BM25Retriever before its per-collection top_k
+        # truncation, so filtered-out high scorers cannot evict valid
+        # lower-ranked candidates.
+        metadata_filter = None
+        if scene or metadata_filters:
+            metadata_filter = lambda meta: self._metadata_matches_filters(  # noqa: E731
+                meta, scene, metadata_filters
+            )
+
         all_results: list[dict[str, Any]] = []
         for coll in collection_names:
             if bm25.collection_size(coll) == 0:
                 continue
             try:
-                results = bm25.search(query, top_k=top_k, collection=coll)
+                results = bm25.search(
+                    query, top_k=top_k, collection=coll,
+                    metadata_filter=metadata_filter,
+                )
                 all_results.extend(results)
             except Exception as e:
                 logger.debug(f"BM25 检索失败 [{coll}]: {e}")
 
-        if scene or metadata_filters:
-            all_results = [
-                r for r in all_results
-                if self._metadata_matches_filters(
-                    r.get("metadata"), scene, metadata_filters
-                )
-            ]
         all_results.sort(key=lambda r: r.get("bm25_score", 0), reverse=True)
         return all_results[:top_k]
 
