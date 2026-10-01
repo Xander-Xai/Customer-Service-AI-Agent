@@ -1,9 +1,9 @@
 {
   "name": "customer-service-ai-agent",
-  "version": "6.1",
+  "version": "6.3",
   "private": true,
   "type": "module",
-  "description": "药妆智多星多智能体客服系统 - v6.1（证据缺口修复 + 三级缓存重构 + 多模态统一入口）",
+  "description": "药妆智多星多智能体客服系统 - 运行时 v6.3（多智能体 + RAG 证据管线 + 三级缓存 + 多模态入口）",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
