@@ -157,6 +157,23 @@ class TestDependencyContract:
             line.strip() == "requirements-lock.local.txt" for line in gitignore.splitlines()
         ), "requirements-lock.local.txt is not gitignored"
 
+    def test_makefile_declares_layered_dependency_contract(self):
+        makefile = _read("Makefile")
+        assert "唯一依赖契约" not in makefile, (
+            "Makefile still claims requirements.txt is the single dependency "
+            "contract; state the Deployment / CI Lane A / Dev Lane B layers"
+        )
+        for token in (
+            "Deployment",
+            "requirements.txt + Dockerfile",
+            "CI Lane A",
+            "Dev compatibility Lane B",
+            "requirements-dev.txt",
+            "HISTORICAL / NON-AUTHORITATIVE",
+            "requirements-lock.local.txt",
+        ):
+            assert token in makefile, f"Makefile dependency contract missing: {token}"
+
 
 class TestHistoricalAuthority:
     def test_codex_spec_no_longer_claims_unique_spec(self):
