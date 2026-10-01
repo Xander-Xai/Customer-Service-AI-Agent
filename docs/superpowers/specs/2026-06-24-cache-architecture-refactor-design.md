@@ -1,5 +1,9 @@
 # 缓存架构重构设计文档
 
+> **HISTORICAL DESIGN SNAPSHOT (2026-06-24)**
+> 这是带日期的设计文档，记录作者当时的设计意图，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；仅作历史留档。
+
 > 日期：2026-06-24
 > 状态：设计阶段
 > 影响范围：cache/response_cache.py, core/config.py, core/container.py, core/graph_builder.py, agents/response_agent.py, api/routes/monitoring.py, rag/qdrant_knowledge_base.py

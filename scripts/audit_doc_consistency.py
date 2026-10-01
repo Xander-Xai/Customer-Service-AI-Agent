@@ -74,9 +74,11 @@ ACTIVE_EXTRA = [
     Path("README.md"),
     Path("CLAUDE.md"),
     Path("docs/README.md"),
-    Path("TOOL_RESULT_CACHE_REUSE_AUDIT.md"),
-    Path("TOOL_RESULT_V2_AUDIT_REPORT.md"),
 ]
+# Historical root audit snapshots (TOOL_RESULT_CACHE_REUSE_AUDIT.md /
+# TOOL_RESULT_V2_AUDIT_REPORT.md) were moved to docs/reports/audit/ during the
+# 2026-10-01 repository truth alignment; reports/ is a HISTORICAL_DIR, so they
+# are excluded from the active scan by directory semantics (no root exception).
 
 # Canonical runtime defaults that must agree across code / example / compose.
 CANONICAL_MODEL_KEYS = {

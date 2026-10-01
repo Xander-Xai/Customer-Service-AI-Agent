@@ -1,5 +1,9 @@
 # 证据缺口修复实施计划
 
+> **HISTORICAL PLAN SNAPSHOT (2026-06-24)**
+> 这是带日期的设计/实施计划，记录作者当时的工作单，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；相关修复已完成，仅作历史留档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 修复审计发现的 4 类 14 项问题，涵盖知识库计数、基准 ID 对齐、Prometheus 注册 Bug、前端多模态、收尾清理

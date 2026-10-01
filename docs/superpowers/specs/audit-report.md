@@ -1,5 +1,9 @@
 # 全量审查报告
 
+> **HISTORICAL AUDIT SNAPSHOT (2026-06-03, v3.3 worktree)**
+> 这是带日期的审计快照，记录当时时点的发现，**不是当前事实**。
+> Current Truth: `docs/reference/current-state.md`；仅作历史留档。
+
 > 审查时间: 2026-06-03 | 审查范围: v3.3 worktree (commit 29fa3b2)
 > 审查人: Agent A3A2 (安全+代码+功能三合一审查)
 

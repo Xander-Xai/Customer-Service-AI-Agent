@@ -17,6 +17,9 @@
 | 编码规范、项目约定、AI 助手指令 | → [standards/](#standardsstandards) |
 | 部署、切换、运维排障 | → [operations/](#operationsoperations) |
 | 发布前/部署前逐项检查 | → [checklists/](#checklistschecklists) |
+| provider/生产证据边界 | → [evaluation/](#evaluationevaluation) |
+| 整改规格、完成报告（历史） | → [audit/](#auditaudit) |
+| 历史设计与实施计划（2026-06） | → [superpowers/](#superpowerssuperpowers) |
 | 阶段完成报告、版本发布说明 | → [reports/](#reportsreports) |
 | 安全审计、代码审查、多维度分析 | → [reports/audit/](#reportsaudit) |
 | 旧版设计、已完成的历史文档 | → [archive/](#archivearchive) |
@@ -55,7 +58,7 @@
 ### 🔒 审计者
 - 当前事实入口 → [reference/current-state.md](reference/current-state.md)
 - 安全审计报告 → [reports/audit/](reports/audit/)
-- 治理审计 → [design/governance-audit.md](design/governance-audit.md)
+- 治理审计 → [reports/audit/governance-audit.md](reports/audit/governance-audit.md)（历史快照）
 - 模型对比分析 → [reference/model-comparison.md](reference/model-comparison.md)
 - RAG 评估（canonical） → [reference/rag-evaluation.md](reference/rag-evaluation.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
@@ -69,6 +72,20 @@
 | provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟢 CURRENT |
 | 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
 | 版本历史 | [reports/releases/](reports/releases/) | 🟡 SNAPSHOT（旧版本章节永不重写） |
+
+### 生命周期图例
+
+每个目录都有且只有一个生命周期；不允许"有大量文档但不知道是否还有效"。
+
+| 标记 | 生命周期 | 含义 |
+|---|---|---|
+| 🟢 | CURRENT | 当前事实/规范，随代码与配置同步更新 |
+| 🔵 | DESIGN / ADR | 设计说明或已采纳决策（决策正文一旦采纳不重写；被取代只更新 Status） |
+| 🟠 | RUNBOOK | 操作/运维/清单，执行后可能过时但仍是操作入口 |
+| 🟣 | EVIDENCE | 证据边界与评估口径（CURRENT，但结论可能是 NOT_VERIFIED） |
+| 🟡 | HISTORICAL AUDIT | 带日期的审计/对齐/迁移快照，仅执行时点有效 |
+| ⚪ | SUPERSEDED | 已被后续文档取代，保留历史身份，不再具权威 |
+| 🔴 | ARCHIVE | 归档，不再维护 |
 
 ### 🆕 新人
 - 项目总览 → [../README.md](../README.md)
@@ -93,7 +110,6 @@
 | [architecture-design.md](design/architecture-design.md) | 四层状态机、9 个 Agent、5 种协作模式 | 开发者、新人 |
 | [security.md](design/security.md) | 安全架构、威胁模型、认证方案 | 开发者、审计者 |
 | [prompt-engineering.md](design/prompt-engineering.md) | Prompt 策略和模式 | 开发者 |
-| [governance-audit.md](design/governance-audit.md) | 治理审计报告 | 审计者 |
 | [interview-intro.md](design/interview-intro.md) | 项目介绍（面试用） | 新人 |
 | [interview-deep-dive.md](design/interview-deep-dive.md) | 深入 Q&A（面试用） | 新人 |
 
@@ -149,6 +165,16 @@
 | [production-operations-guide.md](operations/production-operations-guide.md) | 生产运维手册 | 运维者 |
 | [llm-provider-switch.md](operations/llm-provider-switch.md) | LLM 提供商切换指南 | 运维者 |
 | [e2e-verification-guide.md](operations/e2e-verification-guide.md) | E2E 验证方法论 | 开发者、运维者 |
+
+---
+
+### `evaluation/` — 证据与评估口径
+
+> 🟣 EVIDENCE — CURRENT：定义"什么是证据、什么还没有证据"
+
+| 文件 | 说明 | 读者 |
+|---|---|---|
+| [production-evidence.md](evaluation/production-evidence.md) | provider/生产证据边界与状态语义（VERIFIED / NOT_VERIFIED / NOT_MEASURED / UNKNOWN） | 开发者、审计者 |
 
 ---
 
@@ -209,6 +235,9 @@
 | [dynamic-validation.md](reports/audit/dynamic-validation.md) | 动态验证测试 |
 | [multi-dimensional-analysis.md](reports/audit/multi-dimensional-analysis.md) | 多维度质量分析 |
 | [audit-remediation-report.md](reports/audit/audit-remediation-report.md) | 审计整改报告 |
+| [governance-audit.md](reports/audit/governance-audit.md) | 文档治理评估（2026-06-17 历史快照；2026-10-01 由 design/ 迁入） |
+| [tool-result-cache-reuse-audit.md](reports/audit/tool-result-cache-reuse-audit.md) | Tool Result cache reuse 审计快照（2026-10-01 由仓库根迁入） |
+| [tool-result-v2-audit-report.md](reports/audit/tool-result-v2-audit-report.md) | Tool Result Context Engineering V2 审计快照（2026-10-01 由仓库根迁入） |
 
 #### `reports/plans/` — 实施计划（均为 HISTORICAL AUDIT SNAPSHOT）
 
@@ -220,6 +249,32 @@
 | [2026-06-23-code-doc-alignment.md](reports/plans/2026-06-23-code-doc-alignment.md) | 2026-06-23 代码与文档对齐记录（历史） |
 | [2026-06-22-code-doc-alignment.md](reports/plans/2026-06-22-code-doc-alignment.md) | 2026-06-22 代码与文档对齐记录（历史） |
 | [frontend-repair-plan.md](reports/plans/frontend-repair-plan.md) | 前端修复计划（历史） |
+
+---
+
+### `audit/` — 整改规格与完成报告
+
+> 🟡 HISTORICAL AUDIT / ⚪ SUPERSEDED — 带日期的整改规格与验收报告，仅执行时点有效。
+> `CODEX_PROJECT_REMEDIATION_SPEC.md` 的"唯一执行规格"权威身份已于 2026-10-01 撤销，
+> 不再与 [reference/current-state.md](reference/current-state.md) 竞争 Current Truth。
+
+| 文件 | 说明 | 生命周期 |
+|---|---|---|
+| [CODEX_PROJECT_REMEDIATION_SPEC.md](audit/CODEX_PROJECT_REMEDIATION_SPEC.md) | 2026-08-13 整改规格 | ⚪ SUPERSEDED |
+| [CODEX_REMEDIATION_PLAN.md](audit/CODEX_REMEDIATION_PLAN.md) | 整改规划（历史） | 🟡 HISTORICAL |
+| [P0_02_COMPLETION_REPORT.md](audit/P0_02_COMPLETION_REPORT.md) | 缓存跨用户泄漏修复报告 | 🟡 HISTORICAL |
+| [P0_03_COMPLETION_REPORT.md](audit/P0_03_COMPLETION_REPORT.md) | ERP 授权修复报告 | 🟡 HISTORICAL |
+
+---
+
+### `superpowers/` — 历史设计与实施计划（2026-06）
+
+> 🟡 HISTORICAL AUDIT — 带日期的设计/实施工作单，已加 historical banner。
+> 均不是当前架构权威；Current Truth 只认
+> [reference/current-state.md](reference/current-state.md)。
+
+`plans/`（迁移/SSE/缓存/证据缺口）与 `specs/`（设计文档 + 审查报告）均为
+2026-06 快照，保留原版本与当时结论，不再逐一列出。
 
 ---
 
@@ -274,8 +329,8 @@ draft   design/   archive/
 
 完整的文档价值评估与分类体系定义在：
 
-> [design/governance-audit.md](design/governance-audit.md) — 文档治理审计与分类报告
+> [reports/audit/governance-audit.md](reports/audit/governance-audit.md) — 文档治理审计与分类报告（2026-06-17 历史快照）
 
 ---
 
-*最后更新：2026-09-30（文档收敛 v3：RAG evidence pipeline 口径 + 真相层级速查 + runtime/config/文档收敛 v2 延续）*
+*最后更新：2026-10-01（Repository Truth Alignment：生命周期图例 + evaluation/audit/superpowers 目录生命周期 + 根快照迁入 reports/audit/）*

@@ -1,5 +1,11 @@
 # 文档治理评估报告
 
+> **HISTORICAL AUDIT SNAPSHOT (2026-06-17)**
+> 本报告是 2026-06-17 的文档治理评估，文中提到的 `active/`、`fix-plan.md`、
+> `docs/release/`、旧 `rag-evaluation-report.json` 等路径均已不存在。
+> 它不是当前文档目录的权威说明。Current Truth: `docs/reference/current-state.md`；
+> 当前文档生命周期以 `docs/README.md` 为准。2026-10-01 由 `docs/design/` 迁入本目录。
+>
 > 评估日期：2026-06-17（原 2026-06-10，v5.4 后复审更新）
 > 评估依据：`/home/dev/projects/governance/document-evaluation-framework.md`
 > 评估范围：项目 `docs/` 目录 + 根目录 `.md` 文件（共 25 份文档）

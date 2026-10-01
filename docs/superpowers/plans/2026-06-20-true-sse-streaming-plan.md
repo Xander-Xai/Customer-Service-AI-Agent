@@ -1,5 +1,9 @@
 # 全链路真流式 SSE Streaming Implementation Plan
 
+> **HISTORICAL PLAN SNAPSHOT (2026-06-20)**
+> 这是带日期的设计/实施计划，记录作者当时的工作单，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；相关实现已完成，仅作历史留档。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement true end-to-end SSE streaming across the entire chain — graph node status, cache pseudo-streaming, tool-calling reasoning visibility, and RAG retrieval status.

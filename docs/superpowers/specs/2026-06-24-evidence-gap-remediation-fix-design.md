@@ -1,5 +1,9 @@
 # 证据缺口修复 — 修正与开发设计方案
 
+> **HISTORICAL DESIGN SNAPSHOT (2026-06-24)**
+> 这是带日期的设计文档，记录作者当时的设计意图，**不是当前架构权威**。
+> Current Truth: `docs/reference/current-state.md`；仅作历史留档。
+
 > 日期：2026-06-24
 > 状态：设计完成
 > 影响范围：scripts/, tests/, web/, api/, core/, docs/
