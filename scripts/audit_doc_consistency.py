@@ -31,7 +31,9 @@ Checks:
       亚毫秒/<10ms) without benchmark/estimate/historical context;
       R. production-grade status claims while production evidence is
       NOT_VERIFIED; S. env-shaped tokens in active docs must resolve to a
-      real config surface or be marked historical/negative on the line.
+      real config surface or be marked historical/negative on the line;
+      T. one canonical lifecycle vocabulary (no Active/Stable/Disposable/
+      Snapshot markers); U. no accidental ``v6.4`` product-version claim.
 
 Historical docs (with an explicit HISTORICAL banner) are excluded from
 terminology checks but still pass through link/reference checks unless they
@@ -245,9 +247,15 @@ def discover_docs(root: Path = ROOT) -> list[Path]:
     seen = set()
     for extra in ACTIVE_EXTRA:
         p = root / extra
-        if p.exists():
-            docs.append(p)
-            seen.add(extra)
+        if not p.exists():
+            continue
+        # Explicit extras still honor the historical-banner rule: a document
+        # bannered HISTORICAL AUDIT SNAPSHOT must never be scanned as current
+        # truth just because it is listed in ACTIVE_EXTRA.
+        if has_historical_banner(p.read_text(encoding="utf-8", errors="replace")):
+            continue
+        docs.append(p)
+        seen.add(extra)
     docs_root = root / "docs"
     for p in sorted(docs_root.rglob("*")):
         if not p.is_file() or p.suffix.lower() not in DOC_SUFFIXES:
@@ -435,13 +443,31 @@ def check_openapi_snapshot(errors: list[str], root: Path = ROOT) -> None:
     if not snapshot.exists():
         errors.append("docs/openapi.json missing (run scripts/generate_openapi.py)")
         return
+    # Fail closed: only an ImportError (a dependency genuinely absent from this
+    # environment) is a tolerated warning. Application import regressions,
+    # route-registration errors and ``app.openapi()`` schema-construction
+    # failures are audit errors, otherwise the advertised OpenAPI audit could
+    # report OK while the application is broken.
     try:
         from api.app_factory import app  # noqa: PLC0415
-
-        live = app.openapi()
-    except Exception as exc:  # pragma: no cover - environment dependent
+    except ImportError as exc:
         warnings_append(
-            f"OpenAPI live spec unavailable in this environment ({exc.__class__.__name__})"
+            f"OpenAPI live spec unavailable (missing dependency "
+            f"{exc.__class__.__name__}: {exc})"
+        )
+        return
+    except Exception as exc:  # noqa: BLE001 - application import regression
+        errors.append(
+            f"OpenAPI app import regression: {exc.__class__.__name__}: {exc} "
+            f"(api.app_factory.{'app'} failed to import)"
+        )
+        return
+    try:
+        live = app.openapi()
+    except Exception as exc:  # noqa: BLE001 - schema construction regression
+        errors.append(
+            f"OpenAPI schema construction failed: {exc.__class__.__name__}: {exc} "
+            f"(app.openapi() must not fail; audit is fail-closed)"
         )
         return
     current = json.loads(snapshot.read_text(encoding="utf-8"))
@@ -907,6 +933,53 @@ def check_production_claims(
             )
 
 
+# ---- Lifecycle vocabulary: one canonical taxonomy (docs/README.md).
+# Retired labels may only appear as explicitly-explained aliases, never as an
+# independent lifecycle marker. Emoji-anchored so prose mentions don't trip.
+RETIRED_LIFECYCLE_RE = re.compile(
+    r"(?:🟢\s*Active|🔵\s*Stable|🟠\s*Disposable|🟡\s*Snapshot)"
+)
+
+# ---- No accidental product-version promotion. Runtime VERSION is 6.3; a
+# `v6.4`/`6.4` claim in an active doc (outside historical context) would be a
+# release that was never made.
+V64_CLAIM_RE = re.compile(r"\bv6\.4\b|\bversion\s*[:=]?\s*6\.4\b", re.IGNORECASE)
+# Explicit "no v6.4 release" statements are the desired documentation, not a claim.
+V64_NEGATION_RE = re.compile(
+    r"未声明|不再声明|不声明|不创建|不发布|no\s+v6\.4|not\s+(?:a\s+)?release",
+    re.IGNORECASE,
+)
+
+
+def check_lifecycle_vocabulary(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule: canonical lifecycle taxonomy only (no Active/Stable/Disposable/Snapshot
+    as independent lifecycle markers)."""
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if RETIRED_LIFECYCLE_RE.search(line):
+                errors.append(
+                    f"retired lifecycle label in {rel}:{line_no} — use the canonical "
+                    f"taxonomy (CURRENT / DESIGN-ADR / RUNBOOK / EVIDENCE / "
+                    f"HISTORICAL AUDIT / SUPERSEDED / ARCHIVE)"
+                )
+
+
+def check_no_v64_claim(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule: no `v6.4` product-version claim (no such release exists)."""
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not V64_CLAIM_RE.search(line):
+                continue
+            if HISTORICAL_CONTEXT.search(line) or V64_NEGATION_RE.search(line):
+                continue
+            errors.append(
+                f"accidental product-version claim `v6.4` in {rel}:{line_no} — the "
+                f"current runtime version is 6.3; do not invent a release"
+            )
+
+
 def collect_known_env_keys(root: Path = ROOT) -> frozenset[str]:
     """Machine-derived env surface: core/config.py constants + env reads in
     any Python module + .env.example/.env.test keys + compose/deploy/workflow
@@ -1039,6 +1112,8 @@ def main() -> int:
     check_latency_absolutes(docs, errors)
     check_production_claims(docs, errors)
     check_env_references(docs, errors)
+    check_lifecycle_vocabulary(docs, errors)
+    check_no_v64_claim(docs, errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
