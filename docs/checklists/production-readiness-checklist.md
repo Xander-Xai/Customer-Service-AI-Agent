@@ -20,6 +20,9 @@
 - [ ] Tool Result feature flags、rollback switches、Redis store/TTL 已验证
 - [ ] Tool Result scope isolation、cache safety 已验证
 - [ ] BM25 lifecycle restart、Qdrant point-id migration dry-run/rollback 已验证
+- [ ] **LangGraph checkpoint 持久化**：生产 `LANGGRAPH_CHECKPOINT_BACKEND=postgres`、
+      官方 saver `setup()` 成功、连接失败 fail closed（本地/受控环境验证；真实多副本
+      恢复仍属 PRODUCTION NOT_VERIFIED）
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -73,6 +76,11 @@
       `scripts/import_eval_corpus.py`（幂等导入 + manifest）、Make 目标
       `rag-eval-import/-preflight/-smoke/rag-eval-649`；提交有 preflight v1
       证据与 import manifest (PR #19)
+- [x] LangGraph Checkpoint 后端生命周期已实现（`core/checkpointer.py`）：
+      开发/测试 MemorySaver、生产官方 `langgraph-checkpoint-postgres`
+      (`AsyncPostgresSaver` + psycopg 异步连接池)；生产初始化失败 fail closed，
+      不静默回退；`/api/health` 暴露脱敏 `langgraph_checkpoint` 状态
+      （本地单测 + 可选真实 PostgreSQL 集成测试；真实多副本恢复仍 PRODUCTION NOT_VERIFIED）
 
 ## 2. 当前仍不能直接宣称"真实上线就绪"的项目
 
@@ -94,6 +102,8 @@
 - [ ] CORS_ORIGINS 在生产环境未配置时将导致前端跨域请求失败
 - [ ] 仍无真实生产密钥/域名/证书的验证记录
 - [ ] Qdrant、Redis、PostgreSQL 尚未在真实部署环境下验证
+- [ ] LangGraph checkpoint 的多副本共享/进程重启恢复尚未在真实生产环境验证
+      （本地/受控 PostgreSQL 集成测试通过，但不等于生产验证）
 - [ ] `rag/api_embedding.py` 的 embedding API Key 复用 `OPENAI_API_KEY`，生产环境应配置独立视角的 embedding 服务
 - [ ] CORS_ORIGINS 为空时已在生产启动校验中阻断启动
 
@@ -107,6 +117,9 @@
 - [ ] 确认 `VECTOR_DB_MODE`、`DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`SESSION_TOKEN_SECRET`、`API_KEY`、`MONITORING_ADMIN_TOKEN` 已按生产值配置
       （`EMBEDDING_API_KEY` / `RERANKER_API_KEY` 可独立配置；向量化与重排凭据必须实际可用
       ——embedding 未单独配置时会复用 `LLM` 的 `OPENAI_API_KEY`，见 `core/config.py`）
+- [ ] 确认 `LANGGRAPH_CHECKPOINT_BACKEND=postgres` 且 checkpoint 表
+      （由官方 saver `setup()` 创建）在目标 PostgreSQL 上初始化成功；健康检查
+      `langgraph_checkpoint.status=healthy`
 - [ ] 验证 `/api/health`、`/api/metrics`、`/api/kpi`、`/metrics/prometheus` 在目标环境下的权限和返回格式
 - [ ] 验证上传链路在 Nginx / 反向代理 / FastAPI 三级限制下仍保持一致
 - [ ] 复核备份、恢复、告警路由和通知通道，而不是只看文档说明

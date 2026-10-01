@@ -342,6 +342,92 @@ ALERT_EMAIL_TO = os.getenv("ALERT_EMAIL_TO", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "")  # 为空则使用 SQLite
 ALEMBIC_CONFIG_PATH = os.getenv("ALEMBIC_CONFIG_PATH", "alembic.ini")
 
+# ===== LangGraph Checkpoint 持久化配置 =====
+# 背景：MemorySaver 只存在于当前 Python 进程内，gunicorn 多 worker / 多副本
+# 之间不共享，实例重启即丢失。生产需要官方 PostgreSQL checkpointer。
+#   memory   -> langgraph.checkpoint.memory.MemorySaver（进程内，仅开发/测试）
+#   postgres -> langgraph.checkpoint.postgres.AsyncPostgresSaver（跨进程/重启持久化）
+# 留空表示按环境自动选择：开发/测试->memory，生产->postgres。
+LANGGRAPH_CHECKPOINT_BACKEND_RAW = os.getenv("LANGGRAPH_CHECKPOINT_BACKEND", "").strip().lower()
+# 显式 checkpoint 数据库 URL。留空且 backend=postgres 时安全复用 DATABASE_URL
+# （仅接受 libpq 兼容的 postgresql:// / postgres://，剥离 SQLAlchemy +driver 后缀；
+#  SQLite / 其它协议一律拒绝，绝不静默降级）。
+LANGGRAPH_CHECKPOINT_DATABASE_URL = os.getenv("LANGGRAPH_CHECKPOINT_DATABASE_URL", "").strip()
+# psycopg 连接池大小与首次 setup 超时（秒）
+LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE = _int_env("LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE", 1)
+LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE = _int_env("LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE", 10)
+LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT = _float_env("LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT", 15.0)
+
+
+def resolve_checkpoint_backend(raw: str = "", *, dev_mode: bool = False) -> str:
+    """解析 checkpoint backend，非法值 fail closed。
+
+    空值按环境选择（开发/测试 memory，生产 postgres）；显式值只允许
+    ``memory`` / ``postgres``，其它值抛 ``ConfigurationError``。
+    """
+    value = (raw or "").strip().lower()
+    if not value:
+        return "memory" if dev_mode else "postgres"
+    if value not in ("memory", "postgres"):
+        raise ConfigurationError(
+            f"LANGGRAPH_CHECKPOINT_BACKEND 非法: {value!r}（仅支持 memory | postgres）"
+        )
+    return value
+
+
+def derive_checkpoint_database_url(
+    explicit: str = "", *, database_url: str = ""
+) -> str | None:
+    """把 SQLAlchemy 风格 DSN 安全转换为 psycopg 可用的 libpq DSN。
+
+    只接受 postgres 协议；剥离 ``postgresql+psycopg2://`` 这类 SQLAlchemy
+    driver 后缀，标准化 ``postgres://`` -> ``postgresql://``。SQLite / MySQL /
+    无 scheme 的输入返回 ``None``（由调用方 fail closed），不做字符串乱替换。
+    """
+    raw = (explicit or "").strip() or (database_url or "").strip()
+    if not raw:
+        return None
+    scheme, sep, rest = raw.partition("://")
+    if not sep:
+        return None
+    base = scheme.split("+", 1)[0].lower()
+    if base in ("postgres", "postgresql"):
+        return f"postgresql://{rest}"
+    return None
+
+
+LANGGRAPH_CHECKPOINT_BACKEND = resolve_checkpoint_backend(
+    LANGGRAPH_CHECKPOINT_BACKEND_RAW, dev_mode=DEV_MODE
+)
+
+
+def validate_checkpoint_settings(
+    backend: str, *, explicit_url: str = "", database_url: str = "", dev_mode: bool = False
+) -> list[str]:
+    """校验 checkpoint 配置，返回错误信息列表（空 = 通过）。
+
+    生产（``dev_mode=False``）：
+      - 禁止 ``memory``（进程内、不跨 worker/副本、重启丢失）；
+      - ``postgres`` 必须能解析出 PostgreSQL DSN（显式 URL 或 DATABASE_URL）。
+    开发/测试：不做约束（允许显式 memory / 自动 memory）。
+    """
+    problems: list[str] = []
+    if dev_mode:
+        return problems
+    if backend == "memory":
+        problems.append(
+            "Production requires LANGGRAPH_CHECKPOINT_BACKEND=postgres "
+            "(MemorySaver is process-local and not shared across workers/replicas)"
+        )
+    elif backend == "postgres" and not derive_checkpoint_database_url(
+        explicit_url, database_url=database_url
+    ):
+        problems.append(
+            "Production checkpoint backend=postgres requires a PostgreSQL "
+            "LANGGRAPH_CHECKPOINT_DATABASE_URL or a PostgreSQL DATABASE_URL"
+        )
+    return problems
+
 # ===== v4.1: SSE 流式输出配置 =====
 SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
 SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
@@ -446,6 +532,18 @@ def validate_required_config():
 
     if not _DEV_MODE and not DATABASE_URL:
         errors.append("Production requires DATABASE_URL (PostgreSQL)")
+
+    # LangGraph checkpoint：生产禁止进程内 MemorySaver（多 worker/多副本不共享、
+    # 重启即丢失），且必须能解析出可用的 PostgreSQL DSN。
+    if not _DEV_MODE:
+        errors.extend(
+            validate_checkpoint_settings(
+                LANGGRAPH_CHECKPOINT_BACKEND,
+                explicit_url=LANGGRAPH_CHECKPOINT_DATABASE_URL,
+                database_url=DATABASE_URL,
+                dev_mode=_DEV_MODE,
+            )
+        )
 
     if errors:
         for err in errors:

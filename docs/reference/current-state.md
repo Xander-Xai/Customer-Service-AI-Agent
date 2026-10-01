@@ -83,6 +83,15 @@ python3 scripts/audit_doc_consistency.py
   确定性压缩、Top-K/token 预算、历史 compaction、专用 compressor、可选
   offload/store/recovery、scope-safe exact reuse cache、可选 semantic summary。
   它不是 Response Cache 的一部分；Session Memory（会话窗口/摘要）是第三种独立概念。
+- **LangGraph Checkpoint**（`core/checkpointer.py`）是第四种独立概念：图状态快照，
+  键为 `thread_id`（当前实现 `thread_id == session_id`），支持断点续传。
+  `LANGGRAPH_CHECKPOINT_BACKEND` 选择 `memory`（开发/测试，进程内
+  `MemorySaver`）或 `postgres`（官方 `langgraph-checkpoint-postgres` 的
+  `AsyncPostgresSaver`，跨 worker/副本共享、重启可恢复；留空时开发→memory、
+  生产→postgres）。checkpoint 表由官方 saver 自管，不与业务 SQLAlchemy Base 耦合。
+  生产初始化失败 fail closed，不静默回退 MemorySaver。
+  四个机制（Session Memory / LangGraph Checkpoint / Response Cache /
+  Tool Result Store）不是同一个概念，禁止互相替代或合并叙述。
 - RAG 链路：rewrite/filter → vector + BM25 → retrieval contract
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、

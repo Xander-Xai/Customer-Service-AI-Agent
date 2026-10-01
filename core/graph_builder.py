@@ -68,13 +68,14 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
     Args:
         container: ServiceContainer 依赖注入容器
-        checkpointer: LangGraph Checkpointer（如 MemorySaver），None 则不启用持久化
+        checkpointer: LangGraph Checkpointer（生产 AsyncPostgresSaver /
+            开发 MemorySaver），None 则不启用持久化
 
     Usage:
         container = ServiceContainer()
         await container.initialize()
-        app = build_graph(container, checkpointer=MemorySaver())
-        # 使用 thread_id 实现对话续传
+        app = build_graph(container, checkpointer=container.checkpointer)
+        # thread_id == session_id 实现对话续传
         config = {"configurable": {"thread_id": session_id}}
         result = await app.ainvoke(state, config=config)
     """
@@ -428,18 +429,21 @@ _default_container = None
 
 
 def make_graph():
-    """向后兼容包装器：内部使用单例 ServiceContainer 并调用 build_graph()。
+    """向后兼容包装器：内部使用单例 ServiceContainer 并调用其 _build_graph()。
 
     注意：此函数会使用一个单例的 ServiceContainer 实例，
     仅包含同步初始化的基础设施组件（不包含 LLM/Agents/Router 等异步组件）。
     图节点会在首次调用时懒初始化所需组件。
+
+    checkpointer 由容器生命周期决定：生产需 postgres 后端，开发/测试回退
+    MemorySaver（由 ``_build_graph`` 保证，生产缺失会 fail closed）。
+    此入口服务于 ``langgraph.json`` 本地开发图，不用于生产编排。
     """
     global _default_container
     if _default_container is None:
         _default_container = ServiceContainer()
-    return build_graph(
-        _default_container, checkpointer=getattr(_default_container, "checkpointer", None)
-    )
+    _default_container._build_graph()
+    return _default_container.graph_app
 
 
 if __name__ == "__main__":
