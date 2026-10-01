@@ -195,6 +195,16 @@ jobs:
       - name: Run unit tests
         run: python -m pytest tests/unit/ -q -m "not real_llm and not stress"
 
+      - name: Exercise declared pytest-asyncio floor (0.23.4)
+        # The resolver normally picks the newest 0.23.x release, so asserting
+        # `>= 0.23.4` does not prove the declared LOWER BOUND is safe. This step
+        # pins the exact floor and reruns the async-fixture collection that
+        # PR #21 fixed, proving 0.23.4 itself works with the pytest 8 range.
+        run: |
+          pip install "pytest-asyncio==0.23.4"
+          python -c "from importlib.metadata import version; assert version('pytest-asyncio') == '0.23.4', version('pytest-asyncio')"
+          python -m pytest tests/integration/test_integration.py -q -m "not real_llm"
+
   # P2-5: 安全扫描
   security:
     runs-on: ubuntu-latest
