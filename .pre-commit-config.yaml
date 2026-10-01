@@ -16,11 +16,12 @@ repos:
       - id: no-api-keys-in-env
         name: Prevent API keys in .env files
         entry: >-
-          bash -c 'failed=0; for f in "$@"; do if grep -Eq
-          "sk-[A-Za-z0-9]{20,}|api_key=[[:space:]]*[A-Za-z0-9_-]{20,}" "$f" 2>/dev/null;
+          bash -c 'failed=0; for f in "$@"; do if grep -Eiq
+          "sk-[A-Za-z0-9]{20,}|api[_-]?key[[:space:]]*=[[:space:]]*[^[:alnum:]]?[A-Za-z0-9_/-]{20,}" "$f" 2>/dev/null;
           then echo "ERROR: suspected API credential in $f"; failed=1; fi; done; exit "$failed"' --
         language: system
         files: '^\.env($|\.)'
+        exclude: '^\.env\.(example|sample|template|test)$'
         pass_filenames: true
 
   - repo: https://github.com/astral-sh/ruff-pre-commit

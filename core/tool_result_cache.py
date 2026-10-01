@@ -22,6 +22,13 @@ class ToolCachePolicy:
     cache_errors: bool = False
     cache_empty: bool = False
     require_scope: bool = True
+    # Private resources (e.g. ERP order/customer) enforce an ownership check
+    # inside the handler. A cache hit skips that handler, so a principal whose
+    # authorization was revoked during the TTL would keep receiving the private
+    # result — scope isolation is not authorization revocation. Such resources
+    # must never be served from cache; the handler (and its authz boundary)
+    # always runs.
+    authorization_required: bool = False
 
 
 def cacheable_result(result: Any, policy: ToolCachePolicy) -> bool:
@@ -29,6 +36,12 @@ def cacheable_result(result: Any, policy: ToolCachePolicy) -> bool:
     if result is None:
         return False
     if result == [] or result == {} or result in ("", "查询完成，无结果"):
+        return policy.cache_empty
+    # ERP wrappers turn an empty adapter result (including a transient provider
+    # outage that returned []) into a "未找到…" string. Caching that would keep
+    # serving a false miss for the full TTL after the provider recovers, so it
+    # is treated like an empty result (cache_empty, default False).
+    if isinstance(result, str) and "未找到" in result:
         return policy.cache_empty
     if isinstance(result, str) and any(
         marker in result for marker in ("执行失败", "暂时不可用", "工具 '", "错误：工具")
