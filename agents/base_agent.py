@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from abc import ABC, abstractmethod
@@ -692,6 +693,33 @@ class BaseAgent(ABC):
 
                 # 执行每个工具调用，追加 ToolMessage
                 for p in parsed_tcs:
+                    # Human-in-the-loop：HIGH 风险操作不直接执行，转人工审批
+                    from core.hitl.gate import should_propose_approval
+
+                    if should_propose_approval(p["name"], p["args"], self.tool_registry):
+                        state.setdefault("pending_actions", []).append(
+                            {
+                                "tool": p["name"],
+                                "arguments": p["args"],
+                                "risk_level": "high",
+                                "agent": self.name,
+                            }
+                        )
+                        proposal_msg = (
+                            "该操作属于高风险，已提交人工审批；批准后系统会继续执行。"
+                        )
+                        if stream_callback:
+                            with contextlib.suppress(Exception):
+                                await stream_callback({
+                                    "type": "tool_result",
+                                    "name": p["name"],
+                                    "summary": proposal_msg,
+                                    "agent": self.name,
+                                })
+                        messages.append(ToolMessage(content=proposal_msg, tool_call_id=p["id"]))
+                        self.logger.info(f"[HITL] 高风险操作转人工审批: {p['name']}")
+                        continue
+
                     cache_policy = (
                         self.tool_registry.cache_policy_for(p["name"])
                         if hasattr(self.tool_registry, "cache_policy_for")

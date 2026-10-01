@@ -74,6 +74,17 @@ services:
       # P0-5: PostgreSQL 数据库连接（生产启用）
       - DATABASE_URL=${DATABASE_URL:-}
       - JWT_SECRET=${JWT_SECRET:-}
+      # LangGraph checkpoint 持久化（生产必须 postgres；留空 URL 安全复用 DATABASE_URL）
+      - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
+      - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
+      - LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE:-1}
+      - LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE:-10}
+      - LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT=${LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT:-15.0}
+      # 跨进程事件流（API SSE 读取 worker 发布的 Redis Stream）
+      - RUN_EVENT_STREAM_ENABLED=${RUN_EVENT_STREAM_ENABLED:-true}
+      - RUN_EVENT_STREAM_BACKEND=${RUN_EVENT_STREAM_BACKEND:-redis}
+      - RUN_EVENT_STREAM_MAXLEN=${RUN_EVENT_STREAM_MAXLEN:-1000}
+      - RUN_EVENT_STREAM_TTL_SECONDS=${RUN_EVENT_STREAM_TTL_SECONDS:-3600}
       # v6.0: Qdrant 向量数据库
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -98,6 +109,70 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - cs-network
+
+  # ===== 分布式 Agent Worker（异步 Run 执行，与 API 进程解耦）=====
+  worker:
+    build: ../..
+    container_name: customer-service-worker
+    command: celery -A runtime.celery_app:celery_app worker -Q ${AGENT_RUN_QUEUE:-agent_runs} -l info --concurrency=${WORKER_CONCURRENCY:-2}
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
+      - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
+      - CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND:-}
+      - AGENT_RUN_DISPATCH=celery
+      - AGENT_RUN_QUEUE=${AGENT_RUN_QUEUE:-agent_runs}
+      - AGENT_RUN_MAX_ATTEMPTS=${AGENT_RUN_MAX_ATTEMPTS:-3}
+      - AGENT_RUN_THREAD_LOCK_ENABLED=${AGENT_RUN_THREAD_LOCK_ENABLED:-true}
+      - AGENT_RUN_THREAD_LOCK_BACKEND=${AGENT_RUN_THREAD_LOCK_BACKEND:-redis}
+      - AGENT_RUN_THREAD_LOCK_TTL_SECONDS=${AGENT_RUN_THREAD_LOCK_TTL_SECONDS:-300}
+      - AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS=${AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS:-5}
+      - AGENT_RUN_LEASE_SECONDS=${AGENT_RUN_LEASE_SECONDS:-180}
+      - AGENT_RUN_HEARTBEAT_SECONDS=${AGENT_RUN_HEARTBEAT_SECONDS:-30}
+      - AGENT_RUN_RETRY_BASE_DELAY=${AGENT_RUN_RETRY_BASE_DELAY:-2}
+      - AGENT_RUN_RETRY_MAX_DELAY=${AGENT_RUN_RETRY_MAX_DELAY:-60}
+      - AGENT_RUN_RETRY_JITTER=${AGENT_RUN_RETRY_JITTER:-0.3}
+      # 跨进程事件流（Worker 发布 -> API SSE 读取）
+      - RUN_EVENT_STREAM_ENABLED=${RUN_EVENT_STREAM_ENABLED:-true}
+      - RUN_EVENT_STREAM_BACKEND=${RUN_EVENT_STREAM_BACKEND:-redis}
+      - RUN_EVENT_STREAM_MAXLEN=${RUN_EVENT_STREAM_MAXLEN:-1000}
+      - RUN_EVENT_STREAM_TTL_SECONDS=${RUN_EVENT_STREAM_TTL_SECONDS:-3600}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      # 与 API 使用同一 checkpoint 配置（多副本共享）
+      - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
+      - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
+      - LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE:-1}
+      - LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE:-10}
+      - LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT=${LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT:-15.0}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - VECTOR_DB_MODE=${VECTOR_DB_MODE:-qdrant_only}
+    volumes:
+      - app-logs:/app/logs
+      - ../../data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A runtime.celery_app:celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - cs-network
 

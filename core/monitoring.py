@@ -234,11 +234,99 @@ try:
     tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
     tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
+    # v6.4: 分布式 Agent Run 可靠性 + 可观测性
+    agent_run_total = _counter(
+        "agent_run_total", "AgentRun terminal/queued outcomes", ["status"]
+    )
+    agent_run_retry_total = _counter("agent_run_retry_total", "AgentRun retry scheduled")
+    agent_run_dead_total = _counter("agent_run_dead_total", "AgentRun reached DEAD")
+    agent_run_duration_seconds = _histogram(
+        "agent_run_duration_seconds",
+        "AgentRun execution duration (RUNNING -> terminal)",
+        buckets=[0.5, 1, 2, 5, 10, 30, 60, 120, 300],
+    )
+    agent_run_queue_wait_seconds = _histogram(
+        "agent_run_queue_wait_seconds",
+        "AgentRun queue wait (queued_at -> started_at)",
+        buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300],
+    )
+    agent_worker_active = _gauge("agent_worker_active", "Active worker tasks")
+    agent_worker_task_total = _counter("agent_worker_task_total", "Worker tasks started")
+    thread_lock_contention_total = _counter(
+        "thread_lock_contention_total", "Same-thread lock contention deferrals"
+    )
+    thread_lock_wait_seconds = _histogram(
+        "thread_lock_wait_seconds",
+        "Time spent acquiring the thread lock",
+        buckets=[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
+    )
+    idempotency_hit_total = _counter(
+        "idempotency_hit_total", "HTTP idempotency key hits"
+    )
+    tool_idempotency_hit_total = _counter(
+        "tool_idempotency_hit_total", "Side-effect tool idempotency hits"
+    )
+    checkpoint_operation_seconds = _histogram(
+        "checkpoint_operation_seconds",
+        "LangGraph checkpoint operation latency",
+        buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+    )
+
+    # v6.4: 跨进程 Agent 事件流
+    run_event_publish_total = _counter(
+        "run_event_publish_total", "RunEvents published to the event stream"
+    )
+    run_event_publish_error_total = _counter(
+        "run_event_publish_error_total", "RunEvent publish failures"
+    )
+    sse_connections = _gauge("sse_connections", "Active SSE connections")
+    sse_reconnect_total = _counter(
+        "sse_reconnect_total", "SSE reconnects with Last-Event-ID"
+    )
+    run_event_lag_seconds = _histogram(
+        "run_event_lag_seconds",
+        "Delay between event timestamp and SSE delivery",
+        buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 15.0, 60.0],
+    )
+
+    # v6.4: MCP 外部工具适配
+    mcp_tool_call_total = _counter(
+        "mcp_tool_call_total", "MCP tool calls", ["server", "tool", "status"]
+    )
+    mcp_tool_error_total = _counter(
+        "mcp_tool_error_total", "MCP tool errors", ["server", "tool", "reason"]
+    )
+    mcp_tool_duration_seconds = _histogram(
+        "mcp_tool_duration_seconds",
+        "MCP tool call latency",
+        ["server", "tool"],
+        buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0, 15.0],
+    )
+
+    # v6.4: Human-in-the-loop 高风险审批
+    human_approval_requested_total = _counter(
+        "human_approval_requested_total",
+        "High-risk actions awaiting human approval",
+        ["risk_level", "action"],
+    )
+    human_approval_decided_total = _counter(
+        "human_approval_decided_total", "Human approval decisions", ["decision"]
+    )
+    human_approval_pending = _gauge(
+        "human_approval_pending", "Pending human approvals"
+    )
+    human_approval_wait_seconds = _histogram(
+        "human_approval_wait_seconds",
+        "Time from approval requested to reviewed",
+        buckets=[10, 60, 300, 900, 3600, 14400, 86400],
+    )
+
     PROMETHEUS_BUSINESS_ENABLED = True
 except ImportError:
     # Prometheus 未安装，降级为无操作
     class _NoopMetric:
         def inc(self, *args, **kwargs): pass
+        def dec(self, *args, **kwargs): pass
         def set(self, *args, **kwargs): pass
         def observe(self, *args, **kwargs): pass
         def labels(self, *args, **kwargs): return self
@@ -292,6 +380,30 @@ except ImportError:
     tool_result_cache_errors_total = _NoopMetric()
     tool_result_cache_bypass_total = _NoopMetric()
     tool_result_cache_latency_seconds = _NoopMetric()
+    agent_run_total = _NoopMetric()
+    agent_run_retry_total = _NoopMetric()
+    agent_run_dead_total = _NoopMetric()
+    agent_run_duration_seconds = _NoopMetric()
+    agent_run_queue_wait_seconds = _NoopMetric()
+    agent_worker_active = _NoopMetric()
+    agent_worker_task_total = _NoopMetric()
+    thread_lock_contention_total = _NoopMetric()
+    thread_lock_wait_seconds = _NoopMetric()
+    idempotency_hit_total = _NoopMetric()
+    tool_idempotency_hit_total = _NoopMetric()
+    checkpoint_operation_seconds = _NoopMetric()
+    run_event_publish_total = _NoopMetric()
+    run_event_publish_error_total = _NoopMetric()
+    sse_connections = _NoopMetric()
+    sse_reconnect_total = _NoopMetric()
+    run_event_lag_seconds = _NoopMetric()
+    mcp_tool_call_total = _NoopMetric()
+    mcp_tool_error_total = _NoopMetric()
+    mcp_tool_duration_seconds = _NoopMetric()
+    human_approval_requested_total = _NoopMetric()
+    human_approval_decided_total = _NoopMetric()
+    human_approval_pending = _NoopMetric()
+    human_approval_wait_seconds = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 

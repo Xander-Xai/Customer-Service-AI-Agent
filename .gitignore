@@ -90,6 +90,7 @@ Thumbs.db
 
 # ===== 密钥文件 =====
 secrets/
+deploy/k8s/secret.yaml
 
 # ===== 个人工具配置 =====
 CLAUDE.md

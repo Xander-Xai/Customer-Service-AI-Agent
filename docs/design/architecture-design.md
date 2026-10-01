@@ -82,7 +82,8 @@ Layer 3: 响应处理 ──→ 解决状态评估 + 缓存写入 + SLA 监控
 
 **设计决策：为什么用 LangGraph 而不是自己写状态机？**
 - LangGraph 的 `StateGraph` 提供声明式的节点和条件边定义，代码可读性高
-- 内置状态序列化支持，方便未来做检查点（checkpoint）和时间回溯
+- 内置状态序列化 + checkpointer 支持对话状态持久化与断点续传
+  （开发/测试 MemorySaver，生产 `langgraph-checkpoint-postgres`，见 §3.6）
 - 社区生态好，面试官认知度高
 
 **设计决策：为什么缓存前置到 Layer 0？**
@@ -232,6 +233,146 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 图片保留 PNG Alpha 通道（v6.1 修复），语音支持 Widget 麦克风输入。
 
+### 3.6 LangGraph Checkpoint 持久化（生产 PostgreSQL）
+
+**为什么 MemorySaver 不够？**
+- `MemorySaver` 只把 checkpoint 存在当前 Python 进程内；gunicorn 多 worker、
+  FastAPI 多副本之间不共享，实例重启即丢失，与 `docker-compose.scale.yml`
+  声称的水平扩展能力不匹配。
+
+**当前实现（`core/checkpointer.py` + `core/container.py` 生命周期）**
+
+| 场景 | backend | saver | 说明 |
+|------|---------|-------|------|
+| 开发/测试 | `memory`（默认自动） | `MemorySaver` | 进程内，允许显式选择；postgres 不可用时可降级但标记 `degraded` |
+| 生产 | `postgres`（默认自动） | 官方 `AsyncPostgresSaver` | psycopg 异步连接池；初始化失败 fail closed，禁止静默回退 |
+
+- 配置：`LANGGRAPH_CHECKPOINT_BACKEND=memory|postgres`（留空按环境自动），
+  `LANGGRAPH_CHECKPOINT_DATABASE_URL`（留空时安全复用 `DATABASE_URL`，只接受
+  postgres 协议、剥离 SQLAlchemy `+driver` 后缀，SQLite/其它协议拒绝）。
+- 生命周期：`ServiceContainer._init_checkpointer()` 在 `build_graph` **之前**完成
+  连接池 open + 官方 `setup()` 建表；`_close_checkpointer()` 在 shutdown 释放连接池；
+  `_build_graph()` 在生产缺失 checkpointer 时抛 `ConfigurationError`。
+- checkpoint 表（`checkpoints` / `checkpoint_blobs` / `checkpoint_writes` /
+  `checkpoint_migrations`）由官方 saver 管理，不与业务 SQLAlchemy `Base` 耦合；
+  首次部署由 `setup()` 幂等创建/迁移。
+- 健康检查 `/api/health` 返回 `langgraph_checkpoint: {backend, status}`（脱敏，
+  不含 URI/用户名/密码）；生产 postgres 后端不可用时整体状态为 `unhealthy`。
+
+**thread_id 语义审计**：当前 `thread_id == session_id`（`api/app.py::_run_graph`）。
+含义是一个会话对应一条图状态线，同一 `session_id` 在多 worker/多副本间可恢复。
+边界：`session_id` 来自客户端，因此 `/api/sessions/{id}/checkpoint` 与其它会话端点
+一样校验会话归属（非 dev 模式）；checkpoint 端点只返回是否存在及 checkpoint id，
+不返回图状态内容。Session Memory（对话窗口/摘要，独立存储）与 LangGraph
+Checkpoint（图状态，官方表）是两套数据，不要混用。
+
+**证据边界**：以上为 `IMPLEMENTED / LOCALLY VERIFIED`（本地单测 + 可选真实
+PostgreSQL 集成测试），尚未在真实生产多副本环境验证，不宣称生产级数字。
+
+### 3.7 分布式 Agent Runtime（异步 Run + Celery Worker）
+
+**问题**：`api/app.py::_run_graph` 直接在 FastAPI 进程 `graph_app.ainvoke(...)`；
+SSE 也用 `asyncio.create_task(run_graph(...))`。API 重启会杀掉执行中的 Agent，
+且 API 与 Agent workload 无法分别扩缩。
+
+**方案**：新增异步 Run API + Celery worker：
+
+```
+Client → FastAPI → AgentRun(PostgreSQL) → Redis/Celery → Worker → LangGraph
+                                                                    → Checkpoint/Qdrant/LLM/Tools
+```
+
+- `AgentRun`（`db/models.py` + `runtime/`）是业务状态真相源；队列消息只携带
+  `run_id`，worker 从 DB 加载任务；Celery result backend 不启用
+  （`task_ignore_result=True`）。
+- 状态机（`runtime/statuses.py`）：PENDING/QUEUED/RUNNING/SUCCEEDED/FAILED/
+  CANCELLED/DEAD，显式 retry = `FAILED -> QUEUED(attempt+1)`；禁止
+  `SUCCEEDED/FAILED -> RUNNING`。原子条件更新防并发 cancel/worker 竞态。
+- Worker 复用 `runtime/bootstrap.py::AgentRuntime`（同一 `ServiceContainer`：
+  LLM / RAG / Tools / Checkpointer / Orchestrator），不初始化 FastAPI。
+- `POST /api/runs` 返回 `202`；`GET /api/runs/{id}` 查询；`POST .../cancel`
+  取消执行前的 run。现有同步 `/api/chat`、SSE、WebSocket、多模态保持兼容。
+- 失败：attempts 有余则重试，未配置重试则 FAILED，用尽则 DEAD；broker 不可用
+  时入队失败 `QUEUED -> DEAD` 且 API 返回 `503`。`AGENT_RUN_DISPATCH=inline`
+  为开发 fallback（生产告警）。
+- 优雅关闭：`acks_late` + `reject_on_worker_lost`；worker shutdown 关闭 runtime
+  资源，不改写 PostgreSQL Run 状态。
+
+**可靠性（thread concurrency / idempotency / retry / dead）**：
+
+- 同一 thread 串行：`runtime/thread_lock.py`（Redis owner token + TTL + Lua
+  compare-and-delete），竞争时保持 QUEUED + `next_retry_at` 延迟重调度，不 busy-loop；
+  不同 thread 并行。
+- HTTP 幂等：`Idempotency-Key`（user + endpoint + key 作用域）+ DB 唯一约束；
+  投递幂等：终态直接返回、RUNNING + worker lease/heartbeat 防重复执行。
+- 写操作工具应用层幂等：`tool_side_effects`（`tool_name + operation_key` 唯一 +
+  请求指纹），worker 崩溃重投不重复退款/改单。
+- 错误分类 `runtime/errors.py`（transient/permanent/cancelled/timeout/lock_backend），
+  transient 指数退避 + jitter 有界重试，permanent 不 retry，attempts 用尽 DEAD；
+  管理员可经 `GET /api/runs/dead` 观测。
+- **跨进程事件流**：worker 用 `RunEventPublisher` 把 graph 的 `stream_callback`
+  事件写入 Redis Streams（`agent:run-events:{run_id}`，MAXLEN + TTL + 大小/敏感字段
+  限制）；API `GET /api/runs/{id}/stream` 读取转 SSE，支持 `Last-Event-ID` 断线续读，
+  Stream 过期后回退 PostgreSQL 终态。三者职责不同：Redis Stream = ephemeral
+  streaming channel，AgentRun = durable run state，Checkpoint = durable graph state。
+  现有 `/api/chat/stream`（进程内直连）保持兼容，未强制重写前端。
+- **投递语义**：at-least-once + application-level idempotency；**不声称端到端
+  exactly-once**。
+
+详见 [docs/design/distributed-agent-runtime.md](distributed-agent-runtime.md)。
+**证据边界**：本地已验证，未在 Kubernetes / 真实生产 HA 验证。
+
+### 3.8 MCP 外部工具适配（叠加在 ToolRegistry 上）
+
+保留 native Function Calling（内建工具：低延迟、可注入 side-effect 幂等、可测），
+在其之上增加 MCP Adapter 接入**外部/第三方**工具，统一进同一个 `ToolRegistry`：
+
+```
+ReActAgent / Function Calling → ToolRegistry
+                                   ├── Native Function Tools（ERP / RAG）
+                                   └── MCP Adapter → MCP Server（stdio / sse）
+```
+
+- `tools/mcp_adapter.py`：`discover_tools`（list_tools + allowlist + schema 归一化）、
+  `invoke`（allowlist + payload 限制 + timeout + 错误映射）、`register_mcp_tools`
+  注册进现有 registry（不新建 registry）。
+- 统一 ToolDefinition：`name` / `description` / `input_schema` / `invoke()` /
+  `risk_level` / `timeout`；MCP 工具命名空间化为 `mcp__{server}__{tool}`。
+- 安全 fail closed：`MCP_ENABLED`（默认 false）、`MCP_SERVERS` allowlist、
+  transport 白名单、timeout、payload 上限、只读优先（写操作默认不注册）。
+- 失败/回滚：`MCP_FAIL_CLOSED=false` 初始化失败降级为仅 native；`MCP_ENABLED=false`
+  完全关闭。
+- Metrics：`mcp_tool_call_total` / `mcp_tool_error_total` / `mcp_tool_duration_seconds`。
+
+详见 [docs/design/mcp-tool-adapter.md](mcp-tool-adapter.md)。
+**证据边界**：本地单测 + 真实 MCP stdio server 集成测试；真实第三方 MCP server /
+生产连通性 `NOT_VERIFIED`。
+
+### 3.9 Human-in-the-loop（高风险操作人工审批）
+
+目的不是展示 LangGraph API，而是建立高风险 Tool 的业务控制边界。
+
+```
+Agent 工具循环（HIGH 风险）→ state.pending_actions → risk gate node
+  LOW/MEDIUM → 执行
+  HIGH       → interrupt() → AgentRun WAITING_APPROVAL（checkpoint 落 PostgreSQL）
+               → 人工 approve/reject/edit → Command(resume=...) → 恢复执行
+```
+
+- 风险策略 `core/hitl/risk.py`：LOW/MEDIUM/HIGH；退款/改单/高额赔付/投诉升级/ERP 写
+  操作 = HIGH（名称 allowlist + 金额阈值）。
+- 审批记录 durable（`human_approvals`，migration 006）；状态 PENDING/APPROVED/
+  REJECTED/EXPIRED；唯一约束 (run_id, action, fingerprint) 保证 resume 幂等。
+- RBAC：仅 supervisor/admin 可审批，且不能自审；审计记录谁/什么/何时/结果（脱敏）。
+- approve 后仍经 Tool idempotency（`tool_side_effects`），resume/retry 不重复副作用。
+- `AgentRun` 新增 `WAITING_APPROVAL`（RUNNING→WAITING_APPROVAL→QUEUED→RUNNING）。
+- Metrics：`human_approval_requested_total` / `human_approval_decided_total` /
+  `human_approval_pending` / `human_approval_wait_seconds`。
+
+详见 [docs/design/human-in-the-loop.md](human-in-the-loop.md)。
+**证据边界**：本地单测 + 真实 interrupt/Command 集成测试；真实多副本跨进程 resume
+`NOT_VERIFIED`。
+
 ---
 
 ## 4. 安全设计
@@ -330,6 +471,24 @@ web/src/
 - **SLA 指标**：响应时间达标率、首次解决率、AI 接管率
 - **熔断器指标**：当前状态、失败计数、恢复时间
 
+### 6.1 Kubernetes 最小部署（`deploy/k8s/`）
+
+API 与 Celery worker 是**独立 Deployment、独立扩缩**（禁止单 Pod 内同时启动）：
+
+```
+Ingress(nginx, SSE/WS) → Service → Deployment/api (gunicorn, 2+)
+                                   Deployment/worker (celery, 2+) ← 独立 HPA
+状态外置：PostgreSQL(AgentRun/checkpoint/审批) + Redis(session/broker/thread-lock/
+event-stream) + Qdrant(向量)。API/worker Pod 无本地持久化，可随意删除/滚动。
+```
+
+- HPA：API 用 CPU/memory 标准指标；worker 先用 CPU 基线，**基于队列深度/pending
+  runs 的 custom-metric autoscaling 是后续项**（不引入 KEDA/Prometheus Adapter）。
+- Secret 示例只含占位符；生产配置校验会 fail fast。
+- 演示依赖（PG/Redis/Qdrant 单副本 emptyDir）在 `deploy/k8s/demo/`，生产用 managed。
+- 边界：不含 service mesh / Istio / ArgoCD / Kafka / Temporal / Operator。
+- 证据边界：清单结构本地校验通过；**真实 K8s 集群部署与故障演练 `NOT_VERIFIED`**。
+
 ---
 
 ## 7. 技术选型与权衡
@@ -341,7 +500,7 @@ web/src/
 | 向量库 | Qdrant（v6.0 从 ChromaDB 迁移，v6.3 起完全替代 ChromaDB） | FAISS / Pinecone | Rust 原生，Docker 部署，生产就绪，高并发 |
 | 缓存 | 自研三层（L1 Redis + L2 Qdrant + L3 Jaccard） | Redis 单层 | 三级缓存（精确+向量+分词），Redis 无法实现语义缓存 |
 | 中文分词 | jieba | HanLP / LAC | 轻量、成熟、社区大 |
-| 部署 | Docker Compose | K8s | 项目规模适中，K8s 过重 |
+| 部署 | Docker Compose（默认）；K8s 最小清单（`deploy/k8s/`，API/worker 独立扩缩） | 完整云原生平台 | 项目规模适中，只做最小可验证 K8s，不引入 mesh/ArgoCD/Operator |
 | 监控 | Prometheus + Grafana | DataDog / ELK | 开源免费、行业标准 |
 
 ### 已知限制与改进方向

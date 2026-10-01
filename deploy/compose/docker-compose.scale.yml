@@ -10,6 +10,22 @@ services:
       - SESSION_STORAGE_BACKEND=redis
       # 使用 PostgreSQL（SQLite 不支持多实例写入）
       - DATABASE_URL=${DATABASE_URL:-postgresql://csai:password@postgres:5432/csai}
+      # 多副本共享 LangGraph checkpoint：必须 PostgreSQL，禁止进程内 MemorySaver
+      - LANGGRAPH_CHECKPOINT_BACKEND=postgres
+      - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+  # Worker 独立扩缩（与 API 解耦）：可单独增加执行并发/副本
+  worker:
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://csai:password@postgres:5432/csai}
+      - LANGGRAPH_CHECKPOINT_BACKEND=postgres
+      - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
     deploy:
       replicas: 2
       resources:

@@ -20,7 +20,7 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`53`**
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`62`**
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
 ## RAG evaluation / evidence state
@@ -83,6 +83,61 @@ python3 scripts/audit_doc_consistency.py
   确定性压缩、Top-K/token 预算、历史 compaction、专用 compressor、可选
   offload/store/recovery、scope-safe exact reuse cache、可选 semantic summary。
   它不是 Response Cache 的一部分；Session Memory（会话窗口/摘要）是第三种独立概念。
+- **LangGraph Checkpoint**（`core/checkpointer.py`）是第四种独立概念：图状态快照，
+  键为 `thread_id`（当前实现 `thread_id == session_id`），支持断点续传。
+  `LANGGRAPH_CHECKPOINT_BACKEND` 选择 `memory`（开发/测试，进程内
+  `MemorySaver`）或 `postgres`（官方 `langgraph-checkpoint-postgres` 的
+  `AsyncPostgresSaver`，跨 worker/副本共享、重启可恢复；留空时开发→memory、
+  生产→postgres）。checkpoint 表由官方 saver 自管，不与业务 SQLAlchemy Base 耦合。
+  生产初始化失败 fail closed，不静默回退 MemorySaver。
+  四个机制（Session Memory / LangGraph Checkpoint / Response Cache /
+  Tool Result Store）不是同一个概念，禁止互相替代或合并叙述。
+- **分布式 Agent Runtime**（`runtime/`）：长耗时 Run 从 API 进程解耦到 Celery
+  worker。`AgentRun`（PostgreSQL `agent_runs` 表）是业务状态真相源；Redis/Celery
+  仅调度，队列消息只携带 `run_id`，Celery result backend 不是真相源。
+  `AGENT_RUN_DISPATCH=celery`（生产）/`inline`（开发 fallback）。状态机
+  PENDING/QUEUED/RUNNING/SUCCEEDED/FAILED/CANCELLED/DEAD 由
+  `runtime/statuses.py` 定义并原子强制。可靠性：同一 thread 用 Redis 分布式锁
+  （owner token + TTL + Lua compare-and-delete）串行，不同 thread 并行；HTTP
+  `Idempotency-Key`（user+endpoint 作用域）+ DB 唯一约束；worker lease/heartbeat
+  防重复投递；写操作工具 `tool_side_effects` 应用层幂等；transient 指数退避
+  retry、permanent 直接 DEAD、attempts 用尽 DEAD。跨进程事件流：
+  worker 通过 `RunEventPublisher` 把 graph 的 `stream_callback` 事件写入
+  Redis Streams（`agent:run-events:{run_id}`，XADD MAXLEN+TTL+大小/敏感字段限制），
+  API `GET /api/runs/{id}/stream` 读取并转 SSE，支持 `Last-Event-ID` 断线续读；
+  Stream 只是 ephemeral streaming channel，过期后最终状态仍从 PostgreSQL 读取。
+  投递语义是
+  **at-least-once + application-level idempotency，不声称端到端 exactly-once**。
+  注意：AgentRun != LangGraph Thread
+  != Celery Task Result != Session，详见
+  [docs/design/distributed-agent-runtime.md](../design/distributed-agent-runtime.md)。
+  运维排查见 [distributed-runtime-runbook.md](../operations/distributed-runtime-runbook.md)；
+  故障恢复/可观测性验证见
+  [2026-10-02-distributed-runtime-verification.md](../reports/audit/2026-10-02-distributed-runtime-verification.md)
+  （`LOCALLY VERIFIED`；容器级/K8s/生产 HA 仍 `NOT_VERIFIED`）。
+  本地已验证（单测/集成 + 真实 Redis 锁/Stream），未在 Kubernetes 或真实生产 HA 验证。
+- **MCP 外部工具适配**（`tools/mcp_adapter.py`）：在现有 `ToolRegistry` 上叠加，
+  **不替代** native Function Calling。native 工具（ERP/RAG）保留低延迟 + side-effect
+  幂等；MCP 作为标准化外部工具接口（discover / schema 归一化 / invoke / timeout /
+  错误映射），统一进同一 registry。安全 fail closed：`MCP_ENABLED`（默认 false）、
+  `MCP_SERVERS` allowlist、transport 白名单、payload/timeout 限制、只读优先。
+  本地单测 + 真实 MCP stdio server 集成测试；真实第三方 MCP server 连通性
+  `NOT_VERIFIED`。详见 [docs/design/mcp-tool-adapter.md](../design/mcp-tool-adapter.md)。
+- **Human-in-the-loop（高风险操作人工审批）**（`core/hitl/` + `human_approvals` 表）：
+  只对 HIGH 风险 Tool（退款/改单/高额赔付/投诉升级/ERP 写操作）拦截审批，普通问答
+  不审批。Agent 工具循环把 HIGH 风险调用写入 `state["pending_actions"]`，图条件路由到
+  `human_approval_gate` 节点 `interrupt()`；`AgentRun` 进入 `WAITING_APPROVAL`，Graph
+  checkpoint 落 PostgreSQL。RBAC 审批 API（supervisor/admin，且不能自审）
+  approve/reject/edit 后用 `Command(resume=...)` 恢复；approve 后仍经 Tool
+  idempotency 防重复。本地单测 + 真实 interrupt/Command 集成测试；真实多副本跨进程
+  第二天审批 resume `NOT_VERIFIED`。详见
+  [docs/design/human-in-the-loop.md](../design/human-in-the-loop.md)。
+- **Kubernetes 最小部署**（`deploy/k8s/`）：API 与 Celery worker 独立 Deployment +
+  独立 HPA + Ingress（SSE/WS 注解）；状态全部外置（PostgreSQL / Redis / Qdrant），
+  API/worker Pod 无本地持久化。演示依赖在 `deploy/k8s/demo/`（单副本 emptyDir），
+  生产建议 managed/external service；Secret 示例仅占位符。不含 service mesh / Istio /
+  ArgoCD / Kafka / Temporal / Operator。清单结构本地校验通过；**真实 K8s 集群部署与
+  故障演练 `NOT_VERIFIED`**。见 [deploy/k8s/README.md](../../deploy/k8s/README.md)。
 - RAG 链路：rewrite/filter → vector + BM25 → retrieval contract
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、

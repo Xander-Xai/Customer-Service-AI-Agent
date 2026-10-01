@@ -25,6 +25,14 @@ jieba>=0.42.1
 # ===== Redis 持久化后端（Session + Cache）=====
 redis>=5.0.0
 
+# ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
+# Redis 作为 broker；业务状态真相源是 PostgreSQL agent_runs 表，不是 Celery result。
+celery>=5.3.0
+
+# ===== MCP（Model Context Protocol）外部工具适配 =====
+# 与 native Function Calling 并存；默认关闭（MCP_ENABLED=false）。
+mcp>=1.2.0
+
 # ===== v4.0: 用户认证 + 数据库 =====
 # SQLAlchemy 已在上面（用于 ORM）
 
@@ -46,6 +54,13 @@ python-docx>=1.0.0
 
 # ===== v4.1: PostgreSQL 支持 =====
 psycopg2-binary>=2.9.9
+
+# ===== LangGraph Checkpoint 持久化（生产 PostgreSQL 后端）=====
+# 官方 checkpointer 管理自己的表；psycopg (v3) 与异步连接池是官方推荐驱动。
+# psycopg[binary] 提供 libpq 绑定，无需系统级 libpq 开发包。
+langgraph-checkpoint-postgres>=3.1.0
+psycopg[binary]>=3.1.0
+psycopg-pool>=3.2.0
 
 # ===== 安全依赖升级（防止传递依赖漏洞）=====
 # python-jose CVE: key verification bypass (PYSEC-2024-232/233)

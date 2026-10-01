@@ -104,30 +104,56 @@ async def delete_session(session_id: str, request: Request):
 
 @router.get("/api/sessions/{session_id}/checkpoint")
 async def get_session_checkpoint(session_id: str, request: Request):
-    """获取会话的 LangGraph checkpoint 状态（断点续传）"""
+    """获取会话的 LangGraph checkpoint 状态（断点续传）。
+
+    thread_id == session_id：检查同一会话对应的图状态快照是否存在。
+    MemorySaver 走同步 ``get()``；官方 AsyncPostgresSaver 只实现异步接口，
+    因此优先使用 ``aget_tuple()``（MagicMock 场景自动回退到同步 get）。
+    访问控制与其它会话端点一致：非 dev 模式下校验会话归属。
+    """
+    import inspect
+
     from api.utils import sanitize_input
 
     clean_id = sanitize_input(session_id)
     if not clean_id:
         return JSONResponse({"error": "无效的 session_id"}, status_code=400)
 
+    state = request.app.state
+
     # v5.1: 从 app.state 获取 graph_app，替代模块级全局变量 import
-    graph_app = getattr(request.app.state, "graph_app", None)
+    graph_app = getattr(state, "graph_app", None)
     if not graph_app or not hasattr(graph_app, "checkpointer") or not graph_app.checkpointer:
         return JSONResponse({"error": "Checkpoint 功能未启用"}, status_code=503)
 
+    # 会话归属校验（与 /api/sessions/{id} 一致，避免跨用户探测 checkpoint）
+    sm = getattr(state, "session_manager", None)
+    dev_mode = getattr(state, "dev_mode", False)
+    if sm is not None:
+        session = await sm.get_session(clean_id)
+        user_id = _extract_user_id(request)
+        if session and not _check_session_ownership(session, user_id, dev_mode):
+            return JSONResponse({"error": "无权访问该会话"}, status_code=403)
+
+    checkpointer = graph_app.checkpointer
+    config = {"configurable": {"thread_id": clean_id}}
     try:
-        config = {"configurable": {"thread_id": clean_id}}
-        checkpoint = graph_app.checkpointer.get(config)
-        if checkpoint:
-            return {
-                "session_id": clean_id,
-                "has_checkpoint": True,
-                "checkpoint_id": str(checkpoint.id) if hasattr(checkpoint, "id") else None,
-            }
-        return {"session_id": clean_id, "has_checkpoint": False}
+        aget = getattr(checkpointer, "aget_tuple", None)
+        if aget is not None and inspect.iscoroutinefunction(aget):
+            result = await aget(config)
+            checkpoint = getattr(result, "checkpoint", result) if result else None
+        else:
+            checkpoint = checkpointer.get(config)
     except Exception as e:
         return JSONResponse({"error": f"查询 checkpoint 失败: {e}"}, status_code=500)
+
+    if checkpoint:
+        return {
+            "session_id": clean_id,
+            "has_checkpoint": True,
+            "checkpoint_id": str(checkpoint.id) if hasattr(checkpoint, "id") else None,
+        }
+    return {"session_id": clean_id, "has_checkpoint": False}
 
 
 @router.get("/api/history")
