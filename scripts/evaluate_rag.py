@@ -23,11 +23,13 @@ RAG 检索质量评估脚本（v6.3 evidence 版，RAG 649 Evidence Refresh 工�
 - provenance：git SHA + benchmark sha256 + runtime config + 模型名 全部自动采集
 
 指标分母定义（写进 artifact notes）：
-- Hit/Recall/Precision/NDCG/MRR 均在「成功执行检索」的查询上取均值（n_success）
-- exception / timeout 计入 failures（不进指标分母），计数在 failures_summary
+- 主口径（primary metric view）固定为 all_queries（端到端）：exception / timeout /
+  GOLD_NOT_INDEXED 的查询以零指标进入该 population 的分母，绝不只对 success 行取均值
+- ``metrics`` / category 指标分母为 n_success（诊断用）；三视图 population_metrics
+  的 all_queries.query_count 必须等于 n_total（成功 + 失败）
+- latency 只在真正完成的请求上聚合；失败请求不伪造 stage/total latency 样本
 - degraded（如向量通道超时降级为词法）查询计入指标，但按 degraded_reason 单独计数
-- 主口径（primary metric view）固定为 all_queries（端到端）；retrieval_eligible /
-  full_gold_covered 只作为诊断视图并列输出，不得单独替代主口径做对外宣称
+- retrieval_eligible / full_gold_covered 只作为诊断视图并列输出，不得单独替代主口径
 
 用法：
     python3 scripts/evaluate_rag.py                       # 正式 649 全量 4 实验
@@ -59,6 +61,17 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from eval_contract import (  # noqa: E402
+    DEFAULT_KS,
+    EXPERIMENT_SPECS,
+    POPULATION_DEFINITIONS,
+    POPULATION_VIEWS,
+    REPORT_SCHEMA_VERSION,
+)
 
 DEFAULT_BENCHMARK = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "artifacts" / "evaluation" / "rag-649"
@@ -70,30 +83,8 @@ EVAL_COLLECTIONS = [
     "complaint_knowledge",
 ]
 
-DEFAULT_KS = (1, 3, 5, 8)
-REPORT_SCHEMA_VERSION = "rag-eval-evidence/v2"
-
 # provider 认证失败判定（仅记录 HTTP 状态码本身，绝不记录凭据材料）
 PROVIDER_AUTH_HTTP_STATUSES = frozenset({401, 403})
-
-EXPERIMENT_SPECS: dict[str, dict[str, Any]] = {
-    # vector_only: 仅向量通道（禁用 BM25），无 rerank
-    "vector_only": {"disable_hybrid": True, "disable_embedding": False, "rerank": False},
-    # bm25_only: 仅词法通道（embedding 置空 -> 向量通道 fail-closed 禁用），无 rerank
-    "bm25_only": {"disable_hybrid": False, "disable_embedding": True, "rerank": False},
-    # hybrid_no_rerank: 生产混合检索（vector+BM25+RRF），无 rerank
-    "hybrid_no_rerank": {"disable_hybrid": False, "disable_embedding": False, "rerank": False},
-    # hybrid_rerank: 生产混合检索 + ApiReranker（production-like）
-    "hybrid_rerank": {"disable_hybrid": False, "disable_embedding": False, "rerank": True},
-}
-
-FAILURE_TAXONOMY = (
-    "TIMEOUT",
-    "PROVIDER_ERROR",
-    "GOLD_NOT_INDEXED",
-    "MISS_ALL",
-    "LOW_RANK",
-)
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +126,18 @@ def compute_query_metrics(
         idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_relevant + 1))
         out[f"ndcg@{k}"] = dcg / idcg if idcg > 0 else 0.0
     return out
+
+
+def reciprocal_rank(first_relevant_rank: int | float) -> float:
+    """Comparable score for a rank where 0 is the MISS sentinel.
+
+    ``first_relevant_rank == 0`` means "no relevant document in top-k" — it is
+    strictly worse than any hit, not rank 0. Comparing raw ranks directly
+    inverts every hit/miss transition, so uplift classification goes through
+    this monotonic mapping instead.
+    """
+    rank = float(first_relevant_rank)
+    return 1.0 / rank if rank > 0 else 0.0
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -201,27 +204,6 @@ def category_metrics(
 # 评测分母三视图（population protocol；全部运行时动态计算，禁止硬编码）
 # ---------------------------------------------------------------------------
 
-POPULATION_VIEWS = ("all_queries", "retrieval_eligible", "full_gold_covered")
-
-POPULATION_DEFINITIONS = {
-    "all_queries": (
-        "View A — end-to-end：全部查询进入分母；gold 未进入索引的查询"
-        "（GOLD_NOT_INDEXED）仍算失败、按 0 分计入。衡量 corpus coverage + "
-        "indexing + retrieval algorithm 的系统级结果（主口径）。"
-    ),
-    "retrieval_eligible": (
-        "View B — retrieval eligible：至少 1 个 gold document 已进入 "
-        "corpus/index 的查询（数量运行时动态计算）。用于分析 retriever 在"
-        "「至少存在可命中文档」情况下的表现。"
-    ),
-    "full_gold_covered": (
-        "View C — full-gold-covered：全部 gold documents 都存在于当前 "
-        "corpus/index 的查询（数量运行时动态计算）。适合 Recall@K / NDCG，"
-        "避免 gold 缺失直接压低算法指标。"
-    ),
-}
-
-
 def population_flags(expected_ids: list[str], corpus_ids: set[str]) -> dict[str, Any]:
     """单查询的 population 归属标记（基于 gold docs 是否在索引 corpus 中）。"""
     present = sum(1 for gid in expected_ids if gid in corpus_ids)
@@ -253,8 +235,32 @@ def population_counts(
     }
 
 
+def zero_metric_row(
+    query_id: str, expected_ids: list[str], corpus_ids: set[str], ks: tuple[int, ...]
+) -> dict[str, Any]:
+    """Denominator row for a failed request.
+
+    Exceptions/timeouts must still enter the end-to-end ``all_queries``
+    population with zero-valued metrics — otherwise the primary view silently
+    averages over survivors and inflates results. ``total_ms`` stays ``None``
+    so the latency stage never fabricates a stage/total sample for a request
+    that did not complete.
+    """
+    return {
+        "query_id": query_id,
+        "total_ms": None,
+        **population_flags(expected_ids, corpus_ids),
+        **compute_query_metrics([], expected_ids, ks),
+    }
+
+
 def population_metrics(rows: list[dict[str, Any]], ks: tuple[int, ...]) -> dict[str, Any]:
-    """按三视图聚合指标/latency（分母 = 该视图内成功执行的查询）。"""
+    """按三视图聚合指标/latency。
+
+    ``rows`` 是「分母行」：成功行 + 失败查询的零指标行（end-to-end
+    all_queries 主口径）。因此 ``all_queries.query_count`` 必须等于该实验的
+    n_total，而 latency 只在真正完成的请求上聚合（``total_ms is not None``）。
+    """
     views = {
         "all_queries": rows,
         "retrieval_eligible": [r for r in rows if r.get("retrieval_eligible")],
@@ -266,7 +272,9 @@ def population_metrics(rows: list[dict[str, Any]], ks: tuple[int, ...]) -> dict[
         out[name] = {
             "query_count": len(sub),
             "metrics": summarize_metric_rows(sub, ks),
-            "latency": aggregate_latency([r["total_ms"] for r in sub]),
+            "latency": aggregate_latency(
+                [r["total_ms"] for r in sub if r.get("total_ms") is not None]
+            ),
         }
     return out
 
@@ -405,6 +413,7 @@ def derive_blockers(
     embedding_configured: bool,
     embedding_probe: str | None,
     embedding_http_status: int | None,
+    reranker_configured: bool = True,
     reranker_probe: str | None,
     reranker_http_status: int | None,
     qdrant_total_points: int,
@@ -478,7 +487,22 @@ def derive_blockers(
             downstream["caused_by"] = blockers[0]["code"]
         blockers.append(downstream)
 
-    if rerank_needed and reranker_probe not in (None, "ok"):
+    if rerank_needed and (not reranker_configured or reranker_probe is None):
+        # Unconfigured / unprobed must never be read as healthy: hybrid_rerank
+        # would then run through ApiReranker's silent fallback and be counted as
+        # a real rerank ablation. Blocks hybrid_rerank only.
+        blockers.append({
+            "code": "RERANKER_PROVIDER_UNAVAILABLE",
+            "stage": "reranker",
+            "blocking": False,
+            "blocks_experiments": ["hybrid_rerank"],
+            "http_status": reranker_http_status,
+            "detail": (
+                "reranker 未配置或未探测（RERANKER_API_KEY 缺失 / 探针未运行）；"
+                "不得把 probe=None 当作健康；仅阻塞 hybrid_rerank"
+            ),
+        })
+    elif rerank_needed and reranker_probe != "ok":
         reranker_auth = reranker_http_status in PROVIDER_AUTH_HTTP_STATUSES
         blockers.append({
             "code": "RERANKER_PROVIDER_AUTH" if reranker_auth else "RERANKER_PROVIDER_DEGRADED",
@@ -503,8 +527,18 @@ def derive_blockers(
     return {"status": status, "primary_blocker": primary, "blockers": blockers}
 
 
-def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
-    """provider/index gate。所有 gate 都执行并记录（阻塞原因要可审计）。"""
+def preflight(
+    kb,
+    *,
+    rerank_probe: bool,
+    requested_experiments: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
+    """provider/index gate。所有 gate 都执行并记录（阻塞原因要可审计）。
+
+    ``requested_experiments`` 决定 blocker 只针对本次 CLI 选择的实验派生：
+    ``--experiments bm25_only`` 不应因 embedding provider 故障而整体退出。
+    未提供时退回全部 canonical 实验（旧行为，用于 preflight-only 默认）。
+    """
 
     gates: dict[str, Any] = {}
 
@@ -615,10 +649,15 @@ def preflight(kb, *, rerank_probe: bool) -> dict[str, Any]:
         embedding_configured=embedding_gate.get("configured", False),
         embedding_probe=embedding_gate.get("probe"),
         embedding_http_status=embedding_gate.get("http_status"),
+        reranker_configured=gates["reranker"].get("configured", False),
         reranker_probe=gates["reranker"].get("probe"),
         reranker_http_status=gates["reranker"].get("http_status"),
         qdrant_total_points=gates["qdrant"]["total_points"],
-        requested_experiments=tuple(EXPERIMENT_SPECS),
+        requested_experiments=(
+            tuple(requested_experiments)
+            if requested_experiments is not None
+            else tuple(EXPERIMENT_SPECS)
+        ),
     )
     gates.update(assessment)
     if gates["status"] == "BLOCKED":
@@ -690,6 +729,8 @@ async def run_experiment(
 
         # ---- 正式 run ----
         rows: list[dict[str, Any]] = []
+        # 分母行 = 成功行 + 失败查询的零指标行；all_queries 主口径据此计算。
+        population_rows: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
         degraded_count = 0
         channel_error_count = 0
@@ -728,24 +769,24 @@ async def run_experiment(
                 first_rank = int(metrics["first_relevant_rank"])
                 if meta.get("retrieval_degraded"):
                     degraded_count += 1
-                rows.append(
-                    {
-                        "query_id": qid,
-                        "category": case["category"],
-                        "difficulty": case["difficulty"],
-                        "query_type": case.get("query_type", ""),
-                        "expected_ids": expected,
-                        "retrieved_ids": retrieved_ids,
-                        "total_ms": round(total_ms, 2),
-                        "stages_ms": {k: round(v, 3) for k, v in trace_stages.items()},
-                        "retrieval_degraded": bool(meta.get("retrieval_degraded")),
-                        "degraded_reason": degraded_reason,
-                        "vector_channel_used": bool(meta.get("vector_channel_used")),
-                        "lexical_channel_used": bool(meta.get("lexical_channel_used")),
-                        **population_flags(expected, corpus_ids),
-                        **metrics,
-                    }
-                )
+                row = {
+                    "query_id": qid,
+                    "category": case["category"],
+                    "difficulty": case["difficulty"],
+                    "query_type": case.get("query_type", ""),
+                    "expected_ids": expected,
+                    "retrieved_ids": retrieved_ids,
+                    "total_ms": round(total_ms, 2),
+                    "stages_ms": {k: round(v, 3) for k, v in trace_stages.items()},
+                    "retrieval_degraded": bool(meta.get("retrieval_degraded")),
+                    "degraded_reason": degraded_reason,
+                    "vector_channel_used": bool(meta.get("vector_channel_used")),
+                    "lexical_channel_used": bool(meta.get("lexical_channel_used")),
+                    **population_flags(expected, corpus_ids),
+                    **metrics,
+                }
+                rows.append(row)
+                population_rows.append(row)
             except (asyncio.TimeoutError, TimeoutError) as e:
                 total_ms = (time.perf_counter() - t0) * 1000.0
                 exception_type = "timeout"
@@ -776,6 +817,10 @@ async def run_experiment(
                         "wall_ms": round(total_ms, 2),
                         "diagnostics": diags,
                     }
+                )
+                # 失败请求以零指标进入 all_queries 分母（end-to-end 主口径）。
+                population_rows.append(
+                    zero_metric_row(qid, expected, corpus_ids, ks)
                 )
                 continue
 
@@ -834,7 +879,7 @@ async def run_experiment(
             "wall_seconds": round(elapsed, 1),
             "warmup": {"count": warmup_n, "query_ids": warmup_ids, "results_discarded": True},
             "metrics": summarize_metric_rows(rows, ks),
-            "population_metrics": population_metrics(rows, ks),
+            "population_metrics": population_metrics(population_rows, ks),
             "latency": aggregate_latency([r["total_ms"] for r in rows]),
             "stage_latency": {
                 stage: aggregate_latency([r["stages_ms"][stage] for r in rows if stage in r["stages_ms"]])
@@ -897,10 +942,12 @@ def ablation_analysis(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
             tgt = target_rows.get(qid)
             if tgt is None:
                 continue
-            d = tgt["first_relevant_rank"] - base_row["first_relevant_rank"]
-            if d < 0:
+            d = reciprocal_rank(tgt["first_relevant_rank"]) - reciprocal_rank(
+                base_row["first_relevant_rank"]
+            )
+            if d > 0:
                 improved.append(qid)
-            elif d > 0:
+            elif d < 0:
                 degraded_.append(qid)
             else:
                 unchanged.append(qid)
@@ -964,7 +1011,9 @@ async def evaluate(args: argparse.Namespace) -> int:
         print("  [FATAL] Qdrant 不可达")
         return 1
     want_rerank = "hybrid_rerank" in args.experiments
-    gates = preflight(kb, rerank_probe=want_rerank)
+    gates = preflight(
+        kb, rerank_probe=want_rerank, requested_experiments=tuple(args.experiments)
+    )
     print(f"  preflight: {gates['status']} | points={gates.get('qdrant', {}).get('total_points')}")
     if gates["status"].startswith("BLOCKED"):
         print(f"  [FATAL] {gates.get('hint', '')}")
@@ -1077,8 +1126,11 @@ async def evaluate(args: argparse.Namespace) -> int:
             "warmup_per_experiment": args.warmup,
             "cache_policy": "no application-level retrieval cache involved; "
                             "embedding/reranker HTTP keepalive warmed by warmup queries",
-            "denominator": "metrics averaged over successfully executed queries "
-                           "(n_success); exceptions/timeouts recorded in failures",
+            "denominator": "primary all_queries view is end-to-end: failed "
+                           "(exception/timeout/gold-not-indexed) requests enter the "
+                           "population with zero-valued metrics; diagnostic "
+                           "metrics/category views average over successful "
+                           "queries (n_success); latency only over completed requests",
             "relevance": "binary (any of expected_doc_ids in top-k)",
             "mrr_truncation": f"MRR computed on top-{args.top_k} retrieved list",
         },
@@ -1279,7 +1331,9 @@ async def async_main() -> int:
         if not kb.available:
             print("[FATAL] Qdrant 不可达")
             return 1
-        gates = preflight(kb, rerank_probe=True)
+        gates = preflight(
+            kb, rerank_probe=True, requested_experiments=tuple(args.experiments)
+        )
         print(json.dumps(gates, ensure_ascii=False, indent=2))
         run_id = args.run_id or (
             "preflight-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

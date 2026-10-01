@@ -41,11 +41,18 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from eval_contract import EXPERIMENT_NAMES  # noqa: E402
+
 RELATIVE_REFERENCE_DIRS = ("artifacts", "evaluation", "rag-649")
 
 STATUS_UNKNOWN = "UNKNOWN"
@@ -62,10 +69,6 @@ REPORT_SCHEMA_VERSION_RE = re.compile(r"^rag-eval-evidence/v[1-9]+$")
 # constitute complete formal evidence: status stays NOT_VERIFIED (fail-closed).
 FORMAL_RUN_STATUSES = frozenset({"VERIFIED_FULL"})
 
-_EXPERIMENT_NAMES_RE = re.compile(
-    r'^\s{4}"(\w+)":\s*\{\s*"(?:disable_hybrid|disable_embedding|rerank)"', re.MULTILINE
-)
-
 
 def _failure() -> dict:
     return {
@@ -78,29 +81,13 @@ def _failure() -> dict:
 
 
 def harness_experiment_names(root: Path = PROJECT_ROOT) -> list[str]:
-    """Canonical experiment names extracted from the evaluation harness source.
+    """Canonical experiment names from the shared evaluation contract.
 
-    The harness source is the single contract for what a formal artifact must
-    contain; the names are never hardcoded here.
+    ``scripts/eval_contract.py`` is the single source of truth, imported by the
+    evaluator itself — no second contract definition and no fragile regex over
+    the harness source.
     """
-    script = root / "scripts" / "evaluate_rag.py"
-    if not script.exists():
-        # Synthetic/test fixture roots may not carry the harness; the formal
-        # run contract still comes from THIS repository's canonical harness
-        # (module-scoped), so no second contract definition is invented.
-        script = PROJECT_ROOT / "scripts" / "evaluate_rag.py"
-    try:
-        src = script.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return []
-    seen: set[str] = set()
-    names = []
-    for hit in _EXPERIMENT_NAMES_RE.findall(src):
-        if hit in seen:
-            continue
-        seen.add(hit)
-        names.append(hit)
-    return names
+    return list(EXPERIMENT_NAMES)
 
 
 def _sha256_file(path: Path) -> str | None:
