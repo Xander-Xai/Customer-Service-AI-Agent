@@ -556,3 +556,42 @@ class TestExtractCheckpointId:
         tup = asyncio.run(scenario())
         assert tup is not None
         assert extract_checkpoint_id(tup.checkpoint) == tup.checkpoint["id"]
+
+
+# ---------------------------------------------------------------------------
+# PR #28 round 2 — Celery failure-ack semantics (the retry-durability fix was
+# incomplete: raising RetryPublicationError does NOT by itself cause redelivery)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+def test_celery_does_not_ack_failed_tasks():
+    """A raised exception must NOT be ACKed, or retry publication is not recoverable.
+
+    ``acks_late`` only defers the ack for tasks that *complete*. On the failure path
+    Celery consults ``task_acks_on_failure_or_timeout``, whose default is True — i.e.
+    the message is ACKed and merely marked FAILURE. The executor relies on the
+    exception escaping so the broker redelivers, so this must be False.
+    """
+    from runtime.celery_app import celery_app
+
+    assert celery_app.conf.task_acks_late is True
+    assert celery_app.conf.task_acks_on_failure_or_timeout is False
+    assert celery_app.conf.task_reject_on_worker_lost is True
+
+
+@pytest.mark.unit
+def test_retry_publication_failure_depends_on_rejection_not_acks_late():
+    """Documents the mechanism so the flag is not 'simplified' away later.
+
+    If this flag were True, ``execute_run`` raising ``RetryPublicationError`` would be
+    ACKed and the run would sit in RETRYING with no replacement message — the exact
+    silent-stuck failure the reconciler is the backstop for.
+    """
+    from runtime.celery_app import celery_app
+    from runtime.executor import RetryPublicationError
+
+    # the escape hatch exists...
+    assert issubclass(RetryPublicationError, RuntimeError)
+    # ...and it only achieves redelivery because failures are not ACKed
+    assert not celery_app.conf.task_acks_on_failure_or_timeout
