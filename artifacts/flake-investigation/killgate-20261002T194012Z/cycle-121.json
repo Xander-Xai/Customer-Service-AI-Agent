@@ -1,0 +1,92 @@
+{
+  "index": 121,
+  "tag": "6226424a",
+  "run_id": "killgate-6226424a",
+  "thread_id": "T-killgate-6226424a",
+  "queue": "agent_runs_test_6226424a",
+  "entered_second": true,
+  "t_entered_second_s": 2.1139,
+  "gate_satisfied": true,
+  "gate_checkpoint_count": 3,
+  "first_before": 1,
+  "running_row": [
+    "RUNNING",
+    "Ydxx:426345:38231c96"
+  ],
+  "pre_checkpoint_count": 3,
+  "pre_checkpoint_id": "1f1be99c-9c75-634c-8001-feab5f0b720d",
+  "pre_channels": [
+    "branch:to:second",
+    "customer_query",
+    "response",
+    "resumed",
+    "stage"
+  ],
+  "pre_durable_has_first_result": true,
+  "pre_pending_writes": [
+    {
+      "checkpoint_id": "1f1be99c-9c5f-6da3-bfff-c159270d1970",
+      "channel": "customer_query",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c5f-6da3-bfff-c159270d1970",
+      "channel": "response",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c5f-6da3-bfff-c159270d1970",
+      "channel": "stage",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c5f-6da3-bfff-c159270d1970",
+      "channel": "resumed",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c5f-6da3-bfff-c159270d1970",
+      "channel": "branch:to:first",
+      "type": "null"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c61-6f7e-8000-c6abc8198896",
+      "channel": "response",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c61-6f7e-8000-c6abc8198896",
+      "channel": "stage",
+      "type": "msgpack"
+    },
+    {
+      "checkpoint_id": "1f1be99c-9c61-6f7e-8000-c6abc8198896",
+      "channel": "branch:to:second",
+      "type": "null"
+    }
+  ],
+  "durable_has_first_result": true,
+  "checkpoint_count": 3,
+  "channels": [
+    "branch:to:second",
+    "customer_query",
+    "response",
+    "resumed",
+    "stage"
+  ],
+  "t_kill_s": 2.1431,
+  "t_postkill_read_s": 2.1509,
+  "post_checkpoint_count": 3,
+  "post_channels": [
+    "branch:to:second",
+    "customer_query",
+    "response",
+    "resumed",
+    "stage"
+  ],
+  "post_durable_has_first_result": true,
+  "gate_admitted_kill": false,
+  "commit_landed_during_kill_window": false,
+  "commit_absent_after_kill": false,
+  "kill_before_durable": false
+}
