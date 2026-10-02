@@ -17,4 +17,12 @@
 pytest>=8.0.0,<9.0.0
 pytest-asyncio>=0.23.4,<0.24.0
 pytest-cov>=4.1.0
+# Hard per-test wall-clock cap for the distributed runtime acceptance tests.
+# Those tests spawn real OS processes (Celery prefork workers) and wait on
+# broker visibility timeouts; without a cap a hung worker would stall CI until
+# the job-level timeout. The `timeout` marker is a no-op when the plugin is
+# absent, so this only takes effect where it is installed (dev + CI runtime
+# lane). Never enable the plugin globally in the canonical coverage lane — it
+# would change timings the committed coverage figure was measured under.
+pytest-timeout>=2.3.0
 mypy>=1.8.0

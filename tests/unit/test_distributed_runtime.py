@@ -96,10 +96,40 @@ async def test_acquire_timeout_raises_thread_busy():
 
 
 @pytest.mark.unit
-async def test_lock_disabled_is_noop():
-    # manager=None 且未启用 -> 直接放行，不阻塞
-    async with thread_lock("T1", manager=None) as owner:
-        assert owner is None or isinstance(owner, str)
+async def test_lock_disabled_is_noop(monkeypatch):
+    """``AGENT_RUN_THREAD_LOCK_ENABLED=false`` 必须直接放行：owner 为 None，不竞争。
+
+    注意 ``thread_lock(manager=None)`` 表示「解析进程默认 manager」，不等于关闭；
+    真正关闭只有配置开关一条路径。
+    """
+    import core.concurrency.distributed_lock as api_lock
+
+    real = InMemoryThreadLock()
+    assert await real.acquire("T1", "other-owner", ttl_seconds=30) is True
+
+    monkeypatch.setattr(api_lock, "get_api_lock_manager", lambda: None)
+    async with thread_lock("T1", acquire_timeout=0.2) as owner:
+        assert owner is None
+
+    # 关闭时不得触碰真实锁状态（上面的 T1 仍属于 other-owner）
+    assert await real.is_locked("T1") is True
+    assert await real.release("T1", "other-owner") is True
+
+
+@pytest.mark.unit
+async def test_explicit_manager_none_resolves_process_default():
+    """``manager=None`` 解析进程默认 manager（不是"关闭"），避免误用造成假互斥。"""
+    import core.concurrency.distributed_lock as api_lock
+    from runtime import thread_lock as worker_lock
+
+    api_lock.reset_api_lock_manager_for_tests()
+    worker_lock.reset_thread_lock_manager_for_tests()
+    try:
+        async with thread_lock("T1-resolve", acquire_timeout=1.0) as owner:
+            assert isinstance(owner, str) and owner
+    finally:
+        api_lock.reset_api_lock_manager_for_tests()
+        worker_lock.reset_thread_lock_manager_for_tests()
 
 
 @pytest.mark.unit

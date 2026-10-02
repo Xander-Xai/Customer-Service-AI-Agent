@@ -33,6 +33,14 @@ known-first-party = ["config", "logger", "exceptions", "agents", "api", "auth", 
 quote-style = "double"
 
 [tool.pytest.ini_options]
+# `scripts/` holds operational CLIs (including `test_worker_crash_recovery.py`,
+# the runtime chaos acceptance script). Without this, bare `pytest` from the repo
+# root imports that script as a test module under the name
+# `test_worker_crash_recovery`, which collides with the real test module
+# `tests/integration/test_worker_crash_recovery.py` and aborts collection with
+# "import file mismatch". Operational scripts are exercised via their Makefile
+# targets (`make runtime-chaos`), never by pytest collection.
+norecursedirs = ["scripts", "deploy", "htmlcov", "node_modules", ".venv", ".worktrees", ".claude"]
 markers = [
     "real_llm: 真实 LLM 端到端测试（需要真实 API Key，默认跳过）",
     "stress: 压力测试（耗时较长）",
