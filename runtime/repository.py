@@ -221,6 +221,33 @@ class AgentRunRepository:
         finally:
             session.close()
 
+    def list_recoverable_runs(self, *, limit: int = 100, now=None) -> list[str]:
+        """RETRYING/QUEUED 且 next_retry_at 已过期的 run（等待重投但无人调度）。
+
+        ``next_retry_at`` 为 NULL 的 QUEUED run 也算：它是"已落库但还没成功投递"的
+        情况，同样需要兜底扫描。
+        """
+        from datetime import datetime, timezone
+
+        now = now or datetime.now(timezone.utc)
+        stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.status.in_(
+                    [RunStatus.RETRYING.value, RunStatus.QUEUED.value]
+                ),
+                AgentRun.next_retry_at.isnot(None),
+                AgentRun.next_retry_at <= now,
+            )
+            .order_by(AgentRun.next_retry_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [row[0] for row in session.execute(stmt).all()]
+        finally:
+            session.close()
+
     # ---- Dead letter ----
 
     def add_dead_letter(

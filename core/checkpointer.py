@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,6 +43,73 @@ STATUS_UNAVAILABLE = "unavailable"
 
 class CheckpointBackendError(RuntimeError):
     """checkpoint 后端创建/初始化失败。"""
+
+
+#: 跨进程 schema setup 的 PostgreSQL advisory lock key。
+#:
+#: 固定常量（不是随机值）：所有进程必须争抢同一把锁，才能把并发 setup() 串行化。
+#: 选一个远离业务常用区间的 64 位 key。
+CHECKPOINT_SETUP_LOCK_KEY = 7_243_119_553_021_884_417
+
+
+async def _setup_with_advisory_lock(saver: Any) -> None:
+    """在 PostgreSQL advisory lock 保护下执行 ``saver.setup()``。
+
+    为什么需要：多 Gunicorn worker 并发启动时每个进程都会各自跑 ``setup()`` 的
+    migration 逻辑；官方 saver 只有进程内锁，跨进程会并发写 ``checkpoint_migrations``，
+    其中一个 worker 在版本插入上失败，而生产 fail-closed 又让它起不来。
+
+    为什么用 ``pg_try_advisory_lock`` 而不是阻塞的 ``pg_advisory_lock``：
+    ``setup()`` 内部会执行 ``CREATE INDEX CONCURRENTLY``，它必须等待所有既有事务结束。
+    如果等待方**持有一条空闲连接**阻塞在 ``pg_advisory_lock`` 上，持锁方的
+    CONCURRENTLY 就会等这个等待方的会话结束 —— 双方互等，启动直接超时。
+    因此这里用 try-lock + 轮询：拿不到锁就**立刻释放连接**再重试，等待期间本进程
+    不持有任何长事务，CONCURRENTLY 可以正常推进。
+
+    ``pg_try_advisory_lock`` 是会话级锁，因此成功后在**同一条连接**上执行 setup，
+    并在 finally 中显式解锁；进程被强杀时 PostgreSQL 会自动释放会话锁，不会留孤儿锁。
+    """
+    pool = saver.conn
+    if not hasattr(pool, "connection"):
+        # 不是 psycopg 连接池（自定义 saver）——不强行加锁，退回直接 setup。
+        await saver.setup()
+        return
+
+    delay = 0.05
+    max_delay = 1.0
+    deadline_attempts = 600  # 上限约 600 * (1s + 开销)，外层还有 wait_for 兜底
+    for _ in range(deadline_attempts):
+        async with pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "SELECT pg_try_advisory_lock(%s) AS got", (CHECKPOINT_SETUP_LOCK_KEY,)
+                )
+                row = await cur.fetchone()
+            # 连接池配置了 ``row_factory=dict_row``，但自定义 saver 可能用 tuple。
+            # 两种形态都要兼容。
+            if row is None:
+                acquired = False
+            elif isinstance(row, dict):
+                acquired = bool(row.get("got"))
+            else:
+                acquired = bool(row[0])
+            if not acquired:
+                # 未拿到锁：本连接即将归还，立即让 CONCURRENTLY 可以推进。
+                await asyncio.sleep(delay)
+                delay = min(max_delay, delay * 1.5)
+                continue
+            try:
+                await saver.setup()
+            finally:
+                with contextlib.suppress(Exception):
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "SELECT pg_advisory_unlock(%s)", (CHECKPOINT_SETUP_LOCK_KEY,)
+                        )
+            return
+    raise CheckpointBackendError(
+        "未能在有限次数内获得 checkpoint schema 初始化锁（advisory lock 持续被占用）"
+    )
 
 
 def _record_checkpoint_error() -> None:
@@ -136,7 +204,22 @@ async def build_postgres_checkpointer(
         await pool.open(wait=True, timeout=setup_timeout)
         saver = AsyncPostgresSaver(pool)
         # 官方推荐：首次使用时调用 setup() 创建/迁移 checkpoint 表。
-        await saver.setup()
+        #
+        # 两个真实缺陷在此修掉（均来自 PR #26 review）：
+        #  1. setup() 之前**没有**超时约束。若 PG 能连接但 DDL 被锁阻塞（典型的
+        #     "另一个进程正在跑 migration"），启动会无限挂起，与
+        #     LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT 的承诺不符。
+        #  2. 多 Gunicorn worker 并发启动时，每个进程都会各自跑 setup() 的
+        #     migration 逻辑；官方 saver 只在进程内有锁，跨进程会并发写
+        #     checkpoint_migrations，导致其中一个 worker 在 migration 版本插入上
+        #     失败，而生产 fail-closed 又会让该 worker 起不来。
+        await asyncio.wait_for(_setup_with_advisory_lock(saver), timeout=setup_timeout)
+    except TimeoutError as e:
+        _record_checkpoint_error()
+        await _close_pool(pool)
+        raise CheckpointBackendError(
+            f"PostgreSQL checkpoint schema 初始化超时（>{setup_timeout}s）"
+        ) from e
     except Exception as e:
         _record_checkpoint_error()
         await _close_pool(pool)
