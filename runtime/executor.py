@@ -142,6 +142,7 @@ async def execute_run(
 
             exec_started = time.perf_counter()
             metrics.inc_worker_active()
+            metrics.inc_run_active()
             started_at = running.get("started_at")
             queued_at = run.get("queued_at")
             if started_at is not None and queued_at is not None:
@@ -201,6 +202,7 @@ async def execute_run(
                     await heartbeat_task
                 metrics.observe_run_duration(time.perf_counter() - exec_started)
                 metrics.dec_worker_active()
+                metrics.dec_run_active()
         finally:
             if lock is not None:
                 with contextlib.suppress(ThreadLockBackendError):
@@ -250,6 +252,7 @@ async def _handle_failure(
                 error_type=error_type,
             )
         metrics.record_run_status(RunStatus.FAILED.value)
+        metrics.record_run_failure()
         metrics.record_worker_task("failed")
         logger.info("AgentRun permanent 失败 run_id=%s attempt=%s", run_id, attempt)
         return RunStatus.FAILED.value
@@ -265,6 +268,7 @@ async def _handle_failure(
             )
         metrics.record_dead_letter()
         metrics.record_run_status(RunStatus.DEAD_LETTER.value)
+        metrics.record_run_failure()
         metrics.record_worker_task("failed")
         logger.warning(
             "AgentRun retry 用尽 -> DEAD_LETTER run_id=%s attempt=%s/%s",
