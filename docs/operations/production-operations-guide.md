@@ -47,8 +47,32 @@
 | Redis连接失败 | Redis宕机/网络分区 | 检查Redis状态，重启服务 | P0 |
 | Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，重建 Qdrant 集合 | P0 |
 | 会话数据丢失 | Session过期/Redis故障 | 检查TTL配置，验证Redis | P1 |
+| 请求返回 409 THREAD_BUSY | 同一 thread 有正在执行的 Run（分布式锁未释放/长请求） | 检查 `agent:thread-lock:{thread_id}` TTL 与慢请求；客户端稍后重试 | P1 |
+| 启动失败：SESSION_STORAGE_BACKEND | 生产配了 memory（fail-fast） | 改为 `SESSION_STORAGE_BACKEND=redis` 并确保 Redis 可用 | P0 |
+| 启动失败：GUNICORN_WORKERS gate | 多 worker 但 checkpoint/session/lock 非分布式 | 配 postgres checkpoint + redis session + redis lock | P0 |
+| Run 长期 QUEUED / 无 worker 消费 | worker 未启动、broker 不可达，或 `AGENT_RUN_DISPATCH=inline` | 检查 worker 进程与 `celery inspect active`；见 runtime runbook §3.1 | P0 |
+| Run 卡在 RUNNING | worker 崩溃但消息未回到队列，或 worker 仍在跑 | 比对 `lease_expires_at`/`heartbeat_at`；不要手工改状态 | P1 |
+| DEAD_LETTER 堆积 | retry 耗尽（transient 抖动或 permanent 缺陷） | 按 `error_type` 分类；`python scripts/replay_dead_run.py <run_id>`（**目前无告警，需巡检**） | P1 |
+| 怀疑副作用工具执行两次 | 写工具未注册 `side_effect=True` | 查 `tool_side_effects` 与 `agent_tool_idempotency_hit_total`；见 runtime runbook §3.5 | P0 |
+| Run 事件流无数据 | worker 未发布，或 Redis 不可用（事件发布降级为 no-op 不影响 Run） | `redis-cli XLEN 'agent:run:<run_id>:events'`；见 runtime runbook §3.6 | P2 |
 | 响应时间过长 | LLM延迟/资源不足 | 检查SLA，扩容实例 | P0 |
 | 告警频繁触发 | 阈值过低/真实故障 | 调整阈值，排查根因 | P1 |
+
+---
+
+### Q0: 分布式 Agent Runtime 排障入口
+
+Run 卡住、线程锁冲突、dead-letter 堆积、副作用重复、事件流缺失等问题的完整排障
+路径（SQL/Redis 命令 + 指标速查 + 已知限制）见
+[distributed-runtime-runbook.md](distributed-runtime-runbook.md)。
+设计语义见 [agent-runtime.md](../design/agent-runtime.md)。
+
+日常验收：
+
+```bash
+make runtime-e2e      # 真实 PG + Redis，30 用例
+make runtime-chaos    # worker kill -9 混沌验收（结构化证据 JSON）
+```
 
 ---
 

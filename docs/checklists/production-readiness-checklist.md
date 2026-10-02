@@ -20,6 +20,25 @@
 - [ ] Tool Result feature flags、rollback switches、Redis store/TTL 已验证
 - [ ] Tool Result scope isolation、cache safety 已验证
 - [ ] BM25 lifecycle restart、Qdrant point-id migration dry-run/rollback 已验证
+- [ ] **LangGraph checkpoint 持久化**：生产 `LANGGRAPH_CHECKPOINT_BACKEND=postgres`、
+      官方 saver `setup()` 成功、连接失败 fail closed（本地/受控环境验证；真实多副本
+      恢复仍属 PRODUCTION NOT_VERIFIED）
+- [ ] **生产 Redis Session**：`SESSION_STORAGE_BACKEND=redis`（生产 memory 启动
+      fail-fast）；Redis 初始化失败不回退 memory
+- [ ] **per-thread 分布式锁**：`AGENT_RUN_THREAD_LOCK_ENABLED=true` +
+      `AGENT_RUN_THREAD_LOCK_BACKEND=redis`；同一 thread 冲突返回 `THREAD_BUSY`(409)
+- [ ] **多 Worker 一致性 gate**：`GUNICORN_WORKERS>1` + 生产要求 postgres checkpoint
+      + redis session + 分布式锁（否则启动失败）
+- [ ] `make runtime-e2e`（真实 PG + Redis，30 用例）PASS
+- [ ] `make runtime-chaos` PASS 且结构化证据显示：崩溃前存在 checkpoint、
+      接管 worker 不同、`idem:counter == 1`、ledger 命中路径被走到
+- [ ] `python scripts/verify_distributed_runtime.py` 生成
+      `artifacts/distributed-runtime/<ts>/report.json` 且 `overall_status=PASS`
+      （未配置基础设施时退出码 2，不会把"没跑"记成"通过"）
+- [ ] DLQ 处置流程已演练：`GET /api/runs/dead` →
+      `python scripts/replay_dead_run.py <run_id>` 确认重放复用原 run_id
+- [ ] 确认无 dead-letter 堆积：`agent_run_dead_letter_total` 无异常增长
+      （注意：**目前没有 dead-letter 告警**，需自行加基于该指标��规则）
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -49,7 +68,8 @@
 - [x] admin.html 版本号同步至 v6.3
 - [x] _revoked_jtis 已吊销 JTI 集合新增容量限制 10000，防止内存泄漏
 - [x] mypy 已从 requirements.txt 移除，移到 requirements-dev.txt
-- [x] config 启动校验新增 4 项生产环境警告（SESSION_STORAGE_BACKEND/ERP_MODE/SESSION_ENCRYPTION_KEY）
+- [x] config 启动校验新增生产环境检查（SESSION_STORAGE_BACKEND 现为 fail-fast 硬错误；
+      ERP_MODE/SESSION_ENCRYPTION_KEY 仍为 warning；多 worker 一致性 gate 见上）
 - [x] web/index.html 版本号同步至 v6.3
 - [x] README 测试计数/Agent 表/缓存架构全部按代码回填
 - [x] Widget file-type header aligned: frontend sends `file-type` (hyphen) matching FastAPI Header() param conversion (v6.3)
@@ -73,6 +93,31 @@
       `scripts/import_eval_corpus.py`（幂等导入 + manifest）、Make 目标
       `rag-eval-import/-preflight/-smoke/rag-eval-649`；提交有 preflight v1
       证据与 import manifest (PR #19)
+- [x] LangGraph Checkpoint 后端生命周期已实现（`core/checkpointer.py`）：
+      开发/测试 MemorySaver、生产官方 `langgraph-checkpoint-postgres`
+      (`AsyncPostgresSaver` + psycopg 异步连接池)；生产初始化失败 fail closed，
+      不静默回退；`/api/health` 暴露脱敏 `langgraph_checkpoint` 状态
+      （本地单测 + 可选真实 PostgreSQL 集成测试；真实多副本恢复仍 PRODUCTION NOT_VERIFIED）
+- [x] **断点续跑语义已修正并验证**（`runtime/bootstrap.py::invoke_graph_with_resume`）：
+      LangGraph `ainvoke(state, cfg)` 会从 START 重跑，只有 `ainvoke(None, cfg)`
+      才从 checkpoint 的 `next` 续跑。CI VERIFIED：`first` 节点执行次数 == 1
+      （证明是真续跑而非从头重跑）
+- [x] **thread lease 执行期间续租**（`_heartbeat_loop` 同时续 DB lease 与 Redis TTL）；
+      API 与 Worker 共用同一 manager 单例（`test_runtime_architecture_contract.py`）
+- [x] **工具副作用幂等接入生产路径**：`ToolRegistry.register(side_effect=True)`
+      的写工具自动走 ledger；CI VERIFIED（worker `kill -9` 后副作用计数器 == 1）
+- [x] **DLQ 人工重放闭环**：`scripts/replay_dead_run.py`（复用原 run_id，保留历史）
+- [x] **Run 事件流 + SSE**：`GET /api/runs/{run_id}/events`（Redis Stream，
+      支持 `Last-Event-ID` 断点续读；负载走字段白名单）
+- [x] **API Run 接口补全**：`POST /api/runs`、`GET /api/runs/{run_id}`、
+      `POST /api/runs/{run_id}/cancel`（协作式）、`GET /api/runs/dead`
+- [x] **SSE + checkpoint 序列化修复（P0，修复前 SSE 在生产必然报错）**：
+      流式回调移出 LangGraph channel 改用 contextvar
+      （`core/streaming_context.py`）；真实 PG checkpointer 下 SSE 已验证正常完成
+      （`tests/integration/runtime/test_sse_checkpoint_serialization.py`）
+- [x] **Runtime 指标契约**：`tests/unit/test_runtime_metrics_contract.py` 断言
+      必需指标存在，且任何 `agent_*` 指标不得使用 run_id/thread_id/user_id/query
+      等高基数 label
 
 ## 2. 当前仍不能直接宣称"真实上线就绪"的项目
 
@@ -94,6 +139,15 @@
 - [ ] CORS_ORIGINS 在生产环境未配置时将导致前端跨域请求失败
 - [ ] 仍无真实生产密钥/域名/证书的验证记录
 - [ ] Qdrant、Redis、PostgreSQL 尚未在真实部署环境下验证
+- [ ] LangGraph checkpoint 的多副本共享/进程重启恢复尚未在真实生产环境验证
+      （本地 + CI 已用**真实跨进程**测试验证，但不等于生产验证）
+- [ ] Worker Pool 无自动扩缩、无 backpressure/admission control
+- [ ] DLQ **无告警**（只有计数指标），人工发现依赖值班巡检
+- [ ] 事件流仅 best-effort 可续读（**非** exactly-once）：较旧 `Last-Event-ID`
+      重连会重放已处理事件（重复）；`replay=false` 与 idle 超时造成缺口；
+      `MAXLEN` 为近似裁剪（非硬上界），被裁历史不可恢复；不承诺跨进程 SSE 断线续传
+- [ ] 认领工具后崩溃的副作用会在租约过期后被重放（需下游接受 idempotency key
+      才能端到端去重）
 - [ ] `rag/api_embedding.py` 的 embedding API Key 复用 `OPENAI_API_KEY`，生产环境应配置独立视角的 embedding 服务
 - [ ] CORS_ORIGINS 为空时已在生产启动校验中阻断启动
 
@@ -107,6 +161,9 @@
 - [ ] 确认 `VECTOR_DB_MODE`、`DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`SESSION_TOKEN_SECRET`、`API_KEY`、`MONITORING_ADMIN_TOKEN` 已按生产值配置
       （`EMBEDDING_API_KEY` / `RERANKER_API_KEY` 可独立配置；向量化与重排凭据必须实际可用
       ——embedding 未单独配置时会复用 `LLM` 的 `OPENAI_API_KEY`，见 `core/config.py`）
+- [ ] 确认 `LANGGRAPH_CHECKPOINT_BACKEND=postgres` 且 checkpoint 表
+      （由官方 saver `setup()` 创建）在目标 PostgreSQL 上初始化成功；健康检查
+      `langgraph_checkpoint.status=healthy`
 - [ ] 验证 `/api/health`、`/api/metrics`、`/api/kpi`、`/metrics/prometheus` 在目标环境下的权限和返回格式
 - [ ] 验证上传链路在 Nginx / 反向代理 / FastAPI 三级限制下仍保持一致
 - [ ] 复核备份、恢复、告警路由和通知通道，而不是只看文档说明

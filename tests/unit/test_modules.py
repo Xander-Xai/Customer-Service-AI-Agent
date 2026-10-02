@@ -1648,9 +1648,12 @@ class TestReActAgentDeep:
 
         result = await agent.process(state)
         assert result["response"] == "面膜产品信息已找到，适合干性肌肤使用。"
-        # 验证工具被调用（v6.0: execute 新增 stream_callback 参数）
+        # 验证工具被调用，且 LLM 的 tool_call id 被透传（副作用工具幂等键依赖它）
         mock_registry.execute.assert_called_once_with(
-            "query_product", {"keyword": "面膜"}, stream_callback=None
+            "query_product",
+            {"keyword": "面膜"},
+            stream_callback=None,
+            tool_call_id="call_001",
         )
 
     @pytest.mark.asyncio

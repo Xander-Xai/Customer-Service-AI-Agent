@@ -12,6 +12,7 @@ import time
 from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -125,6 +126,23 @@ def _make_cached_static(app: ASGIApp, max_age: int = 31536000, extra_headers: di
 # ── 图执行引擎（所有路由共用）──
 
 
+async def _pending_steps(graph_app, graph_config: dict[str, Any]) -> tuple[str, ...]:
+    """返回该 thread 最新 checkpoint 的待执行节点；无待执行返回空 tuple。
+
+    探活失败一律按「无待执行」处理（正常执行），绝不让 checkpoint 查询异常阻断业务。
+    """
+    aget_state = getattr(graph_app, "aget_state", None)
+    if aget_state is None:
+        return ()
+    try:
+        snapshot = await aget_state(graph_config)
+    except Exception:
+        return ()
+    if snapshot is None:
+        return ()
+    return tuple(getattr(snapshot, "next", ()) or ())
+
+
 async def _run_graph(
     session_id: str,
     query: str,
@@ -153,24 +171,56 @@ async def _run_graph(
         "resolution_status": "",
         "trace_id": get_trace_id(),
     }
-    if stream_callback:
-        state["stream_callback"] = stream_callback
     if multimodal_content:
         state["multimodal_content"] = multimodal_content
         state["has_multimodal"] = True
     if user_id:
         state["user_id"] = user_id
 
-    try:
-        # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传
-        # 无 checkpointer 时 config 被忽略，保持向后兼容
-        graph_config = {"configurable": {"thread_id": session_id}}
-        result = await _graph_app.ainvoke(state, config=graph_config)
-    except (AttributeError, TypeError):
+    # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传
+    # 无 checkpointer 时 config 被忽略，保持向后兼容
+    # v6.4: per-thread 分布式锁 —— REST/SSE/WS/multimodal 共用同一执行边界，
+    # 保证同一 thread 同一时刻只有一个 LangGraph Run 修改状态；不同 thread 并行。
+    # 拿不到锁抛 ThreadBusyError（由全局 handler 映射 409 / SSE/WS 错误帧）。
+    from core.concurrency.distributed_lock import thread_lock
+    from core.streaming_context import reset_stream_callback, set_stream_callback
+
+    graph_config = {"configurable": {"thread_id": session_id}}
+    async with thread_lock(session_id):
+        # 断点续跑：若该 thread 有**未完成**的 checkpoint（客户端断线重连、进程在
+        # 图中途被杀），必须用 ainvoke(None) 续跑。LangGraph 语义实测：
+        #   ainvoke(None, cfg)  -> 从 checkpoint 的 next 继续，不重跑已完成节点
+        #   ainvoke(state, cfg) -> 从 START 重新执行并用入参覆盖 channel 值
+        # 因此传 state 会把"续传"退化成"从头重跑"。已完成的历史快照（next 为空）
+        # 走正常分支，多轮对话语义不变。
+        pending = await _pending_steps(_graph_app, graph_config)
+        if pending:
+            logger.info(
+                "从 checkpoint 续跑 session=%s pending=%s", session_id, pending
+            )
+            graph_input = None
+        else:
+            graph_input = state
+
+        # 流式回调**不能**放进 state：state 的每个 channel 都会被 checkpointer 序列化，
+        # async 可调用对象会触发 "Type is not msgpack serializable: function"，
+        # MemorySaver 与官方 AsyncPostgresSaver 都会写盘失败。改用 contextvar 传递，
+        # 节点通过 core.streaming_context.get_stream_callback(state) 读取。
+        stream_token = set_stream_callback(stream_callback)
         try:
-            result = await _graph_app.ainvoke(state)
-        except AttributeError:
-            result = await asyncio.to_thread(_graph_app.invoke, state)
+            try:
+                result = await _graph_app.ainvoke(graph_input, config=graph_config)
+            except (AttributeError, TypeError):
+                # 无 checkpointer 的旧图：不接受 config。续跑模式没有 state 可传，
+                # 此时退回有 config 的调用会必然失败，直接抛原始错误更有诊断价值。
+                if graph_input is None:
+                    raise
+                try:
+                    result = await _graph_app.ainvoke(graph_input)
+                except AttributeError:
+                    result = await asyncio.to_thread(_graph_app.invoke, graph_input)
+        finally:
+            reset_stream_callback(stream_token)
 
     elapsed = time.time() - start
     result["elapsed"] = elapsed
@@ -293,6 +343,11 @@ def create_app(
         from llm.client import OpenAICompatibleClient
 
         await OpenAICompatibleClient.close_all_clients()
+
+        # v6.4: 释放 API 执行边界的 per-thread 锁管理器
+        from core.concurrency.distributed_lock import shutdown_api_lock_manager
+
+        await shutdown_api_lock_manager()
         logger.info("httpx 连接池已关闭")
 
     app = FastAPI(title="药妆智多星多智能体客服系统", version=VERSION, lifespan=lifespan)
@@ -325,17 +380,47 @@ def create_app(
             "X-Admin-Token",
             "X-Session-Token",
             "X-CSRF-Token",
+            "Idempotency-Key",
             "Content-Type",
             "Authorization",
         ],
     )
     setup_middleware(app)
 
+    # ── v6.4: THREAD_BUSY -> 409（同一 thread 并发请求的统一错误契约）──
+    from core.concurrency.distributed_lock import (
+        ThreadBusyError,
+        ThreadLockUnavailableError,
+        thread_busy_payload,
+    )
+
+    async def _thread_busy_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        assert isinstance(exc, ThreadBusyError)
+        logger.info(
+            "THREAD_BUSY thread=%s request=%s", exc.thread_id, request.url.path
+        )
+        return JSONResponse(thread_busy_payload(exc), status_code=409)
+
+    async def _thread_lock_unavailable_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        logger.error("THREAD_LOCK_UNAVAILABLE path=%s", request.url.path)
+        return JSONResponse(
+            {"error": "THREAD_LOCK_UNAVAILABLE", "code": "THREAD_LOCK_UNAVAILABLE"},
+            status_code=503,
+        )
+
+    app.add_exception_handler(ThreadBusyError, _thread_busy_handler)
+    app.add_exception_handler(ThreadLockUnavailableError, _thread_lock_unavailable_handler)
+
     # ── 挂载路由模块 ──
     from api.routes.chat import router as chat_router
     from api.routes.chat_multimodal import router as chat_multimodal_router
     from api.routes.feedback import router as feedback_router
     from api.routes.monitoring import router as monitoring_router
+    from api.routes.runs import router as runs_router
     from api.routes.sessions import router as sessions_router
     from api.routes.ws import router as ws_router
 
@@ -344,6 +429,7 @@ def create_app(
     app.include_router(feedback_router)
     app.include_router(chat_router)
     app.include_router(chat_multimodal_router)
+    app.include_router(runs_router)
     app.include_router(ws_router)
 
     # ── 静态资源（使用缓存包装器，不依赖中间件）──

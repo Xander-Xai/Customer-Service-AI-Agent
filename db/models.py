@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -124,3 +125,122 @@ class PromptVersion(Base):
     score_avg = Column(Float, default=0.0)  # 平均评分
     feedback_count = Column(Integer, default=0)  # 反馈计数
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class AgentRun(Base):
+    """Agent 运行记录（异步分布式执行）。
+
+    业务状态真相源（PostgreSQL/SQLite ``agent_runs`` 表）；Redis/Celery 仅负责
+    调度，Celery result backend 不是真相源。
+
+    三个 ID 概念严格区分（详见 docs/design/distributed-agent-runtime.md）：
+      - ``thread_id``：对话级 ID（== 业务 session_id == LangGraph thread_id），
+        同一多轮会话持续复用；
+      - ``id``（run_id）：单轮 Graph 执行 ID，每次用户请求唯一；
+      - ``task_id``：队列消息 / Worker 执行 ID（Celery task id），异步执行后才存在。
+
+    合法状态迁移由 ``runtime/statuses.py`` 定义并在 ``runtime/run_service.py``
+    通过原子条件更新强制。
+    """
+
+    __tablename__ = "agent_runs"
+
+    id = Column(String(36), primary_key=True)  # run_id (UUID 字符串)
+    thread_id = Column(String(64), nullable=False, index=True)
+    session_id = Column(String(64), nullable=False, index=True)
+    user_id = Column(String(64), nullable=True, index=True)
+    status = Column(String(16), nullable=False, default="QUEUED", index=True)
+    query = Column(Text, nullable=False)
+    result = Column(JSON, nullable=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    error_type = Column(String(16), nullable=True)  # transient|permanent|timeout
+    last_error = Column(Text, nullable=True)
+    attempt = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    queued_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    trace_id = Column(String(64), nullable=True)
+    # 幂等键：同一 key 只创建一个 run（可为空；空值允许多条）
+    idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
+    # Worker ownership / lease / heartbeat
+    worker_id = Column(String(64), nullable=True)
+    task_id = Column(String(64), nullable=True)  # 最近一次消费的 Celery task id
+    lease_expires_at = Column(DateTime(timezone=True), nullable=True)
+    heartbeat_at = Column(DateTime(timezone=True), nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_agent_runs_status_created", "status", "created_at"),
+        Index("ix_agent_runs_thread", "thread_id", "created_at"),
+        Index("ix_agent_runs_status_next_retry", "status", "next_retry_at"),
+    )
+
+
+class AgentDeadLetter(Base):
+    """应用级 Dead Letter 记录（retry 用尽后的可查询证据）。
+
+    注意：这是 **application-level DLQ**，不是 broker-native DLX。Redis broker
+    只负责重投递；把 run 归入死信由应用显式写入本表。可回答：
+      - 哪个 run 失败？
+      - 失败几次？
+      - 最后错误是什么？
+      - 什么时候进入 DLQ？
+    """
+
+    __tablename__ = "agent_dead_letters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(36), nullable=False, unique=True, index=True)
+    thread_id = Column(String(64), nullable=False, index=True)
+    attempt_count = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=3)
+    error_type = Column(String(16), nullable=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    worker_id = Column(String(64), nullable=True)
+    entered_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ToolSideEffect(Base):
+    """写操作工具（退款/改单/工单等）的幂等 ledger。
+
+    at-least-once delivery + application-level idempotency：同一
+    ``(tool_name, operation_key)`` 一旦 SUCCEEDED，重投递 / 崩溃恢复不得再次
+    执行。唯一约束在数据库层，不依赖 Redis。
+
+    边界：该 ledger 只保证「同一 Agent 不会重复发起同一副作用」。若下游外部
+    系统（ERP 等）需要真正的端到端幂等，必须由下游 API 接受 idempotency key，
+    或由本 ledger 配合人工对账，不构成本 PR 的分布式事务保证。
+    """
+
+    __tablename__ = "tool_side_effects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(36), nullable=False, index=True)
+    thread_id = Column(String(64), nullable=True, index=True)
+    tool_name = Column(String(64), nullable=False, index=True)
+    operation_key = Column(String(200), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="PENDING", index=True)
+    result_reference = Column(JSON, nullable=True)
+    error_type = Column(String(16), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tool_name", "operation_key", name="uq_tool_side_effects_operation"
+        ),
+        Index("ix_tool_side_effects_tool_op", "tool_name", "operation_key"),
+    )

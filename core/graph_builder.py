@@ -25,6 +25,7 @@ from langgraph.graph import StateGraph
 from core.container import ServiceContainer
 from core.logger import get_logger, set_trace_id
 from core.state import AgentState
+from core.streaming_context import get_stream_callback
 from router.query_router import RoutingResult
 
 logger = get_logger("graph")
@@ -43,7 +44,7 @@ async def _emit_status(state: AgentState | dict, phase: str, message: str) -> No
     从 state 中获取 stream_callback，发出 status 事件。
     回调不存在或抛出异常时不传播，仅 debug log。
     """
-    cb = state.get("stream_callback") if isinstance(state, dict) else None
+    cb = get_stream_callback(state)
     if cb:
         try:
             await cb({"type": "status", "phase": phase, "content": message})
@@ -68,13 +69,14 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
     Args:
         container: ServiceContainer 依赖注入容器
-        checkpointer: LangGraph Checkpointer（如 MemorySaver），None 则不启用持久化
+        checkpointer: LangGraph Checkpointer（生产 AsyncPostgresSaver /
+            开发 MemorySaver），None 则不启用持久化
 
     Usage:
         container = ServiceContainer()
         await container.initialize()
-        app = build_graph(container, checkpointer=MemorySaver())
-        # 使用 thread_id 实现对话续传
+        app = build_graph(container, checkpointer=container.checkpointer)
+        # thread_id == session_id 实现对话续传
         config = {"configurable": {"thread_id": session_id}}
         result = await app.ainvoke(state, config=config)
     """
@@ -213,7 +215,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             await _emit_status(state, "cache", "⚡ 缓存命中，快速响应中...")
 
             # v6.0: 缓存伪流式 — 分块输出缓存内容
-            stream_callback = state.get("stream_callback")
+            stream_callback = get_stream_callback(state)
             if stream_callback:
                 chunk_size = 20
                 interval = 0.03
@@ -261,7 +263,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             # v6.0: emit agent_switch 和 mode 事件
             agent_name = routing_result.agent_name
             await _emit_status(state, "route", f"🔄 协作模式: {mode_name}, Agent: {agent_name}")
-            cb = state.get("stream_callback")
+            cb = get_stream_callback(state)
             if cb:
                 with contextlib.suppress(Exception):
                     await cb({"type": "agent_switch", "from": "router", "to": agent_name})
@@ -428,18 +430,21 @@ _default_container = None
 
 
 def make_graph():
-    """向后兼容包装器：内部使用单例 ServiceContainer 并调用 build_graph()。
+    """向后兼容包装器：内部使用单例 ServiceContainer 并调用其 _build_graph()。
 
     注意：此函数会使用一个单例的 ServiceContainer 实例，
     仅包含同步初始化的基础设施组件（不包含 LLM/Agents/Router 等异步组件）。
     图节点会在首次调用时懒初始化所需组件。
+
+    checkpointer 由容器生命周期决定：生产需 postgres 后端，开发/测试回退
+    MemorySaver（由 ``_build_graph`` 保证，生产缺失会 fail closed）。
+    此入口服务于 ``langgraph.json`` 本地开发图，不用于生产编排。
     """
     global _default_container
     if _default_container is None:
         _default_container = ServiceContainer()
-    return build_graph(
-        _default_container, checkpointer=getattr(_default_container, "checkpointer", None)
-    )
+    _default_container._build_graph()
+    return _default_container.graph_app
 
 
 if __name__ == "__main__":

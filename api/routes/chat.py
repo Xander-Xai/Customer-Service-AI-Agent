@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from api.utils import extract_user_id, sanitize_input, validate_session_id
+from core.concurrency.distributed_lock import ThreadBusyError, thread_busy_payload
 from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger
 
@@ -207,6 +208,16 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
 
         try:
             result = await ctx.graph_task
+        except ThreadBusyError as e:
+            logger.info("SSE THREAD_BUSY sid=%s", ctx.sid)
+            yield _sse_event(
+                {
+                    "type": "error",
+                    "code": "THREAD_BUSY",
+                    "content": thread_busy_payload(e)["message"],
+                }
+            )
+            return
         except Exception as e:
             logger.error(f"SSE 图执行失败: {e}", exc_info=True)
             yield _sse_event({"type": "error", "content": ERR_INTERNAL})
@@ -272,6 +283,9 @@ async def rest_chat(data: ChatRequest, request: Request):
         if session.session_manager:
             mapped["session_token"] = session.session_manager.generate_session_token(session.sid)
         return mapped
+    except ThreadBusyError as e:
+        logger.info("REST THREAD_BUSY sid=%s", session.sid)
+        return JSONResponse(thread_busy_payload(e), status_code=409)
     except Exception as e:
         logger.error(f"REST 处理失败: {e}", exc_info=True)
         return JSONResponse({"error": ERR_INTERNAL}, status_code=500)

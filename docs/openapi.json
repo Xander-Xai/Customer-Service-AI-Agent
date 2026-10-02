@@ -388,7 +388,7 @@
     "/api/sessions/{session_id}/checkpoint": {
       "get": {
         "summary": "Get Session Checkpoint",
-        "description": "获取会话的 LangGraph checkpoint 状态（断点续传）",
+        "description": "获取会话的 LangGraph checkpoint 状态（断点续传）。\n\nthread_id == session_id：检查同一会话对应的图状态快照是否存在。\nMemorySaver 走同步 ``get()``；官方 AsyncPostgresSaver 只实现异步接口，\n因此优先使用 ``aget_tuple()``（MagicMock 场景自动回退到同步 get）。\n访问控制与其它会话端点一致：非 dev 模式下校验会话归属。",
         "operationId": "get_session_checkpoint_api_sessions__session_id__checkpoint_get",
         "parameters": [
           {
@@ -841,6 +841,238 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs": {
+      "post": {
+        "summary": "Create Run",
+        "operationId": "create_run_api_runs_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/dead": {
+      "get": {
+        "summary": "List Dead Runs",
+        "description": "管理员观测：application-level DLQ 记录（脱敏，不含 secret）。",
+        "operationId": "list_dead_runs_api_runs_dead_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/events": {
+      "get": {
+        "summary": "Stream Run Events",
+        "description": "SSE 转发 run 事件流（Redis Stream -> 客户端）。\n\n- 事件由 worker 写入 ``agent:run:{run_id}:events``，API 只做转发（worker 不接触\n  浏览器连接）；\n- 支持断点续读：``Last-Event-ID`` 请求头或 ``?last_event_id=`` 指定 Redis stream\n  entry id；``replay=false`` 时只看新事件（``$``）；\n- run 进入终态后自动关闭连接。\n\n**语义边界**：best-effort resumable event stream; **not** exactly-once; duplicates or gaps may occur around reconnect/replay; trimmed historical events may become unrecoverable。\n单条连接内每个事件只转发一次；但用较旧的 ``Last-Event-ID`` 重连会重放已处理过\n的事件（重复），``replay=false`` 与 idle 超时会造成缺口，``MAXLEN`` 近似裁剪\n后的历史不可恢复。权威状态请用 ``GET /api/runs/{run_id}``。",
+        "operationId": "stream_run_events_api_runs__run_id__events_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "last_event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last Event Id"
+            }
+          },
+          {
+            "name": "replay",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Replay"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}": {
+      "get": {
+        "summary": "Get Run",
+        "operationId": "get_run_api_runs__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/runs/{run_id}/cancel": {
+      "post": {
+        "summary": "Cancel Run",
+        "description": "取消尚未完成的 run。\n\n协作式取消：立即把状态置 ``CANCELLED``（终态），未开始执行的 run 不会再被执行\n（worker 领取时因状态非可执行而跳过）。已进入 RUNNING 的 run **不会**被强行中断，\n其 ``mark_succeeded`` 走条件更新，不会覆盖 ``CANCELLED``。",
+        "operationId": "cancel_run_api_runs__run_id__cancel_post",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1850,6 +2082,44 @@
         ],
         "title": "ChatStreamRequest",
         "description": "SSE 流式输出请求模型"
+      },
+      "CreateRunRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 5000,
+            "title": "Query"
+          },
+          "session_id": {
+            "type": "string",
+            "maxLength": 36,
+            "title": "Session Id",
+            "default": ""
+          },
+          "session_token": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Session Token",
+            "default": ""
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "CreateRunRequest"
       },
       "FeedbackRequest": {
         "properties": {

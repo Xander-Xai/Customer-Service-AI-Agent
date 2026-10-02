@@ -205,6 +205,89 @@ jobs:
           python -c "from importlib.metadata import version; assert version('pytest-asyncio') == '0.23.4', version('pytest-asyncio')"
           python -m pytest tests/integration/test_integration.py -q -m "not real_llm"
 
+  # Distributed Agent Runtime — real PostgreSQL + Redis acceptance lane.
+  #
+  # These tests deliberately CANNOT run in the `test` job: they spawn real OS
+  # processes, a real Celery broker and real LangGraph checkpoints. Running them
+  # with mocks would prove nothing about crash recovery, same-thread
+  # serialization or side-effect idempotency — all three are exactly the claims
+  # that regress silently when faked.
+  runtime-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: csai_runtime_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DISTRIBUTED_DB_URL: postgresql://postgres:postgres@localhost:5432/csai_runtime_test
+      TEST_REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Stage test environment
+        # tests/integration/runtime imports runtime.errors -> db.database ->
+        # core.config at collection time, and core/config.py fails closed when
+        # API_KEY_ENABLED=true without an API_KEY. The other lanes (`test`,
+        # `dev-compat`) already stage .env.test; without it this lane died at
+        # collection with exit code 2 before running a single test.
+        run: cp .env.test .env
+
+      - name: Runtime end-to-end acceptance
+        # checkpoint 跨进程恢复 / thread 串行与跨 thread 并发 / lease 崩溃接管 /
+        # queue-worker 解耦 / worker kill 后从 checkpoint 续跑 / retry / DLQ +
+        # 重放 / 副作用工具恰好执行一次 / run 事件流
+        run: python -m pytest tests/integration/runtime -q -p no:cacheprovider
+
+      - name: Runtime chaos acceptance (worker kill -9)
+        # 混沌脚本输出结构化证据：崩溃前存在 checkpoint、接管 worker 不同、
+        # 副作用计数器恰好为 1、ledger 命中路径被走到。
+        run: |
+          python scripts/test_worker_crash_recovery.py \
+            --output artifacts/runtime/chaos-ci.json
+          python - <<'PY'
+          import json, pathlib
+          report = json.loads(pathlib.Path("artifacts/runtime/chaos-ci.json").read_text())
+          assert report["result"] == "PASS", report
+          print("chaos:", report["result"])
+          PY
+
+      - name: Upload chaos evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-chaos-evidence
+          path: artifacts/runtime/
+
   # P2-5: 安全扫描
   security:
     runs-on: ubuntu-latest

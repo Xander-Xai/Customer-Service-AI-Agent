@@ -14,6 +14,7 @@
 | [ADR-006](006-cache-and-tool-result-context-architecture.md) | Cache 与 Tool Result Context 架构分离 | 2026-09-29 | 已采纳 |
 | [ADR-007](007-current-default-llm.md) | 当前默认 LLM（Qwen/Qwen3-8B，OpenAI-compatible 接口） | 2026-09-30 | 已采纳 |
 | [ADR-008](008-current-rag-retrieval-architecture.md) | 当前 RAG 检索与 Embedding 架构 | 2026-09-30 | 已采纳 |
+| [ADR-009](009-distributed-agent-runtime.md) | Distributed Agent Runtime Foundation（PostgreSQL + Redis + asyncio 分工） | 2026-10-02 | 已采纳 |
 
 ## 模板
 

@@ -47,6 +47,23 @@ python-docx>=1.0.0
 # ===== v4.1: PostgreSQL 支持 =====
 psycopg2-binary>=2.9.9
 
+# ===== LangGraph Checkpoint 持久化（生产 PostgreSQL 后端）=====
+# 官方 checkpointer 管理自己的表；psycopg (v3) 与异步连接池是官方推荐驱动。
+# psycopg[binary] 提供 libpq 绑定，无需系统级 libpq 开发包。
+langgraph-checkpoint-postgres>=3.1.0
+psycopg[binary]>=3.1.0
+psycopg-pool>=3.2.0
+
+# ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
+# Broker 复用已有 Redis；Celery result backend 不是业务状态真相源。
+celery>=5.3.0
+
+# ===== v5.4 / v6.4: 可观测性（Prometheus 指标）=====
+# core/monitoring.py 与 cache/response_cache.py 在运行时 import prometheus_client。
+# 缺失时它们会静默降级为 no-op 指标（应用仍能启动），但 /api/metrics 会变成空、
+# 所有 agent_* 指标消失——这种"静默降级"必须靠**显式声明依赖**来避免。
+prometheus-client>=0.20.0
+
 # ===== 安全依赖升级（防止传递依赖漏洞）=====
 # python-jose CVE: key verification bypass (PYSEC-2024-232/233)
 # Jinja2 CVE: HTML sanitization bypass (CVE-2024-22195)
