@@ -12,6 +12,7 @@ from collections import defaultdict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from api.utils import sanitize_input, validate_session_id
+from core.concurrency.distributed_lock import ThreadBusyError, thread_busy_payload
 from core.config import (
     API_KEY,
     API_KEY_ENABLED,
@@ -262,6 +263,16 @@ async def websocket_chat(ws: WebSocket):
                         "resolution_status": result.get("resolution_status", ""),
                         "session_id": sid,
                         "session_token": session_token,
+                    }
+                )
+            except ThreadBusyError as e:
+                notify_task.cancel()
+                logger.info("[WS] THREAD_BUSY sid=%s", sid)
+                await ws.send_json(
+                    {
+                        "type": "error",
+                        "code": "THREAD_BUSY",
+                        "content": thread_busy_payload(e)["message"],
                     }
                 )
             except Exception as e:

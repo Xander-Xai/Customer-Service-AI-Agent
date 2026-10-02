@@ -162,16 +162,22 @@ async def _run_graph(
     if user_id:
         state["user_id"] = user_id
 
-    try:
-        # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传
-        # 无 checkpointer 时 config 被忽略，保持向后兼容
-        graph_config = {"configurable": {"thread_id": session_id}}
-        result = await _graph_app.ainvoke(state, config=graph_config)
-    except (AttributeError, TypeError):
+    # v5.2: 传递 thread_id config 以支持 checkpointer 断点续传
+    # 无 checkpointer 时 config 被忽略，保持向后兼容
+    # v6.4: per-thread 分布式锁 —— REST/SSE/WS/multimodal 共用同一执行边界，
+    # 保证同一 thread 同一时刻只有一个 LangGraph Run 修改状态；不同 thread 并行。
+    # 拿不到锁抛 ThreadBusyError（由全局 handler 映射 409 / SSE/WS 错误帧）。
+    from core.concurrency.distributed_lock import thread_lock
+
+    graph_config = {"configurable": {"thread_id": session_id}}
+    async with thread_lock(session_id):
         try:
-            result = await _graph_app.ainvoke(state)
-        except AttributeError:
-            result = await asyncio.to_thread(_graph_app.invoke, state)
+            result = await _graph_app.ainvoke(state, config=graph_config)
+        except (AttributeError, TypeError):
+            try:
+                result = await _graph_app.ainvoke(state)
+            except AttributeError:
+                result = await asyncio.to_thread(_graph_app.invoke, state)
 
     elapsed = time.time() - start
     result["elapsed"] = elapsed
@@ -294,6 +300,11 @@ def create_app(
         from llm.client import OpenAICompatibleClient
 
         await OpenAICompatibleClient.close_all_clients()
+
+        # v6.4: 释放 API 执行边界的 per-thread 锁管理器
+        from core.concurrency.distributed_lock import shutdown_api_lock_manager
+
+        await shutdown_api_lock_manager()
         logger.info("httpx 连接池已关闭")
 
     app = FastAPI(title="药妆智多星多智能体客服系统", version=VERSION, lifespan=lifespan)
@@ -332,6 +343,34 @@ def create_app(
         ],
     )
     setup_middleware(app)
+
+    # ── v6.4: THREAD_BUSY -> 409（同一 thread 并发请求的统一错误契约）──
+    from core.concurrency.distributed_lock import (
+        ThreadBusyError,
+        ThreadLockUnavailableError,
+        thread_busy_payload,
+    )
+
+    async def _thread_busy_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        assert isinstance(exc, ThreadBusyError)
+        logger.info(
+            "THREAD_BUSY thread=%s request=%s", exc.thread_id, request.url.path
+        )
+        return JSONResponse(thread_busy_payload(exc), status_code=409)
+
+    async def _thread_lock_unavailable_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        logger.error("THREAD_LOCK_UNAVAILABLE path=%s", request.url.path)
+        return JSONResponse(
+            {"error": "THREAD_LOCK_UNAVAILABLE", "code": "THREAD_LOCK_UNAVAILABLE"},
+            status_code=503,
+        )
+
+    app.add_exception_handler(ThreadBusyError, _thread_busy_handler)
+    app.add_exception_handler(ThreadLockUnavailableError, _thread_lock_unavailable_handler)
 
     # ── 挂载路由模块 ──
     from api.routes.chat import router as chat_router
