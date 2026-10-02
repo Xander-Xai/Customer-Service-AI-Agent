@@ -92,16 +92,24 @@ def _code_is_dirty(artifact_root: Path) -> tuple[bool, list[str]]:
     look dirty and render ``clean_tree_throughout`` useless. What matters for a
     measurement is whether the code under test differs from the recorded SHA, so
     paths under the artifact roots are excluded. Everything else counts.
+
+    Comparison is done in **repo-relative** form on both sides. ``git status``
+    reports relative paths while ``--out-root`` may be given either way, so
+    resolving only one side makes the exclusion silently never match — and a
+    50-iteration run then reports ``clean_tree_throughout: false`` for the
+    harness's own output.
     """
-    roots = [
-        str(artifact_root.resolve()),
+    repo = REPO_ROOT.resolve()
+    roots = {
+        str((artifact_root if artifact_root.is_absolute() else repo / artifact_root).resolve()),
         str((REPO_ROOT / "artifacts" / "runtime-diagnostics").resolve()),
-    ]
+    }
     entries = _git("status", "--porcelain").splitlines()
     offending: list[str] = []
     for line in entries:
-        path = line[3:].strip().strip('"')
-        if any(path == root or path.startswith(root + os.sep) for root in roots):
+        raw = line[3:].strip().strip('"')
+        absolute = (repo / raw).resolve()
+        if any(str(absolute) == root or str(absolute).startswith(root + os.sep) for root in roots):
             continue
         offending.append(line)
     return bool(offending), offending
