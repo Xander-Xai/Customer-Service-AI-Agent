@@ -126,10 +126,7 @@ def _write_canonical_sources(
     (tmp_repo / "core").mkdir(parents=True, exist_ok=True)
     (tmp_repo / "deploy" / "compose").mkdir(parents=True, exist_ok=True)
     (tmp_repo / "core" / "config.py").write_text(
-        f'OPENAI_MODEL = os.getenv(\n'
-        f'    "OPENAI_MODEL",\n'
-        f'    "{runtime_model}",\n'
-        f')\n',
+        f'OPENAI_MODEL = os.getenv(\n    "OPENAI_MODEL",\n    "{runtime_model}",\n)\n',
         encoding="utf-8",
     )
     env_lines = [
@@ -160,9 +157,7 @@ def test_runtime_model_drift_is_detected_when_env_and_compose_agree(tmp_repo: Pa
     )
     errors: list[str] = []
     audit.check_canonical_config(errors, root=tmp_repo)
-    assert any(
-        "canonical OPENAI_MODEL drift" in e and "Qwen/Qwen4-8B" in e for e in errors
-    ), errors
+    assert any("canonical OPENAI_MODEL drift" in e and "Qwen/Qwen4-8B" in e for e in errors), errors
 
 
 def test_required_env_key_missing_even_if_present_in_config_is_detected(tmp_repo: Path):
@@ -295,7 +290,10 @@ def test_schema_serialization_drift_with_same_surface_passes(tmp_repo: Path, mon
     )
     _fake_app_module(
         monkeypatch,
-        {"paths": {"/x": {"post": {"summary": "different serialization"}}}, "info": {"version": "6.3"}},
+        {
+            "paths": {"/x": {"post": {"summary": "different serialization"}}},
+            "info": {"version": "6.3"},
+        },
     )
 
     errors: list[str] = []
@@ -467,7 +465,10 @@ def test_makefile_rag_target_not_wired_to_script_is_detected(tmp_repo: Path):
     docs = [write(tmp_repo, "README.md", "run: make rag-eval-649 (canonical: rag-evaluation.md)")]
     errors: list[str] = []
     audit.check_rag_eval_references(docs, errors, root=tmp_repo)
-    assert any("rag-eval-649` missing" in e or ("rag-eval-649" in e and "canonical evaluation script" in e) for e in errors)
+    assert any(
+        "rag-eval-649` missing" in e or ("rag-eval-649" in e and "canonical evaluation script" in e)
+        for e in errors
+    )
 
 
 def test_wired_makefile_targets_pass(tmp_repo: Path):
@@ -564,7 +565,10 @@ def _make_benchmark(tmp_repo: Path, n: int = 16) -> str:
 
     data = {
         "metadata": {"total_queries": n, "version": "benchmark-v1", "created_at": "2026-01-01"},
-        "queries": [{"id": f"q{i}", "query": f"问题 {i}", "data_id": f"d{i}", "expected_doc_ids": []} for i in range(n)],
+        "queries": [
+            {"id": f"q{i}", "query": f"问题 {i}", "data_id": f"d{i}", "expected_doc_ids": []}
+            for i in range(n)
+        ],
     }
     path = tmp_repo / "tests" / "eval" / "rag_benchmark.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -729,7 +733,9 @@ def test_doc_cannot_self_promote_to_verified(tmp_repo: Path):
 def test_verified_artifact_with_stale_not_verified_doc_fails(tmp_repo: Path):
     sha = _make_benchmark(tmp_repo)
     _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
-    doc = write(tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：NOT_VERIFIED。")
+    doc = write(
+        tmp_repo, "docs/reference/rag-evaluation.md", "当前 649-query 正式指标：NOT_VERIFIED。"
+    )
     facts = facts_module()
     assert facts.check_doc(doc, root=tmp_repo) == 1
 
@@ -786,10 +792,14 @@ def _init_synthetic_git_repo(tmp_repo: Path) -> None:
     import subprocess
 
     env = dict(os.environ)
-    env.update({
-        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-    })
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+    )
 
     def git(*args: str) -> None:
         subprocess.run(["git", *args], cwd=tmp_repo, check=True, capture_output=True, env=env)
@@ -817,7 +827,9 @@ def test_clean_index_after_rm_cached_passes(tmp_repo: Path):
     _init_synthetic_git_repo(tmp_repo)
     subprocess.run(
         ["git", "rm", "--cached", "-q", "secrets/keys.json"],
-        cwd=tmp_repo, check=True, capture_output=True,
+        cwd=tmp_repo,
+        check=True,
+        capture_output=True,
     )
     errors: list[str] = []
     audit.check_tracked_ignored_files(errors, [], root=tmp_repo)
@@ -882,7 +894,10 @@ def test_facts_eval_experiment_drift_is_detected():
         problems.append(f"missing: {experiment}")
     assert all("missing" in p for p in problems), "drift simulation must produce findings"
     assert collected["evaluation_experiments"] == [
-        "vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank",
+        "vector_only",
+        "bm25_only",
+        "hybrid_no_rerank",
+        "hybrid_rerank",
     ]
 
 
@@ -894,7 +909,12 @@ def test_facts_check_doc_flags_missing_canonical_target(tmp_path: Path):
     doc = tmp_path / "current-state.md"
     doc.write_text(stripped, encoding="utf-8")
     problems: list[str] = []
-    for target in ("rag-eval-import", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-649"):
+    for target in (
+        "rag-eval-import",
+        "rag-eval-649-preflight",
+        "rag-eval-649-smoke",
+        "rag-eval-649",
+    ):
         if target not in stripped:
             problems.append(
                 f"stale evaluation fact: canonical make target `{target}` missing from {doc.name}"
@@ -907,7 +927,13 @@ def test_facts_check_doc_flags_missing_canonical_target(tmp_path: Path):
 def test_facts_targets_resolved_from_makefile():
     facts = _load_facts_module()
     targets = facts._makefile_targets()
-    for required in ("eval-rag", "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import"):
+    for required in (
+        "eval-rag",
+        "rag-eval-649",
+        "rag-eval-649-preflight",
+        "rag-eval-649-smoke",
+        "rag-eval-import",
+    ):
         assert required in targets, f"Makefile missing documented target: {required}"
 
 
@@ -989,9 +1015,7 @@ def test_make_target_in_any_active_doc_is_checked(tmp_repo: Path):
 
 def test_make_english_verb_false_positive_is_not_a_target(tmp_repo: Path):
     write(tmp_repo, "Makefile", "dev:\n\techo dev\n")
-    doc = write(
-        tmp_repo, "docs/design/note.md", "External updates can make a cached read stale.\n"
-    )
+    doc = write(tmp_repo, "docs/design/note.md", "External updates can make a cached read stale.\n")
     errors: list[str] = []
     audit.check_makefile_doc_targets(errors, root=tmp_repo, docs=[doc])
     assert errors == []
@@ -1027,9 +1051,7 @@ def test_fail_closed_embedding_note_passes(tmp_repo: Path):
 
 
 def test_unsupported_latency_absolute_is_detected(tmp_repo: Path):
-    doc = write(
-        tmp_repo, "docs/design/arch.md", "缓存命中 → 亚毫秒级本地读，直接返回\n"
-    )
+    doc = write(tmp_repo, "docs/design/arch.md", "缓存命中 → 亚毫秒级本地读，直接返回\n")
     errors: list[str] = []
     audit.check_latency_absolutes([doc], errors, root=tmp_repo)
     assert any("亚毫秒" in e for e in errors)
@@ -1047,9 +1069,7 @@ def test_latency_absolute_with_benchmark_context_passes(tmp_repo: Path):
 
 
 def test_zero_latency_in_decision_doc_is_tolerated(tmp_repo: Path):
-    doc = write(
-        tmp_repo, "docs/decisions/001-legacy.md", "熔断后规则引擎零延迟接管\n"
-    )
+    doc = write(tmp_repo, "docs/decisions/001-legacy.md", "熔断后规则引擎零延迟接管\n")
     errors: list[str] = []
     audit.check_latency_absolutes([doc], errors, root=tmp_repo)
     assert errors == []
@@ -1059,9 +1079,7 @@ def test_zero_latency_in_decision_doc_is_tolerated(tmp_repo: Path):
 
 
 def test_production_grade_claim_is_rejected(tmp_repo: Path):
-    doc = write(
-        tmp_repo, "docs/design/interview.md", "我把这个系统做到了生产级。\n"
-    )
+    doc = write(tmp_repo, "docs/design/interview.md", "我把这个系统做到了生产级。\n")
     errors: list[str] = []
     audit.check_production_claims([doc], errors, root=tmp_repo)
     assert any("production" in e.lower() for e in errors)
@@ -1189,3 +1207,316 @@ def test_negated_v64_statement_passes(tmp_repo: Path):
     errors: list[str] = []
     audit.check_no_v64_claim([doc], errors, root=tmp_repo)
     assert errors == []
+
+
+# ===========================================================================
+# Distributed Agent Runtime semantic-drift guards (V / W / X / Y / Z).
+#
+# Truth priority is executable code: every guard below *derives* whether a
+# capability exists from the repository filesystem, then forbids CURRENT docs
+# from contradicting that. A test that only fed a doc string would not catch a
+# guard that silently stopped consulting the code, so each fixture creates the
+# marker files that make the capability "implemented".
+# ===========================================================================
+
+
+def _make_runtime_implemented(root: Path) -> None:
+    """Create every marker file that makes all RUNTIME_CAPABILITIES implemented.
+
+    Mirrors RUNTIME_CAPABILITIES exactly, so deleting one marker in production
+    turns the corresponding guard off (which is the intended fail-open
+    direction) and these tests prove the mapping stays truthful.
+    """
+    for rel in (
+        "runtime/celery_app.py",
+        "runtime/tasks.py",
+        "runtime/dispatch.py",
+        "core/concurrency/distributed_lock.py",
+        "core/concurrency/__init__.py",
+        "runtime/thread_lock.py",
+        "core/checkpointer.py",
+    ):
+        write(root, rel, "# marker\n")
+
+
+# ------------------------------------------------------------- Guard V
+
+
+def test_celery_worker_described_as_future_is_detected(tmp_repo: Path):
+    """runtime/celery_app.py + tasks.py + dispatch.py exist -> a CURRENT doc
+    calling the Celery worker future work contradicts the code."""
+    _make_runtime_implemented(tmp_repo)
+    doc = write(tmp_repo, "README.md", "下一阶段计划引入 Celery worker 执行长任务。\n")
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert any("celery_worker" in e for e in errors)
+
+
+def test_redis_lock_described_as_future_is_detected(tmp_repo: Path):
+    _make_runtime_implemented(tmp_repo)
+    doc = write(tmp_repo, "docs/design/note.md", "多 Worker 场景未来需要 Redis 分布式锁。\n")
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert any("redis_distributed_lock" in e for e in errors)
+
+
+def test_persistent_checkpoint_described_as_future_is_detected(tmp_repo: Path):
+    _make_runtime_implemented(tmp_repo)
+    doc = write(tmp_repo, "docs/design/note.md", "未来会把 checkpoint 换成持久化存储。\n")
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert any("postgres_checkpointer" in e for e in errors)
+
+
+def test_implemented_capability_stated_as_current_passes(tmp_repo: Path):
+    _make_runtime_implemented(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/design/note.md",
+        "当前实现：Celery worker 执行异步 Run，checkpoint 使用 PostgreSQL saver，"
+        "同一 thread 用 Redis 分布式锁串行。\n",
+    )
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_future_claim_is_not_flagged_when_capability_is_absent(tmp_repo: Path):
+    """Guard must derive from the filesystem, not from a hardcoded verdict:
+    without runtime/celery_app.py the same sentence is not a contradiction."""
+    doc = write(tmp_repo, "docs/design/note.md", "下一阶段计划引入 Celery worker。\n")
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_negated_future_claim_passes(tmp_repo: Path):
+    """Honest "it is NOT future work" framing is the intended documentation."""
+    _make_runtime_implemented(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/design/note.md",
+        "早期版本曾计划引入 Celery worker，但这已经不是未来能力，当前已实现。\n",
+    )
+    errors: list[str] = []
+    audit.check_runtime_future_claims([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_historical_audit_claim_is_excluded_from_guard_v(tmp_repo: Path):
+    _make_runtime_implemented(tmp_repo)
+    write(
+        tmp_repo,
+        "docs/reports/audit/2026-01-01-snapshot.md",
+        "> HISTORICAL AUDIT SNAPSHOT\n> 当时计划引入 Celery worker。\n",
+    )
+    write(tmp_repo, "docs/design/live.md", "干净的当前文档。\n")
+    docs = audit.discover_docs(root=tmp_repo)
+    errors: list[str] = []
+    audit.check_runtime_future_claims(docs, errors, root=tmp_repo)
+    assert errors == []
+    assert [p.relative_to(tmp_repo) for p in docs] == [Path("docs/design/live.md")]
+
+
+# ------------------------------------------------------------- Guard W
+
+
+def test_docs_index_missing_current_adr_is_detected(tmp_repo: Path):
+    write(tmp_repo, "docs/README.md", "# 索引\n\n[design](design/agent-runtime.md)\n")
+    write(tmp_repo, "docs/design/agent-runtime.md", "x\n")
+    errors: list[str] = []
+    audit.check_docs_index_coverage(errors, root=tmp_repo)
+    assert any("009-distributed-agent-runtime.md" in e for e in errors)
+
+
+def test_complete_docs_index_passes(tmp_repo: Path):
+    lines = ["# 索引\n"]
+    for required, _reason in audit.REQUIRED_INDEX_ENTRIES:
+        rel = required[len("docs/") :]
+        write(tmp_repo, required, "x\n")
+        lines.append(f"[{rel}]({rel})\n")
+    write(tmp_repo, "docs/README.md", "".join(lines))
+    errors: list[str] = []
+    audit.check_docs_index_coverage(errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_missing_docs_index_is_detected(tmp_repo: Path):
+    errors: list[str] = []
+    audit.check_docs_index_coverage(errors, root=tmp_repo)
+    assert any("docs index missing" in e for e in errors)
+
+
+# ------------------------------------------------------------- Guard X
+
+
+def _stub_openapi_app(monkeypatch, spec: dict) -> None:
+    """Install a fake ``api.app_factory`` module so the guard compares the doc
+    anchor against a controlled surface instead of the live application."""
+
+    class _App:
+        def openapi(self):
+            return spec
+
+    import types
+
+    module = types.ModuleType("api.app_factory")
+    module.app = _App()
+    monkeypatch.setitem(sys.modules, "api.app_factory", module)
+
+
+def test_api_reference_surface_drift_is_detected(tmp_repo: Path, monkeypatch):
+    _stub_openapi_app(
+        monkeypatch,
+        {"info": {"version": "6.3"}, "paths": {"/a": {"get": {}}, "/b": {"post": {}}}},
+    )
+    write(
+        tmp_repo,
+        "docs/reference/api-reference.md",
+        "<!-- openapi-surface: paths=53 operations=55 api_operations=51 -->\n",
+    )
+    errors: list[str] = []
+    audit.check_api_reference_surface(errors, root=tmp_repo)
+    assert any("(paths)" in e and "says 53" in e for e in errors)
+    assert any("(operations)" in e and "says 55" in e for e in errors)
+
+
+def test_api_reference_matching_surface_passes(tmp_repo: Path, monkeypatch):
+    _stub_openapi_app(
+        monkeypatch,
+        {
+            "info": {"version": "6.3"},
+            "paths": {
+                "/a": {"get": {}},
+                "/api/runs": {"post": {}},
+                "/api/runs/dead": {"get": {}},
+            },
+        },
+    )
+    write(
+        tmp_repo,
+        "docs/reference/api-reference.md",
+        "<!-- openapi-surface: paths=3 operations=3 api_operations=2 -->\n",
+    )
+    errors: list[str] = []
+    audit.check_api_reference_surface(errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_api_reference_without_anchor_is_detected(tmp_repo: Path, monkeypatch):
+    _stub_openapi_app(monkeypatch, {"info": {"version": "6.3"}, "paths": {}})
+    write(tmp_repo, "docs/reference/api-reference.md", "# API\n\n53 个 HTTP 路径。\n")
+    errors: list[str] = []
+    audit.check_api_reference_surface(errors, root=tmp_repo)
+    assert any("machine-checkable surface anchor" in e for e in errors)
+
+
+def test_real_api_reference_anchor_matches_generated_openapi():
+    """The shipped anchor must equal app.openapi() — the reason "53 HTTP paths"
+    is structurally unable to survive once numbers come from the generator."""
+    errors: list[str] = []
+    audit.check_api_reference_surface(errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard Y
+
+
+_MULTI_WORKER_OK_STACK = (
+    "# 部署\n\n"
+    "`GUNICORN_WORKERS=4`。跨进程不变量三件套：\n"
+    "- `LANGGRAPH_CHECKPOINT_BACKEND=postgres`（图状态共享）\n"
+    "- `SESSION_STORAGE_BACKEND=redis`（会话共享）\n"
+    "- `AGENT_RUN_THREAD_LOCK_BACKEND=redis`，key namespace `agent:thread-lock:`"
+    "（同一 thread 串行）\n"
+)
+
+
+def test_multi_worker_doc_missing_thread_lock_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "README.md",
+        "# 部署\n\n`GUNICORN_WORKERS=4`。checkpoint 用 "
+        "`LANGGRAPH_CHECKPOINT_BACKEND=postgres`，session 用 "
+        "`SESSION_STORAGE_BACKEND=redis`。\n",
+    )
+    errors: list[str] = []
+    audit.check_multi_worker_deployment_truth([doc], errors, root=tmp_repo)
+    assert any("Redis thread lock" in e for e in errors)
+
+
+def test_multi_worker_doc_missing_session_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/distributed-agent-runtime.md",
+        "# 多副本\n\ncheckpoint 用 `LANGGRAPH_CHECKPOINT_BACKEND=postgres`，"
+        "thread 锁用 `AGENT_RUN_THREAD_LOCK_BACKEND=redis`。\n",
+    )
+    errors: list[str] = []
+    audit.check_multi_worker_deployment_truth([doc], errors, root=tmp_repo)
+    assert any("Redis session" in e for e in errors)
+
+
+def test_multi_worker_doc_with_full_stack_passes(tmp_repo: Path):
+    doc = write(tmp_repo, "README.md", _MULTI_WORKER_OK_STACK)
+    errors: list[str] = []
+    audit.check_multi_worker_deployment_truth([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_single_process_doc_is_not_subject_to_guard_y(tmp_repo: Path):
+    """Guard Y is scoped to deployment docs; a non-deployment note that merely
+    mentions 多副本 must not be forced to restate the whole stack."""
+    doc = write(
+        tmp_repo,
+        "docs/reference/model-comparison.md",
+        "# 对比\n\n真实多副本长期运行的证据尚未验证。\n",
+    )
+    errors: list[str] = []
+    audit.check_multi_worker_deployment_truth([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_y_allowlist_docs_must_exist_in_repo():
+    """A guard allowlist entry that points at a deleted document silently stops
+    covering the real deployment docs, so the allowlist itself is verified."""
+    missing = [rel for rel in audit.MULTI_WORKER_DEPLOY_DOCS if not (REAL_ROOT / rel).exists()]
+    assert missing == [], f"guard-Y allowlist references missing docs: {missing}"
+
+
+# ------------------------------------------------------------- Guard Z
+
+
+def test_root_level_audit_snapshot_is_detected(tmp_repo: Path):
+    write(tmp_repo, "README.md", "# readme\n")
+    write(tmp_repo, "CLAUDE.md", "# claude\n")
+    write(tmp_repo, "FINAL_RUNTIME_FACT_CHECK.md", "# audit\n")
+    errors: list[str] = []
+    audit.check_no_root_level_audit_snapshots(errors, root=tmp_repo)
+    assert any("FINAL_RUNTIME_FACT_CHECK.md" in e for e in errors)
+
+
+def test_root_readme_and_claude_are_allowed(tmp_repo: Path):
+    write(tmp_repo, "README.md", "# readme\n")
+    write(tmp_repo, "CLAUDE.md", "# claude\n")
+    errors: list[str] = []
+    audit.check_no_root_level_audit_snapshots(errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_has_no_root_level_audit_snapshot():
+    errors: list[str] = []
+    audit.check_no_root_level_audit_snapshots(errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------- real-repo runtime invariants
+
+
+def test_real_repo_declares_all_runtime_capabilities_implemented():
+    """Guards V are fail-open when code is absent; assert the shipped code really
+    satisfies every marker set so the guard cannot be silently disabled."""
+    for capability, (markers, _pattern) in audit.RUNTIME_CAPABILITIES.items():
+        assert audit._capability_is_implemented(REAL_ROOT, markers), (
+            f"{capability} marker set is not fully present in the repository"
+        )
