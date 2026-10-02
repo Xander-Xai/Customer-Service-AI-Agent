@@ -1,0 +1,2854 @@
+{
+  "schema": "runtime-suite-diagnostics/v1",
+  "captured_at": "2026-10-02T20:29:51.801521+00:00",
+  "phase": "at_failure",
+  "nodeid": "tests/integration/runtime/test_zz_diag_selftest.py::test_deliberate_failure_for_diagnostics_selftest",
+  "outcome": "failed",
+  "host": "Ydxx.localdomain",
+  "pid": 509650,
+  "visible_worker_processes": [],
+  "queues": {},
+  "redis": {
+    "broker_global_keys": {
+      "unacked": {
+        "type": "none",
+        "size": null
+      },
+      "unacked_index": {
+        "type": "none",
+        "size": null
+      }
+    },
+    "test_queues": {},
+    "production_queue": {
+      "agent_runs": 0
+    }
+  },
+  "postgres": {
+    "runs_by_status": {
+      "CANCELLED": 58,
+      "DEAD_LETTER": 4,
+      "FAILED": 291,
+      "QUEUED": 349,
+      "SUCCEEDED": 468,
+      "WAITING_APPROVAL": 2
+    },
+    "non_terminal_runs": [
+      {
+        "id": "efad3d57-0e24-46fa-9cf2-d94f7c5c8ad8",
+        "thread_id": "T-gate2-03c4ce4f90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:13.292712+00:00"
+      },
+      {
+        "id": "ac755f06-0014-4441-aaa4-3118b6e80491",
+        "thread_id": "T-gate2-03c4ce4f90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:13.339520+00:00"
+      },
+      {
+        "id": "946b86d8-74eb-4b11-9e91-4aeb40b44a6e",
+        "thread_id": "T-gate2-03c4ce4f90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:13.350618+00:00"
+      },
+      {
+        "id": "e179555b-ebbb-445e-ac8c-0305c0f87def",
+        "thread_id": "T-idem-011cf63bf8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:13.416458+00:00"
+      },
+      {
+        "id": "1e007403-dd63-4185-8c8b-b961ce43f9fb",
+        "thread_id": "T-idem-3b798defec",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:13.428292+00:00"
+      },
+      {
+        "id": "f37bf242-bfe6-418a-ba6a-bfdeca809e28",
+        "thread_id": "T-gate10k-a7addeac24",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:18.961325+00:00"
+      },
+      {
+        "id": "641e5d0a-d705-4874-ade3-22c5f16ae661",
+        "thread_id": "T-pending-9c63171fa8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:57:19.073558+00:00"
+      },
+      {
+        "id": "3bf77ed8-2c1e-4205-9fc3-a6e91331fdef",
+        "thread_id": "T-gate2-fbc1e8e585",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:35.052431+00:00"
+      },
+      {
+        "id": "c8b19db3-4074-4e98-b2e8-caed8a37920e",
+        "thread_id": "T-gate2-fbc1e8e585",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:35.083806+00:00"
+      },
+      {
+        "id": "c1451d92-9816-436d-ba39-fa37af80a771",
+        "thread_id": "T-gate2-fbc1e8e585",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:35.094045+00:00"
+      },
+      {
+        "id": "60513028-f9c5-4e0f-98aa-402d601bc0d0",
+        "thread_id": "T-gate10-b2f5168ff6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:42.356685+00:00"
+      },
+      {
+        "id": "9d66c013-8599-47bf-a9a9-e02b63ab5e3d",
+        "thread_id": "T-gate10k-35556c61cf",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:42.449319+00:00"
+      },
+      {
+        "id": "7976e687-6639-45ed-bcc0-125101ad585b",
+        "thread_id": "T-pending-13608e6d02",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:58:42.555601+00:00"
+      },
+      {
+        "id": "0f684f11-b9b7-4368-923a-58bdb2752795",
+        "thread_id": "T-gate2-231446b70a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:09.916889+00:00"
+      },
+      {
+        "id": "04b03737-0925-4d87-82f9-8bcc0e0cb794",
+        "thread_id": "T-gate2-231446b70a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:09.942645+00:00"
+      },
+      {
+        "id": "8e7e3de9-0fc9-4c01-b4ab-9ce15b459773",
+        "thread_id": "T-gate2-231446b70a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:09.951576+00:00"
+      },
+      {
+        "id": "d81b32a5-414b-403b-81bb-cc9a4b133468",
+        "thread_id": "T-gate10-dca4491e42",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:17.022851+00:00"
+      },
+      {
+        "id": "59b17aec-2c16-478d-bb9a-db8b3cc7dd08",
+        "thread_id": "T-gate10k-e352355dc9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:17.088373+00:00"
+      },
+      {
+        "id": "db719329-ddb9-4cc9-a221-0322d098b7c0",
+        "thread_id": "T-pending-d0910ca0fa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T01:59:17.173223+00:00"
+      },
+      {
+        "id": "436b7f13-8d11-4907-9113-2fb273051098",
+        "thread_id": "T-gate2-cdce3eae33",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:30.993388+00:00"
+      },
+      {
+        "id": "28e8e5e4-be07-4810-8d4a-ec686afa7976",
+        "thread_id": "T-gate2-cdce3eae33",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:31.016996+00:00"
+      },
+      {
+        "id": "8be7911b-71ae-4fdf-a79e-3ed5a936f1c1",
+        "thread_id": "T-gate2-cdce3eae33",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:31.025397+00:00"
+      },
+      {
+        "id": "e3613d5d-9c49-4801-8a9e-b6941511656c",
+        "thread_id": "T-gate10-2a21172cf3",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:38.104780+00:00"
+      },
+      {
+        "id": "978557d8-d88d-446d-a2a4-cca626a936e5",
+        "thread_id": "T-gate10k-cd0f487ac9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:38.188571+00:00"
+      },
+      {
+        "id": "25b76c8f-236b-4efa-8f3d-f82cb030919a",
+        "thread_id": "T-pending-3ba58beb8a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:05:38.303962+00:00"
+      },
+      {
+        "id": "ad6bbba9-303a-46c4-98a1-6296026c24a9",
+        "thread_id": "T-gate2-cb8629f81e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:09.409692+00:00"
+      },
+      {
+        "id": "c4812e6d-3bd9-4cd6-bcd6-15e23a373513",
+        "thread_id": "T-gate2-cb8629f81e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:09.421014+00:00"
+      },
+      {
+        "id": "33f8f8a7-f674-4103-a3f9-be200550dc57",
+        "thread_id": "T-gate2-cb8629f81e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:09.430116+00:00"
+      },
+      {
+        "id": "e3b13c89-e59c-455f-b688-b86185da9b85",
+        "thread_id": "T-gate10-43ddec657e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:16.576462+00:00"
+      },
+      {
+        "id": "b69a4ef5-af6f-4a62-9f65-d78e583495a2",
+        "thread_id": "T-gate10k-7fde67c202",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:16.681780+00:00"
+      },
+      {
+        "id": "ff308705-6310-48ee-8217-31feefac25a6",
+        "thread_id": "T-pending-fe18a91f04",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:12:16.801342+00:00"
+      },
+      {
+        "id": "97b7ee55-beb2-4c07-9f5c-cb296e5af7d4",
+        "thread_id": "T-gate2-18a88a7fd2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:34.391408+00:00"
+      },
+      {
+        "id": "142c00b4-644a-48f1-9f1c-0eb43e984e34",
+        "thread_id": "T-gate2-18a88a7fd2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:34.407194+00:00"
+      },
+      {
+        "id": "2745d60c-df8f-4a5f-915b-e5e4276af059",
+        "thread_id": "T-gate2-18a88a7fd2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:34.417830+00:00"
+      },
+      {
+        "id": "282cee7f-ce1a-4108-b3ea-8e3a31c6213d",
+        "thread_id": "T-gate10-562dd6dcf6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:42.953656+00:00"
+      },
+      {
+        "id": "254b41ff-893f-4769-92c3-a7fc4bcc7651",
+        "thread_id": "T-gate10k-add9a6f586",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:43.027957+00:00"
+      },
+      {
+        "id": "27929685-bdd6-4a04-a786-bc566529e9de",
+        "thread_id": "T-pending-d761599e3c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:13:43.127741+00:00"
+      },
+      {
+        "id": "63e88f1f-37f4-4aab-a794-a23679905501",
+        "thread_id": "T-gate2-f633580859",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:14.930079+00:00"
+      },
+      {
+        "id": "e6a3cb06-5bbc-40c6-81c1-f22bae46d95a",
+        "thread_id": "T-gate2-f633580859",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:14.942802+00:00"
+      },
+      {
+        "id": "ae0998d4-1fa2-4e87-b122-0331aefbe26b",
+        "thread_id": "T-gate2-f633580859",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:14.952036+00:00"
+      },
+      {
+        "id": "a80a35e1-1ec6-4acc-af47-c7127b99ea33",
+        "thread_id": "T-gate10-4ec195e945",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:23.379289+00:00"
+      },
+      {
+        "id": "fc78e5c1-0431-418b-8d90-889492930054",
+        "thread_id": "T-gate10k-ea39ad355e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:23.456944+00:00"
+      },
+      {
+        "id": "3deeac01-99ac-43d5-93e8-a57a03ced203",
+        "thread_id": "T-pending-45d5f27c64",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:15:23.563482+00:00"
+      },
+      {
+        "id": "c76ef514-455d-4e9f-87c0-3c00645c7028",
+        "thread_id": "T-gate2-ec48ab470c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:38.310236+00:00"
+      },
+      {
+        "id": "4cfb1920-a986-4cbf-9799-c8950a96642e",
+        "thread_id": "T-gate2-ec48ab470c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:38.322817+00:00"
+      },
+      {
+        "id": "4156bac6-7fd9-439f-a733-1f046e0b4492",
+        "thread_id": "T-gate2-ec48ab470c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:38.331242+00:00"
+      },
+      {
+        "id": "faad8f4a-a355-40a6-95bf-3d0885da58fd",
+        "thread_id": "T-gate10-c64bf636b7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:45.340519+00:00"
+      },
+      {
+        "id": "97e13a43-ecde-4585-919b-45bbbbad3793",
+        "thread_id": "T-gate10k-ed7146ca04",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:45.412565+00:00"
+      },
+      {
+        "id": "f42efcad-7f44-4ab0-af08-20ee25439f48",
+        "thread_id": "T-pending-96fe088306",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:16:45.527614+00:00"
+      },
+      {
+        "id": "c6f9b3fe-4050-4dca-b941-33200e0fef17",
+        "thread_id": "T-gate2-28954e680d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:20.022719+00:00"
+      },
+      {
+        "id": "959871e4-4527-4b97-95f4-88539277b7f6",
+        "thread_id": "T-gate2-28954e680d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:20.036812+00:00"
+      },
+      {
+        "id": "c605a41a-7280-41e7-a4a2-deac324ffcbb",
+        "thread_id": "T-gate2-28954e680d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:20.046324+00:00"
+      },
+      {
+        "id": "6e2589c3-24fc-48cb-b888-e613dfec1ce2",
+        "thread_id": "T-gate10-2ee42b32b8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:27.144951+00:00"
+      },
+      {
+        "id": "d948a8a5-807c-4526-8b04-ff7d145bfdfe",
+        "thread_id": "T-gate10k-861c134aad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:27.252709+00:00"
+      },
+      {
+        "id": "980752b8-4f58-4e52-9f31-d1a852cd0cff",
+        "thread_id": "T-pending-8822d4e2de",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:18:27.380003+00:00"
+      },
+      {
+        "id": "716d0fe6-fbc9-4404-89ad-479cfdac26a7",
+        "thread_id": "T-gate2-65103c2063",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:17.043597+00:00"
+      },
+      {
+        "id": "968db4ee-c5a7-4933-9bf4-cb1297d0eddd",
+        "thread_id": "T-gate2-65103c2063",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:17.056966+00:00"
+      },
+      {
+        "id": "5691c5a3-7b42-4af8-978f-4137205dcacd",
+        "thread_id": "T-gate2-65103c2063",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:17.066415+00:00"
+      },
+      {
+        "id": "b9cf7ebe-da80-42cf-b7ed-25d1de9dc631",
+        "thread_id": "T-gate10-47eccb44aa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:24.141377+00:00"
+      },
+      {
+        "id": "853e6923-fd71-469e-b74e-c45f3d35b192",
+        "thread_id": "T-gate10k-b1ee3cb946",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:24.218754+00:00"
+      },
+      {
+        "id": "00f9574e-df67-4342-88d6-7911408bed86",
+        "thread_id": "T-pending-fef21c8107",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:23:24.324801+00:00"
+      },
+      {
+        "id": "8815aaf2-bdc5-432d-82f8-8458f5146fa9",
+        "thread_id": "T-gate2-3a45f40701",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:28.854820+00:00"
+      },
+      {
+        "id": "26517e75-e336-48b9-805d-f2a59109f81f",
+        "thread_id": "T-gate2-3a45f40701",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:28.898596+00:00"
+      },
+      {
+        "id": "6ea606f8-ae06-4b43-a5bb-03e7688c2846",
+        "thread_id": "T-gate2-3a45f40701",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:28.909034+00:00"
+      },
+      {
+        "id": "7928c7d0-f832-4ccc-93b6-0453c384485c",
+        "thread_id": "T-gate10-aecefaddc2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:36.011749+00:00"
+      },
+      {
+        "id": "518b848d-c8b4-4803-b7c0-bb4e98956b87",
+        "thread_id": "T-gate10k-4d8634064c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:36.094144+00:00"
+      },
+      {
+        "id": "800dd0d2-1e22-4da4-848b-16b450725925",
+        "thread_id": "T-pending-468f9d8b21",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:44:36.195506+00:00"
+      },
+      {
+        "id": "6c5273a0-d7a3-4ee6-8888-4e8641d3878b",
+        "thread_id": "T-gate2-1bcbab9b7e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:01.340377+00:00"
+      },
+      {
+        "id": "803f7f06-bd02-43f9-ae6b-cd8735b089ff",
+        "thread_id": "T-gate2-1bcbab9b7e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:01.351875+00:00"
+      },
+      {
+        "id": "d33b0678-c5a8-470f-a48d-311c34f6bd9d",
+        "thread_id": "T-gate2-1bcbab9b7e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:01.361809+00:00"
+      },
+      {
+        "id": "c018363c-3ad3-494d-995c-2045ba794a59",
+        "thread_id": "T-gate10-71239324e3",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:09.776753+00:00"
+      },
+      {
+        "id": "78dd8057-a049-4c84-b5bc-fd926c910019",
+        "thread_id": "T-gate10k-cf24356c8e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:09.882194+00:00"
+      },
+      {
+        "id": "f4132dfd-fc08-4620-bafc-d5e79726e855",
+        "thread_id": "T-pending-6c69555071",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:48:09.988805+00:00"
+      },
+      {
+        "id": "7ec72be4-df9b-49fb-8308-3f3d00eac351",
+        "thread_id": "T-gate2-11f88ae1ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:46.459659+00:00"
+      },
+      {
+        "id": "9fc025f3-d1c5-442a-a98d-70db75a8fdb5",
+        "thread_id": "T-gate2-11f88ae1ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:46.470036+00:00"
+      },
+      {
+        "id": "a9d7e4fa-1356-4fb6-b072-ca8f12f3f936",
+        "thread_id": "T-gate2-11f88ae1ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:46.480265+00:00"
+      },
+      {
+        "id": "e3b4ed22-9ed5-441f-94b4-687c86627efc",
+        "thread_id": "T-gate10-7e06a01dd2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:53.779406+00:00"
+      },
+      {
+        "id": "f7b999aa-9916-423c-a82a-ca26d7e3cabc",
+        "thread_id": "T-gate10k-c47d0d67c9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:53.859343+00:00"
+      },
+      {
+        "id": "0544f7eb-3de4-4b1b-8e5c-27fab1248cc3",
+        "thread_id": "T-pending-add1035fb5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:53:53.973597+00:00"
+      },
+      {
+        "id": "db51d2ed-4725-48f6-9a78-2e1bf4e9352b",
+        "thread_id": "T-gate2-228313d045",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:24.688103+00:00"
+      },
+      {
+        "id": "5931c63e-064b-40bf-a53f-f04dc7b599c2",
+        "thread_id": "T-gate2-228313d045",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:24.699182+00:00"
+      },
+      {
+        "id": "ee7f90ad-d9c7-4006-b673-130fbd69848b",
+        "thread_id": "T-gate2-228313d045",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:24.708157+00:00"
+      },
+      {
+        "id": "c5c69a88-248b-4347-99da-af2d25fe6833",
+        "thread_id": "T-gate10-c68fd3a0bc",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:31.827533+00:00"
+      },
+      {
+        "id": "f49d3d8e-e569-4e71-9e0b-ed42c00ca93d",
+        "thread_id": "T-gate10k-b7ad7be968",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:31.927049+00:00"
+      },
+      {
+        "id": "faa6cff4-de4b-4082-ad8d-cc65155227d4",
+        "thread_id": "T-pending-d009c9649a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T02:58:32.045032+00:00"
+      },
+      {
+        "id": "a945683c-10ee-4ac8-81a6-4fafc512e1b9",
+        "thread_id": "T-gate2-548a919dc0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:25.970350+00:00"
+      },
+      {
+        "id": "e135fa3a-7c13-4592-90bc-12a8ebb0b78e",
+        "thread_id": "T-gate2-548a919dc0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:25.980417+00:00"
+      },
+      {
+        "id": "bfa93225-5163-4b7a-804a-821a0daf241b",
+        "thread_id": "T-gate2-548a919dc0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:25.989584+00:00"
+      },
+      {
+        "id": "eee90bc6-a46c-4a2b-9b8c-97e8db8e5e0f",
+        "thread_id": "T-gate10-bea1550e56",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:33.303479+00:00"
+      },
+      {
+        "id": "0c11d2b8-52a2-4686-b44b-8d0b3fc08015",
+        "thread_id": "T-gate10k-6d09aaedce",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:33.393371+00:00"
+      },
+      {
+        "id": "619af955-8ba3-4e24-9725-b88e248b53fc",
+        "thread_id": "T-pending-c6514fa6ef",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:18:33.520587+00:00"
+      },
+      {
+        "id": "c2d22b38-a2a2-472c-bcfa-80d95402b4c1",
+        "thread_id": "T-gate2-bb5af957a8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:19.731739+00:00"
+      },
+      {
+        "id": "731a1fbd-f383-4d7f-99cf-e5ddcd161966",
+        "thread_id": "T-gate2-bb5af957a8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:19.742227+00:00"
+      },
+      {
+        "id": "fea771d7-0e8d-485f-8bc6-dab45a0eb816",
+        "thread_id": "T-gate2-bb5af957a8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:19.791468+00:00"
+      },
+      {
+        "id": "0352263e-1a57-496f-ac5e-976141be8ab3",
+        "thread_id": "T-gate10-54b714f8e5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:27.050474+00:00"
+      },
+      {
+        "id": "0057b381-8c81-4b78-b63d-45e3afb8139f",
+        "thread_id": "T-gate10k-0d43b9e3be",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:27.140334+00:00"
+      },
+      {
+        "id": "03c3a51c-d096-4591-a21f-3bfe49eeebea",
+        "thread_id": "T-pending-27333fb06a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T03:26:27.260048+00:00"
+      },
+      {
+        "id": "33a8b1ac-f4e0-4103-bb66-a82f3f271d6b",
+        "thread_id": "T-gate2-fc54ad6229",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:08:53.969574+00:00"
+      },
+      {
+        "id": "3496ddf8-90ec-45ad-b999-49ab1e998901",
+        "thread_id": "T-gate2-fc54ad6229",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:08:53.980891+00:00"
+      },
+      {
+        "id": "f822d29c-f545-4226-b92d-fe8fd98b78ea",
+        "thread_id": "T-gate2-fc54ad6229",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:08:53.990822+00:00"
+      },
+      {
+        "id": "fbdc43ec-dc45-42bf-be12-e0a60ee4e319",
+        "thread_id": "T-gate10-5f5b511455",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:09:01.241144+00:00"
+      },
+      {
+        "id": "f50f1e9c-270d-461b-bf58-fce4d8ce6c47",
+        "thread_id": "T-gate10k-e4dcefdc5f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:09:01.329098+00:00"
+      },
+      {
+        "id": "79069564-ae2d-4bbe-b1f1-e52b216f4092",
+        "thread_id": "T-pending-b1a20a0286",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:09:01.447076+00:00"
+      },
+      {
+        "id": "80ee1355-297b-434d-ba94-25c409145e0a",
+        "thread_id": "T-gate2-70fb15d4dd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:19.237344+00:00"
+      },
+      {
+        "id": "f5d5e25d-8881-4ac2-abf0-d91883e5ba2d",
+        "thread_id": "T-gate2-70fb15d4dd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:19.255121+00:00"
+      },
+      {
+        "id": "0767bb63-f34e-4544-98bc-f354d9b25139",
+        "thread_id": "T-gate2-70fb15d4dd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:19.269603+00:00"
+      },
+      {
+        "id": "2d1d7d94-a699-4f56-a397-0b5910f851bf",
+        "thread_id": "T-gate10-601307bd6f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:26.812314+00:00"
+      },
+      {
+        "id": "b491e206-ab36-4abc-91f3-6d78e14979f0",
+        "thread_id": "T-gate10k-87220c7df3",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:26.946608+00:00"
+      },
+      {
+        "id": "e44a5836-c0d8-4582-835f-e3235f1cf9e6",
+        "thread_id": "T-pending-f5495466d5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:10:27.100481+00:00"
+      },
+      {
+        "id": "5893eff1-b82a-4b9b-97b3-8869e4e9f6ff",
+        "thread_id": "T-gate2-446a27cdbb",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:09.364211+00:00"
+      },
+      {
+        "id": "5b02b537-89c3-47f3-815a-df604716f764",
+        "thread_id": "T-gate2-446a27cdbb",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:09.384785+00:00"
+      },
+      {
+        "id": "15923b22-321c-4da8-9f59-dccf9d7ff8be",
+        "thread_id": "T-gate2-446a27cdbb",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:09.396864+00:00"
+      },
+      {
+        "id": "6a09a2d9-26de-4229-887d-8aa279df6d55",
+        "thread_id": "T-gate10-e854560e70",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:18.250032+00:00"
+      },
+      {
+        "id": "04614b99-6dd9-490d-9fbf-1d2311986048",
+        "thread_id": "T-gate10k-eaf7b5a764",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:18.369086+00:00"
+      },
+      {
+        "id": "55f236b3-843f-4979-bfeb-5e994fb7febb",
+        "thread_id": "T-pending-a36e6b98fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:29:18.532974+00:00"
+      },
+      {
+        "id": "30706d73-8181-4220-bc26-a0cdfb80930f",
+        "thread_id": "T-gate2-d5273f0946",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:09.709278+00:00"
+      },
+      {
+        "id": "ff709df6-d036-4f77-a135-3d8c379bfc12",
+        "thread_id": "T-gate2-d5273f0946",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:09.721556+00:00"
+      },
+      {
+        "id": "d8ffd9c1-f9f1-40ba-9dbc-0b1dda7d445e",
+        "thread_id": "T-gate2-d5273f0946",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:09.732724+00:00"
+      },
+      {
+        "id": "8f51dd85-8731-4b0f-9f4d-20a47ce5abbd",
+        "thread_id": "T-gate10-a999d4f08e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:17.215227+00:00"
+      },
+      {
+        "id": "2e1442ab-6f64-427f-b410-cb3913407139",
+        "thread_id": "T-gate10k-742fe69a4c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:17.333193+00:00"
+      },
+      {
+        "id": "a3bbb4b1-88bd-4a9e-9df9-f33b5d0f7bdc",
+        "thread_id": "T-pending-99c3fadb88",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:34:17.499820+00:00"
+      },
+      {
+        "id": "15b67fa0-370a-480d-a4e3-082d5982e2fb",
+        "thread_id": "T-gate2-4ed0e633fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:45.985598+00:00"
+      },
+      {
+        "id": "9bdbb60c-076b-4f05-83d6-8cf0317fd3dd",
+        "thread_id": "T-gate2-4ed0e633fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:45.997543+00:00"
+      },
+      {
+        "id": "071d3961-31a0-4895-9969-7c19f9aaa1c5",
+        "thread_id": "T-gate2-4ed0e633fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:46.007583+00:00"
+      },
+      {
+        "id": "558e0e94-bb06-4ca6-9b32-985c4a77c33c",
+        "thread_id": "T-gate10-e40c8e0e58",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:53.377190+00:00"
+      },
+      {
+        "id": "92ac8d6d-3436-436f-9a9f-0d8d53dd873a",
+        "thread_id": "T-gate10k-4854eea4a4",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:53.477840+00:00"
+      },
+      {
+        "id": "7d1307eb-7153-4d4d-b722-caf6cb8c18c4",
+        "thread_id": "T-pending-85426f30b9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T05:40:53.626765+00:00"
+      },
+      {
+        "id": "d03d8b2f-a807-4240-96d8-0813ef9d1926",
+        "thread_id": "T-gate2-d839bfa20e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:17.726982+00:00"
+      },
+      {
+        "id": "44508e34-b5e5-4bfe-ab3b-5c59196f4c06",
+        "thread_id": "T-gate2-d839bfa20e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:17.744384+00:00"
+      },
+      {
+        "id": "6dfbbb90-d069-4b11-8514-7c04d4569556",
+        "thread_id": "T-gate2-d839bfa20e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:17.759066+00:00"
+      },
+      {
+        "id": "c6395c93-c4dd-4d86-809a-147de93e3f3c",
+        "thread_id": "T-gate10-186b098919",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:25.189067+00:00"
+      },
+      {
+        "id": "b9040883-25a4-437d-acd6-1b71affb2d44",
+        "thread_id": "T-gate10k-33c259887b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:25.290219+00:00"
+      },
+      {
+        "id": "86b83fbe-f9e3-458a-9d2b-b29d5e39fe0e",
+        "thread_id": "T-pending-0d81b6da2e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:01:25.426126+00:00"
+      },
+      {
+        "id": "3a9991d9-c40c-45ba-8893-be8f0d943da6",
+        "thread_id": "T-gate2-dbd80318c9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:09.444037+00:00"
+      },
+      {
+        "id": "9d261fd7-3641-4eb5-8826-12533f3dd26a",
+        "thread_id": "T-gate2-dbd80318c9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:09.455495+00:00"
+      },
+      {
+        "id": "11a576d1-9f59-4453-98f3-85cd8771d2fb",
+        "thread_id": "T-gate2-dbd80318c9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:09.465028+00:00"
+      },
+      {
+        "id": "010bc22d-59dd-44e3-b3c5-5d3821a7ff0f",
+        "thread_id": "T-gate10-4ad326905b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:18.211385+00:00"
+      },
+      {
+        "id": "fe8f5f00-066a-4204-8bce-e0f65e6c1be8",
+        "thread_id": "T-gate10k-02345df587",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:18.294700+00:00"
+      },
+      {
+        "id": "68d943ec-efb5-4cf6-b7fd-437114154ae7",
+        "thread_id": "T-pending-db155253df",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:43:18.408383+00:00"
+      },
+      {
+        "id": "ea7c7616-4a08-4e5d-9f43-bf00322eed9e",
+        "thread_id": "T-gate2-22a6e21ff0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:20.243444+00:00"
+      },
+      {
+        "id": "63710fd4-e9e6-4f26-90fc-b427e3a6e02a",
+        "thread_id": "T-gate2-22a6e21ff0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:20.261099+00:00"
+      },
+      {
+        "id": "b82f8962-8876-43ca-a349-e2eea7ba0e68",
+        "thread_id": "T-gate2-22a6e21ff0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:20.271398+00:00"
+      },
+      {
+        "id": "4010de47-e129-4dd3-9fff-fef22f2cba8b",
+        "thread_id": "T-gate10-9fa076e9a1",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:27.622234+00:00"
+      },
+      {
+        "id": "7429fb8b-af57-4dd6-8124-cab5a5c17aed",
+        "thread_id": "T-gate10k-e5d39818e5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:27.736591+00:00"
+      },
+      {
+        "id": "917dfb22-d24f-4017-ab40-90695f3fd275",
+        "thread_id": "T-pending-97033ae817",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T07:55:27.900598+00:00"
+      },
+      {
+        "id": "c7248811-dd62-4e9a-9359-75c654920631",
+        "thread_id": "T-gate2-abb57f357d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:03.356212+00:00"
+      },
+      {
+        "id": "a5eb6d7e-6182-44cf-bea7-e2c240764236",
+        "thread_id": "T-gate2-abb57f357d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:03.372187+00:00"
+      },
+      {
+        "id": "6fc13c06-2696-4e17-8fe3-a83367594825",
+        "thread_id": "T-gate2-abb57f357d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:03.387211+00:00"
+      },
+      {
+        "id": "d74db7ca-358c-49a6-af15-6c2f53c57bda",
+        "thread_id": "T-gate10-29694c689f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:10.846486+00:00"
+      },
+      {
+        "id": "a23e6762-5c2c-43b3-9176-e5d1d9d471e4",
+        "thread_id": "T-gate10k-73fb064046",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:10.946533+00:00"
+      },
+      {
+        "id": "b0ea71e0-890c-4689-9e52-932c8a04846a",
+        "thread_id": "T-pending-e14e693dcd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:05:11.092553+00:00"
+      },
+      {
+        "id": "e0521db3-212c-40bb-874d-53da2047719f",
+        "thread_id": "T-gate2-84d0a802b7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:03.813717+00:00"
+      },
+      {
+        "id": "bcfc050e-7fec-4ef2-9b36-1d77f1e3faeb",
+        "thread_id": "T-gate2-84d0a802b7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:03.827067+00:00"
+      },
+      {
+        "id": "7278128d-1965-4f45-9c4d-4f71af05f2f6",
+        "thread_id": "T-gate2-84d0a802b7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:03.836903+00:00"
+      },
+      {
+        "id": "4929bae0-07e3-48dc-8741-5eb3bb5ced42",
+        "thread_id": "T-gate10-f257aede75",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:11.288023+00:00"
+      },
+      {
+        "id": "283ea0e1-9ac3-467e-adba-571a83749aaa",
+        "thread_id": "T-gate10k-eda657b762",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:11.423328+00:00"
+      },
+      {
+        "id": "b95ca210-6ead-46f6-bb5b-8800262f9cf3",
+        "thread_id": "T-pending-95c6735f3e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T08:25:11.578228+00:00"
+      },
+      {
+        "id": "16341576-8b30-4d3a-a363-a04ee1c6aebd",
+        "thread_id": "T-gate2-1859a6ea63",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:15.309443+00:00"
+      },
+      {
+        "id": "a3cc0236-c8fe-4560-b09a-e13d4d242e93",
+        "thread_id": "T-gate2-1859a6ea63",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:15.337833+00:00"
+      },
+      {
+        "id": "5a5e7045-951a-44cb-9fca-c15409f51fbd",
+        "thread_id": "T-gate2-1859a6ea63",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:15.359364+00:00"
+      },
+      {
+        "id": "047d49b3-3810-428d-a73a-024500c35e86",
+        "thread_id": "T-gate10-528da806ca",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:24.734167+00:00"
+      },
+      {
+        "id": "32827ab5-d9cd-4f3b-85e3-99b6e9498b7f",
+        "thread_id": "T-gate10k-f086868735",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:24.863191+00:00"
+      },
+      {
+        "id": "d14744db-893d-49c9-b1fe-b5a3b7c4220e",
+        "thread_id": "T-pending-ccc90569b5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:30:25.011094+00:00"
+      },
+      {
+        "id": "6d9387d6-90b8-438c-bca3-2fecd1efcd97",
+        "thread_id": "T-gate2-ade65238ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:34.474781+00:00"
+      },
+      {
+        "id": "26a807e6-f649-4bb8-a166-0f9eac788526",
+        "thread_id": "T-gate2-ade65238ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:34.485735+00:00"
+      },
+      {
+        "id": "a0054bbf-160e-48c4-9744-bf593e0c3f2a",
+        "thread_id": "T-gate2-ade65238ad",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:34.496510+00:00"
+      },
+      {
+        "id": "f8f62228-ced7-4f27-b53d-59d7c2d896b4",
+        "thread_id": "T-gate10-036dd8c42e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:41.956055+00:00"
+      },
+      {
+        "id": "b39bc1ce-a936-4d5f-b8e7-ec7ad8547762",
+        "thread_id": "T-gate10k-9d33a1aa57",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:42.056804+00:00"
+      },
+      {
+        "id": "9fdd2fcc-a5cb-494c-9914-95f6f65daedb",
+        "thread_id": "T-pending-54d8475902",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:33:42.212866+00:00"
+      },
+      {
+        "id": "b0fe7a22-da85-4a21-81ba-b05c89c6023d",
+        "thread_id": "T-gate2-9c55d5798d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:23.149096+00:00"
+      },
+      {
+        "id": "4e3f99f7-a902-4998-8a62-0077bb4a8cef",
+        "thread_id": "T-gate2-9c55d5798d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:23.161502+00:00"
+      },
+      {
+        "id": "a41ad008-e8d6-46bb-9d2a-c1ecc9e4c1de",
+        "thread_id": "T-gate2-9c55d5798d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:23.172437+00:00"
+      },
+      {
+        "id": "2bea657d-15ea-4d06-a93e-0227466cedbc",
+        "thread_id": "T-gate10-ea84097298",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:32.428550+00:00"
+      },
+      {
+        "id": "e988b123-8fdd-4374-8fb5-1062400a5e6e",
+        "thread_id": "T-gate10k-90f8414756",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:32.541761+00:00"
+      },
+      {
+        "id": "18a29f44-6fa2-4477-afd9-f2866fc7d147",
+        "thread_id": "T-pending-7c7edbf97b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:53:32.688201+00:00"
+      },
+      {
+        "id": "d75bf647-54ec-4021-a76d-d844579b2e51",
+        "thread_id": "T-gate2-4e752a60e8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:50.955601+00:00"
+      },
+      {
+        "id": "5cb07c28-5c0a-4cd9-8115-4282f5457f8b",
+        "thread_id": "T-gate2-4e752a60e8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:50.971850+00:00"
+      },
+      {
+        "id": "fc7aae9e-b250-422f-af6b-d022ae601924",
+        "thread_id": "T-gate2-4e752a60e8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:50.983070+00:00"
+      },
+      {
+        "id": "b9355fbb-e435-4a90-94aa-cb8b1b3b5d65",
+        "thread_id": "T-gate10-e47e4a3222",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:58.362438+00:00"
+      },
+      {
+        "id": "2aca0556-0ccb-4d42-8dcd-a95aa3879762",
+        "thread_id": "T-gate10k-61ab7dc284",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:58.460305+00:00"
+      },
+      {
+        "id": "60ca8951-12f9-4c8c-9255-5052f20842d0",
+        "thread_id": "T-pending-4c0e9c7f00",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:54:58.585379+00:00"
+      },
+      {
+        "id": "949ebbdc-4564-48e9-8741-584e6f96a396",
+        "thread_id": "T-gate2-181263f8a7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:21.346458+00:00"
+      },
+      {
+        "id": "918fe21b-858b-4ec2-a5ef-1635087ae571",
+        "thread_id": "T-gate2-181263f8a7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:21.364455+00:00"
+      },
+      {
+        "id": "499c0dbf-3c2b-4bf0-ab79-2a73ab35cb28",
+        "thread_id": "T-gate2-181263f8a7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:21.383296+00:00"
+      },
+      {
+        "id": "c92afc27-7c4d-40c1-88e7-bb15b0416b78",
+        "thread_id": "T-gate10-b51052bb65",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:29.242674+00:00"
+      },
+      {
+        "id": "f4178457-64b4-42ef-8830-e926d9171d64",
+        "thread_id": "T-gate10k-1c7efb70e8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:29.406440+00:00"
+      },
+      {
+        "id": "4ec6a630-27d4-456c-93a9-e644253d4a9f",
+        "thread_id": "T-pending-92298441d7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T10:56:29.619161+00:00"
+      },
+      {
+        "id": "1a93c32a-dfb5-453b-bffb-94d3914c0cfe",
+        "thread_id": "T-gate2-5135b94529",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:27.484302+00:00"
+      },
+      {
+        "id": "f394acf0-aa55-4b34-9a8a-1c21d2c2b9b7",
+        "thread_id": "T-gate2-5135b94529",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:27.493930+00:00"
+      },
+      {
+        "id": "c475ec05-30c3-45f5-9e41-a7b3d62322a6",
+        "thread_id": "T-gate2-5135b94529",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:27.505366+00:00"
+      },
+      {
+        "id": "05c2f4c1-2e3b-4a77-a3d5-c9160030d45d",
+        "thread_id": "T-gate10-a52e4162e3",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:34.899427+00:00"
+      },
+      {
+        "id": "eee0d269-dfd0-4570-be87-9b62624f7c94",
+        "thread_id": "T-gate10k-6434ac748e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:35.038607+00:00"
+      },
+      {
+        "id": "40004f3f-bd02-4ab6-bbd6-2bdde24d3102",
+        "thread_id": "T-pending-79438c4dac",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:01:35.211559+00:00"
+      },
+      {
+        "id": "1e874ac3-0c48-4619-b744-1826e36dacbc",
+        "thread_id": "T-gate2-72da29e1fc",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:02:57.474159+00:00"
+      },
+      {
+        "id": "dea48856-07e6-4ac9-933e-ea4e05a6a986",
+        "thread_id": "T-gate2-72da29e1fc",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:02:57.487965+00:00"
+      },
+      {
+        "id": "f97f8ca9-b8fe-4926-bad1-40e8efffc6a2",
+        "thread_id": "T-gate2-72da29e1fc",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:02:57.502138+00:00"
+      },
+      {
+        "id": "90d9b5c7-6ef2-4e18-939e-0afeb3d99d7e",
+        "thread_id": "T-gate10-9f3a2c4a14",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:03:07.351309+00:00"
+      },
+      {
+        "id": "f03b006d-9978-47e2-9567-a7514d0a535c",
+        "thread_id": "T-gate10k-4ab8892371",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:03:07.471448+00:00"
+      },
+      {
+        "id": "89ca4d05-b625-4666-97d1-909830203975",
+        "thread_id": "T-pending-8526164ad4",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:03:07.620815+00:00"
+      },
+      {
+        "id": "e5129382-0f5f-4e2f-a82f-1f5eff4e8c96",
+        "thread_id": "T-gate2-89f0b5445d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:25.840620+00:00"
+      },
+      {
+        "id": "e903918d-7e6d-402b-9766-1c8bcfef4d44",
+        "thread_id": "T-gate2-89f0b5445d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:25.854628+00:00"
+      },
+      {
+        "id": "86f1ea07-023b-4dde-8193-2147424777d2",
+        "thread_id": "T-gate2-89f0b5445d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:25.866949+00:00"
+      },
+      {
+        "id": "063a0613-d74c-4119-9d77-d82e0b453698",
+        "thread_id": "T-gate10-5d9eb7abb7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:33.249285+00:00"
+      },
+      {
+        "id": "5444cdcb-db69-4003-8a0a-8c053e1f83cf",
+        "thread_id": "T-gate10k-f334a54444",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:33.342841+00:00"
+      },
+      {
+        "id": "0c6b7f9f-0f97-4dff-9084-c99bbf15c9e9",
+        "thread_id": "T-pending-fa6255bb1a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:04:33.474141+00:00"
+      },
+      {
+        "id": "e12c9130-4c52-487c-9cb0-7629981f31f7",
+        "thread_id": "T-gate2-de4b9dd2aa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:16.499650+00:00"
+      },
+      {
+        "id": "03ef20af-de05-4b5c-97f5-0a732933a3a7",
+        "thread_id": "T-gate2-de4b9dd2aa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:16.515966+00:00"
+      },
+      {
+        "id": "2bc9c883-ed89-45a5-91a6-0ab32d0050fa",
+        "thread_id": "T-gate2-de4b9dd2aa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:16.529146+00:00"
+      },
+      {
+        "id": "1cf892bb-810e-4fa4-a520-3b05879a9a3e",
+        "thread_id": "T-gate10-581886e2b2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:23.909902+00:00"
+      },
+      {
+        "id": "c7d8b849-1076-40d4-a929-cdd7c1be5030",
+        "thread_id": "T-gate10k-8cb85edd5b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:24.010235+00:00"
+      },
+      {
+        "id": "abf27636-9270-4f4d-a342-09665c89135b",
+        "thread_id": "T-pending-5b6ad5df81",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:08:24.125817+00:00"
+      },
+      {
+        "id": "80c2bdf5-f6f9-4f84-98e1-5cd9b04c0b39",
+        "thread_id": "T-gate2-dcfac606d5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:47.881213+00:00"
+      },
+      {
+        "id": "88bbab45-aa4d-410e-b3ec-01e40a5f54a7",
+        "thread_id": "T-gate2-dcfac606d5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:47.897035+00:00"
+      },
+      {
+        "id": "4c506d6f-d7b8-4159-97cc-5f0047891477",
+        "thread_id": "T-gate2-dcfac606d5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:47.910881+00:00"
+      },
+      {
+        "id": "11cf4f06-d04c-4714-89b0-e68517351e80",
+        "thread_id": "T-gate10-0e417ff32b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:57.105056+00:00"
+      },
+      {
+        "id": "4bf17f59-2f77-4c1a-999a-3c49e3d2a708",
+        "thread_id": "T-gate10k-ec13aa59ae",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:57.201634+00:00"
+      },
+      {
+        "id": "519b606a-39be-4648-a218-1b31c5a2368d",
+        "thread_id": "T-pending-48689a1da9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:09:57.353527+00:00"
+      },
+      {
+        "id": "a13934f3-d7b3-4c56-87bf-b7553cd1d323",
+        "thread_id": "T-gate2-1b41cec747",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:10.348776+00:00"
+      },
+      {
+        "id": "f4d7e2a1-1558-47f2-86fc-74180930bc7a",
+        "thread_id": "T-gate2-1b41cec747",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:10.364402+00:00"
+      },
+      {
+        "id": "a5456b8e-fb63-4957-8e06-553246cd1e46",
+        "thread_id": "T-gate2-1b41cec747",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:10.376767+00:00"
+      },
+      {
+        "id": "b58aa050-347f-49c9-b0af-0794ba561198",
+        "thread_id": "T-gate10-afd79fca32",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:17.673759+00:00"
+      },
+      {
+        "id": "5799191b-47e0-4eb6-8a9f-52a468d64705",
+        "thread_id": "T-gate10k-073828110e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:17.775303+00:00"
+      },
+      {
+        "id": "7b92ba86-56fa-4c42-b1b8-6664fcbd48da",
+        "thread_id": "T-pending-810bdb5c85",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:11:19.594376+00:00"
+      },
+      {
+        "id": "f5702c3c-c459-42e2-83cd-7a24de3f1539",
+        "thread_id": "T-gate2-5724f15869",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:35.158168+00:00"
+      },
+      {
+        "id": "89887b6e-edf9-4aa8-a2cd-367caaf8f971",
+        "thread_id": "T-gate2-5724f15869",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:35.170172+00:00"
+      },
+      {
+        "id": "d6994b25-a47e-4efb-af81-ba2e74b8247b",
+        "thread_id": "T-gate2-5724f15869",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:35.182272+00:00"
+      },
+      {
+        "id": "2b8f3092-6d63-4d94-84b4-b0c30969e0df",
+        "thread_id": "T-gate10-d1330716da",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:42.576434+00:00"
+      },
+      {
+        "id": "d3566946-8e4c-4869-9fdb-8d01f79f5977",
+        "thread_id": "T-gate10k-377f24163f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:42.687831+00:00"
+      },
+      {
+        "id": "dcf9b149-f641-43e9-a70c-d2e87d916c32",
+        "thread_id": "T-pending-eb202eddb5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:12:42.820179+00:00"
+      },
+      {
+        "id": "85e65a8d-a57b-49e7-b591-97543134b0a0",
+        "thread_id": "T-gate2-429d943a5d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:12.993787+00:00"
+      },
+      {
+        "id": "5c72df59-a98e-4b02-9267-d85350bdff35",
+        "thread_id": "T-gate2-429d943a5d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:13.009340+00:00"
+      },
+      {
+        "id": "d8073178-1392-47e9-ae22-6939d8e0cac3",
+        "thread_id": "T-gate2-429d943a5d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:13.028430+00:00"
+      },
+      {
+        "id": "86e2ea51-826f-4f11-a195-ee7c8724b640",
+        "thread_id": "T-gate10-6b11463a2c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:20.569932+00:00"
+      },
+      {
+        "id": "5935f643-6e24-4191-91d3-a4bf21a48b8d",
+        "thread_id": "T-gate10k-14c197c2b4",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:20.682813+00:00"
+      },
+      {
+        "id": "1183ed57-139e-4232-b935-34fc88c41caa",
+        "thread_id": "T-pending-7f9b4346f8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:14:20.836947+00:00"
+      },
+      {
+        "id": "58b10445-1da8-4acc-9c2f-8255d96b17a2",
+        "thread_id": "T-gate2-9feba9c1a1",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:15:55.996730+00:00"
+      },
+      {
+        "id": "8b8cab3d-5d71-4d42-b828-b098a8503117",
+        "thread_id": "T-gate2-9feba9c1a1",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:15:56.008540+00:00"
+      },
+      {
+        "id": "ac053b2d-4904-4484-99cc-341ee5090f15",
+        "thread_id": "T-gate2-9feba9c1a1",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:15:56.017444+00:00"
+      },
+      {
+        "id": "664bc369-f9e7-4246-809e-3a10cde1de56",
+        "thread_id": "T-gate10-58ba8d0b79",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:16:03.143655+00:00"
+      },
+      {
+        "id": "9a438918-2e0a-4d77-ac90-bbcbddaa35ad",
+        "thread_id": "T-gate10k-7bb6c1a0b8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:16:03.231337+00:00"
+      },
+      {
+        "id": "fa79859b-74f9-4c46-96c6-a7843104db06",
+        "thread_id": "T-pending-fd8cb9725e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:16:03.342341+00:00"
+      },
+      {
+        "id": "d3ed0931-0d64-4234-b1c6-22ac829fd4f6",
+        "thread_id": "T-gate2-1e50e5924f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:03.088904+00:00"
+      },
+      {
+        "id": "f6f73288-4ff8-410a-adde-ecfbd13a6fdd",
+        "thread_id": "T-gate2-1e50e5924f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:03.109296+00:00"
+      },
+      {
+        "id": "1cce30e9-4308-4924-990e-cce41495209e",
+        "thread_id": "T-gate2-1e50e5924f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:03.121569+00:00"
+      },
+      {
+        "id": "1e2b167e-f52d-430a-98e0-30c047ceba83",
+        "thread_id": "T-gate10-390bd6def8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:10.623744+00:00"
+      },
+      {
+        "id": "25fd97af-cc2d-44cf-9539-4fce8db1519d",
+        "thread_id": "T-gate10k-6d4462a784",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:10.717146+00:00"
+      },
+      {
+        "id": "c55e7378-7189-437b-8b24-722c1fda1985",
+        "thread_id": "T-pending-fa3152e001",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:27:10.869822+00:00"
+      },
+      {
+        "id": "27a3d620-bc51-45d9-b043-72050af045cd",
+        "thread_id": "T-gate2-f9f2292c90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:39.853260+00:00"
+      },
+      {
+        "id": "c6096c02-9a0b-4e95-9622-1db848b09815",
+        "thread_id": "T-gate2-f9f2292c90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:39.866639+00:00"
+      },
+      {
+        "id": "b3da4c11-5a40-4c0c-8aa8-80a769ea7fe6",
+        "thread_id": "T-gate2-f9f2292c90",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:39.880306+00:00"
+      },
+      {
+        "id": "392a1018-335b-4a2e-9885-0d7b83b9631a",
+        "thread_id": "T-gate10-6a54d951fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:47.547118+00:00"
+      },
+      {
+        "id": "f7c7c846-1f92-40d8-bb64-a3245032d008",
+        "thread_id": "T-gate10k-5347199a26",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:47.704860+00:00"
+      },
+      {
+        "id": "d0f6c9d8-c052-478e-9a35-42b1d7900788",
+        "thread_id": "T-pending-0d0adb4f87",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T11:28:47.909467+00:00"
+      },
+      {
+        "id": "e00580ca-753f-48c2-a834-6dad14221d52",
+        "thread_id": "thread-hitl-07412a52",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:05:15.501437+00:00"
+      },
+      {
+        "id": "202c14b4-2aab-4e3e-926d-ab723d3091c4",
+        "thread_id": "thread-hitl-4332de5a",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:05:27.787749+00:00"
+      },
+      {
+        "id": "b64c950b-a347-4914-bf91-1a373c48ab39",
+        "thread_id": "T-gate2-d526882a94",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:10.829758+00:00"
+      },
+      {
+        "id": "84c2647c-7c94-4e46-a7b1-7936731d3a6e",
+        "thread_id": "T-gate2-d526882a94",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:10.841467+00:00"
+      },
+      {
+        "id": "c844bf39-4ccb-48ef-8f02-7738d6216a4b",
+        "thread_id": "T-gate2-d526882a94",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:10.850788+00:00"
+      },
+      {
+        "id": "f3e0b1af-88c1-4624-80ec-454f16949349",
+        "thread_id": "T-gate10-71ea4474a9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:20.542627+00:00"
+      },
+      {
+        "id": "17d987aa-d2bc-4d13-8693-6df28b848b6e",
+        "thread_id": "T-gate10k-f0832dd361",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:20.630777+00:00"
+      },
+      {
+        "id": "034a4228-62af-49f0-bd26-e53038584e6b",
+        "thread_id": "T-pending-4c776ff698",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:06:20.759022+00:00"
+      },
+      {
+        "id": "b222537c-b536-428f-951c-72435c89de20",
+        "thread_id": "T-gate2-49954bf0cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:16:57.961710+00:00"
+      },
+      {
+        "id": "17ad114d-b371-4abd-b3b6-25537b99cebd",
+        "thread_id": "T-gate2-49954bf0cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:16:57.982137+00:00"
+      },
+      {
+        "id": "28470de8-e42e-4ca3-8393-96c3ba377f2f",
+        "thread_id": "T-gate2-49954bf0cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:16:57.991658+00:00"
+      },
+      {
+        "id": "5e3e19fb-481f-41af-89ec-97ea4a8ce38c",
+        "thread_id": "T-gate10-1d9f9d39e5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:17:07.351764+00:00"
+      },
+      {
+        "id": "a17cee72-fee6-4d26-8ec7-e7de4f2e04e7",
+        "thread_id": "T-gate10k-da1d6d609b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:17:07.499369+00:00"
+      },
+      {
+        "id": "def76152-8ef2-4d6f-bd40-9ed4f6a3ae04",
+        "thread_id": "T-pending-3a611dda0d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:17:07.671226+00:00"
+      },
+      {
+        "id": "80cf590e-37d6-492e-af4c-01567e930ff3",
+        "thread_id": "T-gate2-9a4d6a5c01",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:22.190700+00:00"
+      },
+      {
+        "id": "163b7ad1-940b-4f66-8162-ced220f6faff",
+        "thread_id": "T-gate2-9a4d6a5c01",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:22.200892+00:00"
+      },
+      {
+        "id": "9a76ec8b-d9b2-428a-bbeb-33b2b2628957",
+        "thread_id": "T-gate2-9a4d6a5c01",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:22.212681+00:00"
+      },
+      {
+        "id": "4d40d7f4-ecb0-498c-a85d-f1def040ec41",
+        "thread_id": "T-gate10-d7850b0443",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:29.603858+00:00"
+      },
+      {
+        "id": "965db599-e46a-4e56-9d83-692c316ef18e",
+        "thread_id": "T-gate10k-c2183d3e85",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:29.722143+00:00"
+      },
+      {
+        "id": "eb504239-82a2-4556-85d2-ec0ef43bfc27",
+        "thread_id": "T-pending-a8559a501a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:23:29.850743+00:00"
+      },
+      {
+        "id": "9d621d12-5c8a-4084-9ab0-f7ac7c34a3af",
+        "thread_id": "T-gate2-29d518a744",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:14.883193+00:00"
+      },
+      {
+        "id": "d99c042c-b4fc-42f7-8cc1-44f666a76032",
+        "thread_id": "T-gate2-29d518a744",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:14.897533+00:00"
+      },
+      {
+        "id": "88517b64-c245-4c57-b0bb-d597ed09776e",
+        "thread_id": "T-gate2-29d518a744",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:14.907948+00:00"
+      },
+      {
+        "id": "66061fc9-780d-4e2a-8bb8-fbaaeffbaa46",
+        "thread_id": "T-gate10-5a211e445c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:22.262488+00:00"
+      },
+      {
+        "id": "675963f7-a1de-425f-9761-aa0f8653707a",
+        "thread_id": "T-gate10k-9b8b0159d9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:22.346464+00:00"
+      },
+      {
+        "id": "dd66a6d5-cc3e-498e-b67a-8cbb18bb4eb7",
+        "thread_id": "T-pending-8c05008780",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:28:22.463712+00:00"
+      },
+      {
+        "id": "b5560f0b-7227-4b81-9fe9-9c7cded75fe6",
+        "thread_id": "T-gate2-beebb46d1d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:31:55.769466+00:00"
+      },
+      {
+        "id": "d46f5797-be8b-4369-8446-ff673a4b948e",
+        "thread_id": "T-gate2-beebb46d1d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:31:55.784285+00:00"
+      },
+      {
+        "id": "bfbef3bd-024f-4d33-88d5-f8c48c284807",
+        "thread_id": "T-gate2-beebb46d1d",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:31:55.795786+00:00"
+      },
+      {
+        "id": "9ccf6e38-bb42-4648-b814-f9a797bcb29e",
+        "thread_id": "T-gate10-e601a34532",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:32:03.083815+00:00"
+      },
+      {
+        "id": "cd70f899-18be-4d55-bf1a-beb300a00c93",
+        "thread_id": "T-gate10k-3f8b6a1592",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:32:03.199095+00:00"
+      },
+      {
+        "id": "f943fe30-0d30-4556-ba1e-5f9bceac8d1e",
+        "thread_id": "T-pending-fe115c89aa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:32:03.357809+00:00"
+      },
+      {
+        "id": "7e596458-7d7a-4969-9645-a4057d13644e",
+        "thread_id": "T-gate2-fa3cdd97af",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:26.388042+00:00"
+      },
+      {
+        "id": "6ca9a5eb-9f71-489c-8eb7-235a19d4369f",
+        "thread_id": "T-gate2-fa3cdd97af",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:26.404548+00:00"
+      },
+      {
+        "id": "a08c1ab0-7f08-427f-8412-e36c56392aed",
+        "thread_id": "T-gate2-fa3cdd97af",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:26.418420+00:00"
+      },
+      {
+        "id": "417e80a7-dcbe-4dee-8da9-cd5d6cf6a1f9",
+        "thread_id": "T-gate10-1515b879b5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:33.963310+00:00"
+      },
+      {
+        "id": "6c992b00-6f69-4566-b23e-10545e0dda6a",
+        "thread_id": "T-gate10k-81a92f2e5a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:34.076323+00:00"
+      },
+      {
+        "id": "164629b2-534b-498d-b12d-228c307644d9",
+        "thread_id": "T-pending-ac360445d2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:46:34.233473+00:00"
+      },
+      {
+        "id": "5821094d-6c61-4e97-9992-df91ab1a02d1",
+        "thread_id": "T-gate2-7ee71034d2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:49.097368+00:00"
+      },
+      {
+        "id": "ee16f2e9-f631-4949-af99-39a28ecb802b",
+        "thread_id": "T-gate2-7ee71034d2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:49.108718+00:00"
+      },
+      {
+        "id": "1c2831ff-9560-4394-bf58-fe0b1547e41a",
+        "thread_id": "T-gate2-7ee71034d2",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:49.119183+00:00"
+      },
+      {
+        "id": "673dc1d7-3cf9-40b3-81ee-bb03dd9e0b4d",
+        "thread_id": "T-gate10-a0d9efe9d0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:56.413019+00:00"
+      },
+      {
+        "id": "5ced8d4e-75e6-4d79-83b8-2e8884c90b12",
+        "thread_id": "T-gate10k-6f51910492",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:56.511511+00:00"
+      },
+      {
+        "id": "84cc674f-4819-4554-8a9c-bc5d286ab509",
+        "thread_id": "T-pending-1b0caca511",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:15:56.630034+00:00"
+      },
+      {
+        "id": "e77d5271-6da5-427a-8054-9b2198456953",
+        "thread_id": "T-gate2-46d0092128",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:33.728370+00:00"
+      },
+      {
+        "id": "0e4a94f8-9887-4ff8-aa3b-3d5bdb99c1d7",
+        "thread_id": "T-gate2-46d0092128",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:33.739707+00:00"
+      },
+      {
+        "id": "0e8eca19-3124-48ce-9a46-b920bdf7e128",
+        "thread_id": "T-gate2-46d0092128",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:33.750358+00:00"
+      },
+      {
+        "id": "740c008c-dc02-499e-8f83-177c2b0a5ddb",
+        "thread_id": "T-gate10-cac84c63f7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:41.131394+00:00"
+      },
+      {
+        "id": "f0b7f03b-23e8-4055-8cdc-463b8e6b8b1f",
+        "thread_id": "T-gate10k-643c6305b6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:41.252890+00:00"
+      },
+      {
+        "id": "3c9b8808-6f71-48c7-b6a2-dae9ec213b5a",
+        "thread_id": "T-pending-6cf0ebec92",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:35:41.393900+00:00"
+      },
+      {
+        "id": "d265d3cb-1223-41ea-a1af-aaeda63cd5d0",
+        "thread_id": "T-gate2-6c74b90dca",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:20.931398+00:00"
+      },
+      {
+        "id": "154b9da6-b7a9-4e63-98d8-5c761598cf96",
+        "thread_id": "T-gate2-6c74b90dca",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:20.942408+00:00"
+      },
+      {
+        "id": "405554e6-bba4-4dd6-8669-f55e6878d556",
+        "thread_id": "T-gate2-6c74b90dca",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:20.954929+00:00"
+      },
+      {
+        "id": "33f27855-c486-4457-83c5-10723e6a53e2",
+        "thread_id": "T-gate10-37105f12ca",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:28.200841+00:00"
+      },
+      {
+        "id": "93773da6-067b-4fc3-b8f6-c4c19e005d14",
+        "thread_id": "T-gate10k-e6ff2d6c80",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:28.291634+00:00"
+      },
+      {
+        "id": "0116e859-d8b2-4593-b5f4-b49bbcdf1ee2",
+        "thread_id": "T-pending-97f11fb1f5",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T14:43:28.408306+00:00"
+      },
+      {
+        "id": "37c7f1b7-82ea-46ac-be0e-320492895591",
+        "thread_id": "T-gate2-d953853676",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:20.472704+00:00"
+      },
+      {
+        "id": "f6610067-0acf-4c5c-83c8-029aec28e32a",
+        "thread_id": "T-gate2-d953853676",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:20.485411+00:00"
+      },
+      {
+        "id": "7a6251dd-fde1-47fe-b543-e6121397fa84",
+        "thread_id": "T-gate2-d953853676",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:20.497368+00:00"
+      },
+      {
+        "id": "40fa5183-ae4b-4c9a-b43e-8f496ba48071",
+        "thread_id": "T-gate10-dd80ca18db",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:28.092570+00:00"
+      },
+      {
+        "id": "d4a7968f-c5e2-4668-8834-958dd5158d73",
+        "thread_id": "T-gate10k-0695a7116b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:28.198787+00:00"
+      },
+      {
+        "id": "c48d5017-6eee-4648-b659-aa7d1a8efb05",
+        "thread_id": "T-pending-e9a2b2cb49",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:06:28.361053+00:00"
+      },
+      {
+        "id": "328c9a7c-48f8-494c-927c-ed11bb975dab",
+        "thread_id": "T-gate2-533afc4373",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:43.330598+00:00"
+      },
+      {
+        "id": "e8f3b068-21ff-4814-92d5-dc2e6028e997",
+        "thread_id": "T-gate2-533afc4373",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:43.348435+00:00"
+      },
+      {
+        "id": "6b865214-d343-4139-8d1e-e14c48a24af4",
+        "thread_id": "T-gate2-533afc4373",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:43.358330+00:00"
+      },
+      {
+        "id": "f3ab4647-17d5-4e4f-a447-fa45067e28df",
+        "thread_id": "T-gate10-0b5475dfeb",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:50.733851+00:00"
+      },
+      {
+        "id": "3f83aad2-70a6-4e46-beb2-fd13af61f702",
+        "thread_id": "T-gate10k-2ccab17b8c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:50.831235+00:00"
+      },
+      {
+        "id": "78397e70-a8c5-4fb8-9d00-f476688da8ef",
+        "thread_id": "T-pending-8897a50a4c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:09:50.978362+00:00"
+      },
+      {
+        "id": "e698ab19-85d1-44a4-9b2a-e753e3679366",
+        "thread_id": "T-gate2-446d607770",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:11:59.130215+00:00"
+      },
+      {
+        "id": "41107d40-2cf1-47b5-85f9-53e3c8d129bb",
+        "thread_id": "T-gate2-446d607770",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:11:59.143204+00:00"
+      },
+      {
+        "id": "27cba644-8c9e-4aaf-8530-1d792f0ba57b",
+        "thread_id": "T-gate2-446d607770",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:11:59.154379+00:00"
+      },
+      {
+        "id": "01fb8847-e79b-49c0-890d-371c029b6846",
+        "thread_id": "T-gate10-b665026faf",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:12:06.586413+00:00"
+      },
+      {
+        "id": "1a7d5d5b-5fc1-4151-aa70-f4af099f56fd",
+        "thread_id": "T-gate10k-5842da0ec7",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:12:06.699636+00:00"
+      },
+      {
+        "id": "e29b234d-3e77-44b3-86ab-94f3b5dbf7c6",
+        "thread_id": "T-pending-3d4f122aff",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:12:06.867443+00:00"
+      },
+      {
+        "id": "4743ce08-a4f9-4632-92e6-784b6ad2a867",
+        "thread_id": "T-gate2-53c6745466",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:24.350404+00:00"
+      },
+      {
+        "id": "51aba0f1-a68b-439f-a666-302438c83f6d",
+        "thread_id": "T-gate2-53c6745466",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:24.361102+00:00"
+      },
+      {
+        "id": "fae546d2-8b89-409e-8913-8e4ae9836d48",
+        "thread_id": "T-gate2-53c6745466",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:24.370640+00:00"
+      },
+      {
+        "id": "a4ba127d-cf2d-4305-a731-7d701b00c0f7",
+        "thread_id": "T-gate10-54a46cb242",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:31.715832+00:00"
+      },
+      {
+        "id": "ca8a998f-ff21-4272-90b3-951c7658ec6d",
+        "thread_id": "T-gate10k-fec5229ec1",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:31.807845+00:00"
+      },
+      {
+        "id": "9927da4a-e24c-4fcc-8452-14ed57d967ef",
+        "thread_id": "T-pending-6e11a22853",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:13:31.927512+00:00"
+      },
+      {
+        "id": "a3e03e64-2e1c-4e6f-a6f6-33a998bfd0e3",
+        "thread_id": "T-gate2-e16ef2b7c6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:47.707538+00:00"
+      },
+      {
+        "id": "6d4d1ccf-c640-4d36-a487-e8862dc76c32",
+        "thread_id": "T-gate2-e16ef2b7c6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:47.718628+00:00"
+      },
+      {
+        "id": "5a7c4955-fea5-4df3-8117-c597c5e03f13",
+        "thread_id": "T-gate2-e16ef2b7c6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:47.728905+00:00"
+      },
+      {
+        "id": "d58304f1-eb39-4b5a-9ad5-e3a3b6025784",
+        "thread_id": "T-gate10-91b4834c23",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:55.380199+00:00"
+      },
+      {
+        "id": "0ccdde61-4ff6-4d22-98a9-b1fba9efcb4b",
+        "thread_id": "T-gate10k-81ad2b43fe",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:55.520311+00:00"
+      },
+      {
+        "id": "1e4ac12d-8615-4c49-a392-c065c405d2d4",
+        "thread_id": "T-pending-fe4a2f8fe4",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T15:14:55.689663+00:00"
+      },
+      {
+        "id": "834b8fb1-46d5-4c3e-acd7-f0c77a48f45d",
+        "thread_id": "T-gate2-d982fbca20",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:00.250197+00:00"
+      },
+      {
+        "id": "0829489b-f735-4f81-b060-b790577c5985",
+        "thread_id": "T-gate2-d982fbca20",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:00.263131+00:00"
+      },
+      {
+        "id": "de7ca0ab-d4cd-4c08-80b5-22edbdb1d373",
+        "thread_id": "T-gate2-d982fbca20",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:00.274042+00:00"
+      },
+      {
+        "id": "cbc1772c-bf4f-4325-9b3c-87dcd88d71dd",
+        "thread_id": "T-gate10-ad71b97a6b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:07.467178+00:00"
+      },
+      {
+        "id": "0c091527-56f3-42e6-8c9e-18508d1805bf",
+        "thread_id": "T-gate10k-ef76049cfa",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:07.559615+00:00"
+      },
+      {
+        "id": "d28cc5a7-6d71-4e19-8dfa-148f9feae4b5",
+        "thread_id": "T-pending-20d010cacf",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:37:07.683433+00:00"
+      },
+      {
+        "id": "852be577-e807-46fd-ad62-bffb0c8f7a8f",
+        "thread_id": "T-gate2-b254de41ac",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:04.706559+00:00"
+      },
+      {
+        "id": "7ec88534-a9d5-48d5-88e4-af4de8662691",
+        "thread_id": "T-gate2-b254de41ac",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:04.719437+00:00"
+      },
+      {
+        "id": "c8c16cf3-01fa-4ee9-aec6-19d31f71702a",
+        "thread_id": "T-gate2-b254de41ac",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:04.729993+00:00"
+      },
+      {
+        "id": "bda8ec87-f1fe-44aa-be52-76319d36b794",
+        "thread_id": "T-gate10-1b0aaec08e",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:11.889837+00:00"
+      },
+      {
+        "id": "d5631c93-156b-4a2b-96b1-d5d527a5e053",
+        "thread_id": "T-gate10k-24e23880a6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:11.976518+00:00"
+      },
+      {
+        "id": "746308c7-cc65-480e-be8d-f2f1e055d35e",
+        "thread_id": "T-pending-a3326a318a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-02T17:39:12.094756+00:00"
+      }
+    ],
+    "checkpoints_rows": 1404,
+    "checkpoint_writes_rows": 4781
+  },
+  "extra": {
+    "when": "makereport(call), before teardown fixtures",
+    "note": "state at the moment of failure, with the failing test's own rows and broker keys still present",
+    "failure_text": "def test_deliberate_failure_for_diagnostics_selftest():\n>       assert 1 == 2, \"deliberate: exercising the failure-diagnostics hook\"\nE       AssertionError: deliberate: exercising the failure-diagnostics hook\nE       assert 1 == 2\n\ntests/integration/runtime/test_zz_diag_selftest.py:21: AssertionError"
+  }
+}

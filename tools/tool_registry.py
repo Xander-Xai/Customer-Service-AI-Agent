@@ -114,6 +114,42 @@ class ToolRegistry:
         if not tool:
             return f"错误：工具 '{name}' 不存在"
 
+        # Lightweight tracing: one span per tool execution. Records the tool NAME,
+        # whether it is a declared side effect, and its risk level — never
+        # ``arguments``. This system's tool arguments include order numbers, refund
+        # amounts and customer identifiers, i.e. exactly the content that must not
+        # reach a trace backend (see core/telemetry).
+        #
+        # Two-level resolution: full implementation first, then a no-op fallback
+        # that imports nothing. A diagnostic-only dependency failing to import must
+        # not be able to fail a business tool call — especially a side-effecting
+        # one. See core/tracing.py::safe_span.
+        try:
+            from core.telemetry import span as _telemetry_span
+        except Exception:  # noqa: BLE001 - diagnostics must never break the runtime
+            from core.tracing import safe_span as _telemetry_span
+
+        with _telemetry_span(
+            "csai.tool.execute",
+            attributes={
+                "csai.tool_name": name,
+                "csai.tool_side_effect": bool(tool.side_effect),
+                "csai.risk_level": tool.risk_level,
+            },
+        ):
+            return await self._execute_raw_inner(
+                tool, name, arguments, stream_callback, tool_call_id
+            )
+
+    async def _execute_raw_inner(
+        self,
+        tool: ToolDefinition,
+        name: str,
+        arguments: dict[str, Any],
+        stream_callback: Callable | None,
+        tool_call_id: str | None,
+    ) -> Any:
+        """``execute_raw`` proper, with the span wrapper peeled off."""
         idempotent_op = self._idempotent_operation(
             tool, arguments, tool_call_id, stream_callback=stream_callback
         )

@@ -778,12 +778,53 @@ class TestCoreModule:
 class TestRAGModule:
     """RAG 知识库验证"""
 
-    def test_knowledge_base_init(self):
+    def test_knowledge_base_init_unavailable_when_qdrant_unreachable(self, monkeypatch):
+        """The knowledge base must report itself unavailable when Qdrant is down.
+
+        The condition is **forced**, not inherited. This test used to assert
+        ``not kb.available`` and rely on Qdrant happening to be unreachable, with
+        the comment "Qdrant 未运行，连接失败". That made the outcome depend on the
+        developer's ambient infrastructure: with the Qdrant container running —
+        which is the correct state for development, and the state CI provides —
+        the connection succeeded and the test failed. It passed only while nothing
+        was listening on the configured port.
+
+        Forcing the failure keeps the assertion testing the degraded path it was
+        written for, on every machine, in both directions.
+        """
         from rag.knowledge_base import CosmeticsKnowledgeBase
 
-        with patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=MagicMock()):
+        def _boom(*_args, **_kwargs):
+            raise ConnectionError("forced: Qdrant is not reachable")
+
+        monkeypatch.setattr(
+            "qdrant_client.QdrantClient.get_collections", staticmethod(_boom), raising=True
+        )
+        with patch.object(
+            CosmeticsKnowledgeBase, "_create_embedding_function", return_value=MagicMock()
+        ):
             kb = CosmeticsKnowledgeBase()
-        assert not kb.available  # Qdrant 未运行，连接失败
+        assert not kb.available
+
+    def test_knowledge_base_init_available_when_qdrant_reachable(self, monkeypatch):
+        """The mirror case: a reachable Qdrant must yield ``available``.
+
+        Added together with the forced-failure test above so the pair covers both
+        outcomes of the same branch, instead of only the outcome that a stopped
+        container happens to produce.
+        """
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+
+        monkeypatch.setattr(
+            "qdrant_client.QdrantClient.get_collections",
+            staticmethod(lambda *_a, **_k: MagicMock(collections=[])),
+            raising=True,
+        )
+        with patch.object(
+            CosmeticsKnowledgeBase, "_create_embedding_function", return_value=MagicMock()
+        ):
+            kb = CosmeticsKnowledgeBase()
+        assert kb.available
 
     def test_seed_data_functions(self):
         from rag.seed_data import seed_faq, seed_product_knowledge, seed_tech_support

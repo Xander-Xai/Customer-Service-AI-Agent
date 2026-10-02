@@ -573,6 +573,35 @@ class QdrantKnowledgeBase:
         ``.meta`` 4-combo degraded contract callers/tests already rely on,
         plus a ``.trace`` transcript of every stage.
         """
+        # Lightweight tracing: one span for the whole retrieval, enriched from the
+        # pipeline's own RetrievalTrace (which already records per-stage status,
+        # candidate counts and duration, and deliberately carries **no** query or
+        # document text). Wrapping the canonical entry point keeps exactly one span
+        # per retrieval — not one per stage, and not a second logging system.
+        #
+        # Two-level resolution: full implementation first, then a no-op fallback
+        # that imports nothing. A diagnostic-only dependency failing to import must
+        # not be able to fail a business call. See core/tracing.py::safe_span.
+        try:
+            from core.telemetry import span as _telemetry_span
+        except Exception:  # noqa: BLE001 - diagnostics must never break retrieval
+            from core.tracing import safe_span as _telemetry_span
+
+        with _telemetry_span(
+            "csai.rag.retrieve",
+            attributes={
+                "csai.rag.scene": getattr(request, "scene", None),
+                "csai.retrieval_top_k": getattr(request, "top_k", None),
+                "csai.embedding_model": self._embedding_model_name,
+                "csai.reranker_model": getattr(self, "_reranker_model_name", None),
+            },
+        ) as _span:
+            result = await self._retrieve_inner(request)
+        _apply_retrieval_span(_span, result)
+        return result
+
+    async def _retrieve_inner(self, request: RetrievalRequest) -> RetrievalResult:
+        """The retrieval pipeline proper, with the span wrapper peeled off."""
         from rag.embedding_status import (
             REASON_EMBEDDING_UNAVAILABLE,
             REASON_NO_RETRIEVAL_CHANNEL,
@@ -1432,3 +1461,53 @@ class QdrantKnowledgeBase:
     @property
     def clip_available(self) -> bool:
         return self._clip_enabled
+
+
+def _apply_retrieval_span(span_obj: Any, result: Any) -> None:
+    """Write a retrieval's **observable facts** onto its span — no source text.
+
+    Takes only three kinds of quantity that ``RetrievalResult`` already exposes:
+    how many results came back, each stage's status and candidate counts, and the
+    degradation reason. It deliberately does not write ``rewritten_query`` — that
+    is a rewrite of the user's own text, i.e. content rather than a metric.
+    """
+    if span_obj is None or result is None:
+        return
+    try:
+        evidence = getattr(result, "evidence", None) or []
+        span_obj.set_attribute("csai.retrieval_result_count", len(evidence))
+
+        meta = getattr(result, "meta", None) or {}
+        if meta.get("retrieval_degraded"):
+            span_obj.set_attribute("csai.retrieval_degraded", True)
+            span_obj.set_attribute(
+                "csai.degraded_reason", str(meta.get("degraded_reason") or "")[:120]
+            )
+
+        pipeline_trace = getattr(result, "trace", None)
+        stages = getattr(pipeline_trace, "stages", None) or []
+        # One *event* per stage rather than one span per stage: it answers "which
+        # step was slow or skipped" without multiplying span count by the number of
+        # pipeline stages.
+        for stage in stages:
+            name = getattr(stage, "name", None)
+            if not name:
+                continue
+            span_obj.add_event(
+                f"rag.stage.{name}",
+                {
+                    "csai.stage.status": str(getattr(stage, "status", "") or "")[:40],
+                    "csai.stage.candidate_in": int(getattr(stage, "candidate_in", 0) or 0),
+                    "csai.stage.candidate_out": int(getattr(stage, "candidate_out", 0) or 0),
+                    "csai.stage.duration_ms": round(
+                        float(getattr(stage, "duration_ms", 0.0) or 0.0), 2
+                    ),
+                },
+            )
+        final = getattr(pipeline_trace, "stage", lambda _n: None)("FINAL") if stages else None
+        if final is not None:
+            span_obj.set_attribute(
+                "csai.reranker_count", int(getattr(final, "candidate_out", 0) or 0)
+            )
+    except Exception as exc:  # noqa: BLE001 - observability must not break retrieval
+        logger.debug("retrieval span enrich 失败（忽略）: %s", exc)

@@ -13,9 +13,11 @@ v4.2: 真流式调用（SSE 逐 chunk）
 """
 
 import asyncio
+import contextlib
 import json
 import random
 import time
+from typing import Any
 
 import httpx
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -45,7 +47,7 @@ class LLMServiceError(Exception):
 class CustomResponse:
     """LLM 响应包装（v3.5: 支持 Function Calling tool_calls）"""
 
-    def __init__(self, content: str, tool_calls: list = None):
+    def __init__(self, content: str, tool_calls: list[Any] | None = None):
         self.content = content
         self.tool_calls = tool_calls  # [{"id", "name", "arguments"}] or None
 
@@ -196,7 +198,10 @@ class OpenAICompatibleClient:
         except Exception:
             pass  # Quota 检查失败不影响主流程
 
-        payload = {"model": self.model, "messages": self._format_messages(messages)}
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": self._format_messages(messages),
+        }
         if "max_tokens" not in payload:
             payload["max_tokens"] = LLM_MAX_TOKENS
         if tools:
@@ -205,6 +210,48 @@ class OpenAICompatibleClient:
         call_timeout = httpx.Timeout(timeout or self.timeout)
         _call_start = time.time()
 
+        # Lightweight tracing: one span per logical LLM call (retries included),
+        # recording model, token usage and outcome only. The prompt and completion
+        # text are NEVER recorded — `self._format_messages(messages)` is exactly the
+        # kind of content that must not reach a trace backend.
+        #
+        # Two-level resolution: the full implementation first, then a no-op fallback
+        # that imports nothing. A diagnostic-only dependency failing to import must
+        # not be able to fail a business run. See core/tracing.py::safe_span for the
+        # concrete failure that motivated this.
+        try:
+            from core.telemetry import span as _telemetry_span
+        except Exception:  # noqa: BLE001 - diagnostics must never break the runtime
+            from core.tracing import safe_span as _telemetry_span
+
+        with _telemetry_span(
+            "csai.llm.chat_completion",
+            attributes={"csai.model_name": self.model},
+        ) as _llm_span:
+            return await self._invoke_with_retries(
+                messages=messages,
+                payload=payload,
+                tools=tools,
+                client=client,
+                call_timeout=call_timeout,
+                span_ctx=_llm_span,
+                user_id=user_id,
+                call_start=_call_start,
+            )
+
+    async def _invoke_with_retries(
+        self,
+        *,
+        messages,
+        payload: dict,
+        tools: list | None,
+        client,
+        call_timeout,
+        span_ctx,
+        user_id: str | None,
+        call_start: float,
+    ):
+        """The retry loop of ``async_invoke``; the span is already open by the caller."""
         for attempt in range(self.max_retries):
             try:
                 resp = await client.post(
@@ -234,8 +281,23 @@ class OpenAICompatibleClient:
                     if self.circuit_breaker:
                         await self.circuit_breaker.record_success()
                     # v5.1: Token 用量追踪
-                    _latency_ms = (time.time() - _call_start) * 1000
+                    _latency_ms = (time.time() - call_start) * 1000
                     await self._record_token_usage(result, _latency_ms)
+                    # tracing: usage counts and duration only, never the text.
+                    with contextlib.suppress(Exception):
+                        _usage = result.get("usage", {}) or {}
+                        _usage = _usage if isinstance(_usage, dict) else {}
+                        span_ctx.set_attribute(
+                            "csai.token_prompt", int(_usage.get("prompt_tokens", 0) or 0)
+                        )
+                        span_ctx.set_attribute(
+                            "csai.token_completion",
+                            int(_usage.get("completion_tokens", 0) or 0),
+                        )
+                        span_ctx.set_attribute(
+                            "csai.token_total", int(_usage.get("total_tokens", 0) or 0)
+                        )
+                        span_ctx.set_attribute("csai.duration_ms", round(_latency_ms, 2))
                     # v5.3: Token Quota 消耗
                     try:
                         from core.token_quota import get_quota_manager
@@ -271,6 +333,9 @@ class OpenAICompatibleClient:
 
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
+        with contextlib.suppress(Exception):
+            span_ctx.set_attribute("csai.error_type", "llm_unavailable")
+            span_ctx.set_attribute("csai.error_code", "LLMServiceError")
         raise LLMServiceError(f"LLM API 调用失败（已重试 {self.max_retries} 次），请稍后重试")
 
     async def async_invoke_raw(self, messages: list, timeout: float | None = None):
@@ -281,7 +346,7 @@ class OpenAICompatibleClient:
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
             raise LLMServiceError("CircuitBreaker OPEN: LLM 调用已熔断")
 
-        payload = {"model": self.model, "messages": messages}
+        payload: dict[str, Any] = {"model": self.model, "messages": messages}
         if "max_tokens" not in payload:
             payload["max_tokens"] = LLM_MAX_TOKENS
         client = await self._get_async_client()
