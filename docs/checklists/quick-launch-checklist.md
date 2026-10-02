@@ -76,6 +76,26 @@ vim .env.prod
 > **不配置的后果**：app 会 fail-fast 拒绝启动，或在多副本下静默地丢状态 /
 > 并发写同一会话。这不是"性能问题"，是**正确性问题**。
 
+### 1.2b HITL 人工审批治理（可选开启；默认关闭）
+
+> **默认 `HITL_ENABLED=false`。** 不配置时高风险工具**直接执行**（不拦）。
+> 生产建议打开——关闭等于主动放弃该治理边界。开启前先确认工具已声明
+> `risk_level` / `side_effect`，否则 HIGH 工具会以「未声明 side_effect」被显式
+> 拒绝执行（fail loud，不会静默裸执行）。
+
+- [ ] 已决定 `HITL_ENABLED` 的取值；**若为 `false`**，确认这是有意识的决定并记录在案
+- [ ] `HITL_HIGH_RISK_TOOLS` — 强制审批的工具名（逗号分隔，大小写不敏感）
+- [ ] `HITL_MEDIUM_RISK_TOOLS` — 只记录不拦截的工具名
+- [ ] `HITL_HIGH_AMOUNT_THRESHOLD` — 金额阈值（`0` = 关闭金额维度）；
+      用金额字段兜底白名单之外的大额写操作
+- [ ] `HITL_APPROVAL_TTL_SECONDS` — 超时按拒绝收敛（`EXPIRED`），**绝不默认放行**；
+      按「人工响应时长」设，别照抄默认值
+- [ ] `human_approvals` 表已迁移（`alembic upgrade head`，单 head `006_add_human_approvals`）
+- [ ] 审批值班路径已确认（无主动通知，只能靠接口拉取）：
+      `GET /api/approvals?status=PENDING` → `POST /api/approvals/{id}/decision`
+- [ ] 知情边界：`/api/chat` 实时快路径**不在** HITL 边界内（无 run 上下文）；
+      真实 ERP 写操作仍 `NOT_VERIFIED`
+
 ### 1.3 RAG / 检索依赖就绪（可选但生产知识库必做）
 
 ```bash
@@ -305,6 +325,25 @@ python3 scripts/replay_dead_run.py --help
 - [ ] 同一 thread 的两个 Run 执行区间**不重叠**（查 `agent_runs` 的
       `started_at`/`finished_at`）
 - [ ] `GET /api/runs/dead` 返回空（无意外 DLQ）
+
+**HITL 冒烟（仅当 `HITL_ENABLED=true`；Blocking）**
+
+```bash
+# 10.7 审批队列可达且为空（无审批挂起）
+curl -s "http://localhost:8000/api/approvals?status=PENDING" \
+  -H "Authorization: Bearer <ADMIN_JWT>" | jq
+
+# 10.8 表已迁移
+docker compose exec postgres psql -U postgres -d cosmetics_ai \
+  -c "SELECT approval_id,run_id,action,risk_level,status,expires_at FROM human_approvals ORDER BY requested_at DESC LIMIT 10;"
+```
+
+- [ ] `GET /api/approvals?status=PENDING` 返回 200（非 401/403）—— 确认
+      reviewer 身份解析链路可用（JWT 或 `X-Reviewer-Id` 都拿不到时应为 401，
+      **不会**退化成匿名固定 reviewer）
+- [ ] `human_approvals` 表存在且为空
+- [ ] 值班须知已确认：审批**无主动通知**，无人处理会在
+      `HITL_APPROVAL_TTL_SECONDS` 后落 `EXPIRED`（等同拒绝）
 
 **幂等与崩溃恢复验收（有独立基础设施时跑，不是启动前置条件）**
 

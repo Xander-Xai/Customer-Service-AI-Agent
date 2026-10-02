@@ -280,8 +280,12 @@ manager 单例**。
 checkpoint 则传 `None`），快路径同语义（`api/app.py::_pending_steps`）。判定边界：
 只有 `StateSnapshot.next` 非空才算恢复；已完成的历史快照走正常执行，多轮对话不受影响。
 
-状态机 `runtime/statuses.py`：`PENDING → QUEUED → RUNNING →
-SUCCEEDED | FAILED | RETRYING → DEAD_LETTER`，任意未终态可 `→ CANCELLED`。
+状态机 `runtime/statuses.py`（`ALLOWED_TRANSITIONS` 为唯一真相源）：`PENDING →
+QUEUED → RUNNING → SUCCEEDED | FAILED | RETRYING → RUNNING | DEAD_LETTER |
+WAITING_APPROVAL → RUNNING`，任意未终态可 `→ CANCELLED`。其中
+`WAITING_APPROVAL` 是 human-in-the-loop 专用的**非终态**：高风险副作用在执行前
+被拦下等人工决策，`→ RUNNING` 不递增 attempt 且不进通用队列轮询
+（见 [human-in-the-loop.md](human-in-the-loop.md)）。
 
 投递为 at-least-once（`acks_late` + `reject_on_worker_lost` +
 `visibility_timeout`），因此**有副作用的写工具必须自身幂等**：

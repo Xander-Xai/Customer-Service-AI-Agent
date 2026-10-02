@@ -37,7 +37,11 @@ async def pending_steps(graph: Any, config: dict[str, Any]) -> tuple[str, ...]:
 
 
 async def invoke_graph_with_resume(
-    graph: Any, state: dict[str, Any] | None, config: dict[str, Any]
+    graph: Any,
+    state: dict[str, Any] | None,
+    config: dict[str, Any],
+    *,
+    resume_command: Any = None,
 ) -> tuple[dict[str, Any], bool]:
     """执行图：存在未完成 checkpoint 时续跑，否则正常执行。返回 ``(result, resumed)``。
 
@@ -50,9 +54,31 @@ async def invoke_graph_with_resume(
     其副作用（工具调用、外部写操作）会被重复触发。worker 崩溃恢复的正确语义是
     ``ainvoke(None)``。
 
+    ``resume_command``（human-in-the-loop）
+    --------------------------------------
+    人工审批恢复**不能**用 ``ainvoke(None)``：实测 langgraph 1.2.12 上对处于
+    interrupt 的图调用 ``ainvoke(None, cfg)`` 只会原样再次返回 ``__interrupt__``，
+    节点不推进（interrupt 需要一个 resume 值才能解除）。因此审批恢复必须显式传
+    ``Command(resume=<decision>)``，此时崩溃恢复分支被跳过。
+
     同时上报 ``agent_checkpoint_recovery_total``。
     """
     pending = await pending_steps(graph, config)
+
+    if resume_command is not None:
+        # 审批恢复：pending_steps 为空也不代表正常——图可能正挂在 interrupt 上，
+        # 交给 LangGraph 用 resume 值解除。
+        from . import metrics as run_metrics
+
+        run_metrics.record_checkpoint_recovery(True)
+        logger.info(
+            "从 interrupt 恢复（人工审批已决策）thread=%s pending=%s",
+            config.get("configurable", {}).get("thread_id"),
+            pending,
+        )
+        result = await graph.ainvoke(resume_command, config=config)
+        return result, True
+
     resumed = bool(pending)
 
     from . import metrics as run_metrics
@@ -105,8 +131,13 @@ class AgentRuntime:
         query: str,
         user_id: str | None = None,
         multimodal_content: list | None = None,
+        resume_command: Any = None,
     ) -> dict[str, Any]:
-        """执行图并返回结果。thread_id == session_id（与 API 语义一致）。"""
+        """执行图并返回结果。thread_id == session_id（与 API 语义一致）。
+
+        ``resume_command``：审批恢复时传入 ``Command(resume=<decision>)``；为 None
+        时走常规执行 / 崩溃恢复（``ainvoke(None)``）。
+        """
         if not self._started:
             await self.start()
 
@@ -140,7 +171,9 @@ class AgentRuntime:
 
         graph = self.container.graph_app
         config = {"configurable": {"thread_id": thread_id}}
-        result, _resumed = await invoke_graph_with_resume(graph, state, config)
+        result, _resumed = await invoke_graph_with_resume(
+            graph, state, config, resume_command=resume_command
+        )
         return result
 
     @staticmethod

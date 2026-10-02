@@ -422,6 +422,82 @@ class RunService:
             queued_at=_utcnow(),
         )
 
+    def mark_waiting_approval(self, run_id: str) -> dict[str, Any]:
+        """RUNNING -> WAITING_APPROVAL：高风险副作用已挂起等人工决策。
+
+        幂等：已在 WAITING_APPROVAL 直接返回；在终态或 QUEUED/RETRYING 时不改写
+        （抛 ``InvalidRunTransition`` 由调用方收敛）。
+
+        刻意**清空 lease**：图已挂起、没有 worker 在执行，留着过期 lease 只会
+        让「谁有权接管」的判断失真；清空后恢复路径可以干净地重新领取。
+        """
+        run = self.require_run(run_id)
+        cur = parse_status(run["status"])
+        if cur == RunStatus.WAITING_APPROVAL:
+            return run
+        ensure_transition(cur, RunStatus.WAITING_APPROVAL, run_id)
+        return self._transition(
+            run_id,
+            RunStatus.WAITING_APPROVAL,
+            from_statuses={cur},
+            lease_expires_at=None,
+            next_retry_at=None,
+            worker_id=None,
+        )
+
+    def mark_resumed_running(
+        self,
+        run_id: str,
+        *,
+        worker_id: str | None = None,
+        task_id: str | None = None,
+        lease_seconds: float | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """WAITING_APPROVAL -> RUNNING（人工审批已决策，恢复执行）。**不递增 attempt。**
+
+        为什么必须与 ``mark_running`` 分开
+        --------------------------------
+        ``mark_running`` 语义是「一次执行尝试」，每次领取都 ``attempt + 1``。
+        审批恢复**不是**新的一次失败重试：等人可能耗时数小时，若复用
+        ``mark_running``，``AGENT_RUN_MAX_ATTEMPTS``（默认 3）会被「等待审批」
+        消耗掉，审批落地前 run 就已 DEAD_LETTER。等待人不是失败。
+
+        并发：条件更新 ``WHERE status='WAITING_APPROVAL'``，多个 worker 同时
+        恢复只有一个成功；其余收到 ``InvalidRunTransition`` 并读到 RUNNING。
+        """
+        run = self.require_run(run_id)
+        cur = parse_status(run["status"])
+        if cur == RunStatus.RUNNING:
+            return run
+        ensure_transition(cur, RunStatus.RUNNING, run_id)
+        now = now or _utcnow()
+        fields: dict[str, Any] = {
+            "worker_id": worker_id,
+            "task_id": task_id,
+            # attempt 原样保留：审批等待不消耗重试预算
+        }
+        if lease_seconds is not None:
+            fields["lease_expires_at"] = now + timedelta(seconds=lease_seconds)
+            fields["heartbeat_at"] = now
+        return self._transition(
+            run_id, RunStatus.RUNNING, from_statuses={RunStatus.WAITING_APPROVAL}, **fields
+        )
+
+    def resume_after_approval(self, run_id: str) -> dict[str, Any]:
+        """等待审批的 run 是否已可恢复（供审批 API 判断能否投递）。
+
+        返回该 run 的最新记录；**不改状态**。恢复由 worker 领取时走
+        ``mark_resumed_running`` 完成（``WAITING_APPROVAL -> RUNNING``）。
+
+        这里刻意**没有** ``WAITING_APPROVAL -> QUEUED`` 这条边：审批 API 若把 run
+        改成 QUEUED，worker 领取就会走 ``mark_running``，而它每次领取都
+        ``attempt + 1``；``AGENT_RUN_MAX_ATTEMPTS`` 默认 3，于是「等人审批」会
+        被当成三次失败重试，审批还没落地 run 就 DEAD_LETTER。等待人不是失败。
+        审批 API 只负责 dispatch，状态由 worker 侧原子迁移。
+        """
+        return self.require_run(run_id)
+
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         """取消尚未完成的 run -> CANCELLED（终态）。
 

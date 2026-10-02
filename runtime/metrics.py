@@ -139,3 +139,28 @@ def inc_run_active() -> None:
 
 def dec_run_active() -> None:
     _change("agent_run_inflight", -1)
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop（审批治理）
+# ---------------------------------------------------------------------------
+
+
+def record_approval_requested(risk_level: str) -> None:
+    _inc("agent_approval_requested_total", risk_level=risk_level)
+    _change("agent_approval_pending", 1)
+
+
+def record_approval_decided(decision: str, wait_seconds: float) -> None:
+    _inc("agent_approval_decided_total", decision=decision)
+    _change("agent_approval_pending", -1)
+    _observe("agent_approval_wait_seconds", max(0.0, wait_seconds))
+
+
+def record_approval_expired() -> None:
+    _inc("agent_approval_expired_total")
+    _change("agent_approval_pending", -1)
+
+
+def record_approval_execution(outcome: str) -> None:
+    _inc("agent_approval_execution_total", outcome=outcome)

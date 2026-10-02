@@ -249,3 +249,65 @@ class ToolSideEffect(Base):
         ),
         Index("ix_tool_side_effects_tool_op", "tool_name", "operation_key"),
     )
+
+
+class HumanApproval(Base):
+    """高风险工具副作用的人工审批记录（human-in-the-loop 治理边界）。
+
+    与 ``AgentRun`` / ``ToolSideEffect`` 的关系：审批**不执行**副作用，它只是
+    「是否允许执行」的决策凭证。审批通过后真正的执行仍由
+    ``runtime/side_effects.py`` 的幂等 ledger 兜底（同一 ``operation_key``
+    只真正触发一次），两者缺一不可：审批防「不该做的被做了」，ledger 防
+    「做了一次被重做」。
+
+    状态机：``PENDING -> APPROVED | REJECTED | EXPIRED``（三者皆终态）。
+      - ``APPROVED`` 允许执行一次（执行仍走 ledger）；
+      - ``REJECTED`` 永不执行；
+      - ``EXPIRED`` 超时未决策，等同拒绝但可区分（``HITL_APPROVAL_TTL_SECONDS``）。
+
+    安全约束：
+      - ``reviewer_id`` 必须 != ``user_id``（发起人），在 service 层强制，
+        API 层不得是唯一防线；
+      - ``proposal`` 存的是**脱敏后**的提案（见 ``core/hitl/sanitize.py``），
+        审批留痕不得成为凭据泄漏通道。
+    """
+
+    __tablename__ = "human_approvals"
+
+    approval_id = Column(String(36), primary_key=True)  # UUID 字符串
+    run_id = Column(String(36), nullable=False, index=True)
+    thread_id = Column(String(64), nullable=True, index=True)
+    # 发起人（会话用户）。审批人不得与此相同。
+    user_id = Column(String(64), nullable=True, index=True)
+    action = Column(String(64), nullable=False, index=True)  # tool_name
+    risk_level = Column(String(16), nullable=False, index=True)
+    agent = Column(String(64), nullable=True)
+    # 脱敏后的提案参数 + 其指纹（幂等复用 + 防「同 run 换参数重提」）
+    proposal = Column(JSON, nullable=False)
+    proposal_fingerprint = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="PENDING", index=True)
+    requested_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+    # 到期时刻；读取时惰性判定，过期由 service 落 EXPIRED
+    expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewer_id = Column(String(64), nullable=True)
+    # {"decision": approve|reject|edit|expired, "reason": ..., "edited_args": {...}}
+    decision = Column(JSON, nullable=True)
+    reason = Column(Text, nullable=True)
+    # 图已消费该决策（保证 resume 只发生一次）
+    resumed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # create_or_get 的幂等基础：同一 run 的同一动作 + 同一提案只产生一条审批
+        UniqueConstraint(
+            "run_id",
+            "action",
+            "proposal_fingerprint",
+            name="uq_human_approvals_proposal",
+        ),
+        Index("ix_human_approvals_status_requested", "status", "requested_at"),
+        Index("ix_human_approvals_run_status", "run_id", "status"),
+    )
