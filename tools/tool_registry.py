@@ -23,6 +23,16 @@ class ToolDefinition:
     parameters: dict[str, Any]  # JSON Schema
     handler: Callable[..., Any]  # async callable(arguments: dict) -> str
     cache_policy: ToolCachePolicy = ToolCachePolicy()
+    side_effect: bool = False
+    """True = 写操作工具（退款/改单/建工单/发消息/ERP 写）。
+
+    声明为副作用的工具在**异步 Run 执行上下文**内会被 ``runtime.side_effects``
+    的 ledger 包裹：同一 ``(tool_name, run_id, tool_call_id)`` 一旦成功，重投递 /
+    worker 崩溃恢复后直接返回已存结果，绝不重复触发外部副作用（at-least-once
+    delivery + idempotent side effects）。
+
+    只读工具保持 False：不落 ledger，也不承担重复执行风险。
+    """
 
 
 class ToolRegistry:
@@ -41,6 +51,7 @@ class ToolRegistry:
         parameters: dict[str, Any],
         handler: Callable[..., Any],
         cache_policy: ToolCachePolicy | None = None,
+        side_effect: bool = False,
     ):
         """注册一个工具"""
         self._tools[name] = ToolDefinition(
@@ -49,6 +60,7 @@ class ToolRegistry:
             parameters=parameters,
             handler=handler,
             cache_policy=cache_policy or ToolCachePolicy(),
+            side_effect=side_effect,
         )
         logger.debug(f"工具已注册: {name}")
 
@@ -69,18 +81,34 @@ class ToolRegistry:
     async def execute(
         self, name: str, arguments: dict[str, Any],
         stream_callback: Callable | None = None,  # v6.0: 转发给工具 handler
+        tool_call_id: str | None = None,
     ) -> str:
         """执行指定工具，返回字符串结果"""
-        result = await self.execute_raw(name, arguments, stream_callback=stream_callback)
+        result = await self.execute_raw(
+            name, arguments, stream_callback=stream_callback, tool_call_id=tool_call_id
+        )
         return str(result) if result is not None else "查询完成，无结果"
 
     async def execute_raw(
-        self, name: str, arguments: dict[str, Any], stream_callback: Callable | None = None
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        stream_callback: Callable | None = None,
+        tool_call_id: str | None = None,
     ) -> Any:
         """执行工具并保留结构化返回值，供 Context Engineering 使用。"""
         tool = self._tools.get(name)
         if not tool:
             return f"错误：工具 '{name}' 不存在"
+
+        idempotent_op = self._idempotent_operation(
+            tool, arguments, tool_call_id, stream_callback=stream_callback
+        )
+        if idempotent_op is not None:
+            # 副作用工具的失败必须冒泡：吞掉异常会把「写操作失败」伪装成成功 run，
+            # 让上层 retry/DLQ 完全失效。
+            return await idempotent_op()
+
         try:
             # v6.0: 注入 stream_callback，仅当 handler 接受此参数时传递
             if stream_callback is not None:
@@ -96,6 +124,74 @@ class ToolRegistry:
             logger.error(f"工具执行失败 [{name}]: {e}", exc_info=True)
             return f"工具 '{name}' 执行失败，请稍后重试"
 
+    def _idempotent_operation(
+        self,
+        tool: ToolDefinition,
+        arguments: dict[str, Any],
+        tool_call_id: str | None,
+        *,
+        stream_callback: Callable | None = None,
+    ):
+        """为副作用工具构造幂等执行闭包；不满足条件时返回 None（直接执行）。
+
+        需要同时具备：
+          - 工具声明 ``side_effect=True``；
+          - 处于异步 Run 执行上下文（``run_id`` 来自 contextvar，worker 路径注入）；
+          - 有稳定的 ``tool_call_id``（LLM Function Calling 的 tool_call id）。
+
+        快路径（``/api/chat`` 等进程内同步执行）没有 run 上下文，返回 None，
+        行为与改造前完全一致。
+        """
+        if not tool.side_effect or not tool_call_id:
+            return None
+        try:
+            from runtime.context import get_current_run_id, get_current_thread_id
+        except Exception:
+            return None
+        run_id = get_current_run_id()
+        if not run_id:
+            return None
+        try:
+            from runtime.side_effects import (
+                build_tool_idempotency_key,
+                execute_idempotent_operation,
+            )
+        except Exception:  # pragma: no cover - ledger 模块不可用时不做幂等包装
+            logger.warning("side-effect ledger 不可用，工具将以非幂等方式执行: %s", tool.name)
+            return None
+
+        operation_key = build_tool_idempotency_key(run_id, tool_call_id)
+        thread_id = get_current_thread_id()
+
+        async def _run():
+            logger.info(
+                "副作用工具走幂等 ledger tool=%s run_id=%s op=%s",
+                tool.name,
+                run_id,
+                operation_key,
+            )
+            return await execute_idempotent_operation(
+                tool_name=tool.name,
+                operation_key=operation_key,
+                run_id=run_id,
+                thread_id=thread_id,
+                arguments=arguments,
+                operation=lambda: self._call_handler(tool, arguments, stream_callback),
+            )
+
+        return _run
+
+    @staticmethod
+    async def _call_handler(
+        tool: ToolDefinition, arguments: dict[str, Any], stream_callback: Callable | None
+    ) -> Any:
+        if stream_callback is not None:
+            sig = inspect.signature(tool.handler)
+            if "stream_callback" in sig.parameters:
+                return await tool.handler(arguments, stream_callback=stream_callback)
+            return await tool.handler(arguments)
+        return await tool.handler(arguments)
+
     def list_tools(self) -> list[str]:
         """返回所有已注册工具名称"""
         return list(self._tools.keys())
@@ -104,3 +200,8 @@ class ToolRegistry:
         """Return an explicit policy; unknown tools fail closed."""
         tool = self._tools.get(name)
         return tool.cache_policy if tool else ToolCachePolicy()
+
+    def is_side_effect(self, name: str) -> bool:
+        """该工具是否声明为写操作（需要幂等 ledger 保护）。"""
+        tool = self._tools.get(name)
+        return bool(tool.side_effect) if tool else False

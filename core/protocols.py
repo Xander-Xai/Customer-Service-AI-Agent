@@ -109,11 +109,15 @@ class ToolRegistryProtocol(Protocol):
         """获取供 LLM Function Calling 使用的工具定义。"""
         ...
 
-    async def execute(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def execute(
+        self, tool_name: str, arguments: dict[str, Any], tool_call_id: str | None = None
+    ) -> Any:
         """执行指定工具。"""
         ...
 
-    async def execute_raw(self, tool_name: str, arguments: dict[str, Any]) -> Any:
+    async def execute_raw(
+        self, tool_name: str, arguments: dict[str, Any], tool_call_id: str | None = None
+    ) -> Any:
         """执行工具并保留结构化结果（可选的 Context Engineering 路径）。"""
         ...
 

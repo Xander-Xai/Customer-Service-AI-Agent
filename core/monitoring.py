@@ -235,10 +235,18 @@ try:
     tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
     # v6.4: 分布式 Agent Run 可靠性 + 可观测性
-    agent_runs_total = _counter("agent_runs_total", "AgentRun outcomes by status", ["status"])
+    #
+    # label 基数纪律：只允许低基数维度（status / mode / agent / error_type）。
+    # 严禁把 run_id / thread_id / user_id / query 放进 label —— 这些是每请求唯一值，
+    # 会让 Prometheus 时序数无界增长。
+    agent_run_total = _counter("agent_run_total", "AgentRun outcomes by status", ["status"])
     agent_run_retry_total = _counter("agent_run_retry_total", "AgentRun retries scheduled")
     agent_run_dead_letter_total = _counter(
         "agent_run_dead_letter_total", "AgentRun retry exhausted -> DEAD_LETTER"
+    )
+    agent_run_dead_letter_replay_total = _counter(
+        "agent_run_dead_letter_replay_total",
+        "Operator replays of DEAD_LETTER runs (redrive)",
     )
     agent_run_duration_seconds = _histogram(
         "agent_run_duration_seconds",
@@ -254,27 +262,42 @@ try:
     agent_worker_task_total = _counter(
         "agent_worker_task_total", "Worker task outcomes", ["status"]
     )
-    agent_runs_active = _gauge("agent_runs_active", "AgentRuns currently executing")
-    agent_run_failures_total = _counter(
-        "agent_run_failures_total", "AgentRun terminal failures (FAILED/DEAD_LETTER)"
+    agent_run_inflight = _gauge("agent_run_inflight", "AgentRuns currently executing")
+    agent_run_failed_total = _counter(
+        "agent_run_failed_total", "AgentRun terminal failures (FAILED/DEAD_LETTER)"
     )
-    agent_thread_lock_acquire_total = _counter(
-        "agent_thread_lock_acquire_total", "Thread lock acquisitions"
+    agent_thread_lease_acquire_total = _counter(
+        "agent_thread_lease_acquire_total", "Thread lease acquisitions"
     )
-    agent_thread_lock_contention_total = _counter(
-        "agent_thread_lock_contention_total", "Same-thread lock contention deferrals"
+    agent_thread_lease_contention_total = _counter(
+        "agent_thread_lease_contention_total", "Same-thread lease contention deferrals"
     )
-    agent_thread_lock_wait_seconds = _histogram(
-        "agent_thread_lock_wait_seconds",
-        "Time spent acquiring the thread lock",
+    agent_thread_lease_wait_seconds = _histogram(
+        "agent_thread_lease_wait_seconds",
+        "Time spent acquiring the thread lease",
         buckets=[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
+    )
+    agent_thread_lease_renewed_total = _counter(
+        "agent_thread_lease_renewed_total",
+        "Thread lease TTL renewals during execution",
+        ["outcome"],
+    )
+    agent_worker_heartbeat = _counter(
+        "agent_worker_heartbeat", "Worker ownership lease heartbeats", ["outcome"]
     )
     checkpoint_errors_total = _counter(
         "checkpoint_errors_total", "LangGraph checkpoint backend errors"
     )
-    idempotency_hit_total = _counter("idempotency_hit_total", "HTTP idempotency key hits")
-    tool_idempotency_hit_total = _counter(
-        "tool_idempotency_hit_total", "Side-effect tool idempotency hits"
+    agent_checkpoint_recovery_total = _counter(
+        "agent_checkpoint_recovery_total",
+        "LangGraph executions resumed from an existing checkpoint",
+        ["mode"],
+    )
+    agent_run_idempotency_hit_total = _counter(
+        "agent_run_idempotency_hit_total", "HTTP idempotency key hits on run creation"
+    )
+    agent_tool_idempotency_hit_total = _counter(
+        "agent_tool_idempotency_hit_total", "Side-effect tool idempotency hits"
     )
 
     PROMETHEUS_BUSINESS_ENABLED = True
@@ -336,21 +359,25 @@ except ImportError:
     tool_result_cache_errors_total = _NoopMetric()
     tool_result_cache_bypass_total = _NoopMetric()
     tool_result_cache_latency_seconds = _NoopMetric()
-    agent_runs_total = _NoopMetric()
+    agent_run_total = _NoopMetric()
     agent_run_retry_total = _NoopMetric()
     agent_run_dead_letter_total = _NoopMetric()
+    agent_run_dead_letter_replay_total = _NoopMetric()
     agent_run_duration_seconds = _NoopMetric()
     agent_run_queue_wait_seconds = _NoopMetric()
     agent_worker_active = _NoopMetric()
     agent_worker_task_total = _NoopMetric()
-    agent_runs_active = _NoopMetric()
-    agent_run_failures_total = _NoopMetric()
-    agent_thread_lock_acquire_total = _NoopMetric()
-    agent_thread_lock_contention_total = _NoopMetric()
-    agent_thread_lock_wait_seconds = _NoopMetric()
+    agent_run_inflight = _NoopMetric()
+    agent_run_failed_total = _NoopMetric()
+    agent_thread_lease_acquire_total = _NoopMetric()
+    agent_thread_lease_contention_total = _NoopMetric()
+    agent_thread_lease_wait_seconds = _NoopMetric()
+    agent_thread_lease_renewed_total = _NoopMetric()
+    agent_worker_heartbeat = _NoopMetric()
     checkpoint_errors_total = _NoopMetric()
-    idempotency_hit_total = _NoopMetric()
-    tool_idempotency_hit_total = _NoopMetric()
+    agent_checkpoint_recovery_total = _NoopMetric()
+    agent_run_idempotency_hit_total = _NoopMetric()
+    agent_tool_idempotency_hit_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 

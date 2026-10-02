@@ -5,9 +5,11 @@
 
 长任务路径（本模块）::
 
-    POST /api/runs              -> 202，创建 RunRecord(QUEUED) + 入队，立即返回 run_id
-    GET  /api/runs/{run_id}     -> 查询状态与结果（polling）
-    GET  /api/runs/dead         -> 管理员查询 application-level DLQ
+    POST /api/runs                 -> 202，创建 AgentRun(QUEUED) + 入队，立即返回 run_id
+    GET  /api/runs/{run_id}        -> 查询状态与结果（polling）
+    GET  /api/runs/{run_id}/events -> SSE 转发 run 事件流（支持 Last-Event-ID 续读）
+    POST /api/runs/{run_id}/cancel -> 协作式取消未完成的 run -> CANCELLED
+    GET  /api/runs/dead            -> 管理员查询 application-level DLQ
 
 API 只负责「创建 + 入队」，不拥有执行生命周期；执行在独立 Celery worker。
 """
@@ -166,6 +168,109 @@ async def list_dead_runs(request: Request, limit: int = 100):
     return {"dead_letters": serialized, "count": len(serialized)}
 
 
+@router.get("/api/runs/{run_id}/events")
+async def stream_run_events(
+    run_id: str,
+    request: Request,
+    last_event_id: str | None = None,
+    replay: bool = True,
+):
+    """SSE 转发 run 事件流（Redis Stream -> 客户端）。
+
+    - 事件由 worker 写入 ``agent:run:{run_id}:events``，API 只做转发（worker 不接触
+      浏览器连接）；
+    - 支持断点续读：``Last-Event-ID`` 请求头或 ``?last_event_id=`` 指定 Redis stream
+      entry id；``replay=false`` 时只看新事件（``$``）；
+    - run 进入终态后自动关闭连接。
+
+    **语义边界**：best-effort resumable event stream; **not** exactly-once; duplicates or gaps may occur around reconnect/replay; trimmed historical events may become unrecoverable。
+    单条连接内每个事件只转发一次；但用较旧的 ``Last-Event-ID`` 重连会重放已处理过
+    的事件（重复），``replay=false`` 与 idle 超时会造成缺口，``MAXLEN`` 近似裁剪
+    后的历史不可恢复。权威状态请用 ``GET /api/runs/{run_id}``。
+    """
+    from fastapi.responses import StreamingResponse
+
+    from runtime.events import (
+        EVENT_CANCELLED,
+        EVENT_COMPLETED,
+        EVENT_FAILED,
+        format_sse,
+        read_events,
+    )
+
+    service = _get_service(request)
+    try:
+        run = service.require_run(run_id)
+    except RunNotFound:
+        return JSONResponse({"error": "run 不存在"}, status_code=404)
+    if not _check_ownership(request, run):
+        return JSONResponse({"error": "无权访问该 run"}, status_code=403)
+
+    terminal = {"SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELLED"}
+    start_from = last_event_id or request.headers.get("last-event-id") or "0-0"
+    if not replay:
+        start_from = "$"
+
+    async def event_source():
+        import redis.asyncio as aioredis
+
+        from core.config import REDIS_URL
+
+        client = aioredis.from_url(REDIS_URL, decode_responses=True)
+        cursor = start_from
+        idle_rounds = 0
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    events = await read_events(
+                        client, run_id, last_event_id=cursor, block_ms=1000, count=100
+                    )
+                except Exception as e:
+                    logger.warning("run 事件流读取失败 run_id=%s: %s", run_id, type(e).__name__)
+                    yield format_sse(
+                        "0-0", {"event": "error", "reason": type(e).__name__}
+                    )
+                    break
+
+                for event_id, fields in events:
+                    cursor = event_id
+                    yield format_sse(event_id, fields)
+                    name = fields.get("event")
+                    if name in (EVENT_COMPLETED, EVENT_FAILED, EVENT_CANCELLED):
+                        idle_rounds = 0
+                        return
+
+                idle_rounds += 1
+                # run 已是终态且没有新事件 -> 收尾，避免连接悬挂
+                try:
+                    current = service.require_run(run_id)
+                except RunNotFound:
+                    break
+                if current["status"] in terminal:
+                    break
+                if idle_rounds > 30:
+                    yield format_sse(
+                        "0-0",
+                        {"event": "error", "reason": "idle_timeout", "status": current["status"]},
+                    )
+                    break
+        finally:
+            with contextlib.suppress(Exception):
+                await client.aclose()
+
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/api/runs/{run_id}")
 async def get_run(run_id: str, request: Request):
     service = _get_service(request)
@@ -176,3 +281,31 @@ async def get_run(run_id: str, request: Request):
     if not _check_ownership(request, run):
         return JSONResponse({"error": "无权访问该 run"}, status_code=403)
     return _serialize(run)
+
+
+@router.post("/api/runs/{run_id}/cancel")
+async def cancel_run(run_id: str, request: Request):
+    """取消尚未完成的 run。
+
+    协作式取消：立即把状态置 ``CANCELLED``（终态），未开始执行的 run 不会再被执行
+    （worker 领取时因状态非可执行而跳过）。已进入 RUNNING 的 run **不会**被强行中断，
+    其 ``mark_succeeded`` 走条件更新，不会覆盖 ``CANCELLED``。
+    """
+    service = _get_service(request)
+    try:
+        run = service.require_run(run_id)
+    except RunNotFound:
+        return JSONResponse({"error": "run 不存在"}, status_code=404)
+    if not _check_ownership(request, run):
+        return JSONResponse({"error": "无权取消该 run"}, status_code=403)
+
+    before = run["status"]
+    cancelled = service.cancel_run(run_id)
+    after = cancelled["status"]
+    run_metrics.record_run_status(after)
+    if before != after:
+        logger.info("run 已取消 run_id=%s %s -> %s", run_id, before, after)
+    payload = _serialize(cancelled)
+    payload["previous_status"] = before
+    payload["was_terminal"] = before == after
+    return payload
