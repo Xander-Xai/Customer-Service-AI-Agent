@@ -1,0 +1,27 @@
+{
+  "schema_version": "distributed-runtime-evidence/v1",
+  "timestamp": "2026-10-02T00:02:09.095509+00:00",
+  "git_sha": "65cea3ec9b421dd799faf514a75eef0b9410de5b",
+  "overall_status": "PASS",
+  "checks": {
+    "checkpoint_cross_process": {
+      "status": "PASS",
+      "thread_id": "verify-cp-c40c31cc28c842a381e30a82e94c2318"
+    },
+    "same_thread_serialization": {
+      "status": "PASS",
+      "acquired_first": true,
+      "second_acquired_while_held": false,
+      "second_acquired_after_release": true
+    },
+    "different_thread_parallelism": {
+      "status": "PASS",
+      "t1": true,
+      "t2": true
+    },
+    "tool_idempotency": {
+      "status": "PASS",
+      "side_effect_calls": 1
+    }
+  }
+}
