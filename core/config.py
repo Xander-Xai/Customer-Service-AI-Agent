@@ -59,7 +59,10 @@ DESCRIPTION = os.getenv(
 
 # ===== HTTP 请求配置 =====
 HTTP_TIMEOUT = _int_env("HTTP_TIMEOUT", 15)  # v5.4: 从 30s 降至 15s，减少失败场景等待
-HTTP_HEADERS = {"Content-Type": "application/json", "User-Agent": f"MultiAgentCustomerService/{VERSION}"}
+HTTP_HEADERS = {
+    "Content-Type": "application/json",
+    "User-Agent": f"MultiAgentCustomerService/{VERSION}",
+}
 
 # ===== 路由配置 =====
 ROUTING_COMPLEXITY_THRESHOLD = _int_env("ROUTING_COMPLEXITY_THRESHOLD", 50)
@@ -75,13 +78,13 @@ CACHE_VECTOR_SCORE_THRESHOLD = _float_env("CACHE_VECTOR_SCORE_THRESHOLD", 0.85)
 
 # TTL 策略: intent_type → TTL(秒)
 CACHE_TTL_POLICY = {
-    "knowledge_qa": 604800,      # 7 天
-    "pricing_stock": 300,        # 5 分钟
-    "policy_rule": 86400,        # 24 小时
-    "order_status": 300,         # 5 分钟
-    "after_sales": 3600,         # 1 小时
-    "chitchat": 600,             # 10 分钟
-    "default": 3600,             # 1 小时
+    "knowledge_qa": 604800,  # 7 天
+    "pricing_stock": 300,  # 5 分钟
+    "policy_rule": 86400,  # 24 小时
+    "order_status": 300,  # 5 分钟
+    "after_sales": 3600,  # 1 小时
+    "chitchat": 600,  # 10 分钟
+    "default": 3600,  # 1 小时
 }
 
 # L3: Jaccard 降级
@@ -97,11 +100,15 @@ CACHE_CONTENT_VERSION = os.getenv("CACHE_CONTENT_VERSION", "1")
 CACHE_CLEANUP_INTERVAL = _int_env("CACHE_CLEANUP_INTERVAL", 3600)  # 秒
 
 # 向后兼容别名（v6.1: 旧 env var 仍会读取，未设置时回退到新值）
-CACHE_L1_MAX = _int_env("CACHE_L1_MAX", 500)       # 不再用于内存 L1，保留避免 ImportError
-CACHE_L2_MAX = _int_env("CACHE_L2_MAX", 2000)       # 同上
-CACHE_TTL = _int_env("CACHE_TTL", 3600)             # 仅作为 default_ttl 兼容
-CACHE_SEMANTIC_THRESHOLD_SHORT = _float_env("CACHE_SEMANTIC_THRESHOLD_SHORT", CACHE_VECTOR_SCORE_THRESHOLD)
-CACHE_SEMANTIC_THRESHOLD_LONG = _float_env("CACHE_SEMANTIC_THRESHOLD_LONG", CACHE_VECTOR_SCORE_THRESHOLD)
+CACHE_L1_MAX = _int_env("CACHE_L1_MAX", 500)  # 不再用于内存 L1，保留避免 ImportError
+CACHE_L2_MAX = _int_env("CACHE_L2_MAX", 2000)  # 同上
+CACHE_TTL = _int_env("CACHE_TTL", 3600)  # 仅作为 default_ttl 兼容
+CACHE_SEMANTIC_THRESHOLD_SHORT = _float_env(
+    "CACHE_SEMANTIC_THRESHOLD_SHORT", CACHE_VECTOR_SCORE_THRESHOLD
+)
+CACHE_SEMANTIC_THRESHOLD_LONG = _float_env(
+    "CACHE_SEMANTIC_THRESHOLD_LONG", CACHE_VECTOR_SCORE_THRESHOLD
+)
 
 # ===== 会话配置 =====
 SESSION_WINDOW_SIZE = _int_env("SESSION_WINDOW_SIZE", 10)
@@ -135,9 +142,9 @@ LLM_ROUTER_TIMEOUT = _float_env(
 )  # v4.3: 从 8s 降至 4s，配合熔断器快速 fallback
 
 # ===== 重试配置 =====
-RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)   # v6.1: 3→指数退避可达 1s/2s/4s 三级
+RETRY_MAX_ATTEMPTS = _int_env("RETRY_MAX_ATTEMPTS", 3)  # v6.1: 3→指数退避可达 1s/2s/4s 三级
 RETRY_BASE_DELAY = _float_env("RETRY_BASE_DELAY", 1.0)
-RETRY_MAX_DELAY = _float_env("RETRY_MAX_DELAY", 30.0)     # v6.1: 指数退避最大延迟
+RETRY_MAX_DELAY = _float_env("RETRY_MAX_DELAY", 30.0)  # v6.1: 指数退避最大延迟
 RETRY_BACKOFF_FACTOR = _int_env("RETRY_BACKOFF_FACTOR", 2)  # v6.1: 指数退避因子
 
 # ===== v3.4: 安全配置 ======
@@ -305,14 +312,18 @@ REACT_SELF_REFLECTION = os.getenv("REACT_SELF_REFLECTION", "false").lower() == "
 TOOL_MAX_ROUNDS = _int_env("TOOL_MAX_ROUNDS", 3)
 
 # Agent Context Engineering: deterministic Tool Result Context Budget.
-TOOL_RESULT_OPTIMIZATION_ENABLED = os.getenv("TOOL_RESULT_OPTIMIZATION_ENABLED", "false").lower() == "true"
+TOOL_RESULT_OPTIMIZATION_ENABLED = (
+    os.getenv("TOOL_RESULT_OPTIMIZATION_ENABLED", "false").lower() == "true"
+)
 TOOL_RESULT_MAX_TOKENS = _int_env("TOOL_RESULT_MAX_TOKENS", 800)
 TOOL_RESULT_MAX_ITEMS = _int_env("TOOL_RESULT_MAX_ITEMS", 5)
 TOOL_RESULT_PRESERVE_RECENT = _int_env("TOOL_RESULT_PRESERVE_RECENT", 2)
 TOOL_RESULT_OFFLOAD_ENABLED = os.getenv("TOOL_RESULT_OFFLOAD_ENABLED", "false").lower() == "true"
 TOOL_RESULT_OFFLOAD_MIN_TOKENS = _int_env("TOOL_RESULT_OFFLOAD_MIN_TOKENS", 1200)
 TOOL_RESULT_STORE_TTL_SECONDS = _int_env("TOOL_RESULT_STORE_TTL_SECONDS", 900)
-TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED = os.getenv("TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED", "false").lower() == "true"
+TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED = (
+    os.getenv("TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED", "false").lower() == "true"
+)
 TOOL_RESULT_CACHE_ENABLED = os.getenv("TOOL_RESULT_CACHE_ENABLED", "false").lower() == "true"
 
 # ===== v4.0: 用户认证配置 =====
@@ -375,9 +386,7 @@ def resolve_checkpoint_backend(raw: str = "", *, dev_mode: bool = False) -> str:
     return value
 
 
-def derive_checkpoint_database_url(
-    explicit: str = "", *, database_url: str = ""
-) -> str | None:
+def derive_checkpoint_database_url(explicit: str = "", *, database_url: str = "") -> str | None:
     """把 SQLAlchemy 风格 DSN 安全转换为 psycopg 可用的 libpq DSN。
 
     只接受 postgres 协议；剥离 ``postgresql+psycopg2://`` 这类 SQLAlchemy
@@ -482,13 +491,21 @@ def validate_distributed_runtime_settings(
     gunicorn_workers: int,
     lock_enabled: bool,
     lock_backend: str,
+    agent_run_dispatch: str = "celery",
+    lock_ttl_seconds: float = 300.0,
+    task_time_limit_seconds: float = 180.0,
+    ttl_safety_margin_seconds: float = 30.0,
 ) -> list[str]:
     """生产分布式运行时一致性校验（纯函数，返回问题列表，空 = 通过）。
 
     规则：
       - 生产必须 Redis Session（进程内 memory 在多 worker 下分片、重启丢失）；
+      - 生产异步 Run 必须 `AGENT_RUN_DISPATCH=celery`（inline 在 API 进程内执行，
+        失去 worker 解耦，不能用于生产）；
       - gunicorn 多 worker 时要求 postgres checkpoint + redis session +
-        分布式 thread lock，否则跨 worker 正确性无法保证。
+        分布式 thread lock，否则跨 worker 正确性无法保证；
+      - thread lock TTL 必须大于 task time limit + safety margin，否则任务仍在执行时
+        锁就可能过期（stale worker 边界，见 docs）。
     开发/测试不做约束。
     """
     problems: list[str] = []
@@ -500,6 +517,12 @@ def validate_distributed_runtime_settings(
             f"(got {session_backend!r}); in-process memory sessions are not shared "
             "across gunicorn workers/replicas and are lost on restart"
         )
+    if agent_run_dispatch != "celery":
+        problems.append(
+            "Production requires AGENT_RUN_DISPATCH=celery "
+            f"(got {agent_run_dispatch!r}); inline runs execute inside the API "
+            "process and lose worker decoupling"
+        )
     if gunicorn_workers > 1:
         if checkpoint_backend != "postgres":
             problems.append(
@@ -508,8 +531,7 @@ def validate_distributed_runtime_settings(
             )
         if session_backend != "redis":
             problems.append(
-                f"GUNICORN_WORKERS={gunicorn_workers}>1 requires "
-                "SESSION_STORAGE_BACKEND=redis"
+                f"GUNICORN_WORKERS={gunicorn_workers}>1 requires SESSION_STORAGE_BACKEND=redis"
             )
         if not lock_enabled or lock_backend != "redis":
             problems.append(
@@ -517,7 +539,15 @@ def validate_distributed_runtime_settings(
                 "AGENT_RUN_THREAD_LOCK_ENABLED=true and "
                 "AGENT_RUN_THREAD_LOCK_BACKEND=redis (per-thread cross-process lock)"
             )
+    if lock_ttl_seconds <= task_time_limit_seconds + ttl_safety_margin_seconds:
+        problems.append(
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS "
+            f"({lock_ttl_seconds}) must exceed AGENT_RUN_TASK_TIME_LIMIT "
+            f"({task_time_limit_seconds}) + safety margin ({ttl_safety_margin_seconds}); "
+            "otherwise the lock can expire while the task is still running"
+        )
     return problems
+
 
 # ===== v4.1: SSE 流式输出配置 =====
 SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
@@ -601,7 +631,9 @@ def validate_required_config():
         errors.append("OPENAI_API_KEY 未配置或使用占位符")
 
     # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
-    if not JWT_SECRET or any(p in JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+    if not JWT_SECRET or any(
+        p in JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
+    ):
         errors.append("JWT_SECRET 未配置或使用默认值/弱密钥")
     elif len(JWT_SECRET) < 32:
         errors.append(
@@ -609,7 +641,9 @@ def validate_required_config():
         )
 
     # Session Token Secret
-    if not SESSION_TOKEN_SECRET or any(p in SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+    if not SESSION_TOKEN_SECRET or any(
+        p in SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
+    ):
         errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值/弱密钥")
     elif len(SESSION_TOKEN_SECRET) < 32:
         errors.append(
@@ -619,7 +653,9 @@ def validate_required_config():
     if not _DEV_MODE and "*" in CORS_ORIGINS:
         errors.append("Production CORS_ORIGINS must not contain wildcard *")
     if not _DEV_MODE and not CORS_ORIGINS:
-        errors.append("Production CORS_ORIGINS is empty — frontend cross-origin requests will fail. Set CORS_ORIGINS or ALLOWED_ORIGINS")
+        errors.append(
+            "Production CORS_ORIGINS is empty — frontend cross-origin requests will fail. Set CORS_ORIGINS or ALLOWED_ORIGINS"
+        )
 
     if not _DEV_MODE and not DATABASE_URL:
         errors.append("Production requires DATABASE_URL (PostgreSQL)")
@@ -636,7 +672,7 @@ def validate_required_config():
             )
         )
 
-    # P0-2 / P0-6: 生产 session + gunicorn 多 worker 一致性（纯函数，便于测试）
+    # P0-2 / P0-6: 生产 session + dispatch + gunicorn 多 worker + lock TTL（纯函数）
     errors.extend(
         validate_distributed_runtime_settings(
             dev_mode=_DEV_MODE,
@@ -645,6 +681,9 @@ def validate_required_config():
             gunicorn_workers=_int_env("GUNICORN_WORKERS", 0),
             lock_enabled=AGENT_RUN_THREAD_LOCK_ENABLED,
             lock_backend=AGENT_RUN_THREAD_LOCK_BACKEND,
+            agent_run_dispatch=AGENT_RUN_DISPATCH,
+            lock_ttl_seconds=AGENT_RUN_THREAD_LOCK_TTL_SECONDS,
+            task_time_limit_seconds=float(AGENT_RUN_TASK_TIME_LIMIT),
         )
     )
 
@@ -667,7 +706,9 @@ def validate_required_config():
     # v6.3: 当 EMBEDDING_API_KEY 为空（即从 OPENAI_API_KEY 回退）时发出警告
     _embedding_raw = os.getenv("EMBEDDING_API_KEY", "")
     if not _DEV_MODE and not _embedding_raw:
-        warnings.append("EMBEDDING_API_KEY not set, reusing OPENAI_API_KEY for embedding service — configure a dedicated key for production")
+        warnings.append(
+            "EMBEDDING_API_KEY not set, reusing OPENAI_API_KEY for embedding service — configure a dedicated key for production"
+        )
     if not _DEV_MODE and AGENT_RUN_DISPATCH == "inline":
         warnings.append(
             "AGENT_RUN_DISPATCH=inline in production: runs execute inside the API "
