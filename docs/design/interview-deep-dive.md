@@ -1,7 +1,16 @@
 # 面试深挖问题准备（基于实际代码）
 
-> 本文档基于项目实际代码，准备面试官最可能追问的 8 个深度问题。
+> 本文档基于项目实际代码，准备面试官最可能追问的深度问题。
 > 每个问题包含：代码位置引用 + 建议回答 + 加分点。
+>
+> **结构**：Q1–Q10 是业务链路 / RAG 侧的通用问题；**R1–R11 是分布式 Agent Runtime
+> 侧的问题**，这是本项目当前最强的工程亮点，也是最容易被追问到证据边界的地方——
+> 建议优先准备 R 组。
+>
+> **口径纪律**：分布式 runtime 的证据等级是 **Level 2 = CI VERIFIED**
+> （真实 PostgreSQL + Redis + 多进程 Celery + SIGKILL 混沌测试），
+> **Level 3（真实生产集群 / 多副本长期运行 / 真实 ERP 写操作 / K8s autoscaling）
+> 是 NOT_VERIFIED**。任何时候都不要把 Level 2 说成"生产集群已验证"。
 
 ---
 
@@ -30,7 +39,7 @@ workflow.add_conditional_edges(
 ### 加分点
 
 - 提到 "状态机比对话驱动更适合客服场景——客服不是自由聊天，是有明确流程的"
-- 提到 "LangGraph 支持 checkpointer，未来可以做对话回溯和调试"
+- 提到 "LangGraph 支持 checkpointer，我用官方 `AsyncPostgresSaver` 做了持久化 checkpoint，进程重启/换 worker 都能续跑"
 - 提到 "2024-2025 年 LangGraph 已经成为多 Agent 编排的事实标准"
 
 ### 代码引用
@@ -204,7 +213,7 @@ async def test_blackboard_concurrent_writes():
 
 - 提到 "asyncio.Lock 不是线程锁，是协程锁——只在协程切换点检查，不需要 OS 级别的互斥"
 - 提到 "httpx.AsyncClient 的连接池是内建的，不需要额外加锁"
-- 提到 "如果未来上多 Worker（Gunicorn），需要用 Redis 做跨进程状态同步"
+- 提到 "多 Worker（Gunicorn）跨进程状态我已经做了：用 Redis 做 per-thread 分布式锁（owner token + TTL + Lua 原子释放），并把 checkpoint 换成 PostgreSQL、session 换成 Redis，生产启动时强制校验这三件套，缺一个就 fail-fast 拒绝启动"
 
 ### 代码引用
 
@@ -354,24 +363,38 @@ evict_count = max(1, len(cache) * 5 // 100)
 
 ### 核心回答
 
-> "五层测试金字塔：单元 → 集成 → E2E → 压力。全部可离线运行（E2E Real 除外）。
+> "四层测试结构：单元 → 集成 → E2E → 压力，外加一条**真实基础设施验收轨**
+> （分布式 runtime）。前四条全部可离线运行（E2E Real 除外）；
 > 当前 collected 数用 `pytest --collect-only -q` 现场获取，不背历史数字。"
 
 | 层级 | 目录 | 覆盖范围 | 依赖 |
 |------|------|---------|------|
-| 单元测试 | `tests/unit/` | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具/Tool Result/BM25 lifecycle/point-id 迁移 | 无外部依赖 |
+| 单元测试 | `tests/unit/` | API/中间件/Agent/Session/Cache/Router/RAG/LLM/工具/Tool Result/BM25 lifecycle/point-id 迁移/分布式 runtime 契约 | 无外部依赖 |
 | 集成测试 | `tests/integration/` | 图调用/ERP 适配器/多模态/BM25 重启 | Mock LLM |
+| **真实基础设施验收** | **`tests/integration/runtime/`** | AgentRun 状态机 / checkpoint 跨进程 / 同 thread 串行 / 跨 thread 并发 / queue-worker 解耦 / worker SIGKILL 续跑 / 重试 / DLQ 重放 / 副作用幂等 / 事件投递语义 | **真实 PostgreSQL + 真实 Redis + 多进程 Celery** |
 | E2E 测试 | `tests/e2e/` | 全图执行/生产特性/真实 LLM（`real_llm` 标记默认跳过） | Mock/Real LLM |
 | 压力测试 | `tests/stress/` | 并发/吞吐 | 无外部依赖 |
 
 **设计决策**：
-- **Mock LLM**：所有测试用 `MockLLMClient` 替代真实 API，确保 100% 离线可运行、CI 友好
+- **Mock LLM**：非 runtime 测试用 `MockLLMClient` 替代真实 API，确保离线可运行、CI 友好
+- **runtime 轨必须真实**：分布式正确性用 mock 证明不了。锁的跨进程互斥、
+  checkpoint 的跨进程可见性、消息的 at-least-once 重投——这些必须用真的
+  PostgreSQL、Redis 和真的多进程 worker 才能验证。该轨在
+  `TEST_DISTRIBUTED_DB_URL` / `TEST_REDIS_URL` 未设置时 skip，但经 `make runtime-e2e`
+  运行时 Makefile 始终注入这两个变量，**基础设施缺失就是硬 FAIL，不静默跳过**。
+- **契约测试锁死架构不变量**：`tests/unit/test_runtime_architecture_contract.py` 断言
+  API 执行边界与 worker 共用同一个锁 key namespace 且共享同一个锁管理器实例；
+  `test_execution_mode_contract.py` 直接读源码断言快路径**不含**任何
+  `dispatch_run` / `apply_async` / Celery 调用（防止有人把 `/api/chat` 悄悄改成走 worker）；
+  `test_runtime_metrics_contract.py` 断言指标名与高基数标签约束。
 - **asyncio_mode = auto**：pytest-asyncio 自动识别异步测试，不需要手动标记
 - **Fixture 复用**：`ServiceContainer` 作为 session-scoped fixture，避免重复初始化
 
 ### 代码引用
 
 - [tests/](../../tests/) — 测试目录
+- [tests/integration/runtime/](../../tests/integration/runtime/) — 真实基础设施验收轨
+- [tests/unit/test_runtime_architecture_contract.py](../../tests/unit/test_runtime_architecture_contract.py) — 架构不变量契约
 - [pyproject.toml](../../pyproject.toml) — 测试配置
 
 ---
@@ -511,6 +534,340 @@ if _RE_INJECTION_DISCLOSURE.search(text):
 - [scripts/import_eval_corpus.py](../../scripts/import_eval_corpus.py) — 幂等语料导入 + gold 覆盖率审计 + import manifest
 - [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md) — canonical 评测文档（artifact schema、populations、当前状态）
 - [tests/unit/test_rag_eval_harness.py](../../tests/unit/test_rag_eval_harness.py) — 评测 harness 回归测试
+
+---
+
+## R 组：分布式 Agent Runtime（当前最强工程亮点）
+
+> 这一组建议**优先准备**。每题都标注了代码位置、建议回答的骨架、以及不能越过的边界。
+
+### R1：`thread_id` / `run_id` / `task_id` / `AgentRun` 有什么区别？为什么必须分开？
+
+> **建议回答骨架**：
+>
+> 这四个概念解决的是四个正交的问题，混在一起会直接导致幂等失效：
+>
+> | 概念 | 粒度 | 是什么 | 唯一性 |
+> |---|---|---|---|
+> | `thread_id` | 对话级 | == `session_id` == LangGraph thread，一整条多轮会话的状态时间线 | 同一会话复用，**跨请求不变** |
+> | `run_id` | 单轮执行 | 一次 LangGraph 图执行，== `agent_runs.id` | 每轮唯一 |
+> | `task_id` | 一次队列投递 | Celery task id | **同一个 run 可以有多个**（重试 / 重放会产生新 task） |
+> | `AgentRun` | 业务记录 | `agent_runs` 这一行，状态真相源 | 一个 `run_id` 对应一行 |
+>
+> 最容易踩的坑是 `task_id` 和 `run_id`：一个 run 被重投三次就有三个 task_id，
+> 所以**不能用 task_id 做业务幂等键**。业务幂等必须锚在 `run_id` 上。
+>
+> 我踩过的具体坑：DLQ 重放时我一开始新建了一个 run，结果工具幂等键是
+> `run_id:tool_call_id`，换了 run_id 就等于绕过幂等 ledger，把已经成功的退款
+> 又执行了一遍。所以 `scripts/replay_dead_run.py` 强制**复用原 run_id**，只产生新的
+> 队列投递。
+>
+> 另一个禁令：**禁止一个请求新建一个 thread_id**。否则多轮会话的图状态会被切碎，
+> 上下文丢失，而且 checkpoint 表按 thread 分片会无限增长。
+
+**代码引用**：`runtime/__init__.py`（四概念定义）、`runtime/statuses.py`、`api/routes/runs.py`、`scripts/replay_dead_run.py`
+
+---
+
+### R2：checkpoint、session memory、response cache、tool store 有什么区别？为什么不能混为一谈？
+
+> **建议回答骨架**：
+>
+> 这四样东西经常被混着讲，但它们解决的是完全不同的问题：
+>
+> | 概念 | 存什么 | 键 | 存储 | 失效语义 |
+> |---|---|---|---|---|
+> | **LangGraph checkpoint** | 图执行的 channel 状态快照 | `thread_id` | PostgreSQL（生产）/ 内存（开发） | 支撑**崩溃恢复与断点续跑**；节点边界粒度 |
+> | **Session Memory** | 会话窗口内的消息历史与摘要 | `session_id` | Redis（生产） | 支撑**上下文连贯**；按 token 预算滚动淘汰 |
+> | **Response Cache** | 完整的最终回答 | 查询内容的 MD5 / 向量 / Jaccard 相似 | Redis + Qdrant | 支撑**重复问题短路**，跳过整条 Router→Agent→LLM 链路 |
+> | **Tool Result Store** | 大体积工具返回值的落盘副本 | 独立 store key | 外部存储 + offload | 支撑**context 预算**，超预算时 offload、按需 recovery |
+>
+> 一句话区分：**checkpoint 存的是"执行到哪一步"，session memory 存的是"聊了什么"，
+> response cache 存的是"这个问题的答案"，tool store 存的是"这个工具返回了什么大块数据"。**
+>
+> 它们不能互相替代：把 response cache 的语义套到 checkpoint 上会导致恢复时状态不一致；
+> 把 session memory 当 checkpoint 用会导致崩溃后无法续跑。
+>
+> 状态归属的完整表格见 `docs/design/runtime-state-ownership.md`。
+
+**代码引用**：`core/checkpointer.py`、`core/session/`、`cache/response_cache.py`、`core/tool_result_*.py`、`docs/design/runtime-state-ownership.md`
+
+---
+
+### R3：为什么是 at-least-once 而不是 exactly-once？你怎么保证不重复？
+
+> **建议回答骨架**：
+>
+> 端到端 exactly-once 在分布式系统里代价极高，而且做不到——外部副作用（ERP 写操作）
+> 不在你的事务边界内。所以我选择**明确声明 at-least-once，然后把幂等做实**，而不是
+> 嘴上说 exactly-once。
+>
+> 投递为什么必然是 at-least-once：Celery 配了 `task_acks_late`（任务执行完才 ACK）
+> + `task_reject_on_worker_lost`（worker 丢了就重投）+ Redis `visibility_timeout`
+> （未 ACK 的任务超时后重新可见）。这三条一起保证了**worker 崩溃时任务不会丢**——
+> 代价就是可能重复投递。
+>
+> 幂等我分三层做：
+>
+> 1. **run 级**：`AgentRun` 终态重复投递直接 no-op（executor 开头检查终态）；
+>    创建时还有 `idempotency_key` 唯一约束防重复创建。
+> 2. **thread 级**：Redis per-thread 锁保证同一 thread 不会有两个执行并发。
+> 3. **工具级**：`tool_side_effects` ledger，`(tool_name, operation_key)` 数据库唯一约束，
+>    `operation_key = run_id:tool_call_id`；已 SUCCEEDED 的记录重投递时直接返回历史结果。
+>
+> **关键是我会主动说清楚 ledger 的边界**：它只保证"同一个 Agent 不重复发起同一副作用"。
+> 如果下游 ERP 自身需要端到端幂等，那必须下游 API 接受 idempotency key，或者做人工对账——
+> 这不是我这边单方面能保证的。我不会假装解决了这个问题。
+
+**代码引用**：`runtime/executor.py`、`runtime/celery_app.py`、`runtime/side_effects.py`、`tools/tool_registry.py`
+
+---
+
+### R4：worker 崩溃了会发生什么？你怎么验证的？
+
+> **建议回答骨架**：
+>
+> 分三层讲恢复：
+>
+> 1. **消息层**：未 ACK 的任务经 Redis `visibility_timeout` 重新可见，被另一个 worker 消费。
+> 2. **执行层**：数据库 `agent_runs` 上有 `worker_id` + `lease_expires_at` 租约。
+>    原 worker 崩溃后租约过期，新 worker 的 `mark_running` 用条件更新接管，`attempt` 加一。
+> 3. **状态层**：**从 PostgreSQL checkpoint 的 `next` 续跑，不是从头重跑。**
+>
+> 第三点是我修过的一个真 bug。LangGraph 的 `ainvoke(state, cfg)` 会从 START 重新执行
+> 并**覆盖 channel 值**；只有 `ainvoke(None, cfg)` 才从 checkpoint 的 `next` 续跑。
+> `runtime/bootstrap.py::invoke_graph_with_resume` 统一了这个判定：checkpoint 的 `next`
+> 非空就续跑，否则正常执行。快路径 `api/app.py::_pending_steps` 同语义。
+>
+> **验证方式**（这是加分点）：
+> - `tests/integration/runtime/test_worker_checkpoint_recovery.py` 断言的不只是"最终成功"，
+>   而是**第一个节点没有重跑**（计数器 == 1）、第二个节点（崩溃时未完成的步骤）被重做、
+>   `attempt >= 2`、`worker_id` 确实换了。
+> - `make runtime-chaos`（`scripts/test_worker_crash_recovery.py`）用 `os.killpg(SIGKILL)`
+>   把整个 worker **进程组**杀掉——只杀父进程的话 prefork 子进程还活着，这个测试就什么都没验证到。
+>   之后断言副作用计数器**仍然是 1**，同时工具真实调用次数 ≥ 2（否则"计数器是 1"可能只是因为
+>   它根本没重试）。
+
+**代码引用**：`runtime/bootstrap.py`、`runtime/executor.py`、`runtime/run_service.py`、`tests/integration/runtime/test_worker_checkpoint_recovery.py`、`scripts/test_worker_crash_recovery.py`
+
+---
+
+### R5：retry 的背退策略是什么？retry 用尽之后呢？
+
+> **建议回答骨架**：
+>
+> 先讲错误分类，因为不分类就退避是错的：
+> - **transient / retryable**：provider 429/5xx、timeout、PostgreSQL 不可用、
+>   checkpoint 初始化失败、工具 PENDING 认领租约未过期 → `RETRYING` + 指数退避重投。
+> - **permanent**：4xx 参数错误、schema 校验失败、工具幂等键指纹冲突
+>   （同 key 不同参数）→ 直接 `FAILED`，**不重试**，因为重试不会变好。
+>
+> 退避策略是指数退避 + jitter + 硬上限：`AGENT_RUN_RETRY_BASE_DELAY` 起步，
+> 每 attempt 翻倍，叠加 `AGENT_RUN_RETRY_JITTER` 比例的随机抖动防止惊群，
+> 封顶 `AGENT_RUN_RETRY_MAX_DELAY`。attempt 上限由 `AGENT_RUN_MAX_ATTEMPTS` 约束——
+> **不做无限重试**。
+>
+> **retry 发布失败怎么办**（这是个容易被追问的细节）：状态先落库成 `RETRYING` 并写
+> `next_retry_at`，再尝试重新投递。**如果投递本身失败**（Redis/Celery 不可达），
+> run 停在 `RETRYING` 而不是假装排队成功；恢复后由对账/replay 路径捞起来。
+> 关键设计是**先写库再投递**——这样"投递成功但写库失败"不会留下一个执行了但无记录的 run；
+> 代价是"写库成功但投递失败"会留下一个 `RETRYING` 的孤儿，这个方向是安全的，
+> 因为它是可观测、可重放的状态，而不是静默丢失。
+>
+> **retry 用尽** → `DEAD_LETTER` 终态 + 写 `agent_dead_letters` 不可变历史
+> （`run_id` 唯一，含 `attempt_count / error_type / error_code / entered_at / worker_id`），
+> 可以通过 `GET /api/runs/dead` 查询，通过 `scripts/replay_dead_run.py` 人工重放。
+>
+> 我要强调这是 **application-level dead-letter**，不是 broker-native DLX。
+
+**代码引用**：`runtime/errors.py`、`runtime/retry.py`、`runtime/executor.py`、`runtime/run_service.py`、`scripts/replay_dead_run.py`
+
+---
+
+### R6：分布式锁怎么实现的？为什么不能简单地 SETNX 然后 DEL？
+
+> **建议回答骨架**：
+>
+> 锁 key 是 `agent:thread-lock:{thread_id}`，语义是 owner token + TTL + 原子释放：
+>
+> - **获取**：`SET key <owner> NX PX <ttl>`，其中 owner 是每次获取生成的唯一 token
+>   （含 hostname + pid + uuid），不是裸的 `True`。
+> - **释放**：用 Lua 脚本 `if redis.call('get',KEYS[1]) == ARGV[1] then return redis.call('del',KEYS[1])`——
+>   **只有 owner 能删**。
+> - **续期**：同样用 Lua 比对 owner 后再 `PEXPIRE`，防止续期把别人的锁延长。
+>
+> 为什么不能 `SETNX` 然后 `DEL`：假设 A 拿锁执行太久超过 TTL 过期，B 拿到了锁，
+> 这时 A 执行完去 `DEL`——**A 删掉的是 B 的锁**。第三个 worker C 就能进来，
+> 和 B 并发执行。加 owner 比对之后，A 的删除会被拒绝（B 的 token 不等于 A 的），B 的锁安全。
+>
+> 还有一点值得说：**API 执行边界和 worker 共用同一个 key namespace，并且共享同一个
+> 锁管理器单例**。这是靠契约测试锁死的——如果哪天两边不小心用了不同的 key 前缀
+> 或者各建各的锁管理器，同一个会话就会被 API 和 worker 并发写。这条不变量有专门的
+> 单元测试（不只是测"锁能用"，而是测"两个入口共用同一个锁"）。
+>
+> 最后声明范围：这是**单个 Redis 实例上的跨进程互斥**，我没有实现 Redlock 集群算法，
+> 也不声称在 Redis 故障切换下仍然正确。
+
+**代码引用**：`runtime/thread_lock.py`、`core/concurrency/distributed_lock.py`、`api/app.py`、`tests/unit/test_runtime_architecture_contract.py`
+
+---
+
+### R7：锁的 TTL / lease / fencing 边界到底在哪？（这题最能筛出深度）
+
+> **建议回答骨架**：
+>
+> 分清三件事：
+>
+> | 机制 | 作用 | 现状 |
+> |---|---|---|
+> | **Redis lock TTL** | 防止持有者崩溃后死锁 | 已实现 |
+> | **DB ownership lease**（`lease_expires_at`）| 决定哪个 worker 有权把 run 推进到终态 | 已实现 |
+> | **fencing token / DB version check** | 让过期持有者的写入**无条件被拒** | **未实现** |
+>
+> 我做的缓解：
+> - **执行期间续租**：`_heartbeat_loop` 按 `AGENT_RUN_HEARTBEAT_SECONDS` 周期**同时**续
+>   DB 租约和 Redis 锁 TTL，观测指标是 `agent_thread_lease_renewed_total{outcome}` 和
+>   `agent_worker_heartbeat{outcome}`——**续租失败是有计数器的**，不是静默的。
+> - **启动强制校验**：`AGENT_RUN_THREAD_LOCK_TTL_SECONDS` 必须大于
+>   `AGENT_RUN_TASK_TIME_LIMIT` + 30 秒安全余量，否则锁可能在任务还在跑时就过期，
+>   应用直接拒绝启动。
+>
+> 我**没有**解决的边界：如果一个 worker 因为 GC 停顿或宿主机卡顿，pause 时间超过整个 TTL
+> （连续租都没来得及发出去），锁过期 → B 拿锁 → A 恢复 → **A 和 B 同时改同一个 thread**。
+>
+> 这里我要诚实地区分后果：
+> - **终态不会被覆盖**：A 恢复后调 `mark_succeeded` 会被 `from_statuses={RUNNING}` 的条件更新
+>   挡下，因为租约已经被 B 接管，A 不再是 owner。
+> - **但节点级副作用仍可能重复**：这就是为什么工具幂等 ledger 是必须的，而不是可选优化。
+>
+> 严格的解法是引入 fencing token（每次获取锁时递增一个单调 token，写操作带上它，
+> 存储层拒绝比当前 token 小的写入）或者数据库版本号乐观锁。**这是我知道的缺口，
+> 我不会假装已经解决。**
+
+**代码引用**：`runtime/executor.py::_heartbeat_loop`、`core/config.py::validate_distributed_runtime_settings`、`docs/design/distributed-agent-runtime.md` §5.1
+
+---
+
+### R8：工具副作用的幂等是怎么保证的？key 是怎么设计的？
+
+> **建议回答骨架**：
+>
+> ledger 在 `runtime/side_effects.py`，表是 `tool_side_effects`，
+> `(tool_name, operation_key)` 上有数据库唯一约束。
+>
+> **key 设计**：`operation_key = run_id:tool_call_id`，由
+> `build_tool_idempotency_key()` 构造。这是我踩坑后改的——一开始我想用
+> "工具名 + 参数哈希"，但那样用户重复执行同一个合法操作（比如两次同样金额的退款
+> 申请）会被误判成重复而拒绝。锚在 `run_id + tool_call_id` 上，语义才是
+> **"这一次 run 的这一个工具调用，重投多少次都只执行一次"**。
+>
+> 三种状态：
+> - `PENDING`（已认领未完成）：**认领租约**（`DEFAULT_CLAIM_TTL_SECONDS`）未过期时，
+>   第二个执行者**不允许**重复触发副作用，而是抛 transient 让整个 run 退避重投。
+>   只有租约过期（认领后崩溃）才允许接管重放。这里保守是有意的：宁可让调用方退避重试，
+>   也不要误判成"可以接管"而重复扣款。
+> - `SUCCEEDED`：重投递时**直接返回历史结果**，不重新执行。
+> - 指纹冲突：同一个 `operation_key` 但参数不同 → `PermanentError`（这是 bug 或攻击信号，
+>   不该重试）。
+>
+> 落地方式：写工具用 `ToolRegistry.register(side_effect=True)` 声明，
+> `agents/base_agent.py` 把 LLM 返回的 `tool_call_id` 透传给 registry，
+> 这样在 Run 执行上下文里**自动**走 ledger，不需要每个工具作者记得手动包。
+>
+> 再次强调边界：这防的是"同一个 Agent 重复发起同一副作用"。下游 ERP 的端到端幂等
+> 仍然需要它自己接受 idempotency key。
+
+**代码引用**：`runtime/side_effects.py`、`tools/tool_registry.py`、`agents/base_agent.py`、`tests/integration/runtime/test_tool_idempotency.py`
+
+---
+
+### R9：Redis 挂了 / PostgreSQL 挂了会怎样？
+
+> **建议回答骨架**：
+>
+> 分组件说，因为降级策略完全不同：
+>
+> | 组件挂掉 | 影响 | 行为 |
+> |---|---|---|
+> | **Redis（thread lock）不可达** | 无法保证同 thread 互斥 | **fail-safe 而不是 fail-open**：不执行，把 run 延迟重调度（`lock_backend_unavailable`），等 Redis 恢复。宁可排队也不并发写 |
+> | **Redis（事件流）不可达** | run 进度事件发不出去 | 事件发布降级为 no-op，**不影响 run 执行和状态查询**（事件流不是真相源） |
+> | **Redis（session）不可用** | 无法读到会话历史 | 生产**启动就 fail-fast**，不会带着进程内 memory 起来——因为多副本下它会静默分片 |
+> | **PostgreSQL（业务库）不可达** | AgentRun 读写失败 | 标为 transient → 退避重试 |
+> | **PostgreSQL（checkpoint）不可用** | 图状态无法持久化 | 生产 checkpoint 初始化**失败即 fail-closed**，绝不静默回退 `MemorySaver` |
+>
+> 这里我想强调一个设计原则：**关键的正确性依赖必须 fail-closed，不能降级成
+> "看起来能跑但语义错了"**。内存 checkpoint 在开发环境是合理的便利，
+> 在生产环境是正确性漏洞——多 worker 各自持有互不相干的状态，看起来服务正常，
+> 但重启就丢、跨副本就分片。所以生产直接不让它起来。
+>
+> 反过来，**观测性的东西可以降级**：事件流挂了不影响业务，因为业务真相在数据库里。
+
+**代码引用**：`runtime/executor.py`、`runtime/events.py`、`core/checkpointer.py`、`core/config.py`、`docs/operations/distributed-runtime-runbook.md`
+
+---
+
+### R10：为什么快路径 `/api/chat` 不走 worker？
+
+> **建议回答骨架**：
+>
+> 这是个明确的架构取舍，不是遗漏：
+>
+> - **快路径**（`/api/chat`、`/api/chat/stream`）需要低延迟，客服对话要立刻出字。
+>   走队列会引入投递 + 轮询的额外延迟，而且 SSE 长连接的生命周期和 worker 任务
+>   生命周期对不上。所以快路径**始终 inline**，在 API 进程内直接执行 LangGraph。
+> - **异步路径**（`/api/runs`）面向长任务和系统间调用：立即返回 run_id，
+>   调用方轮询或订阅事件流。worker 崩溃、水平扩展、优雅停机这些能力只在这条路径上有意义。
+>
+> 两条路径**共享同一个 checkpoint 后端**，所以状态是连贯的。
+>
+> 这条不变量我是用测试锁死的：`test_execution_mode_contract.py` 直接读
+> `api/app.py::_run_graph` 的源码，断言里面有 `ainvoke` 且**不含**
+> `dispatch_run` / `apply_async` / `execute_run` / `celery`。这样以后有人想把快路径
+> 悄悄改成走队列，CI 会直接失败。
+>
+> 另外有个配置上的坑值得提：`AGENT_EXECUTION_MODE`（canonical）和
+> `AGENT_RUN_DISPATCH`（历史遗留名）两个旋钮会冲突，我的处理是 canonical 优先 +
+> 冲突时告警，但不因为仓库 `.env` 里的 `AGENT_RUN_DISPATCH=inline`（开发默认）
+> 而拒绝启动。
+
+**代码引用**：`core/config.py`、`api/app.py`、`tests/unit/test_execution_mode_contract.py`
+
+---
+
+### R11：你说这个是"CI 验证通过"，具体验证到哪一步了？边界在哪？
+
+> **建议回答骨架**：
+>
+> 我明确分三级，而且我不会把 Level 2 说成生产验证：
+>
+> **Level 1 — IMPLEMENTED（代码存在）**：PostgreSQL checkpoint、Redis session、
+> Redis per-thread lock、AgentRun 真相源、Celery + Redis broker、worker 执行、
+> `run_id` 投递、acks_late / reject_on_worker_lost / visibility_timeout、retry、
+> tool ledger、Prometheus 指标。
+>
+> **Level 2 — CI VERIFIED（真实基础设施 + 命令 + artifact）**：
+> `make runtime-e2e` 用**真实 PostgreSQL + 真实 Redis + 多进程 Celery**；
+> `make runtime-chaos` SIGKILL 整个 worker 进程组验证续跑与副作用不重复；
+> `make runtime-verify` 产出带 `tested_code_sha` + `generated_at` 的
+> `distributed-runtime-evidence/v2` artifact。CI 里 `runtime-e2e` job 用
+> postgres + redis service container 跑，基础设施缺失是硬 FAIL 不静默 skip。
+>
+> **Level 3 — NOT_VERIFIED（未验证）**：真实生产集群、多副本长期稳定性、
+> 真实用户流量、**真实 ERP 写操作**、大规模 queue backlog、K8s autoscaling、
+> multi-region。
+>
+> 我会特别点出两个 Level 2 证明了什么、没证明什么：
+> - 证明了"同一 thread 在多进程下真的不重叠"——而且是用数据库的
+>   `started_at`/`finished_at` 时间区间断言的，不是只看"SETNX 有没有成功"。
+> - 证明了"不同 thread 真的并发"——用墙钟耗时断言。
+> - 但**没有**证明 Redis 故障切换下的行为（我是单 Redis 实例，没实现 Redlock）。
+> - 也**没有**证明 fencing——那个缺口我前面说了，我没做。
+>
+> 再说一句我会主动交代的：RAG 那块当前正式指标是 NOT_VERIFIED（provider 凭据失效），
+> 我不会报 Hit/MRR 数字。分布式 runtime 的证据等级高，不代表 RAG 的证据等级也高，
+> 这两件事要分开说。
+
+**代码引用**：`docs/reference/current-state.md`、`docs/reference/distributed-runtime-interview-evidence.md`、`artifacts/distributed-runtime/`、`tests/integration/runtime/`
 
 ---
 

@@ -2,24 +2,40 @@
 
 > 本文档按 `api.app_factory:app` 的真实 FastAPI 路由同步。交互式文档：http://localhost:8000/docs（Swagger UI）。
 > OpenAPI 快照：`docs/openapi.json` 由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-> 数量校验用 `python3 scripts/project_facts.py` 或 `python3 scripts/generate_openapi.py --check`，不要手工维护计数。
+> 数量校验用 `make openapi-check` 或 `python3 scripts/project_facts.py`。
+>
+> **本文档的所有数量都不是手工维护的。** 下面的 `openapi-surface` 注释行是机器可校验的
+> 锚点，由 `scripts/audit_doc_consistency.py::check_api_reference_surface` 与
+> `app.openapi()` 对比；漂移即硬失败。改路由后先跑 `python3 scripts/generate_openapi.py`
+> 重新生成快照，再按生成结果更新这一行。
 
 ---
 
 ## 当前接口总览
 
-> 下表数量由 `app.openapi()` 在 2026-09-30 导出（53 个 HTTP 路径 / 55 个操作）。
-> 漂移守卫：`make openapi-check`。
+<!-- openapi-surface: paths=58 operations=60 api_operations=54 -->
 
-| 类型 | 数量 | 说明 |
+| 类型 | 数量 | 来源 |
 |------|------|------|
-| HTTP 路径 | 53 | 当前 `app.openapi()` 导出的全部 HTTP 路径（含页面，不含 WebSocket） |
-| HTTP 操作 | 55 | 同一路径可含多 method；其中 49 个位于 `/api/*` 下 |
-| `/api/*` 业务操作 | 49 | 认证、对话、多模态、会话、监控、知识库、缓存、告警、Prompt 管理等业务接口 |
-| WebSocket | 1 | `WS /ws/chat` 实时双向对话 |
-| HTML 页面 | 5 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html` |
+| HTTP 路径 | **58** | `app.openapi()["paths"]` |
+| HTTP 操作 | **60** | 同一路径可含多 method |
+| `/api/*` 业务操作 | **54** | 认证、对话、多模态、异步 Run、会话、监控、知识库、缓存、告警、Prompt 管理 |
+| 非 `/api/*` 路径 | 6 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
+| WebSocket | 1 | `WS /ws/chat` 实时双向对话（OpenAPI 不含 WebSocket 路由，单独列出） |
 
-> 说明：OpenAPI 不包含 WebSocket 路由，因此 `WS /ws/chat` 在本文档中单独列出。
+### 按域分组（同样由生成结果导出）
+
+| 组 | 操作数 | 组 | 操作数 |
+|---|---|---|---|
+| `/api/auth` | 8 | `/api/monitoring` | 5 |
+| `/api/chat` | 7 | `/api/admin` | 5 |
+| **`/api/runs`（异步 Run）** | **5** | `/api/sessions` | 4 |
+| `/api/alerts` | 4 | `/api/knowledge` | 4 |
+| `/api/cache` | 2 | `/api/feedback` | 2 |
+| `/api/history` | 2 | `/api/tts` | 2 |
+| `/api/health` | 1 | `/api/kpi` | 1 |
+| `/api/metrics` | 1 | `/api/circuit-breaker` | 1 |
+| `/metrics/prometheus` | 1 | HTML 页面 | 5 |
 
 ---
 
@@ -120,6 +136,57 @@ ws.onmessage = (event) => {
 | `transcription` | string | 语音转录文本（仅 `type=voice`） |
 | `image_url` | string | 图片 data URL（仅 `type=image`） |
 | `message` | string | 原始消息文本（voice 时为转录文本，image 时为用户输入） |
+
+### 异步 Run（分布式 Agent Runtime）
+
+这一组是**异步执行路径**：API 只负责落库 + 入队并立即返回，真正的 LangGraph 执行在
+独立 Celery worker 进程里完成。实时快路径（上面的 `/api/chat`、`/api/chat/stream`）
+**始终 inline 执行，不经过 worker**。
+
+| 方法 | 路径 | 说明 | 前端封装 |
+|------|------|------|----------|
+| `POST` | `/api/runs` | 创建 Run 并入队，**立即返回**（不等图执行完）；支持 `Idempotency-Key` | —（无前端封装，供客户端/集成方调用） |
+| `GET` | `/api/runs/{run_id}` | 查询 Run 当前状态与结果（canonical 状态源是 `agent_runs` 表） | — |
+| `POST` | `/api/runs/{run_id}/cancel` | 协作式取消：立即置 `CANCELLED` | — |
+| `GET` | `/api/runs/{run_id}/events` | Run 事件流（Redis Stream → SSE，支持 `Last-Event-ID` 续读） | — |
+| `GET` | `/api/runs/dead` | 查询 dead-letter 队列（`agent_dead_letters`） | — |
+
+**`POST /api/runs` 请求参数：**
+
+| 参数 | 位置 | 类型 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `query` | body | string | 必填 | 用户查询（有长度上限） |
+| `session_id` | body | string | `""` | 会话 ID；提供时作为 `thread_id`（多轮复用同一 thread） |
+| `session_token` | body | string | `""` | 会话令牌（校验会话所有权） |
+| `idempotency_key` | body | string | `None` | 业务幂等键（上限 128 字符） |
+| `Idempotency-Key` | **Header** | string | — | 与 body 同契约；超限返回 `400` |
+
+**Run 状态机（`runtime/statuses.py`）：**
+
+```text
+PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
+                                 ├──► FAILED           (终态，permanent error，不重试)
+                                 ├──► RETRYING ──► RUNNING (transient error，退避后重试)
+                                 └──► DEAD_LETTER      (终态，retry 用尽)
+                └──► CANCELLED                     (终态，任意未终态可迁入)
+```
+
+**语义边界（不要误读）：**
+
+- **at-least-once，不是 exactly-once。** worker 崩溃后任务会被重新投递。
+  幂等由三层保证：终态重复投递 no-op、`agent:thread-lock:{thread_id}` 跨进程互斥、
+  `tool_side_effects` ledger（`operation_key = run_id:tool_call_id`）。
+- **取消是协作式的。** `POST /api/runs/{run_id}/cancel` 立即置终态，但**已经进入
+  `RUNNING` 的执行不会被强行中断**，调用方仍需轮询 `GET /api/runs/{run_id}` 确认。
+- **事件流不是业务真相源。** `GET /api/runs/{run_id}/events` 是 best-effort
+  resumable：单连接内不重复，但用较旧 `Last-Event-ID` 重连会重放已处理事件，
+  `replay=false` 与 idle 超时会造成缺口。权威状态始终查 `GET /api/runs/{run_id}`。
+- **四个 ID 概念严格区分**：`thread_id`（对话级 == `session_id`）、
+  `run_id`（单轮执行 == `agent_runs.id`）、`task_id`（Celery task id）、
+  `AgentRun`（业务运行记录）。禁止"每个请求新建 `thread_id`"。
+
+设计文档：[distributed-agent-runtime.md](../design/distributed-agent-runtime.md)；
+运维：[distributed-runtime-runbook.md](../operations/distributed-runtime-runbook.md)。
 
 ### 认证与 RBAC
 
@@ -227,6 +294,7 @@ ws.onmessage = (event) => {
 - 主聊天页已经覆盖：`/api/chat`、`/api/chat/stream`、`/api/chat/image`、`/api/chat/multimodal/stream`、`/api/chat/file`、`/api/chat/voice`、会话与反馈相关接口。
 - 管理后台已经覆盖：健康检查、监控指标、KPI、缓存、SLA 告警、知识库、用户、审计日志、Prompt 管理、Token Quota、Token 用量、熔断器详情、Prometheus 文本预览。
 - Widget 当前通过 `/api/chat` 和 `/api/chat/stream` 进行交互，并把服务端返回的 `session_id/session_token` 保存在 `sessionStorage` 中，以保持同一浏览器标签页内的多轮上下文。
+- `/api/runs` 这一组**目前没有前端封装**，由集成方/客户端直接调用；这是有意为之（长任务通常来自系统间调用而不是聊天 UI）。
 
 ---
 
@@ -237,6 +305,8 @@ ws.onmessage = (event) => {
 | `400` | 请求参数错误 | 检查字段长度、类型和格式 |
 | `401` | 认证失败或登录过期 | 检查 JWT / refresh token / API Key |
 | `403` | 权限不足 | 使用具备 admin 或 supervisor 权限的账号 |
+| `404` | 资源不存在 | Run / Session 不存在，或不属于当前用户 |
+| `409` | `THREAD_BUSY`：同一 thread 已有执行在跑 | 稍后重试；同一 thread 串行是设计语义 |
 | `429` | 请求过于频繁 | 降低请求频率，等待限流窗口重置 |
 | `500` | 服务内部错误 | 查看应用日志和 `/api/health` |
-| `503` | LLM 服务不可用 | 查看 `/api/circuit-breaker` 和降级日志 |
+| `503` | LLM 服务不可用，或异步 Run 入队失败 | 查看 `/api/circuit-breaker` 与降级日志；入队失败时 Run 会落到 DLQ（`GET /api/runs/dead`） |

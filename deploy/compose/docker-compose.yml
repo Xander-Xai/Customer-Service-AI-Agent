@@ -23,6 +23,9 @@ services:
     expose:
       - "8000"
     environment:
+      # 进程角色：决定 core/config.py 施加哪一套校验（见 core/config.py::SERVICE_ROLE）。
+      # API 需要 API_KEY / CORS / JWT / Session 密钥；worker 不需要。
+      - SERVICE_ROLE=api
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       # Canonical default from core/config.py: Qwen/Qwen3-8B (see .env.example)
@@ -78,10 +81,10 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - VECTOR_DB_MODE=${VECTOR_DB_MODE:-qdrant_only}
-      # v6.4: LangGraph checkpoint（生产必须 postgres，跨 worker/副本共享）
+      # LangGraph checkpoint（生产必须 postgres，跨 worker/副本共享）
       - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
       - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
-      # v6.4: 异步 Agent Run（API 只创建+入队，执行在 worker）
+      # 异步 Agent Run（API 只创建+入队，执行在 worker）
       - AGENT_RUN_DISPATCH=${AGENT_RUN_DISPATCH:-celery}
       - AGENT_RUN_THREAD_LOCK_BACKEND=${AGENT_RUN_THREAD_LOCK_BACKEND:-redis}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
@@ -108,7 +111,7 @@ services:
     networks:
       - cs-network
 
-  # ===== v6.4: Celery Worker（异步 Agent Run 执行）=====
+  # ===== Celery Worker（异步 Agent Run 执行）=====
   # 独立于 API 进程；API 关闭不影响已入队任务。业务状态真相源是 PostgreSQL，
   # Redis 仅作 broker（result backend 不启用）。
   worker:
@@ -120,6 +123,10 @@ services:
       --loglevel=${WORKER_LOG_LEVEL:-info}
       --without-gossip --without-mingle
     environment:
+      # 进程角色：worker 不终结 HTTP 请求，因此**不**需要 API_KEY / CORS_ORIGINS /
+      # JWT_SECRET / SESSION_TOKEN_SECRET。缺少这些不再阻止 worker 启动
+      # （core/config.py 按 SERVICE_ROLE 跳过 API 专属校验）。
+      - SERVICE_ROLE=worker
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
@@ -135,11 +142,21 @@ services:
       - VECTOR_DB_MODE=${VECTOR_DB_MODE:-qdrant_only}
       - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
       - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
-      - AGENT_RUN_DISPATCH=celery
+      # 执行模式：异步 Run 一律落库 + 入队（worker 自身就是消费方）
+      - AGENT_EXECUTION_MODE=queued
       - AGENT_RUN_QUEUE=${AGENT_RUN_QUEUE:-agent_runs}
+      - AGENT_RUN_THREAD_LOCK_ENABLED=true
       - AGENT_RUN_THREAD_LOCK_BACKEND=${AGENT_RUN_THREAD_LOCK_BACKEND:-redis}
+      - AGENT_RUN_THREAD_LOCK_TTL_SECONDS=${AGENT_RUN_THREAD_LOCK_TTL_SECONDS:-300}
+      - AGENT_RUN_LEASE_SECONDS=${AGENT_RUN_LEASE_SECONDS:-180}
+      - AGENT_RUN_HEARTBEAT_SECONDS=${AGENT_RUN_HEARTBEAT_SECONDS:-30}
+      - AGENT_RUN_MAX_ATTEMPTS=${AGENT_RUN_MAX_ATTEMPTS:-3}
       - AGENT_RUN_VISIBILITY_TIMEOUT=${AGENT_RUN_VISIBILITY_TIMEOUT:-3600}
+      - LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MIN_SIZE:-1}
+      - LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE=${LANGGRAPH_CHECKPOINT_POOL_MAX_SIZE:-10}
+      - LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT=${LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT:-15}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
+      - CHECKPOINT_RETENTION_MIN_AGE_SECONDS=${CHECKPOINT_RETENTION_MIN_AGE_SECONDS:-86400}
     volumes:
       - app-logs:/app/logs
       - ../../data:/app/data

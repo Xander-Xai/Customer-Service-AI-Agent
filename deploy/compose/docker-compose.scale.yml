@@ -1,6 +1,24 @@
 # ===== 水平扩展覆盖配置（P2-2）=====
-# 用法: docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale app=3
-# 前提: SESSION_STORAGE_BACKEND=redis, DATABASE_URL=postgresql://...
+# 用法: docker compose -f deploy/compose/docker-compose.yml \
+#         -f deploy/compose/docker-compose.scale.yml up -d --scale app=3
+#
+# ⚠️ 多副本（app>1 或 GUNICORN_WORKERS>1）的**强制前提**。任一项不满足时
+#    应用会在生产模式下 fail-fast 拒绝启动（core/config.py::
+#    validate_distributed_runtime_settings + validate_checkpoint_settings）——
+#    这是正确性门禁，不是可以忽略的告警：
+#
+#   1. DATABASE_URL=postgresql://...            # SQLite 不支持多实例写入
+#   2. SESSION_STORAGE_BACKEND=redis            # 内存 session 多实例分片 + 重启丢失
+#   3. LANGGRAPH_CHECKPOINT_BACKEND=postgres     # 内存 checkpoint 每进程独立
+#   4. AGENT_RUN_THREAD_LOCK_ENABLED=true       # 同 thread 跨进程互斥
+#   5. AGENT_RUN_THREAD_LOCK_BACKEND=redis
+#   6. AGENT_RUN_DISPATCH=celery（或 AGENT_EXECUTION_MODE=queued）
+#   7. AGENT_RUN_THREAD_LOCK_TTL_SECONDS > AGENT_RUN_TASK_TIME_LIMIT + 30
+#      （默认 300 > 180 + 30 已满足；改过任一项必须重算）
+#
+# ⚠️ **worker 必须同步扩容**：只扩 app 不扩 worker 会让 agent_runs 队列无限堆积。
+#    用 --scale worker=N（base compose 已定义独立 worker service）。
+#    队列积压、autoscaling、生产吞吐数字当前均为 NOT_VERIFIED / NOT_MEASURED。
 version: '3.8'
 
 services:
@@ -10,6 +28,16 @@ services:
       - SESSION_STORAGE_BACKEND=redis
       # 使用 PostgreSQL（SQLite 不支持多实例写入）
       - DATABASE_URL=${DATABASE_URL:-postgresql://csai:password@postgres:5432/csai}
+      # 多副本必须外部化图状态（内存 checkpoint 是每进程独立的）
+      - LANGGRAPH_CHECKPOINT_BACKEND=postgres
+      # 异步 Run 必须解耦到 worker（inline 会在 API 进程内执行）
+      - AGENT_EXECUTION_MODE=queued
+      # 同 thread 跨进程互斥（与 worker 共用 agent:thread-lock: key namespace）
+      - AGENT_RUN_THREAD_LOCK_ENABLED=true
+      - AGENT_RUN_THREAD_LOCK_BACKEND=redis
+      # 锁 TTL 必须大于任务时限 + 安全余量，否则启动校验失败
+      - AGENT_RUN_THREAD_LOCK_TTL_SECONDS=${AGENT_RUN_THREAD_LOCK_TTL_SECONDS:-300}
+      - AGENT_RUN_TASK_TIME_LIMIT=${AGENT_RUN_TASK_TIME_LIMIT:-180}
     deploy:
       replicas: 2
       resources:

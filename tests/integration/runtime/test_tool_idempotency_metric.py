@@ -177,6 +177,10 @@ def test_gate11_pending_claim_lease_blocks_concurrent_execution(side_effect_stor
             )
         ).scalar_one()
         assert row.status == STATUS_PENDING
+        # 过期判定的权威字段是 ``claim_expires_at``（migration 005 引入的认领租约）；
+        # ``updated_at`` 只是老数据回退路径。只回拨 ``updated_at`` 不会让租约过期，
+        # 因此两者都要回拨，才能真正模拟"认领后崩溃、租约到期"。
+        row.claim_expires_at = _utcnow() - timedelta(seconds=600)
         row.updated_at = _utcnow() - timedelta(seconds=600)
         session.commit()
     finally:

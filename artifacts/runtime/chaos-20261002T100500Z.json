@@ -1,0 +1,65 @@
+{
+  "result": "PASS",
+  "run_id": "chaos-71cf5e89",
+  "thread_id": "T-chaos-71cf5e89",
+  "queue": "agent_runs_test_71cf5e89",
+  "steps": [
+    {
+      "step": 1,
+      "action": "create_run",
+      "run_id": "chaos-71cf5e89",
+      "ok": true
+    },
+    {
+      "step": 2,
+      "action": "enqueue",
+      "queue": "agent_runs_test_71cf5e89",
+      "ok": true
+    },
+    {
+      "step": 3,
+      "action": "side_effect_applied",
+      "idem:counter": 1,
+      "ok": true
+    },
+    {
+      "step": 4,
+      "action": "checkpoint_persisted",
+      "checkpoints": 2,
+      "worker_id": "Ydxx:3587100:8b06c482",
+      "ok": true
+    },
+    {
+      "step": 5,
+      "action": "sigkill_worker_group",
+      "ok": true
+    },
+    {
+      "step": 6,
+      "action": "restart_worker",
+      "ok": true
+    },
+    {
+      "step": 7,
+      "action": "recovered",
+      "status": "SUCCEEDED",
+      "attempt": 2,
+      "worker_id": "Ydxx:3587409:7101f599",
+      "worker_switched": true,
+      "ok": true
+    },
+    {
+      "step": 8,
+      "action": "side_effect_deduplicated",
+      "idem:counter": 1,
+      "tool_invocations": 2,
+      "ledger_hits": 1,
+      "ledger": {
+        "tool_name": "increment_counter",
+        "operation_key": "chaos-71cf5e89:T-chaos-71cf5e89:refund",
+        "status": "SUCCEEDED"
+      },
+      "ok": true
+    }
+  ]
+}

@@ -1,5 +1,16 @@
 # FINAL_RUNTIME_FACT_CHECK
 
+> **HISTORICAL AUDIT SNAPSHOT — 2026-10-02.** 本文件是**时点审计结果**，只在该
+> 审计执行的 HEAD 上有效，**不是 Current Truth**，不得与
+> [docs/reference/current-state.md](../../reference/current-state.md) 竞争。
+>
+> 文件内容按审计时点原样冻结，**不随后续代码更新而重写**。
+> 其中若干结论已被后续 commit 推翻 —— 典型是本报告关于
+> **"DLQ replay 闭环未实现"** 与 **"cross-process SSE bridge 未实现"** 的结论：
+> 两者在当前 HEAD 均已实现（`scripts/replay_dead_run.py` 复用原 `run_id`；
+> `runtime/events.py` Redis Stream + `GET /api/runs/{run_id}/events` SSE 续读）。
+> **读当前事实请以 `current-state.md` 为准。**
+>
 > 审计对象：`feat/distributed-agent-runtime` @ `aa8d082`
 > 原则：以代码为唯一事实源，不引用历史总结。本文件是临时审计，收口后可保留作证据。
 

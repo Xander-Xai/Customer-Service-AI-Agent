@@ -1,8 +1,21 @@
-# E2E 真实 LLM 验证指南
+# E2E 验证指南（两条独立轨道）
 
 > 本文档解决"无真实端到端验证"缺口，提供从配置到验证的完整操作步骤。
 >
-> **校准说明（v6.3，2026-09-30）**：验证流程以当前代码为准（provider 探针、
+> ## ⚠️ 先读：这是**两条互不替代的验证轨道**
+>
+> | 轨道 | 验证什么 | 需要什么 | 证明什么 | 不证明什么 |
+> |---|---|---|---|---|
+> | **轨道 A — 开发者 E2E**（本文 §2–§7） | 一次真实 LLM 调用能否端到端跑通 | 真实 provider API Key | **业务链路可用**：路由 → 多 Agent 协作 → RAG → Function Calling → SSE/WebSocket | 不证明任何分布式正确性；不使用真实 PostgreSQL / Redis / Celery worker |
+> | **轨道 B — 生产式分布式 Runtime E2E**（本文 §9） | 分布式运行时的**正确性** | 真实 PostgreSQL + Redis + 多进程 Celery | 跨进程 checkpoint、thread 串行/跨 thread 并发、queue-worker 解耦、worker 崩溃续跑、副作用幂等、DLQ 重放、事件投递语义 | 不证明真实生产集群 / 多副本长期运行 / 真实 ERP 写操作（这些是 `NOT_VERIFIED`） |
+>
+> **只跑轨道 A 就宣称"分布式架构已验证"是错误的。** 轨道 A 全程可以在
+> SQLite + 进程内 session + 内存 checkpoint 下通过，而分布式正确性恰恰依赖
+> 真实 PG / Redis / 独立 worker 进程才能测出来。
+> 运维视角的完整步骤见
+> [distributed-runtime-runbook.md](distributed-runtime-runbook.md)。
+>
+> **校准说明（2026-10-02）**：验证流程以当前代码为准（provider 探针、
 > JWT/占位符校验、WebSocket DEV_MODE 不绕过等加固均已生效）。历史实测結果
 > 一律归入 §8 Historical Evidence 区；当前测试数量用 `pytest --collect-only -q`
 > 现场获取，不沿用任何历史数字。涉及 RAG 检索质量时，走
@@ -13,10 +26,12 @@
 > **provider 先探针**：任何真实调用前先 `python3 scripts/probe_provider_auth.py`，
 > 401/403 是 NON_RETRYABLE auth 失败，chat/流式/评测都会被阻塞——这就是
 > 历史 staging 运行失败与当前 RAG preflight BLOCKED 的根因。
+>
+> **轨道 A 的范围**：以下 §1–§9 全部属于轨道 A（开发者 / 真实 LLM E2E）。
 
 ---
 
-## 1. 目标
+## 1. 目标（轨道 A）
 
 用一次真实 LLM 调用验证系统端到端能跑通，生成可截图/录屏的 demo 证据。
 
@@ -289,7 +304,139 @@ _RE_INJECTION_DISCLOSURE = re.compile(
 
 ---
 
-## 9. 面试话术
+
+## 9. 轨道 B — 生产式分布式 Runtime E2E
+
+> **本节不属于轨道 A。** 轨道 A 验证业务链路；轨道 B 验证**分布式正确性**。
+> 两者互不替代：用 SQLite + 进程内 session + 内存 checkpoint 把轨道 A 跑通，
+> 完全不能说明分布式架构正确。
+
+### 9.1 轨道的证据边界（先说清楚）
+
+| 层级 | 含义 | 状态 |
+|---|---|---|
+| **Level 1 — IMPLEMENTED** | 代码存在且可读：PG checkpoint / Redis session / Redis thread lock / AgentRun 真相源 / Celery+Redis broker / acks_late / reject_on_worker_lost / visibility_timeout / retry / tool ledger | 已实现 |
+| **Level 2 — CI VERIFIED** | 真实 PostgreSQL + Redis + 多进程 Celery 的自动化验收 + SIGKILL 混沌测试 + 带 provenance 的 evidence artifact | **当前状态** |
+| **Level 3 — NOT_VERIFIED** | 真实生产集群 / 多副本长期稳定 / 真实用户流量 / **真实 ERP 写操作** / 大规模 queue backlog / K8s autoscaling / multi-region | **未验证，不得声称** |
+
+> **Level 2 ≠ 生产验证。** 任何对外材料都不得把轨道 B 通过表述为"生产集群已验证"。
+
+### 9.2 前置条件
+
+| 条件 | 说明 |
+|------|------|
+| PostgreSQL 14+ | 真实实例（不是 SQLite）。`agent_runs` / `agent_dead_letters` / `tool_side_effects` 三张表由 conftest 按模型元数据创建，**不需要**跑 Alembic |
+| Redis 6+ | 真实实例；同时充当 Celery broker 与事件流 |
+| Celery worker | 真实**独立进程**（不是线程）。轨道 B 的核心断言（worker 崩溃后重投、跨进程 checkpoint 可见）依赖真实 OS 进程 |
+| `TEST_DISTRIBUTED_DB_URL` | `postgresql://user:pass@host:5432/db` |
+| `TEST_REDIS_URL` | `redis://[:password@]host:6379` |
+
+> 经 `make runtime-e2e` 运行时 Makefile **始终注入**这两个变量，因此基础设施缺失
+> 会变成**硬 FAIL 而不是静默 skip**。这是有意设计：把"没跑"当成"通过"是证据污染。
+
+### 9.3 执行
+
+```bash
+# 9.3.1 真实基础设施验收（tests/integration/runtime）
+make runtime-e2e
+# 等价于：
+#   TEST_DISTRIBUTED_DB_URL=... TEST_REDIS_URL=... \
+#   pytest tests/integration/runtime -q
+
+# 9.3.2 Worker 崩溃混沌验收（SIGKILL 整个 worker 进程组）
+make runtime-chaos
+# 产出 artifacts/runtime/chaos-<ts>.json
+
+# 9.3.3 机器可读 evidence
+make runtime-verify
+# 产出 artifacts/distributed-runtime/<UTC ts>/report.json
+#   schema_version: distributed-runtime-evidence/v2
+#   tested_code_sha + generated_at + overall_status + checks
+# 退出码 fail-closed：0=全 PASS，1=有 FAIL，2=NOT_RUN/PARTIAL（"没跑"不算通过）
+
+# 9.3.4 DLQ 人工重放工具
+make runtime-replay-help
+python3 scripts/replay_dead_run.py <run_id> [--yes]
+```
+
+### 9.4 API 层验证路径（在线，不只是 pytest）
+
+轨道 B 不只靠 pytest 脚本，也可以对**运行中的系统**做端到端验证：
+
+```bash
+# --- API ---
+# 创建异步 Run（立即返回 run_id，不等图执行）
+RUN=$(curl -s -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" -H "X-API-Key: $API_KEY" \
+  -d '{"query":"你好","session_id":"e2e-b"}' | jq -r '.run_id')
+
+# 查询状态直到终态
+curl -s "http://localhost:8000/api/runs/$RUN" -H "X-API-Key: $API_KEY" | jq
+# 期望终态 ∈ {SUCCEEDED, FAILED, DEAD_LETTER, CANCELLED}
+
+# 协作式取消（run 尚未被消费时有效；已 RUNNING 不会强杀）
+curl -s -X POST "http://localhost:8000/api/runs/$RUN/cancel" -H "X-API-Key: $API_KEY" | jq
+
+# 事件流（SSE，支持 Last-Event-ID 续读）
+curl -sN "http://localhost:8000/api/runs/$RUN/events" -H "X-API-Key: $API_KEY"
+
+# DLQ 查询
+curl -s "http://localhost:8000/api/runs/dead" -H "X-API-Key: $API_KEY" | jq
+
+# --- Worker ---
+docker compose ps worker
+docker compose exec worker celery -A runtime.celery_app:celery_app inspect ping   # 期望 pong
+
+# --- Redis ---
+# thread lock：同 thread 应能看到锁
+docker compose exec redis redis-cli --scan --pattern 'agent:thread-lock:*'
+# run 事件流
+docker compose exec redis redis-cli --scan --pattern 'agent:run:*:events'
+
+# --- PostgreSQL ---
+# 真相源：状态必须在库里，而不是只在队列里
+docker compose exec postgres psql -U postgres -d cosmetics_ai -c \
+  "SELECT run_id,status,attempt,worker_id,task_id,started_at,finished_at
+     FROM agent_runs ORDER BY queued_at DESC LIMIT 10;"
+# DLQ 历史（不可变）
+docker compose exec postgres psql -U postgres -d cosmetics_ai -c \
+  "SELECT run_id,attempt_count,error_type,error_code,entered_at FROM agent_dead_letters;"
+# checkpoint 确实在 PG 里（而不是内存）
+docker compose exec postgres psql -U postgres -d cosmetics_ai -c \
+  "SELECT thread_id, COUNT(*) FROM checkpoints GROUP BY thread_id;"
+# 工具副作用 ledger
+docker compose exec postgres psql -U postgres -d cosmetics_ai -c \
+  "SELECT tool_name,operation_key,status FROM tool_side_effects ORDER BY created_at DESC LIMIT 10;"
+```
+
+### 9.5 关键断言（验收时逐条核对）
+
+| 能力 | 期望 | 由什么锁定 |
+|---|---|---|
+| `checkpoint_cross_process` | 两个**独立 OS 进程**（不是同进程两个 saver 实例）能互相读到对方写入的 checkpoint；进程重启后续跑 | `tests/integration/runtime/test_cross_process_checkpoint.py`、`make runtime-verify` |
+| `same_thread_serialization` | 同 `thread_id` 的两个 run 的 `started_at`/`finished_at` 区间**不重叠**（用 DB 时间戳断言，不是"看 SETNX 有没有成功"） | `tests/integration/runtime/test_run_semantics.py` |
+| `different_thread_parallelism` | 不同 `thread_id` 真的并发（墙钟耗时断言） | 同上 |
+| `worker_crash_recovery` | `SIGKILL` 后任务重投、新 worker 接管租约、**从 checkpoint 的 `next` 续跑**（第一个节点计数器 == 1，未完成节点被重做） | `test_worker_checkpoint_recovery.py`、`make runtime-chaos` |
+| `tool_idempotency` | 崩溃恢复后副作用计数器**仍为 1**，同时工具真实调用次数 ≥ 2（否则"是 1"可能只是没重试） | `test_tool_idempotency.py` |
+| `retry_recovery` | transient 错误退避重投后成功；permanent 错误不重试；retry 用尽 → `DEAD_LETTER` + DLQ 行 + 重放复用原 `run_id` | `test_run_semantics.py` |
+| `queue_worker_decoupling` | 无 worker 时 run 保持 `QUEUED`、`started_at is None`（证明 API 进程没有偷偷执行） | `test_queue_worker_decoupling.py` |
+| 事件投递语义 | 单连接内不重复；**较旧 `Last-Event-ID` 会重放已处理事件**（重复）；`replay=false` 造成缺口；`MAXLEN ~` 是近似裁剪、非硬上界 | `test_event_delivery_semantics.py` |
+| SSE + checkpoint 序列化 | 真实 PG checkpointer 下 SSE 正常完成、`done` 帧、0 错误帧 | `test_sse_checkpoint_serialization.py` |
+
+### 9.6 失败排查
+
+| 症状 | 大概率原因 | 处理 |
+|------|-----------|------|
+| run 一直停在 `QUEUED` | worker 没起来 / 队列名不匹配 / broker 认证失败 | `docker compose ps worker`；`inspect ping`；核对 `AGENT_RUN_QUEUE` |
+| `validate_distributed_runtime_settings` 报错导致启动失败 | 门禁真的生效了，不是 bug | 按 [../checklists/quick-launch-checklist.md](../checklists/quick-launch-checklist.md) §1.2 逐项修 |
+| checkpoint 一直为空 | worker 侧 `LANGGRAPH_CHECKPOINT_BACKEND` 不是 postgres | 核对 worker 与 API 两个进程的该配置 |
+| 同 thread 出现重叠执行 | 锁 backend 不是 redis，或 TTL < 任务时限 + 余量 | 核对 `AGENT_RUN_THREAD_LOCK_BACKEND=redis` 与 TTL 关系 |
+| 副作用执行了两次 | 工具没声明 `side_effect=True`，或 `run_id` 在重放时变了 | 检查 registry 声明；DLQ 重放必须复用原 `run_id` |
+| `make runtime-verify` 退出码 2 | 基础设施未配置（`NOT_RUN`/`PARTIAL`） | 这**不是**通过；配好 PG/Redis 重跑 |
+
+---
+
+## 10. 面试话术
 
 准备面试时这样说（**只能引用你自己当前运行的实测结果**；没有新 artifact 就不要报当前 PASS 数）：
 

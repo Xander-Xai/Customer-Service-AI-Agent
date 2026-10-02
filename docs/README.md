@@ -12,12 +12,14 @@
 | 你在找什么？ | 去这里 |
 |---|---|
 | 系统架构、技术设计 | → [design/](#designdesign) |
+| **分布式 Agent Runtime（Celery worker / checkpoint / 幂等 / DLQ）** | → [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009](decisions/009-distributed-agent-runtime.md)、[operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) |
 | API 接口、模型参数、配置速查 | → [reference/](#referencereference) |
 | 为什么选这个方案（ADR） | → [decisions/](#decisionsdecisions) |
 | 编码规范、项目约定、AI 助手指令 | → [standards/](#standardsstandards) |
 | 部署、切换、运维排障 | → [operations/](#operationsoperations) |
 | 发布前/部署前逐项检查 | → [checklists/](#checklistschecklists) |
-| provider/生产证据边界 | → [evaluation/](#evaluationevaluation) |
+| provider/生产/Runtime 证据边界 | → [evaluation/](#evaluationevaluation)、[reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) |
+| 面试介绍、深入问答、题集 | → [design/interview-intro.md](design/interview-intro.md)、[design/interview-deep-dive.md](design/interview-deep-dive.md)、[interview-questions-final.md](interview-questions-final.md) |
 | 整改规格、完成报告（历史） | → [audit/](#auditaudit) |
 | 历史设计与实施计划（2026-06） | → [superpowers/](#superpowerssuperpowers) |
 | 阶段完成报告、版本发布说明 | → [reports/](#reportsreports) |
@@ -30,6 +32,8 @@
 
 ### 👨‍💻 开发者
 - 系统架构 → [design/architecture-design.md](design/architecture-design.md)
+- 分布式 Agent Runtime 设计 → [design/agent-runtime.md](design/agent-runtime.md)
+- 状态归属（checkpoint / session / cache / tool store） → [design/runtime-state-ownership.md](design/runtime-state-ownership.md)
 - API 参考 → [reference/api-reference.md](reference/api-reference.md)
 - 安全设计 → [design/security.md](design/security.md)
 - Prompt 策略 → [design/prompt-engineering.md](design/prompt-engineering.md)
@@ -38,6 +42,7 @@
 
 ### 🛠️ 运维者
 - 生产运维指南 → [operations/production-operations-guide.md](operations/production-operations-guide.md)
+- **分布式 Runtime runbook** → [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md)
 - LLM 提供商切换 → [operations/llm-provider-switch.md](operations/llm-provider-switch.md)
 - E2E 验证 → [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md)
 - 生产就绪检查 → [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)
@@ -45,6 +50,7 @@
 - 事实驱动工程标准 → [standards/evidence-driven-engineering-loop.md](standards/evidence-driven-engineering-loop.md)
 - Agent Context Engineering → [design/context-engineering.md](design/context-engineering.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
+- 分布式 Runtime 证据边界 → [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md)
 - 公共仓库密钥策略 → [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
@@ -69,7 +75,10 @@
 |---|---|---|
 | 当前 runtime 事实 + 验证命令 | [reference/current-state.md](reference/current-state.md) | 🟢 CURRENT（随代码/命令同步） |
 | RAG 评估方法/口径/当前评测状态 | [reference/rag-evaluation.md](reference/rag-evaluation.md) | 🟢 CURRENT（评测实现变更时更新；历史小节单独标注） |
-| provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟢 CURRENT |
+| provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟣 EVIDENCE |
+| 分布式 Runtime 为什么这么设计 | [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009-distributed-agent-runtime.md](decisions/009-distributed-agent-runtime.md) | 🔵 DESIGN / ADR |
+| 分布式 Runtime 运维操作 | [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) | 🟠 RUNBOOK |
+| 分布式 Runtime 能宣称到什么程度 | [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) | 🟣 EVIDENCE |
 | 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
 | 版本历史 | [reports/releases/](reports/releases/) | 🟡 SNAPSHOT（旧版本章节永不重写） |
 
@@ -114,9 +123,14 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | 文件 | 说明 | 读者 |
 |---|---|---|
 | [architecture-design.md](design/architecture-design.md) | 四层状态机、9 个 Agent、5 种协作模式 | 开发者、新人 |
+| [agent-runtime.md](design/agent-runtime.md) | 分布式 Agent Runtime 完整设计（状态机 / 锁 / 幂等 / DLQ） | 开发者、面试者 |
+| [distributed-agent-runtime.md](design/distributed-agent-runtime.md) | 分布式 Runtime 架构与可靠性边界（能力/非能力） | 开发者、审计者 |
+| [runtime-state-ownership.md](design/runtime-state-ownership.md) | 四类状态归属表（checkpoint / session / cache / tool store） | 开发者、审计者 |
+| [async-agent-worker-architecture.md](design/async-agent-worker-architecture.md) | Worker pool 深化设计（已实现部分 vs 纯设计部分） | 开发者 |
+| [context-engineering.md](design/context-engineering.md) | Tool Result / Session Context Engineering | 开发者 |
 | [security.md](design/security.md) | 安全架构、威胁模型、认证方案 | 开发者、审计者 |
 | [prompt-engineering.md](design/prompt-engineering.md) | Prompt 策略和模式 | 开发者 |
-| [interview-intro.md](design/interview-intro.md) | 项目介绍（面试用） | 新人 |
+| [interview-intro.md](design/interview-intro.md) | 项目介绍（面试用，60s / 2min / 3min 三档） | 新人 |
 | [interview-deep-dive.md](design/interview-deep-dive.md) | 深入 Q&A（面试用） | 新人 |
 
 ---
@@ -146,6 +160,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [006-cache-and-tool-result-context-architecture.md](decisions/006-cache-and-tool-result-context-architecture.md) | Cache 与 Tool Result Context 架构分离 |
 | [007-current-default-llm.md](decisions/007-current-default-llm.md) | 当前默认 LLM（Qwen/Qwen3-8B） |
 | [008-current-rag-retrieval-architecture.md](decisions/008-current-rag-retrieval-architecture.md) | 当前 RAG 检索与 Embedding 架构 |
+| [009-distributed-agent-runtime.md](decisions/009-distributed-agent-runtime.md) | 分布式 Agent Runtime（Postgres checkpoint / Redis session+lock / Celery worker / AgentRun 真相源） |
 
 ---
 
@@ -155,8 +170,9 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 
 | 文件 | 说明 | 读者 | Lifecycle |
 |---|---|---|---|
-| [api-reference.md](reference/api-reference.md) | API 端点速查 | 开发者 | 🟢 CURRENT / REFERENCE |
+| [api-reference.md](reference/api-reference.md) | API 端点速查（数量由生成工具校验，不手工维护） | 开发者 | 🟢 CURRENT / REFERENCE |
 | [current-state.md](reference/current-state.md) | 当前事实入口（版本/模型/验证命令） | 开发者、审计者 | 🟢 CURRENT |
+| [distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) | 分布式 Runtime 面试证据边界（Level 1/2/3 与不宣称项） | 面试者、审计者 | 🟣 EVIDENCE |
 | [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 | 🟡 HISTORICAL AUDIT（含 CURRENT 配置小结） |
 | [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 | 🟢 CURRENT（历史小节单独标注） |
 
@@ -169,8 +185,9 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | 文件 | 说明 | 读者 |
 |---|---|---|
 | [production-operations-guide.md](operations/production-operations-guide.md) | 生产运维手册 | 运维者 |
+| [distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) | 分布式 Runtime 运维 runbook（生产 gate / DLQ 重放 / 排障） | 运维者 |
 | [llm-provider-switch.md](operations/llm-provider-switch.md) | LLM 提供商切换指南 | 运维者 |
-| [e2e-verification-guide.md](operations/e2e-verification-guide.md) | E2E 验证方法论 | 开发者、运维者 |
+| [e2e-verification-guide.md](operations/e2e-verification-guide.md) | E2E 验证方法论（开发者 E2E / 生产式分布式 Runtime E2E 分轨） | 开发者、运维者 |
 
 ---
 
@@ -242,6 +259,8 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [multi-dimensional-analysis.md](reports/audit/multi-dimensional-analysis.md) | 多维度质量分析 |
 | [audit-remediation-report.md](reports/audit/audit-remediation-report.md) | 审计整改报告 |
 | [governance-audit.md](reports/audit/governance-audit.md) | 文档治理评估（2026-06-17 历史快照；2026-10-01 由 design/ 迁入） |
+| [2026-10-02-DISTRIBUTED_RUNTIME_AUDIT.md](reports/audit/2026-10-02-DISTRIBUTED_RUNTIME_AUDIT.md) | 分布式 Runtime 状态归属审计（HEAD `912ad49` 快照；2026-10-02 由仓库根迁入） |
+| [2026-10-02-FINAL_RUNTIME_FACT_CHECK.md](reports/audit/2026-10-02-FINAL_RUNTIME_FACT_CHECK.md) | 分布式 Runtime 事实核对（HEAD `aa8d082` 快照，部分结论已被后续 commit 推翻；2026-10-02 由仓库根迁入） |
 | [tool-result-cache-reuse-audit.md](reports/audit/tool-result-cache-reuse-audit.md) | Tool Result cache reuse 审计快照（2026-10-01 由仓库根迁入） |
 | [tool-result-v2-audit-report.md](reports/audit/tool-result-v2-audit-report.md) | Tool Result Context Engineering V2 审计快照（2026-10-01 由仓库根迁入） |
 
@@ -337,4 +356,4 @@ CURRENT  DESIGN/ADR  ARCHIVE
 
 ---
 
-*最后更新：2026-10-01（Repository Truth Alignment：生命周期图例 + evaluation/audit/superpowers 目录生命周期 + 根快照迁入 reports/audit/）*
+*最后更新：2026-10-02（Repository Truth Convergence：新增分布式 Agent Runtime 文档索引 — ADR-009 / agent-runtime / runtime-state-ownership / async-agent-worker-architecture / distributed-runtime-runbook / distributed-runtime-interview-evidence，并修正 lifecycle 标注）*

@@ -36,8 +36,8 @@ python -c "import celery, psycopg, langgraph, prometheus_client; print('deps OK'
 需要**真实** PostgreSQL 与 Redis。环境缺失时目标 FAIL（不静默 skip）。
 
 ```bash
-make runtime-e2e      # 30 个集成用例（checkpoint / 线程模型 / 队列 / 重试 / DLQ / 幂等 / 事件流）
-make runtime-chaos    # worker kill -9 → lease 过期 → checkpoint 续跑 → 副作用恰好一次
+make runtime-e2e      # tests/integration/runtime（checkpoint / 线程模型 / 队列 / 重试 / DLQ / 幂等 / 事件流）
+make runtime-chaos    # worker kill -9 → lease 过期 → checkpoint 续跑 → 本 Agent 侧副作用去重（counter==1；非端到端 exactly-once）
 make runtime-verify   # 机器可读证据 artifacts/distributed-runtime/<ts>/report.json
 make runtime-replay-help
 ```

@@ -198,11 +198,33 @@ LOG_CONFIG = {
 CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 
 # ===== API 认证配置（v3.0 新增） =====
+# ===== 进程角色（config validation boundary） =====
+#
+# core/config.py 被**所有**进程导入：API 服务与 Celery worker。两者对配置的需求不同：
+#   - API    : 需要 API Key 认证、CORS、端用户 JWT / Session 密钥；
+#   - worker : 只执行 AgentRun，不终结 HTTP 请求、不签发或校验用户凭据，因此
+#              API_KEY / CORS / JWT / SESSION_TOKEN_SECRET 对它没有意义。
+#
+# 过去 API 专属校验（尤其是下面这个 **import 期** 的硬 raise）会直接阻塞 worker 启动：
+# worker 只要 import core.config 就必须提供 API_KEY，否则 ValueError 起不来，而 worker
+# 根本不会读取这个配置。现在用 SERVICE_ROLE 显式区分，默认 `api` —— 生产 API 的行为
+# 完全不变；只有显式声明 SERVICE_ROLE=worker 的进程才跳过 API 专属校验。
+SERVICE_ROLE = os.getenv("SERVICE_ROLE", "api").strip().lower() or "api"
+if SERVICE_ROLE not in ("api", "worker"):
+    raise ConfigurationError(
+        f"SERVICE_ROLE 非法: {SERVICE_ROLE!r}（仅支持 api | worker）"
+    )
+#: 当前进程是否为 Celery worker（据此跳过 API 专属校验）。
+IS_WORKER_PROCESS = SERVICE_ROLE == "worker"
+
 API_KEY_ENABLED = os.getenv("API_KEY_ENABLED", "true").lower() == "true"
 API_KEY = os.getenv("API_KEY", "")
-if API_KEY_ENABLED and not API_KEY:
+# 仅 API 进程需要 API Key；worker 不终结 HTTP 请求，不应因缺 API_KEY 而无法启动。
+if API_KEY_ENABLED and not API_KEY and not IS_WORKER_PROCESS:
     raise ValueError(
-        "API_KEY_ENABLED=true requires a non-empty API_KEY. Set API_KEY in .env or disable authentication with API_KEY_ENABLED=false"
+        "API_KEY_ENABLED=true requires a non-empty API_KEY. Set API_KEY in .env, "
+        "disable authentication with API_KEY_ENABLED=false, or start this process with "
+        "SERVICE_ROLE=worker if it is a Celery worker"
     )
 
 # ===== ERP 模式配置（v3.0 新增） =====
@@ -688,32 +710,38 @@ def validate_required_config():
     ):
         errors.append("OPENAI_API_KEY 未配置或使用占位符")
 
-    # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
-    if not JWT_SECRET or any(
-        p in JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
-    ):
-        errors.append("JWT_SECRET 未配置或使用默认值/弱密钥")
-    elif len(JWT_SECRET) < 32:
-        errors.append(
-            f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥"
-        )
+    # ---- 以下均为 **API 进程专属**：worker 不终结 HTTP 请求、不签发/校验用户凭据，
+    # 因此不应该因为缺少这些配置而无法启动（见 SERVICE_ROLE / IS_WORKER_PROCESS）。
+    if not IS_WORKER_PROCESS:
+        # JWT Secret（v5.0: 最小 32 字符，防止弱密钥）
+        if not JWT_SECRET or any(
+            p in JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
+        ):
+            errors.append("JWT_SECRET 未配置或使用默认值/弱密钥")
+        elif len(JWT_SECRET) < 32:
+            errors.append(
+                f"JWT_SECRET 长度不足（{len(JWT_SECRET)} < 32），请使用至少 32 字符的随机密钥"
+            )
 
-    # Session Token Secret
-    if not SESSION_TOKEN_SECRET or any(
-        p in SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
-    ):
-        errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值/弱密钥")
-    elif len(SESSION_TOKEN_SECRET) < 32:
-        errors.append(
-            f"SESSION_TOKEN_SECRET 长度不足（{len(SESSION_TOKEN_SECRET)} < 32），请使用至少 32 字符的随机密钥"
-        )
+        # Session Token Secret
+        if not SESSION_TOKEN_SECRET or any(
+            p in SESSION_TOKEN_SECRET.lower()
+            for p in ("change-me", "change_me", "your-", "dev-")
+        ):
+            errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值/弱密钥")
+        elif len(SESSION_TOKEN_SECRET) < 32:
+            errors.append(
+                f"SESSION_TOKEN_SECRET 长度不足（{len(SESSION_TOKEN_SECRET)} < 32），"
+                "请使用至少 32 字符的随机密钥"
+            )
 
-    if not _DEV_MODE and "*" in CORS_ORIGINS:
-        errors.append("Production CORS_ORIGINS must not contain wildcard *")
-    if not _DEV_MODE and not CORS_ORIGINS:
-        errors.append(
-            "Production CORS_ORIGINS is empty — frontend cross-origin requests will fail. Set CORS_ORIGINS or ALLOWED_ORIGINS"
-        )
+        if not _DEV_MODE and "*" in CORS_ORIGINS:
+            errors.append("Production CORS_ORIGINS must not contain wildcard *")
+        if not _DEV_MODE and not CORS_ORIGINS:
+            errors.append(
+                "Production CORS_ORIGINS is empty — frontend cross-origin requests will "
+                "fail. Set CORS_ORIGINS or ALLOWED_ORIGINS"
+            )
 
     if not _DEV_MODE and not DATABASE_URL:
         errors.append("Production requires DATABASE_URL (PostgreSQL)")

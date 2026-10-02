@@ -1,5 +1,17 @@
 # DISTRIBUTED_RUNTIME_AUDIT
 
+> **HISTORICAL AUDIT SNAPSHOT — 2026-10-02.** 本文件是**时点审计结果**，只在该
+> 审计执行的 HEAD 上有效，**不是 Current Truth**，不得与
+> [docs/reference/current-state.md](../../reference/current-state.md) 竞争。
+>
+> 文件内容按审计时点原样冻结，**不随后续代码更新而重写**。
+> 其中若干结论已被后续 commit 推翻 —— 典型是本报告 §9"仅设计（不在本 Foundation
+> 实现）"里的 **"DLQ 运维闭环（replay / requeue / 告警）"** 与
+> **"cross-process SSE event bridge"**：两者在当前 HEAD 均已实现
+> （`scripts/replay_dead_run.py` 复用原 `run_id`；`runtime/events.py` Redis Stream
+> + `GET /api/runs/{run_id}/events` SSE 续读）。**读当前事实请以 `current-state.md`
+> 为准。**
+>
 > 审计对象：`Xander-Xai/customer-ai-agent` · 审计时 HEAD `912ad49`（`feat/distributed-agent-runtime`）
 > 审计原则：以当前代码为事实源；先审计后修改；不夸大验证状态。
 > 说明：本仓库此前已落地一轮分布式运行时工作（`runtime/` 包、Postgres

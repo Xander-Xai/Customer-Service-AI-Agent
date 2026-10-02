@@ -61,7 +61,7 @@ Agent Worker → Redis thread lock → LangGraph → Postgres checkpoint → Age
 真实 PostgreSQL + Redis（本地，非生产集群）：
 
 ```bash
-DISTRIBUTED_DB_URL=postgresql://... TEST_REDIS_URL=redis://... \
+TEST_DISTRIBUTED_DB_URL=postgresql://... TEST_REDIS_URL=redis://... \
   python scripts/verify_distributed_runtime.py
 # → artifacts/distributed-runtime/<ts>/report.json (schema v2)
 #   tested_code_sha / generated_at / overall_status=PASS
@@ -118,9 +118,12 @@ worker 可从 DB 恢复完整上下文、提高 retry/crash recovery 一致性�
 ### Q7 锁 TTL 到期但旧 worker 还在跑怎么办？
 当前：owner token + Lua compare-and-delete 只能防"旧 owner 错删新锁"，**不能**严格
 消除"pause 超过 TTL 后旧 worker 继续执行"（A 卡顿 → TTL 过期 → B 拿锁 → A 恢复 →
-A/B 同时跑）。缓解：`TTL > task time limit + margin`（启动校验）+ checkpoint/
-idempotency + 任务超时。更严格场景应加 **lease renewal / heartbeat / fencing token /
-DB version check**——当前**没有** fencing token，不假装解决。
+A/B 同时跑）。已实现的缓解：执行期间 **lease renewal / heartbeat**
+（`runtime/executor.py::_heartbeat_loop` 同时续 DB lease 与 Redis lock TTL，
+观测 `agent_thread_lease_renewed_total` / `agent_worker_heartbeat`）+
+`TTL > task time limit + margin`（启动校验）+ checkpoint 续跑 + 工具幂等 +
+任务超时。更严格场景仍应加 **fencing token / DB version check**——当前
+**没有** fencing token，不假装解决。
 
 ### Q8 为什么 tool ledger 不能等同于端到端 exactly-once？
 本地 ledger 只保证"同一 Agent 不重复发起同一副作用"。下游 ERP 可能已经执行但响应
