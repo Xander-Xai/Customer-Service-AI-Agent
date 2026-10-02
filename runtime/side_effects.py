@@ -65,13 +65,13 @@ def _claim_lease_expired(row: Any, ttl_seconds: float) -> bool:
     if expires_at is not None:
         if expires_at.tzinfo is None:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
-        return _utcnow() >= expires_at
+        return bool(_utcnow() >= expires_at)
     updated_at = getattr(row, "updated_at", None)
     if updated_at is None:
         return False
     if updated_at.tzinfo is None:
         updated_at = updated_at.replace(tzinfo=timezone.utc)
-    return (_utcnow() - updated_at).total_seconds() > max(0.0, ttl_seconds)
+    return bool((_utcnow() - updated_at).total_seconds() > max(0.0, ttl_seconds))
 
 
 def _new_owner() -> str:
