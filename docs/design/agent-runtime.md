@@ -355,7 +355,7 @@ worker -> XADD agent:run:{run_id}:events -> API XREAD -> SSE -> client
 | Redis 不可用（事件流） | 事件发布降级为 no-op，**不影响** Run | 事件流缺事件；状态查询正常 |
 | PostgreSQL 不可用 | Checkpoint/Run 写入失败 → `transient` retry；`CHECKPOINT_UNAVAILABLE` | Run 失败或退避 |
 | 消息重复投递 | application-level run 幂等（终态 no-op）+ `lease_expires_at` 归属检查 | 不会重复出结果 |
-| 工具成功但 worker 崩溃 | ledger `SUCCEEDED` → 重投时返回历史结果 | 副作用**只发生一次** |
+| 工具成功但 worker 崩溃 | ledger `SUCCEEDED` → 重投时返回历史结果 | 本 Agent 侧副作用**只发生一次**（下游系统端到端幂等仍需其接受 idempotency key） |
 | 认领工具时崩溃（PENDING） | 认领租约过期后允许接管重放 | 可能重试该次写操作（不可避免） |
 
 ---
@@ -364,7 +364,7 @@ worker -> XADD agent:run:{run_id}:events -> API XREAD -> SSE -> client
 
 ```bash
 # 需要真实 PostgreSQL + Redis；未配置时目标 FAIL（不静默 skip）
-make runtime-e2e     # tests/integration/runtime，30 个用例
+make runtime-e2e     # tests/integration/runtime
 make runtime-chaos   # 崩溃恢复 + 副作用去重，输出结构化证据 JSON
 make runtime-verify  # 生成 artifacts/distributed-runtime/<ts>/report.json
 ```

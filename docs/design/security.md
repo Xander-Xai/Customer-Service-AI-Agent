@@ -17,7 +17,7 @@
 | **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层泄露检测 | ✅ 已实现 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 | ✅ 已实现 |
 | **安全头** | HSTS + X-Frame-Options + X-Content-Type-Options + Referrer-Policy + Permissions-Policy | ✅ 已实现 |
-| **CSP** | script-src nonce（无 unsafe-inline），style-src nonce（v5.4 修复） | ✅ 已实现 |
+| **CSP** | `script-src 'self' 'nonce-…'`（无 `unsafe-inline`，每请求随机 nonce）；`style-src 'self' 'unsafe-inline'`（当前仍有 `unsafe-inline`，见"已知限制"） | ✅ 已实现（`api/middleware/__init__.py`） |
 | **前端 XSS** | DOMPurify 净化 LLM 输出 + escapeHtml 净化动态数据 + 4 处 innerHTML 已审计（2 注释 + 2 widget） | ✅ 已实现 |
 | **WebSocket** | API Key（query/header/message）优先 + JWT 首条消息认证 + 每 IP 连接限制 + 消息限流 + 空闲超时 | ✅ 已实现 |
 | **会话安全** | UUID 格式校验 + HMAC 会话令牌签名 + 用户级会话所有权隔离 + 黑板 ContextVar 隔离 | ✅ 已实现 |
@@ -142,7 +142,7 @@ LLM 输出处理链路：`marked.parse()` → `DOMPurify.sanitize()` → 插入 
 
 | 限制 | 当前状态 | 改进方案 | 优先级 |
 |------|---------|---------|--------|
-| ~~style-src 使用 unsafe-inline~~ | ~~前端 65 处内联样式~~ | ~~迁移内联样式到 CSS 类或使用 style nonce~~ | ✅ v5.4 已完成 |
+| style-src 仍使用 `unsafe-inline` | 前端存在分散的内联样式（主题切换/动态样式注入） | 迁移内联样式到 CSS 类或改用 CSS 自定义属性，从而收紧 style-src | 未完成（低优先级） |
 | ~~密码哈希使用 PBKDF2~~ | ~~OWASP 最低推荐~~ | ~~升级到 Argon2id~~ | ✅ v5.4 已完成 |
 | 同步 JWT decode 无法检查 Redis 黑名单 | 已文档化 | 迁移到全异步认证路径 | P1 |
 | ERP 集成为 Mock 模式 | 接口抽象已完成 | 真实 ERP 对接需企业配合 | P3 |

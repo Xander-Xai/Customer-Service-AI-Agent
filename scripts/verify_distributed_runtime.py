@@ -10,8 +10,13 @@
 
 基础设施（未配置则对应检查 NOT_RUN）：
 
-  DISTRIBUTED_DB_URL / TEST_POSTGRES_CHECKPOINT_URL / DATABASE_URL  (PostgreSQL)
+  TEST_DISTRIBUTED_DB_URL / DISTRIBUTED_DB_URL /                    (PostgreSQL)
+  TEST_POSTGRES_CHECKPOINT_URL / DATABASE_URL
   TEST_REDIS_URL / REDIS_URL                                        (Redis)
+
+``TEST_DISTRIBUTED_DB_URL`` / ``TEST_REDIS_URL`` 是与
+``tests/integration/runtime/conftest.py``、``scripts/test_worker_crash_recovery.py``、
+``make runtime-e2e|chaos|verify`` 和 CI 一致的**规范变量名**，优先级最高。
 
 退出码（fail-closed）::
 
@@ -25,7 +30,8 @@
 输出：artifacts/distributed-runtime/<UTC 时间戳>/report.json
 用法：
   python scripts/verify_distributed_runtime.py
-  DISTRIBUTED_DB_URL=postgresql://... TEST_REDIS_URL=redis://... python scripts/verify_distributed_runtime.py
+  TEST_DISTRIBUTED_DB_URL=postgresql://... TEST_REDIS_URL=redis://... \
+      python scripts/verify_distributed_runtime.py
 """
 
 from __future__ import annotations
@@ -215,7 +221,15 @@ async def _run() -> dict[str, Any]:
     os.environ.setdefault("API_KEY_ENABLED", "false")
     sys.path.insert(0, str(REPO_ROOT))
 
-    pg_url = _first_env("DISTRIBUTED_DB_URL", "TEST_POSTGRES_CHECKPOINT_URL", "DATABASE_URL")
+    # TEST_DISTRIBUTED_DB_URL 必须是第一候选：它就是 conftest / chaos 脚本 /
+    # Makefile / CI 注入的规范变量名。之前这里漏了它，导致 make runtime-verify
+    # 明明注入了 PG URL 却仍然报 NOT_RUN（而错误提示却让用户去设这个变量）。
+    pg_url = _first_env(
+        "TEST_DISTRIBUTED_DB_URL",
+        "DISTRIBUTED_DB_URL",
+        "TEST_POSTGRES_CHECKPOINT_URL",
+        "DATABASE_URL",
+    )
     redis_url = _first_env("TEST_REDIS_URL", "REDIS_URL")
 
     checks: dict[str, Any] = {}

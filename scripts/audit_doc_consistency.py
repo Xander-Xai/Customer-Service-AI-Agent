@@ -25,6 +25,17 @@ Checks:
       NOT_VERIFIED (v3, rule D)
    L. make targets referenced by current-truth docs must exist (v3, rule E)
    M. tracked+ignored repository hygiene (v3, rule F)
+   V. distributed-runtime future-claim drift: an IMPLEMENTED capability
+      (Celery worker / Redis per-thread lock / PostgreSQL checkpointer,
+      derived from the filesystem) must never be described as future work
+      in a CURRENT document
+   W. docs index must link every current ADR/design/runbook for a shipped
+      capability
+   X. API reference surface anchor must equal app.openapi()
+   Y. CURRENT docs describing multi-worker/multi-replica deployment must
+      state PostgreSQL checkpoint + Redis session + Redis per-thread lock
+   Z. no point-in-time audit snapshot may sit at the repository root where it
+      escapes the guard scope
    Final-closeout guards: N. negative-existence claims (doc says a repo file
       is missing while it exists); P. stale fail-open embedding semantics
       (random-vector fallback); Q. unsupported latency absolutes (零延迟/
@@ -56,14 +67,28 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 DOC_SUFFIXES = {".md", ".rst", ".txt"}
 SKIP_PARTS = {
-    ".git", "node_modules", "dist", "__pycache__", ".venv", ".worktrees",
-    ".claude", "htmlcov", "logs", "chat_sessions", "web/static",
+    ".git",
+    "node_modules",
+    "dist",
+    "__pycache__",
+    ".venv",
+    ".worktrees",
+    ".claude",
+    "htmlcov",
+    "logs",
+    "chat_sessions",
+    "web/static",
 }
 # Directories whose content is snapshot/historical by semantics (not scanned
 # for current-state terminology; broken-link checking is also skipped because
 # snapshots may reference files as they existed at audit time).
 HISTORICAL_DIRS = (
-    "archive", "milestone", "superpowers", "chat-records", "audit", "reports",
+    "archive",
+    "milestone",
+    "superpowers",
+    "chat-records",
+    "audit",
+    "reports",
 )
 # Small explicit exclude list for files that are snapshots by convention.
 EXCLUDE_FILES = {
@@ -93,23 +118,41 @@ CANONICAL_MODEL_KEYS = {
 
 # Public runtime keys that must appear in .env.example (deployment template).
 REQUIRED_ENV_KEYS = [
-    "LLM_PROVIDER", "OPENAI_MODEL", "OPENAI_BASE_URL", "LLM_MAX_TOKENS",
-    "HTTP_TIMEOUT", "LLM_ROUTER_TIMEOUT",
-    "EMBEDDING_MODEL", "EMBEDDING_BASE_URL", "EMBEDDING_DIM",
-    "RERANKER_MODEL", "RERANKER_BASE_URL",
-    "HYBRID_SEARCH_ENABLED", "VECTOR_DB_MODE", "QDRANT_HOST", "QDRANT_PORT",
+    "LLM_PROVIDER",
+    "OPENAI_MODEL",
+    "OPENAI_BASE_URL",
+    "LLM_MAX_TOKENS",
+    "HTTP_TIMEOUT",
+    "LLM_ROUTER_TIMEOUT",
+    "EMBEDDING_MODEL",
+    "EMBEDDING_BASE_URL",
+    "EMBEDDING_DIM",
+    "RERANKER_MODEL",
+    "RERANKER_BASE_URL",
+    "HYBRID_SEARCH_ENABLED",
+    "VECTOR_DB_MODE",
+    "QDRANT_HOST",
+    "QDRANT_PORT",
 ]
 
 # Stale terms that must not be described as current in active docs.
 STALE_CURRENT_TERMS = [
-    r"Qwen/Qwen2\.5-7B-Instruct", r"Qwen2\.5-7B-Instruct", r"Qwen2\.5-7B",
-    r"bge-small-zh-v1\.5", r"text2vec-base-chinese", r"all-MiniLM-L6-v2",
+    r"Qwen/Qwen2\.5-7B-Instruct",
+    r"Qwen2\.5-7B-Instruct",
+    r"Qwen2\.5-7B",
+    r"bge-small-zh-v1\.5",
+    r"text2vec-base-chinese",
+    r"all-MiniLM-L6-v2",
     r"ChromaDB",
 ]
 # Hardcoded stale counts / claims (must not appear as current facts).
 STALE_COUNT_TERMS = [
-    r"1,?361\+?", r"1400\+ tests", r"5000\+ 条测试", r"共 5000\+ 条",
-    r"55 个 HTTP 路径", r"55 HTTP paths",
+    r"1,?361\+?",
+    r"1400\+ tests",
+    r"5000\+ 条测试",
+    r"共 5000\+ 条",
+    r"55 个 HTTP 路径",
+    r"55 HTTP paths",
 ]
 # Allow phrases that explicitly frame history (line-level context allowance).
 HISTORICAL_CONTEXT = re.compile(
@@ -285,7 +328,7 @@ def markdown_link_targets(text: str):
 
 def check_links(path: Path, text: str, errors: list[str], root: Path = ROOT) -> None:
     for target in markdown_link_targets(text):
-        resolved = (path.parent / target)
+        resolved = path.parent / target
         if not resolved.exists():
             errors.append(
                 f"broken local link: {path.relative_to(root)} -> {target} "
@@ -293,13 +336,15 @@ def check_links(path: Path, text: str, errors: list[str], root: Path = ROOT) -> 
             )
 
 
-
 def check_file_refs_line_aware(path: Path, text: str, errors: list[str], root: Path = ROOT) -> None:
     """Line-aware variant: a referenced file missing on disk is only an error when
     the line describes it as a current entry point. Lines marked with historical
     context (修复方案 / 已移除 / 已删除 / 历史) are tolerated."""
     for line_no, line in enumerate(text.splitlines(), 1):
-        refs = re.findall(r"(?:scripts|tests|rag|core|cache|agents|api|llm|web/src)/[A-Za-z0-9_./-]+\.(?:json|yml|yaml|py|js)", line)
+        refs = re.findall(
+            r"(?:scripts|tests|rag|core|cache|agents|api|llm|web/src)/[A-Za-z0-9_./-]+\.(?:json|yml|yaml|py|js)",
+            line,
+        )
         if not refs:
             continue
         if HISTORICAL_CONTEXT.search(line):
@@ -320,9 +365,7 @@ def check_env_coverage(errors: list[str], root: Path = ROOT) -> None:
     env_keys = set(re.findall(r"^([A-Z][A-Z0-9_]+)=", env_example, re.MULTILINE))
     public_tool_flags = re.findall(r'os\.getenv\("(TOOL_RESULT_[A-Z0-9_]+)"', config)
     missing_flags = sorted(set(public_tool_flags) - env_keys)
-    errors.extend(
-        f"public config missing from .env.example: {name}" for name in missing_flags
-    )
+    errors.extend(f"public config missing from .env.example: {name}" for name in missing_flags)
     # Strict contract: every REQUIRED_ENV_KEY must be present in .env.example.
     # Presence in core/config.py does NOT satisfy this — internal-only runtime
     # config must be removed from REQUIRED_ENV_KEYS (with a reason), not
@@ -452,8 +495,7 @@ def check_openapi_snapshot(errors: list[str], root: Path = ROOT) -> None:
         from api.app_factory import app  # noqa: PLC0415
     except ImportError as exc:
         warnings_append(
-            f"OpenAPI live spec unavailable (missing dependency "
-            f"{exc.__class__.__name__}: {exc})"
+            f"OpenAPI live spec unavailable (missing dependency {exc.__class__.__name__}: {exc})"
         )
         return
     except Exception as exc:  # noqa: BLE001 - application import regression
@@ -483,9 +525,7 @@ def check_openapi_snapshot(errors: list[str], root: Path = ROOT) -> None:
             "OpenAPI snapshot drift: API surface (path→methods) differs from app.openapi()"
         )
     if current.get("info", {}).get("version") != live.get("info", {}).get("version"):
-        errors.append(
-            "OpenAPI version drift: docs/openapi.json != app.openapi() info.version"
-        )
+        errors.append("OpenAPI version drift: docs/openapi.json != app.openapi() info.version")
 
 
 def warnings_append(msg: str) -> None:  # noqa: D401 (helper keeps naming clear)
@@ -506,7 +546,9 @@ def check_benchmark_metadata(errors: list[str], root: Path = ROOT) -> None:
         )
 
 
-def check_stale_terms(docs: list[Path], warnings: list[str], errors: list[str], root: Path = ROOT) -> None:
+def check_stale_terms(
+    docs: list[Path], warnings: list[str], errors: list[str], root: Path = ROOT
+) -> None:
     for path in docs:
         rel = path.relative_to(root)
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -538,16 +580,26 @@ def check_stale_terms(docs: list[Path], warnings: list[str], errors: list[str], 
 # must derive counts dynamically (`pytest --collect-only -q` / `npm test`);
 # dated historical snapshots are exempt via discovery/historical banners.
 CURRENT_TEST_COUNT_PATTERNS = [
-    (re.compile(r"收集\D{0,10}\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
-     "hardcoded pytest collected count framed as current"),
-    (re.compile(r"pytest --collect-only.{0,80}?\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
-     "hardcoded pytest collected count framed as current"),
-    (re.compile(r"(?:用例|测试)(?:总数|数量)\s*(?:约|=|为|:：)?\s*\d{3,}"),
-     "hardcoded test-count claim framed as current"),
-    (re.compile(r"npm test\b[^|\n]{0,40}=\s*\d+\s*/\s*\d+"),
-     "hardcoded npm test N/N framing (current-truth claim)"),
-    (re.compile(r"(?:all\s*|所有\s*|全部\s*)\d+\s*tests?\s*(?:pass|passed|通过)", re.IGNORECASE),
-     "fixed 'all N tests pass' framing"),
+    (
+        re.compile(r"收集\D{0,10}\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
+        "hardcoded pytest collected count framed as current",
+    ),
+    (
+        re.compile(r"pytest --collect-only.{0,80}?\d{3,}\s*(?:个|条)?\s*(?:测试|用例|tests?)"),
+        "hardcoded pytest collected count framed as current",
+    ),
+    (
+        re.compile(r"(?:用例|测试)(?:总数|数量)\s*(?:约|=|为|:：)?\s*\d{3,}"),
+        "hardcoded test-count claim framed as current",
+    ),
+    (
+        re.compile(r"npm test\b[^|\n]{0,40}=\s*\d+\s*/\s*\d+"),
+        "hardcoded npm test N/N framing (current-truth claim)",
+    ),
+    (
+        re.compile(r"(?:all\s*|所有\s*|全部\s*)\d+\s*tests?\s*(?:pass|passed|通过)", re.IGNORECASE),
+        "fixed 'all N tests pass' framing",
+    ),
 ]
 # Lines that explicitly frame counts as dynamic command output are allowed.
 DYNAMIC_COUNT_FRAMING = re.compile(
@@ -564,7 +616,10 @@ RAG_ENTRY_DOCS = [
 # Canonical RAG evaluation make targets that must be wired to the canonical
 # evaluation scripts in the Makefile.
 RAG_EVAL_MAKE_TARGETS = (
-    "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import",
+    "rag-eval-649",
+    "rag-eval-649-preflight",
+    "rag-eval-649-smoke",
+    "rag-eval-import",
 )
 
 # (K) Metric families that must not be claimed as current formal numbers while
@@ -589,11 +644,54 @@ MAKE_TARGET_REF_RE = re.compile(
 MAKE_ANY_TARGET_RE = re.compile(r"\bmake\s+([A-Za-z][A-Za-z0-9_-]*)")
 # English-verb false positives ("can make a cached read stale").
 MAKE_STOP_TARGETS = {
-    "a", "an", "the", "it", "its", "sure", "use", "up", "of", "in", "on", "at",
-    "to", "for", "and", "or", "that", "this", "all", "any", "no", "not", "me",
-    "my", "your", "our", "them", "they", "we", "be", "been", "is", "are", "was",
-    "were", "do", "does", "did", "done", "made", "sense", "difference",
-    "decision", "call", "note", "few", "lot", "one",
+    "a",
+    "an",
+    "the",
+    "it",
+    "its",
+    "sure",
+    "use",
+    "up",
+    "of",
+    "in",
+    "on",
+    "at",
+    "to",
+    "for",
+    "and",
+    "or",
+    "that",
+    "this",
+    "all",
+    "any",
+    "no",
+    "not",
+    "me",
+    "my",
+    "your",
+    "our",
+    "them",
+    "they",
+    "we",
+    "be",
+    "been",
+    "is",
+    "are",
+    "was",
+    "were",
+    "do",
+    "does",
+    "did",
+    "done",
+    "made",
+    "sense",
+    "difference",
+    "decision",
+    "call",
+    "note",
+    "few",
+    "lot",
+    "one",
 }
 
 # (M) Tracked files the repo deliberately keeps despite ignore patterns
@@ -646,9 +744,7 @@ def check_rag_eval_references(docs: list[Path], errors: list[str], root: Path = 
 
     canonical = root / CANONICAL_RAG_DOC
     if not canonical.exists():
-        errors.append(
-            f"canonical RAG evaluation reference missing: {CANONICAL_RAG_DOC}"
-        )
+        errors.append(f"canonical RAG evaluation reference missing: {CANONICAL_RAG_DOC}")
         return
 
     makefile = root / "Makefile"
@@ -683,13 +779,16 @@ def check_rag_eval_references(docs: list[Path], errors: list[str], root: Path = 
 
     ctext = canonical.read_text(encoding="utf-8", errors="replace")
     for token in (
-        "vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank",
-        "all_queries", "retrieval_eligible", "full_gold_covered",
+        "vector_only",
+        "bm25_only",
+        "hybrid_no_rerank",
+        "hybrid_rerank",
+        "all_queries",
+        "retrieval_eligible",
+        "full_gold_covered",
     ):
         if token not in ctext:
-            errors.append(
-                f"canonical RAG doc missing evidence-pipeline token: {token}"
-            )
+            errors.append(f"canonical RAG doc missing evidence-pipeline token: {token}")
 
 
 def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
@@ -805,7 +904,10 @@ def git_tracked_ignored(root: Path = ROOT) -> list[str] | None:
     try:
         out = subprocess.run(
             ["git", "ls-files", "-ci", "--exclude-standard"],
-            cwd=root, capture_output=True, text=True, check=True,
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
         # not a git repo (e.g. synthetic test fixture): skip quietly
@@ -813,9 +915,7 @@ def git_tracked_ignored(root: Path = ROOT) -> list[str] | None:
     return [p for p in out.stdout.splitlines() if p.strip()]
 
 
-def check_negative_existence_claims(
-    docs: list[Path], errors: list[str], root: Path = ROOT
-) -> None:
+def check_negative_existence_claims(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
     """Guard N: active docs must not claim a repo file is missing while it
     exists (and vice versa is covered by check_file_refs_line_aware). The
     negative claim must bind to the path (直接前缀 不包含…，或路径后紧跟
@@ -834,8 +934,8 @@ def check_negative_existence_claims(
                     continue  # missing-file refs handled by file-ref guards
                 claimed_missing = False
                 for hit in re.finditer(re.escape(ref), line):
-                    before = line[max(0, hit.start() - 40): hit.start()]
-                    after = line[hit.end(): hit.end() + 24]
+                    before = line[max(0, hit.start() - 40) : hit.start()]
+                    after = line[hit.end() : hit.end() + 24]
                     if NEG_CONTAINS_RE.search(before) or NEG_AFTER_RE.match(after.strip()):
                         claimed_missing = True
                         break
@@ -847,9 +947,7 @@ def check_negative_existence_claims(
                     )
 
 
-def check_stale_embedding_fallback(
-    docs: list[Path], errors: list[str], root: Path = ROOT
-) -> None:
+def check_stale_embedding_fallback(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
     """Guard P: the response cache is fail-closed on embedding failure
     (EmbeddingUnavailableError -> skip L2; never a random vector). Ban the
     random-vector fallback wording from cache source and active docs."""
@@ -868,14 +966,10 @@ def check_stale_embedding_fallback(
             if not is_doc and STALE_RANDOM_VECTOR_NEGATED_RE.search(line):
                 continue
             if is_doc and (
-                HISTORICAL_CONTEXT.search(line)
-                or STALE_RANDOM_VECTOR_NEGATED_RE.search(line)
+                HISTORICAL_CONTEXT.search(line) or STALE_RANDOM_VECTOR_NEGATED_RE.search(line)
             ):
                 continue
-            where = (
-                path.relative_to(root) if root in path.parents or path.parent == root
-                else path
-            )
+            where = path.relative_to(root) if root in path.parents or path.parent == root else path
             errors.append(
                 f"stale embedding fallback semantics: {where}:{line_no} claims a "
                 f"random-vector fallback — response cache is fail-closed "
@@ -883,9 +977,7 @@ def check_stale_embedding_fallback(
             )
 
 
-def check_latency_absolutes(
-    docs: list[Path], errors: list[str], root: Path = ROOT
-) -> None:
+def check_latency_absolutes(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
     """Guard Q: current-truth/active docs must not state latency absolutes
     (零延迟/亚毫秒/<10ms/…) without a same-line benchmark/estimate/historical
     qualifier. In-process mechanism descriptions (no numbers) stay allowed."""
@@ -908,9 +1000,7 @@ def check_latency_absolutes(
             )
 
 
-def check_production_claims(
-    docs: list[Path], errors: list[str], root: Path = ROOT
-) -> None:
+def check_production_claims(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
     """Guard R: production-grade status claims are not allowed as current
     facts while provider/production evidence is NOT_VERIFIED. Design-oriented
     framing (生产化/面向生产/生产级要求) and disclaimers stay allowed;
@@ -936,9 +1026,7 @@ def check_production_claims(
 # ---- Lifecycle vocabulary: one canonical taxonomy (docs/README.md).
 # Retired labels may only appear as explicitly-explained aliases, never as an
 # independent lifecycle marker. Emoji-anchored so prose mentions don't trip.
-RETIRED_LIFECYCLE_RE = re.compile(
-    r"(?:🟢\s*Active|🔵\s*Stable|🟠\s*Disposable|🟡\s*Snapshot)"
-)
+RETIRED_LIFECYCLE_RE = re.compile(r"(?:🟢\s*Active|🔵\s*Stable|🟠\s*Disposable|🟡\s*Snapshot)")
 
 # ---- No accidental product-version promotion. Runtime VERSION is 6.3; a
 # `v6.4`/`6.4` claim in an active doc (outside historical context) would be a
@@ -978,6 +1066,384 @@ def check_no_v64_claim(docs: list[Path], errors: list[str], root: Path = ROOT) -
                 f"accidental product-version claim `v6.4` in {rel}:{line_no} — the "
                 f"current runtime version is 6.3; do not invent a release"
             )
+
+
+# ===========================================================================
+# Distributed Agent Runtime semantic-drift guards (v4).
+#
+# Truth priority: executable code first. Each guard below *derives* whether a
+# capability exists from the repository filesystem/code, then forbids CURRENT
+# documentation from describing that already-implemented capability as future
+# work. Historical documents (bannered or in a historical directory) are out of
+# scope by construction — `discover_docs` never returns them.
+# ===========================================================================
+
+# Capability -> (code markers proving it is IMPLEMENTED, proximity pattern that
+# fires only when a "future/planned" marker is bound to the capability mention).
+# A capability counts as implemented only when every marker file exists.
+# The proximity window is deliberately tight: describing an implemented
+# capability is fine, calling it future work is the drift we forbid.
+#
+# Marker set is intentionally explicit rather than a broad "future-ish" regex.
+# Short markers like 待 / 尚未 match ordinary Chinese prose ("等待当前任务",
+# "尚未投递到队列") and produced false positives on correct documentation, so
+# only unambiguous roadmap phrasing is used.
+_FUTURE_MARKER = r"未来|待实现|尚未实现|未实现|计划(?:中)?|下一阶段|将来(?:要|会)|有(?:望|待)实现"
+RUNTIME_CAPABILITIES: dict[str, tuple[tuple[str, ...], re.Pattern[str]]] = {
+    "celery_worker": (
+        ("runtime/celery_app.py", "runtime/tasks.py", "runtime/dispatch.py"),
+        re.compile(
+            rf"(?:{_FUTURE_MARKER})[^。\n]{{0,40}}"
+            rf"(?:Celery|celery|worker|Worker|队列)"
+            rf"|(?:Celery|celery|worker|Worker|队列)[^。\n]{{0,40}}"
+            rf"(?:{_FUTURE_MARKER})",
+            re.IGNORECASE,
+        ),
+    ),
+    "redis_distributed_lock": (
+        (
+            "core/concurrency/distributed_lock.py",
+            "runtime/thread_lock.py",
+            "core/concurrency/__init__.py",
+        ),
+        # The capability noun (lock / cross-process mutual exclusion) must be
+        # adjacent to the future marker. A bare "多副本" is a topology mention,
+        # not a claim that the lock is missing.
+        re.compile(
+            rf"(?:{_FUTURE_MARKER})[^。\n]{{0,40}}"
+            rf"(?:分布式锁|跨进程(?:互斥|状态同步|锁)|distributed\s+lock|per-thread\s+(?:lock|锁))"
+            rf"|(?:分布式锁|跨进程(?:互斥|状态同步|锁)|distributed\s+lock|per-thread\s+(?:lock|锁))"
+            rf"[^。\n]{{0,40}}(?:{_FUTURE_MARKER})"
+            rf"|(?:需要|要)用\s*Redis[^。\n]{{0,30}}跨进程"
+            rf"|多\s*[Ww]orker[^。\n]{{0,20}}需要[^。\n]{{0,20}}Redis",
+            re.IGNORECASE,
+        ),
+    ),
+    "postgres_checkpointer": (
+        ("core/checkpointer.py",),
+        re.compile(
+            rf"(?:{_FUTURE_MARKER})[^。\n]{{0,40}}"
+            rf"(?:checkpoint|checkpointer|检查点|持久化)"
+            rf"|(?:checkpoint|checkpointer|检查点|持久化)[^。\n]{{0,40}}"
+            rf"(?:{_FUTURE_MARKER})"
+            rf"|(?:future|future\s+work|not\s+yet\s+implemented|planned|to\s+be)\W{{0,30}}"
+            rf"(?:persistent|durable)?\s*(?:checkpoint|checkpointer)",
+            re.IGNORECASE,
+        ),
+    ),
+}
+
+# Line-level allowance: the line explicitly negates / historicizes the claim,
+# records an evidence gap, or quotes someone else's future framing as something
+# being corrected.
+RUNTIME_NEGATION_RE = re.compile(
+    r"不是未来|不再|已(?:经)?(?:实现|完成|落地|具备|实现|改)|已非|而非未来|"
+    r"曾经(?:计划|打算)|原本(?:计划|打算)|"
+    r"历史|Historical|historical|snapshot|快照|审计时|当时|基线|"
+    r"没有(?:实现|做)|未(?:实现|完成)|改为|改成|修正|纠正|"
+    r"尚未在真实|未在真实|尚未.{0,20}验证|不等同于生产|不等于生产|"
+    r"假设|假想|设想场景|如果将来|即便将来|"
+    r"反例|反面|错误(?:的)?(?:说法|示例)|不要说|不能说|不得(?:说|写)|"
+    r"面试话术|追问|反问|not\s+implemented|no\s+longer|never\s+implemented|"
+    r"下一阶段设计",
+    re.IGNORECASE,
+)
+
+# Multi-worker deployment claim -> the three invariants such a section MUST
+# state. Scoping matters: a doc may mention "multi-replica" once inside a
+# NOT_VERIFIED caveat without being a deployment guide. The guard is applied
+# per section (heading-delimited), not per document, so a passing mention does
+# not force every unrelated doc to become a deployment guide.
+MULTI_WORKER_DEPLOY_RE = re.compile(
+    r"GUNICORN_WORKERS\s*[>=]|gunicorn\s*(?:多|multi)[-_]?worker|"
+    r"多\s*[Ww]orker|多副本|多实例|水平扩展|横向扩展|--scale\s+app|"
+    r"multi-?worker|multiple\s+(?:workers|replicas|instances)|"
+    r"跨进程(?:互斥|状态同步)",
+    re.IGNORECASE,
+)
+# Guard Y is deliberately an explicit allowlist rather than pattern inference.
+# "Does this sentence sound like deployment guidance?" is not decidable by
+# regex and produced heavy false positives (interview scripts, API tables, ADRs
+# about unrelated topics). Naming the deployment-facing CURRENT documents makes
+# the requirement explicit, auditable, and impossible to evade by rewording.
+# These are the docs an operator or new engineer reads to configure a deployment.
+MULTI_WORKER_DEPLOY_DOCS: frozenset[str] = frozenset(
+    {
+        "README.md",
+        "CLAUDE.md",
+        "docs/reference/current-state.md",
+        "docs/design/distributed-agent-runtime.md",
+        "docs/design/agent-runtime.md",
+        "docs/design/runtime-state-ownership.md",
+        "docs/design/async-agent-worker-architecture.md",
+        "docs/operations/production-operations-guide.md",
+        "docs/operations/distributed-runtime-runbook.md",
+        "docs/operations/e2e-verification-guide.md",
+        "docs/checklists/quick-launch-checklist.md",
+        "docs/checklists/production-readiness-checklist.md",
+    }
+)
+MULTI_WORKER_REQUIRED_TERMS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "PostgreSQL checkpoint",
+        re.compile(
+            r"LANGGRAPH_CHECKPOINT_BACKEND\s*=?\s*postgres|"
+            r"AsyncPostgresSaver|"
+            r"checkpoint[^\n]{0,30}(?:postgres|postgresql)|"
+            r"(?:postgres|postgresql)[^\n]{0,30}checkpoint",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Redis session",
+        re.compile(
+            r"SESSION_STORAGE_BACKEND\s*=?\s*redis|"
+            r"session[^\n]{0,30}(?:redis|Redis)|(?:redis|Redis)[^\n]{0,30}session",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "Redis thread lock",
+        re.compile(
+            r"AGENT_RUN_THREAD_LOCK|agent:thread-lock:|"
+            r"(?:thread|线程)[^\n]{0,20}锁|锁[^\n]{0,20}(?:thread|线程)|分布式锁",
+            re.IGNORECASE,
+        ),
+    ),
+)
+# Sections that only record an evidence gap ("multi-replica is NOT_VERIFIED")
+# are not deployment guidance and must not be forced to restate the stack.
+MULTI_WORKER_EXEMPT_RE = re.compile(
+    r"HISTORICAL|historical|快照|历史|"
+    r"NOT_VERIFIED|not\s+verified|未验证|未生产验证|不宣称|不得(?:说|写|声称)",
+    re.IGNORECASE,
+)
+_HEADING_RE = re.compile(r"^(#{1,6})\s")
+
+# Documents that MUST be reachable from the docs index, because they are the
+# current authority for a shipped capability. (path, human reason)
+REQUIRED_INDEX_ENTRIES: tuple[tuple[str, str], ...] = (
+    ("docs/decisions/009-distributed-agent-runtime.md", "ADR: distributed Agent Runtime"),
+    ("docs/design/agent-runtime.md", "distributed Agent Runtime design"),
+    ("docs/design/distributed-agent-runtime.md", "distributed runtime reliability boundaries"),
+    ("docs/design/runtime-state-ownership.md", "state ownership (checkpoint/session/cache/store)"),
+    (
+        "docs/design/async-agent-worker-architecture.md",
+        "worker architecture (implemented vs design)",
+    ),
+    ("docs/operations/distributed-runtime-runbook.md", "distributed runtime runbook"),
+    ("docs/reference/distributed-runtime-interview-evidence.md", "runtime evidence boundary"),
+)
+
+# Machine-checkable anchor in docs/reference/api-reference.md. The numbers in
+# that file must come from the generator, never from a human.
+API_SURFACE_ANCHOR_RE = re.compile(
+    r"<!--\s*openapi-surface:\s*paths=(\d+)\s+operations=(\d+)\s+api_operations=(\d+)\s*-->"
+)
+API_REFERENCE_DOC = "docs/reference/api-reference.md"
+# Root-level markdown that is neither README nor CLAUDE.md would sit outside
+# `discover_docs` and therefore escape every guard while still competing with
+# docs/reference/current-state.md.
+ROOT_ALLOWED_MARKDOWN = {"README.md", "CLAUDE.md"}
+
+
+def _capability_is_implemented(root: Path, markers: tuple[str, ...]) -> bool:
+    return all((root / marker).exists() for marker in markers)
+
+
+def check_runtime_future_claims(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule V: an implemented distributed-runtime capability must never be
+    described as future/planned work in a CURRENT document.
+
+    The truth source is the filesystem: if the Celery worker, the Redis
+    per-thread lock, and the PostgreSQL checkpointer all exist in code, then a
+    CURRENT doc that calls them future work is a factual contradiction, not a
+    matter of wording.
+    """
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if RUNTIME_NEGATION_RE.search(line):
+                continue
+            for capability, (markers, drift_re) in RUNTIME_CAPABILITIES.items():
+                if not _capability_is_implemented(root, markers):
+                    continue
+                if drift_re.search(line):
+                    errors.append(
+                        f"runtime future-claim drift ({capability}) in {rel}:{line_no} — "
+                        f"{', '.join(markers)} exist in code, so this capability is "
+                        f"IMPLEMENTED and must not be described as future/planned work; "
+                        f"reframe as an already-shipped capability or mark the line "
+                        f"historical/negated"
+                    )
+
+
+def check_docs_index_coverage(errors: list[str], root: Path = ROOT) -> None:
+    """Rule W: the docs index must expose every current ADR/design/runbook for
+    a shipped capability, otherwise a CURRENT doc is effectively unreachable."""
+    index_path = root / "docs" / "README.md"
+    if not index_path.exists():
+        errors.append("docs index missing: docs/README.md")
+        return
+    index_text = index_path.read_text(encoding="utf-8", errors="replace")
+    # Only consider relative link targets (docs/README.md links to ../README.md
+    # and to reference/... etc.), so normalize both sides to repo-relative.
+    linked: set[str] = set()
+    for target in markdown_link_targets(index_text):
+        if "://" in target:
+            continue
+        try:
+            resolved = (index_path.parent / target).resolve().relative_to(root.resolve())
+        except (ValueError, OSError):
+            continue
+        linked.add(str(resolved).replace("\\", "/"))
+    for required, reason in REQUIRED_INDEX_ENTRIES:
+        if required not in linked:
+            errors.append(
+                f"docs index missing entry for {required} ({reason}) — add it to "
+                f"docs/README.md; CURRENT docs for shipped capabilities must be "
+                f"reachable from the index"
+            )
+
+
+def check_api_reference_surface(errors: list[str], root: Path = ROOT) -> None:
+    """Rule X: the API reference surface must equal the generated OpenAPI.
+
+    The doc carries a machine-readable anchor; its numbers are compared against
+    `app.openapi()`. Human-maintained counts are exactly how "53 HTTP paths"
+    survived long after the surface grew to 58.
+    """
+    doc_path = root / API_REFERENCE_DOC
+    if not doc_path.exists():
+        errors.append(f"API reference missing: {API_REFERENCE_DOC}")
+        return
+    text = doc_path.read_text(encoding="utf-8", errors="replace")
+    match = API_SURFACE_ANCHOR_RE.search(text)
+    if match is None:
+        errors.append(
+            f"{API_REFERENCE_DOC} has no machine-checkable surface anchor — add a line of the "
+            f"form '<!-- openapi-surface: paths=N operations=N api_operations=N -->'; "
+            f"API counts must come from the generator, not from a human"
+        )
+        return
+    doc_paths, doc_ops, doc_api_ops = (int(g) for g in match.groups())
+
+    try:
+        from api.app_factory import app as _fastapi_app
+    except ImportError as exc:  # pragma: no cover - environment problem, not drift
+        warnings_append(
+            f"could not import api.app_factory ({exc}); skipped API-reference surface verification"
+        )
+        return
+    except Exception as exc:  # noqa: BLE001 - app import must not mask drift
+        errors.append(
+            f"api.app_factory raised {type(exc).__name__} while building app.openapi(); "
+            f"cannot verify {API_REFERENCE_DOC} surface — fix the import rather than "
+            f"silently skipping the guard"
+        )
+        return
+
+    try:
+        spec = _fastapi_app.openapi()
+    except Exception as exc:  # noqa: BLE001
+        errors.append(
+            f"app.openapi() raised {type(exc).__name__}; cannot verify {API_REFERENCE_DOC} surface"
+        )
+        return
+
+    real_paths = spec.get("paths", {})
+    http_methods = {"get", "post", "put", "patch", "delete", "head", "options"}
+    real_ops = sum(
+        1 for methods in real_paths.values() for method in methods if method.lower() in http_methods
+    )
+    real_api_ops = sum(
+        1
+        for path, methods in real_paths.items()
+        for method in methods
+        if method.lower() in http_methods and path.startswith("/api/")
+    )
+    for label, doc_value, real_value in (
+        ("paths", doc_paths, len(real_paths)),
+        ("operations", doc_ops, real_ops),
+        ("api_operations", doc_api_ops, real_api_ops),
+    ):
+        if doc_value != real_value:
+            errors.append(
+                f"API reference surface drift ({label}) — {API_REFERENCE_DOC} says "
+                f"{doc_value} but app.openapi() yields {real_value}; regenerate with "
+                f"`python3 scripts/generate_openapi.py` and update the anchor"
+            )
+
+
+def _split_sections(lines: list[str]) -> list[tuple[int, str, str]]:
+    """Split a document into heading-delimited sections.
+
+    Returns (first_line_no, heading, body) tuples. Content before the first
+    heading becomes a section with an empty heading, so front-matter is checked
+    too.
+    """
+    sections: list[tuple[int, str, str]] = []
+    heading = ""
+    start_line = 1
+    body: list[str] = []
+    for idx, line in enumerate(lines, 1):
+        if _HEADING_RE.match(line):
+            sections.append((start_line, heading, "\n".join(body)))
+            heading = line
+            start_line = idx
+            body = []
+        else:
+            body.append(line)
+    sections.append((start_line, heading, "\n".join(body)))
+    return sections
+
+
+def check_multi_worker_deployment_truth(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    """Rule Y: a CURRENT deployment-facing doc that describes multi-worker /
+    multi-replica deployment must state all three cross-process invariants
+    (PostgreSQL checkpoint, Redis session, Redis per-thread lock). Naming only
+    some of them is how "we only need Redis for multi-worker" style drift enters
+    the docs.
+
+    Scope is the explicit `MULTI_WORKER_DEPLOY_DOCS` allowlist, and the check is
+    document-scoped (one statement of the stack is enough for a deployment doc).
+    """
+    for path in docs:
+        rel = path.relative_to(root).as_posix()
+        if rel not in MULTI_WORKER_DEPLOY_DOCS:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not MULTI_WORKER_DEPLOY_RE.search(text):
+            continue
+        missing = [
+            label for label, pattern in MULTI_WORKER_REQUIRED_TERMS if not pattern.search(text)
+        ]
+        if missing:
+            errors.append(
+                f"multi-worker deployment doc {rel} omits cross-process invariant(s): "
+                f"{', '.join(missing)} — any CURRENT deployment doc describing "
+                f"multi-worker / multi-replica deployment must state PostgreSQL "
+                f"checkpoint + Redis session + Redis per-thread lock together"
+            )
+
+
+def check_no_root_level_audit_snapshots(errors: list[str], root: Path = ROOT) -> None:
+    """Rule Z: no point-in-time audit snapshot may live at the repository root.
+
+    Root markdown outside `ACTIVE_EXTRA` is invisible to `discover_docs`, so it
+    would escape every guard while still competing with
+    docs/reference/current-state.md for the title of Current Truth.
+    """
+    offenders = sorted(p.name for p in root.glob("*.md") if p.name not in ROOT_ALLOWED_MARKDOWN)
+    for name in offenders:
+        errors.append(
+            f"root-level markdown {name} escapes the doc guards (only README.md / "
+            f"CLAUDE.md are scanned at the root) and can compete with "
+            f"docs/reference/current-state.md — move it to docs/reports/audit/ "
+            f"with a 'HISTORICAL AUDIT SNAPSHOT' banner, or list it in ACTIVE_EXTRA"
+        )
 
 
 def collect_known_env_keys(root: Path = ROOT) -> frozenset[str]:
@@ -1062,14 +1528,13 @@ def check_env_references(docs: list[Path], errors: list[str], root: Path = ROOT)
                 token = match.group(0)
                 if token in known or token in ENV_NON_VAR_ALLOWLIST or token in reported:
                     continue
-                tail = line[match.end():]
+                tail = line[match.end() :]
                 # Flag when the token is assigned (KEY=value / KEY: value) or
                 # the line explicitly frames it as env usage (环境变量/.env/
                 # export/getenv). Bare prose mentions of code constants stay
                 # out of scope.
                 assigned = bool(re.match(r"\s*[:=]", tail)) or bool(
-                    ENV_ASSIGN_SHAPE_RE.search(line.strip())
-                    and line.strip().startswith(token)
+                    ENV_ASSIGN_SHAPE_RE.search(line.strip()) and line.strip().startswith(token)
                 )
                 if not assigned and not ENV_USAGE_CONTEXT_RE.search(line):
                     continue
@@ -1114,6 +1579,12 @@ def main() -> int:
     check_env_references(docs, errors)
     check_lifecycle_vocabulary(docs, errors)
     check_no_v64_claim(docs, errors)
+    # Distributed Agent Runtime semantic-drift guards (v4).
+    check_runtime_future_claims(docs, errors)
+    check_docs_index_coverage(errors)
+    check_api_reference_surface(errors)
+    check_multi_worker_deployment_truth(docs, errors)
+    check_no_root_level_audit_snapshots(errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -1129,7 +1600,9 @@ def main() -> int:
         f"test-count framing, RAG eval references, unproven metric claims, "
         f"make targets (all active docs), tracked-ignored hygiene, "
         f"negative-existence claims, stale embedding-fallback semantics, "
-        f"latency absolutes, production framing, env references"
+        f"latency absolutes, production framing, env references, "
+        f"runtime future-claims, docs-index coverage, API-reference surface, "
+        f"multi-worker deployment truth, root-level snapshot hygiene"
     )
     return 0
 

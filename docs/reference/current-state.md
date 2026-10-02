@@ -190,7 +190,7 @@ python3 scripts/audit_doc_consistency.py
     run_id dispatch、acks_late、reject_on_worker_lost、visibility_timeout、retry
     基础、tool ledger、idempotency helper、Prometheus metrics。
   - Level 2（本地验证，有命令 + artifact，真实 PG + Redis + 真实多进程 Celery）：
-    `make runtime-e2e`（tests/integration/runtime，30 个用例，覆盖 checkpoint
+    `make runtime-e2e`（tests/integration/runtime，覆盖 checkpoint
     跨进程恢复 / thread-run 分离 / 同 thread 执行区间不重叠 / 跨 thread 并发耗时 /
     lease 非 owner 释放与 TTL 接管 / queue-worker 解耦 / worker kill -9 后从
     checkpoint 续跑 / 三次重试后成功 / permanent 不重试 / DLQ + 重放 / 副作用工具
@@ -205,9 +205,14 @@ python3 scripts/audit_doc_consistency.py
   `overall_status`；artifact 自身随后提交到另一个 commit（生成时无法预知，
   `artifact_commit_sha` 为 null）。历史 v1 artifact 保留不改。
 - **状态归属**：见 [runtime-state-ownership](../design/runtime-state-ownership.md)
-  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)。下一阶段（**基础
-  Celery/Redis 链路已存在**，这里指深化）worker pool autoscaling / DLQ 运维闭环 /
-  SSE bridge 仅设计：
+  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)。仍未实现的只有
+  worker pool autoscaling / backpressure admission control / Kubernetes-HPA /
+  multi-region；**DLQ 运维闭环已实现**（`GET /api/runs/dead` +
+  `RunService.requeue_dead_letter` + `scripts/replay_dead_run.py` 复用原 `run_id`），
+  **Run 事件流 SSE bridge 已实现**（`runtime/events.py` Redis Stream +
+  `GET /api/runs/{run_id}/events`，支持 `Last-Event-ID` 续读，但只是
+  best-effort 观测通道，不是业务真相源）。
+  深化设计见
   [async-agent-worker-architecture](../design/async-agent-worker-architecture.md)。
 - **验证命令**（需要真实 Redis/PostgreSQL；默认 skip）：
   ```bash
@@ -215,7 +220,7 @@ python3 scripts/audit_doc_consistency.py
   TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
       pytest tests/integration/test_worker_crash_recovery.py tests/integration/test_thread_lock_redis.py -q
   # 生成机器可读 evidence（artifacts/distributed-runtime/<ts>/report.json）
-  DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
+  TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
   TEST_REDIS_URL=redis://localhost:6379 \
       python scripts/verify_distributed_runtime.py
   # 或脚本
