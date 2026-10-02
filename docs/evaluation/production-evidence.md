@@ -2,14 +2,86 @@
 
 This harness makes Issue #7 measurable without claiming that local fixtures are production evidence.
 
-## Two evidence families
+## Three evidence families
 
-This repository maintains two distinct evidence families; do not substitute one for the other:
+This repository maintains three distinct evidence families; do not substitute one for the other:
 
 1. **Provider / production evidence** — authentication, token usage/billing, latency, staging outcomes (this document, `scripts/run_production_evidence.py`, `scripts/probe_provider_auth.py`).
 2. **RAG retrieval evaluation evidence** — benchmark retrieval quality across controlled ablations (canonical reference: [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md)).
+3. **Distributed Agent Runtime evidence** — correctness of the async Run / Celery worker / checkpoint / lock / idempotency layer (see §"Distributed Agent Runtime Evidence" below; commands `make runtime-e2e`, `make runtime-chaos`, `make runtime-verify`).
 
 A local RAG benchmark on `tests/eval/rag_benchmark.json` is **not** a production customer outcome: it measures retriever/search quality on a fixed query set, not end-user resolution quality, latency SLOs, or business metrics.
+
+Equally important: **passing the distributed runtime acceptance suite is not production validation.** See the Level 1/2/3 ladder below.
+
+## Distributed Agent Runtime Evidence
+
+This family answers one question: **is the distributed execution layer correct under real
+infrastructure?** It is deliberately separated from the provider/production family above,
+because "the runtime behaved correctly against real PostgreSQL + Redis" and
+"production is validated" are different claims at different confidence levels.
+
+### Evidence levels (canonical ladder)
+
+| Level | Meaning | Current state |
+|---|---|---|
+| **Level 1 — IMPLEMENTED** | Code exists and is readable. Proves design intent, nothing more. | PostgreSQL checkpoint, Redis session, Redis per-thread lock, `AgentRun` canonical state, Celery + Redis broker, worker execution, `run_id` dispatch, `acks_late` / `reject_on_worker_lost` / `visibility_timeout`, retry, tool ledger, Prometheus metrics |
+| **Level 2 — LOCALLY VERIFIED / CI VERIFIED** | Real infrastructure + a command + a provenance-bearing artifact. Proves correctness against real PostgreSQL + Redis + multi-process Celery. | `make runtime-e2e`, `make runtime-chaos`, `make runtime-verify` |
+| **Level 3 — PRODUCTION VERIFIED** | Real production cluster, sustained multi-replica operation, real user traffic, **real ERP write operations**, large queue backlogs, K8s autoscaling, multi-region. | **`NOT_VERIFIED`** |
+
+**`LOCALLY_VERIFIED != PRODUCTION_VERIFIED`.** Level 2 must never be reported as
+"production cluster verified" in documentation, résumés, or interview answers. The
+specific gaps that Level 2 does **not** close:
+
+- Single-Redis mutual exclusion is proven; **Redis failover / Redlock-cluster behaviour is not**.
+- Lease renewal during execution is proven; **fencing token is not implemented** (a worker
+  paused longer than the lock TTL can resume concurrently with the new owner; terminal
+  writes are rejected by the `from_statuses={RUNNING}` conditional update, but
+  node-level side effects still rely on the tool idempotency ledger).
+- Correctness against real infrastructure is proven; **production throughput, P99 latency,
+  and queue backlog behaviour are `NOT_MEASURED`**.
+- Simulated failures and process kills are proven; **real ERP write operations are
+  `NOT_VERIFIED`** (the ERP adapter runs in Mock mode).
+
+### Required evidence dimensions
+
+Every distributed-runtime evidence claim must name one of these dimensions. A claim that
+does not map to a dimension below is not admissible.
+
+| Dimension | What it must demonstrate | How it is established |
+|---|---|---|
+| `checkpoint_cross_process` | A checkpoint written by one **independent OS process** is readable by another, and execution resumes from the checkpoint's `next` rather than restarting from the first node. Two saver instances inside one process do **not** satisfy this. | `tests/integration/runtime/test_cross_process_checkpoint.py`; `scripts/verify_distributed_runtime.py` |
+| `same_thread_serialization` | Two runs on the same `thread_id` never overlap. Asserted on database `started_at` / `finished_at` intervals — not on "SETNX returned true". | `tests/integration/runtime/test_run_semantics.py` |
+| `different_thread_parallelism` | Distinct `thread_id`s genuinely execute in parallel (wall-clock, not merely "lock acquired"). | `tests/integration/runtime/test_run_semantics.py` |
+| `worker_crash_recovery` | After `SIGKILL` of the worker **process group**, the unacknowledged task is redelivered, a second worker takes over the expired lease (`attempt` increases), and execution resumes from the checkpoint. | `tests/integration/runtime/test_worker_checkpoint_recovery.py`; `make runtime-chaos` |
+| `tool_idempotency` | After crash recovery, the side-effect counter is still `1` **and** the tool was genuinely invoked ≥ 2 times (otherwise "1" may simply mean it never retried). | `tests/integration/runtime/test_tool_idempotency.py`; `make runtime-chaos` |
+| `retry_recovery` | Transient errors back off and eventually succeed; permanent errors are not retried; exhausted retries reach `DEAD_LETTER`, write an immutable `agent_dead_letters` row, and replay reuses the **original `run_id`**. | `tests/integration/runtime/test_run_semantics.py` |
+
+Supplementary dimensions also covered by the acceptance suite, and admissible when named:
+`queue_worker_decoupling`, `event_delivery_semantics`, `sse_checkpoint_serialization`,
+`run_event_redaction`, `error_classification`, `secret_non_leak`, `cross_user_isolation`.
+
+### Artifacts and provenance
+
+| Command | Artifact | Schema | Provenance fields |
+|---|---|---|---|
+| `make runtime-verify` | `artifacts/distributed-runtime/<UTC ts>/report.json` | `distributed-runtime-evidence/v2` | `tested_code_sha`, `generated_at`, `overall_status`, `checks` |
+| `make runtime-chaos` | `artifacts/runtime/chaos-<ts>.json` | ad hoc | step log + result; **no git SHA / schema version** — weakest provenance in the repository, treat as a step trace rather than a formal artifact |
+| `make runtime-e2e` | pytest output (no committed artifact) | — | CI job `.github/workflows/ci.yml::runtime-e2e` (postgres + redis service containers) |
+
+`scripts/verify_distributed_runtime.py` is **fail-closed**: exit `0` only when every check
+is `PASS`, exit `1` on any `FAIL`, exit `2` on `NOT_RUN` / `PARTIAL`. "Did not run" is
+deliberately *not* success — treating it as success is evidence pollution.
+Historical `distributed-runtime-evidence/v1` artifacts are preserved unmodified.
+
+### Reading an artifact
+
+- `overall_status == "PASS"` means every listed check passed **against the real
+  infrastructure at `tested_code_sha`**. It does not mean production is verified.
+- `artifact_commit_sha` is `null` by design: the artifact is committed *after* generation,
+  so its own commit is unknowable at write time. Use `tested_code_sha` for provenance.
+- A passing artifact with a `tested_code_sha` that is not an ancestor of the current
+  `HEAD` describes an older codebase — re-verify before quoting it.
 
 ## RAG metric contract (canonical: rag-evaluation.md)
 
@@ -102,6 +174,8 @@ This is the current evidence contract, not a claim that production has been vali
 | Provider token usage/billing | `NOT_AVAILABLE` | No production cost claim may be derived |
 | Production latency/P99 | `NOT_MEASURED` | Local processing time is not provider or production latency |
 | RAG quality (649-query formal metrics) | `NOT_VERIFIED` (provider-auth blocker in committed preflight evidence) | Must name dataset, code, model, K, population, and artifact; never conflate Hit@K with Recall@K |
+| **Distributed runtime correctness** (checkpoint / locking / crash recovery / idempotency) | **Level 2 — CI VERIFIED** via `make runtime-e2e` / `runtime-chaos` / `runtime-verify` against real PostgreSQL + Redis + multi-process Celery | Proves the listed dimensions against real infrastructure; **never** report this as production-cluster validation |
+| **Distributed runtime in production** (real cluster, sustained multi-replica, real ERP writes, backlog, autoscaling) | **Level 3 — `NOT_VERIFIED`** | Must not be claimed in docs, résumés, or interview answers |
 | FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
 
 Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,
@@ -109,3 +183,17 @@ Safe local entry points include `python3 scripts/benchmark_tool_result_context.p
 `scripts/repro_*.py` scripts. Label their outputs local/fixture evidence. Provider
 and production runs require an approved environment, redacted output, and a
 provenance-bearing artifact.
+
+## Distributed runtime commands
+
+```bash
+make runtime-e2e        # tests/integration/runtime: real PostgreSQL + Redis + multi-process Celery
+make runtime-chaos      # SIGKILL the worker process group; emits artifacts/runtime/chaos-<ts>.json
+make runtime-verify     # emits artifacts/distributed-runtime/<ts>/report.json (schema v2)
+make runtime-replay-help
+```
+
+These require real PostgreSQL and Redis. The Makefile always injects
+`TEST_DISTRIBUTED_DB_URL` / `TEST_REDIS_URL`, so missing infrastructure is a hard FAIL
+rather than a silent skip. Full operational procedure:
+[operations/distributed-runtime-runbook.md](../operations/distributed-runtime-runbook.md).

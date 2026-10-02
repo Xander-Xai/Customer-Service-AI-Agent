@@ -10,11 +10,11 @@
 ### 1. 环境配置 [10分钟]
 
 ```bash
-# 1.1 生成生产配置
+# 生成生产配置
 python3 scripts/generate_prod_env.py
 cp .env.prod.generated .env.prod
 
-# 1.2 编辑配置文件
+# 编辑配置文件
 vim .env.prod
 ```
 
@@ -35,7 +35,48 @@ vim .env.prod
 - [ ] `RERANKER_API_KEY` — 独立重排凭据（**不会**回退到 OPENAI_API_KEY）；未配置时
       reranker 不可用、检索按原始顺序返回，preflight 会显式报告
 
-### 1.1 RAG / 检索依赖就绪（可选但生产知识库必做）
+### 1.2 分布式 Agent Runtime（生产 Blocking Gate）
+
+> **这一节是硬门禁，不是建议。** `core/config.py::validate_distributed_runtime_settings`
+> 与 `validate_checkpoint_settings` 在 `DEV_MODE=false` 时会 **fail-fast 拒绝启动**，
+> 配错就是"起不来"，不是"降级运行"。逐项确认后再部署。
+
+**基础设施（必须真实存在，不能用内存替身）**
+
+- [ ] **PostgreSQL** 可达，且 `DATABASE_URL` 是 `postgresql://` 协议
+- [ ] **Redis** 可达（`REDIS_URL`），并已设置 `REDIS_PASSWORD`
+- [ ] 数据库迁移已执行：`make db-upgrade`（含 `agent_runs` / `agent_dead_letters` /
+      `tool_side_effects` 三张表）
+
+**关键配置（`DEV_MODE=false` 时强制）**
+
+- [ ] `LANGGRAPH_CHECKPOINT_BACKEND=postgres` — 生产**不允许** `memory`；
+      留空会自动解析为 postgres。初始化失败是 fail-closed，**不会**静默回退 MemorySaver
+- [ ] `SESSION_STORAGE_BACKEND=redis` — 进程内 session 在多 worker 下会分片、
+      重启丢失，生产启动会直接拒绝
+- [ ] `AGENT_EXECUTION_MODE=queued` — 等价历史变量 `AGENT_RUN_DISPATCH=celery`。
+      `inline` 会让异步 Run 在 API 进程内执行，失去 worker 解耦，生产禁止
+- [ ] `AGENT_RUN_THREAD_LOCK_ENABLED=true` 且 `AGENT_RUN_THREAD_LOCK_BACKEND=redis`
+- [ ] `CELERY_BROKER_URL` — 留空安全复用 `REDIS_URL`，显式设置时必须指向同一 Redis
+
+**多副本一致性（`GUNICORN_WORKERS>1` 时额外强制）**
+
+- [ ] `LANGGRAPH_CHECKPOINT_BACKEND=postgres`
+- [ ] `SESSION_STORAGE_BACKEND=redis`
+- [ ] `AGENT_RUN_THREAD_LOCK_ENABLED=true` / `AGENT_RUN_THREAD_LOCK_BACKEND=redis`
+- [ ] `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` **>** `AGENT_RUN_TASK_TIME_LIMIT` + 30
+      （默认 300 > 180 + 30 已满足；改过任一项就必须重算，否则锁可能在任务仍在执行时过期）
+
+**Worker 服务**
+
+- [ ] 独立 `worker` service 已随 compose 启动（`docker compose ps worker`）
+- [ ] `celery -A runtime.celery_app:celery_app inspect ping` 能收到 pong
+- [ ] worker 的 `LANGGRAPH_CHECKPOINT_BACKEND` / `AGENT_RUN_DISPATCH` 与 API 进程一致
+
+> **不配置的后果**：app 会 fail-fast 拒绝启动，或在多副本下静默地丢状态 /
+> 并发写同一会话。这不是"性能问题"，是**正确性问题**。
+
+### 1.3 RAG / 检索依赖就绪（可选但生产知识库必做）
 
 ```bash
 # 若使用正式 RAG 评测链，先确认语料/索引/凭据：
@@ -223,7 +264,63 @@ curl http://localhost:8000/api/metrics | head -20
 - ✅ 日志无ERROR级别错误
 - ✅ 指标端点返回Prometheus格式数据
 
-### 10. 性能基线 [5分钟]
+### 10. 分布式 Runtime 冒烟（Blocking）
+
+> 部署完必须实际跑一次异步 Run —— 只测 `/api/chat` 等于没验证分布式部分。
+> 完整路径见 `docs/operations/distributed-runtime-runbook.md`。
+
+```bash
+# 10.1 Worker 健康
+docker compose ps worker                       # worker 容器应为 running
+docker compose exec worker \
+  celery -A runtime.celery_app:celery_app inspect ping     # 期望收到 pong
+
+# 10.2 AgentRun smoke：创建 → 查询终态
+RUN=$(curl -s -X POST http://localhost:8000/api/runs \
+  -H "Content-Type: application/json" -H "X-API-Key: YOUR_API_KEY" \
+  -d '{"query":"你好","session_id":"smoke-1"}' | jq -r '.run_id')
+echo "run_id=$RUN"
+for i in $(seq 1 30); do
+  ST=$(curl -s "http://localhost:8000/api/runs/$RUN" -H "X-API-Key: YOUR_API_KEY" | jq -r '.status')
+  echo "status=$ST"; case "$ST" in SUCCEEDED|FAILED|DEAD_LETTER|CANCELLED) break;; esac; sleep 2
+done
+# 期望终态 SUCCEEDED；若停在 QUEUED，说明 worker 没消费或没起来
+
+# 10.3 状态真相源确实是数据库（不是队列）
+docker compose exec postgres psql -U postgres -d cosmetics_ai \
+  -c "SELECT run_id,status,attempt,worker_id,task_id FROM agent_runs ORDER BY queued_at DESC LIMIT 5;"
+
+# 10.4 同 thread 串行：并发发两个同 session_id 的 Run，不应同时 RUNNING
+#     （拿不到锁的会被延迟重调度，而不是并发执行）
+
+# 10.5 DLQ 可查询（当前应为空）
+curl -s "http://localhost:8000/api/runs/dead" -H "X-API-Key: YOUR_API_KEY" | jq
+
+# 10.6 重放工具可用（不真跑，只确认 CLI 存在且能拒绝非 DLQ run）
+python3 scripts/replay_dead_run.py --help
+```
+
+- [ ] worker 容器 running，`inspect ping` 有 pong
+- [ ] AgentRun 到达终态 `SUCCEEDED`，`agent_runs` 表有对应行（含 `worker_id`）
+- [ ] 同一 thread 的两个 Run 执行区间**不重叠**（查 `agent_runs` 的
+      `started_at`/`finished_at`）
+- [ ] `GET /api/runs/dead` 返回空（无意外 DLQ）
+
+**幂等与崩溃恢复验收（有独立基础设施时跑，不是启动前置条件）**
+
+```bash
+make runtime-e2e       # tests/integration/runtime：真实 PG + Redis + 多进程 Celery
+make runtime-chaos     # SIGKILL 整个 worker 进程组 → 续跑 + 副作用不重复
+make runtime-verify    # 产出 artifacts/distributed-runtime/<ts>/report.json
+```
+
+- [ ] `make runtime-e2e` 通过（基础设施缺失时是硬 FAIL，不静默 skip）
+- [ ] `make runtime-chaos` 的 JSON 里 `result == "PASS"`，且
+      `steps[].side_effect_deduplicated` 显示副作用计数**仍为 1**
+- [ ] `make runtime-verify` 产出 artifact，`overall_status == "PASS"`，
+      带 `tested_code_sha` + `generated_at`
+
+### 11. 性能基线 [5分钟]
 
 ```bash
 # 记录初始性能指标

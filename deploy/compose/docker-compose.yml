@@ -81,10 +81,10 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - VECTOR_DB_MODE=${VECTOR_DB_MODE:-qdrant_only}
-      # v6.4: LangGraph checkpoint（生产必须 postgres，跨 worker/副本共享）
+      # LangGraph checkpoint（生产必须 postgres，跨 worker/副本共享）
       - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
       - LANGGRAPH_CHECKPOINT_DATABASE_URL=${LANGGRAPH_CHECKPOINT_DATABASE_URL:-}
-      # v6.4: 异步 Agent Run（API 只创建+入队，执行在 worker）
+      # 异步 Agent Run（API 只创建+入队，执行在 worker）
       - AGENT_RUN_DISPATCH=${AGENT_RUN_DISPATCH:-celery}
       - AGENT_RUN_THREAD_LOCK_BACKEND=${AGENT_RUN_THREAD_LOCK_BACKEND:-redis}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
@@ -111,7 +111,7 @@ services:
     networks:
       - cs-network
 
-  # ===== v6.4: Celery Worker（异步 Agent Run 执行）=====
+  # ===== Celery Worker（异步 Agent Run 执行）=====
   # 独立于 API 进程；API 关闭不影响已入队任务。业务状态真相源是 PostgreSQL，
   # Redis 仅作 broker（result backend 不启用）。
   worker:

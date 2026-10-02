@@ -389,7 +389,7 @@ Celery worker（`acks_late` / `reject_on_worker_lost` / `visibility_timeout`）�
   `agent_thread_lease_*` / `agent_checkpoint_recovery_total` /
   `agent_tool_idempotency_hit_total` / `agent_worker_heartbeat`），并有测试断言
   **不得**使用 run_id/thread_id/user_id/query 等高基数 label。
-- 真实 PostgreSQL + Redis 验收测试（30 用例）+ 混沌脚本 + CI `runtime-e2e` job。
+- 真实 PostgreSQL + Redis 验收测试（`tests/integration/runtime`）+ 混沌脚本 + CI `runtime-e2e` job。
 
 **本轮没有继续扩展**：大规模 Worker Pool autoscaling、backpressure/admission
 control、Kubernetes/HPA、multi-region、broker-native DLX、DLQ 告警。
@@ -400,9 +400,12 @@ SSE 事件；`POST /api/runs/{run_id}/cancel` 协作式取消；`GET /api/runs/d
 dead-letter 记录。Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是
 `agent_runs` 表（Celery result backend 不是真相源，`task_ignore_result=True`）。
 
-**四个 ID**：`thread_id`（对话级状态时间线，多轮复用） / `run_id`（单轮执行，唯一） /
-`job_id`（一次队列投递，可多次） / `idempotency_key`（副作用去重）。**禁止一个请求
-新建一个 thread**；DLQ 重放复用原 `run_id`，否则会绕过工具幂等键。
+**四个 ID / 概念**：`thread_id`（对话级状态时间线 == `session_id`，多轮复用） /
+`run_id`（单轮执行 == `agent_runs.id`，唯一） / `task_id`（一次队列投递 / worker
+执行 == Celery task id，同一个 run 可有多个） / `AgentRun`（业务运行记录，状态
+真相源）。另有工具侧 `idempotency_key`（`operation_key = run_id:tool_call_id`，
+用于副作用去重）。**禁止一个请求新建一个 thread**；DLQ 重放复用原 `run_id`，
+否则会绕过工具幂等键。
 
 **可靠性能力（诚实边界）**：队列投递 at-least-once；副作用靠 **application-level
 去重（idempotency ledger）**——同一 `operation_key` 不重复写外部系统；
@@ -413,6 +416,18 @@ application-level dead-letter（`agent_dead_letters` 不可变历史 + CLI 重�
 worker `kill -9` 后从 checkpoint 续跑。**不**宣称 exactly-once、任意指令级无损
 恢复或 broker-native DLX。
 
+**多 Worker / 多副本部署的三个跨进程不变量**（进程内状态每 worker 一份，因此
+生产启动时 fail-fast 校验，`core/config.py::validate_distributed_runtime_settings`）：
+
+| # | 不变量 | 配置 | 承担的跨进程语义 |
+|---|---|---|---|
+| 1 | PostgreSQL checkpoint | `LANGGRAPH_CHECKPOINT_BACKEND=postgres` | 图状态跨 worker/副本共享，重启可从 checkpoint 续跑（生产 fail closed，不静默回退 `MemorySaver`） |
+| 2 | Redis session | `SESSION_STORAGE_BACKEND=redis` | 会话历史跨 worker/副本共享，避免分片与重启丢失 |
+| 3 | Redis per-thread 锁 | `AGENT_RUN_THREAD_LOCK_ENABLED=true` + `AGENT_RUN_THREAD_LOCK_BACKEND=redis` | 同一 `thread_id` 跨进程串行、不同 thread 并行；key namespace `agent:thread-lock:{thread_id}`，owner token + TTL + Lua 原子 compare-and-delete |
+
+异步路径另需 `AGENT_RUN_DISPATCH=celery`（生产必须，`inline` 仅开发/测试），
+worker 与 API 进程共用同一套 key namespace。
+
 ### Distributed Runtime Evidence Boundary
 
 > 面试一眼判断能力边界，避免夸大。
@@ -420,7 +435,7 @@ worker `kill -9` 后从 checkpoint 续跑。**不**宣称 exactly-once、任意�
 **CI VERIFIED（`.github/workflows/ci.yml` `runtime-e2e` job，postgres + redis
 service container）**：
 
-- `make runtime-e2e` — 30 个真实基础设施用例（未配置 PG/Redis 时目标 FAIL，不静默 skip）
+- `make runtime-e2e` — `tests/integration/runtime` 真实基础设施用例（未配置 PG/Redis 时目标 FAIL，不静默 skip）
 - `make runtime-chaos` — worker `kill -9` → lease 过期 → checkpoint 续跑 →
   副作用计数器恰好 1（输出结构化证据 JSON）
 
@@ -647,7 +662,7 @@ Thought（推理当前需要什么信息）
 | **输入验证** | Pydantic 请求模型 + `MAX_QUERY_LENGTH=2000` + 控制字符 + HTML 标签净化（HTML 实体解码防绕过） |
 | **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层系统提示泄露检测 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
-| **安全头** | HSTS / CSP（script-src + style-src 使用 nonce，无 `unsafe-inline`）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
+| **安全头** | HSTS / CSP（`script-src` 用 nonce、无 `unsafe-inline`；`style-src` 仍为 `'self' 'unsafe-inline'`）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
 | **会话安全** | UUID 格式校验 + HMAC 会话令牌签名（可绑定客户端指纹）+ 用户级会话所有权隔离 |
 | **WebSocket** | 首条消息 JWT 认证（非 URL 参数）+ 每 IP 连接限制 + 消息限流 + 空闲超时 + 定期清理 |
 | **CORS** | 环境变量配置，默认 `http://localhost:8000`，生产必须配置真实域名 |
@@ -746,7 +761,7 @@ cp .env.example .env                     # .env 是 gitignored；.env.test 已�
 source .venv/bin/activate
 # 准备一个测试库
 docker exec <pg-container> psql -U postgres -c "CREATE DATABASE csai_runtime_test;"
-make runtime-e2e      # 38 个真实基础设施用例
+make runtime-e2e      # tests/integration/runtime 真实基础设施用例
 make runtime-chaos    # worker kill -9 混沌验收（结构化证据 JSON）
 python -m pytest      # 全量单测 + 集成
 ```
@@ -832,21 +847,22 @@ make env-check   # 查看当前环境配置摘要
 
 | 类别 | 端点数 | 说明 |
 |------|--------|------|
-| 聊天 | 8 | REST + SSE 流式 + 多模态图片 + 图片流式 + 语音 + 文件上传 + TTS + TTS 声音列表 |
+| 聊天 | 9 | REST + SSE 流式 + 多模态图片 + 图片流式 + 语音 + 文件上传 + 统一多模态入口 + TTS + TTS 声音列表 |
 | 会话 | 6 | 列表 / 详情 / 删除 / Checkpoint / 历史 / 消息 |
 | 认证 | 8 | 注册 / 登录 / 刷新 / 登出 / 当前用户 / 用户列表 / 审计 / 角色更新 |
 | 知识库 | 4 | 统计 / 种子 / 添加 / 同步 |
 | 告警 | 4 | SLA 告警记录 / 配置 / 测试 / 历史 |
-| 监控 | 11 | 健康 / 指标 / KPI / 缓存 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token Quota / Token 追踪 |
+| 监控 | 12 | 健康 / 指标 / KPI / 缓存统计 / 缓存失效 / 熔断器 / Prometheus / 质量趋势 / 热门问题 / 满意度 / Token Quota / Token 追踪 |
 | Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
 | 反馈 | 2 | 提交 / 统计 |
-| 异步 Run | 3 | 创建 / 查询 / DLQ 列表 |
+| 异步 Run | 5 | 创建 / 查询 / 取消 / 事件流（SSE）/ DLQ 列表 |
 | 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
 **合计：`docs/openapi.json` 快照由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 56 个 HTTP 路径 / 58 个操作，
-其中 52 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。**
+HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 58 个 HTTP 路径 / 60 个操作，
+其中 54 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。
+这些数字由生成工具产生并由 `make openapi-check` 校验，**不要手工修改**。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -878,7 +894,7 @@ customer-service-ai-agent/
 │   ├── src/           # 34 JS 模块（聊天/API/Auth/工具/管理后台/测试）
 │   ├── styles/        # 14 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
-├── deploy/compose/    # Docker Compose 变体（prod/canary/scale/monitoring）
+├── deploy/compose/    # Docker Compose 变体（base / prod / override / canary / scale / monitoring）
 ├── tests/             # 测试套件（pytest unit/integration/e2e/stress + eval 资产；数量以 pytest --collect-only -q 为准）
 ├── docs/              # 文档（active/archive/decisions + ADR）
 ├── alembic/           # 数据库迁移脚本（3 个版本）

@@ -1,5 +1,19 @@
 # 简历项目描述修正稿
 
+> **本文件是 evidence-frozen 快照，冻结时点为 2026-09-29。**
+> 下方的量化条目按当时证据冻结，**不随代码演进重写**。
+>
+> 🚨 **要写"当前"的面试口径，请不要改这个文件**，改用：
+> - 项目介绍（60s / 2min / 3min）→ [../design/interview-intro.md](../design/interview-intro.md)
+> - 深度问答（含分布式 Agent Runtime R1–R11）→ [../design/interview-deep-dive.md](../design/interview-deep-dive.md)
+> - 题集与必问优先级 → [../interview-questions-final.md](../interview-questions-final.md)
+> - 当前事实入口 → [../reference/current-state.md](../reference/current-state.md)
+>
+> 注意：冻结时点之后，本项目已落地**分布式 Agent Runtime**
+> （PostgreSQL checkpoint / Redis session + per-thread lock / Celery worker /
+> AgentRun 真相源 / 幂等副作用 / DLQ 重放）。**本文件的简历描述不包含这些内容**，
+> 也因此不能被当作当前简历口径使用。
+
 > 修正依据：基于项目代码库实际实现数据（config/benchmark/RAG eval）
 
 > **Evidence freeze (2026-09-29)**：本稿不得把 local/fixture benchmark 或假设写成

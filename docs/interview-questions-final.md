@@ -1,14 +1,25 @@
 # 药妆智多星 — 面试题集·最终版
 
-> 当前口径（2026-09-30）：不要把旧的"8 agents""二级缓存"、ChromaDB 或
-> 未验证生产指标当作当前事实。使用 9 个角色、独立的 Response/Tool Result
-> cache、Qdrant + BM25 lifecycle、retrieval contract、scope-safe offload/recovery
-> 4-config RAG ablation（vector_only / bm25_only / hybrid_no_rerank / hybrid_rerank）、
-> multi-K 指标与三套 population 分母。**当前 649-query 正式 RAG 指标
-> NOT_VERIFIED**（preflight 显示 provider auth blocker）；任何百分比必须绑定
-> provenance-bearing artifact（详见 docs/reference/rag-evaluation.md）。
-
-> 基于简历 v5.4.1 版本，覆盖 6 条简历内容，19 道必问 + 15 道备选
+> **口径纪律（先读这一段）**：
+> - 分布式 Agent Runtime 是本项目**当前最强工程亮点**，面试官问到"最难的技术问题"
+>   /"架构上最大的改造"时**应该**往这里引。一面/二面已按此重新排序必问优先级。
+> - 分布式 runtime 的证据等级是 **Level 2 = CI VERIFIED**（真实 PostgreSQL + Redis
+>   + 多进程 Celery + SIGKILL 混沌测试）；**Level 3（真实生产集群 / 多副本长期运行 /
+>   真实 ERP 写操作 / K8s autoscaling）是 NOT_VERIFIED**。候选人若把 Level 2 说成
+>   "生产集群已验证"，是**减分项**。
+> - RAG 当前 649-query 正式指标 **NOT_VERIFIED**（preflight 显示 provider auth
+>   blocker）；任何百分比必须绑定 provenance-bearing artifact
+>   （详见 `docs/reference/rag-evaluation.md`）。
+> - 9 个 Agent 角色、Response Cache 与 Tool Result cache 是独立机制、
+>   Qdrant + BM25 lifecycle、retrieval contract、scope-safe offload/recovery。
+>   不要用旧的"8 agents""二级缓存"、ChromaDB 口径。
+> - 测试数量以 `pytest --collect-only -q` 当前输出为准，不背数字。
+>
+> 分布式 runtime 的深度问答骨架见
+> [`docs/design/interview-deep-dive.md`](design/interview-deep-dive.md) 的 **R1–R11**。
+>
+> 本题集编号按「轮次-Q序号」局部编号（每轮重新计数），下文的 D/R 前缀题号用于
+> 指代分布式 runtime 新增题组。
 
 ---
 
@@ -70,6 +81,46 @@
 
 **Q14 （备选）** ContextVar 按 Session 隔离黑板数据——为什么选择 ContextVar 而不是传参？多用户并发场景下出过数据污染问题吗？
 
+### 分布式 Agent Runtime（4分钟）— 当前最强工程亮点
+
+> 这组是本轮**优先准备**部分。问法要开放，让候选人自己展开；不要像考背诵题那样逐条追问。
+
+**D1 【必问】** 你的系统怎么支持多进程/多副本部署？多个 Gunicorn worker 之间怎么共享状态？
+
+> ⚠️ **合格线**：候选人应能说出**三件套**——checkpoint 用 PostgreSQL（不是内存）、
+> session 用 Redis（不是进程内）、同一会话加 Redis 分布式锁。并能指出这三者缺一个
+> 在多副本下会怎样错。只说"加 Redis 就行"是**不合格**。
+>
+> **追问：** 这三个是"配置"还是"代码"保证的？有人配错了会怎样？
+> → 加分回答：生产启动时 fail-fast 校验，缺一个直接拒绝启动；`GUNICORN_WORKERS>1`
+> 时额外要求 checkpoint=postgres + session=redis + redis 锁。
+
+**D2 【必问】** 异步的 Run 是怎么保证不重复执行的？
+
+> ⚠️ **筛人点**：候选人主动区分 **at-least-once vs exactly-once** 是关键。
+> 说"exactly-once"或含糊带过是明显减分。
+>
+> **加分回答**：分三层讲幂等（run 级终态 no-op / thread 级锁 / 工具级 ledger），
+> 并**主动说出 ledger 的边界**（只保证同一 Agent 不重复发起副作用，
+> 下游 ERP 端到端幂等要靠对方接受 idempotency key）。
+
+**D3 【必问】** worker 执行到一半挂了，会发生什么？
+
+> ⚠️ **筛人点**：候选人是否知道"续跑"和"从头重跑"的区别。
+>
+> **加分回答**：主动提这个真 bug——LangGraph `ainvoke(state, cfg)` 会从 START 重跑并
+> 覆盖 channel 值，只有 `ainvoke(None, cfg)` 才从 checkpoint 的 `next` 续跑。
+> 以及用 `killpg(SIGKILL)` 杀整个进程组做混沌测试（只杀父进程测不到东西），
+> 并且断言"第一个节点没重跑"而不只是"最终成功"。
+
+**D4 （备选）** 分布式锁怎么实现的？为什么不能简单地 `SETNX` 然后 `DEL`？
+
+> ⚠️ **筛人点**：候选人能否自己讲出"旧 owner 误删新锁"这个竞态。
+>
+> **加分回答**：owner token + TTL + Lua 原子 compare-and-delete；
+> 主动声明这是**单 Redis** 互斥，没实现 Redlock 集群；
+> 提到 API 执行边界和 worker 共用同一 key namespace（用契约测试锁死）。
+
 ### 知识检索（3分钟）
 
 **Q15 【必问】** 查询改写是怎么做的？改写后怎么保证语义不漂移？
@@ -84,7 +135,7 @@
 
 **Q19 （备选）** 为什么选 SSE 做流式输出而不是 WebSocket？踩过什么坑？
 
-> 必问 **7 题**，备选 **7 题**
+> 必问 **10 题**（含 D1/D2/D3），备选 **8 题**（含 D4）
 
 ---
 
@@ -143,7 +194,101 @@
 
 > 💡 **简历提示**：`core/monitoring.py` 有 Prometheus 指标（cache_hit_rate、llm_call_duration、collaboration_mode_counter 等），支持 Grafana 大盘。
 
-### 高可用与容错（4分钟）
+### 分布式运行时与可靠性边界（8分钟）— 本面核心
+
+> 这组是**二面的主战场**。这里最容易区分"做过工程"和"看过工程博客"。
+> 详细追问弹药见 `docs/design/interview-deep-dive.md` 的 R1–R11。
+
+**R1 【必问·第一题就问】** 你说这个分布式 Runtime 已经"验证通过"了——具体验证到哪一步？边界在哪？
+
+> ⚠️ **这是本套题最重要的一题。** 观察候选人是否**主动**划出证据边界。
+>
+> **合格线（必须答出）**：Level 1 代码存在 / Level 2 真实 PostgreSQL + Redis +
+> 多进程 Celery 的自动化验收 + SIGKILL 混沌测试，**CI VERIFIED** /
+> Level 3 真实生产集群、多副本长期运行、真实 ERP 写操作**未验证**。
+>
+> **减分项**：把 CI 验证说成"生产集群已验证"；或含糊说"基本都验证过了"。
+> **加分项**：能说出证据 artifact 带 `tested_code_sha` + `generated_at`，
+> 且"没跑"和"跑过但失败"是两回事（fail-closed，不是同一件事）。
+
+**R2 【必问】** `thread_id`、`run_id`、`task_id` 分别是什么？为什么必须分开？
+
+> ⚠️ **筛人点**：候选人是否意识到同一个 run 重投会有**多个** task_id，
+> 所以业务幂等不能锚在 task_id 上。
+>
+> **加分回答**：主动讲 DLQ 重放的坑——换新 run_id 会让工具幂等键
+> `run_id:tool_call_id` 失效，把已成功的退款再执行一遍，所以必须复用原 run_id。
+
+**R3 【必问】** checkpoint、session memory、response cache、tool result store，这四个有什么区别？
+
+> ⚠️ **筛人点**：这四个如果被混着讲，基本可以判定没真正理解状态架构。
+>
+> **合格线**：checkpoint = 执行到哪一步（按 thread_id，支撑崩溃恢复）；
+> session memory = 聊了什么（支撑上下文连贯）；response cache = 这个问题的答案
+> （支撑重复问题短路）；tool store = 工具返回的大块数据（支撑 context 预算）。
+> 并能说出它们**不能互相替代**。
+
+**R4 【必问】** 锁的 TTL / lease / fencing token 到底解决什么？你有没有做 fencing？
+
+> ⚠️ **这是深度筛子题。** 诚实回答"没做 fencing，我知道这是缺口"**优于**
+> 含糊地说"有 TTL 所以很安全"。
+>
+> **加分回答**：说清已做的缓解（执行期间 lease 续租 + 续租失败有计数器 +
+> 启动强制 TTL > 任务时限 + 余量）；说清残余风险（GC/宿主机卡顿 pause 超过 TTL 时
+> 旧 worker 与新 owner 可能同时写，终态会被条件更新挡下但**节点副作用**仍需幂等）；
+> 并知道严格解法是 fencing token 或 DB 版本号。
+
+**R5 【必问】** Redis 挂了 / PostgreSQL 挂了分别会怎样？
+
+> ⚠️ **筛人点**：能否区分"关键的正确性依赖必须 fail-closed"和
+> "观测性的东西可以降级"。
+>
+> **合格线**：锁不可达 → 不执行、延迟重投（fail-safe，不 fail-open）；
+> checkpoint 生产初始化失败 → **绝不静默回退内存**；
+> session 不可用 → 生产启动就 fail-fast；
+> 事件流不可达 → no-op 但不影响业务状态。
+
+**R6 【必问】** retry 是怎么设计的？退避策略是什么？用尽之后呢？重试的投递本身失败了怎么办？
+
+> ⚠️ **加分点**：候选人若主动讲"先写库再投递"这个顺序选择，并说明它的方向性
+> （投递失败留下可观测可重放的 `RETRYING`，而不是静默丢失），是很好的工程信号。
+>
+> **加分回答**：区分 transient/permanent，指数退避 + jitter + 硬上限，不无限重试；
+> 用尽 → `DEAD_LETTER` + 不可变 DLQ 历史 + **人工**重放（不是 broker-native DLX）。
+
+**R7 【必问】** 工具副作用的幂等 key 是怎么设计的？key 冲突了怎么办？
+
+> ⚠️ **筛人点**：候选人是否想过"用参数哈希做 key"会误杀合法的重复操作。
+>
+> **加分回答**：`operation_key = run_id:tool_call_id`；认领租约未过期时第二个执行者
+> **不得**重复触发副作用，而是抛 transient 退避重投（宁可退避也不重复扣款）；
+> 同 key 不同参数 → `PermanentError`。
+
+**R8 【必问】** 为什么快路径 `/api/chat` 不走 worker？
+
+> ⚠️ **筛人点**：这是**主动的架构取舍**还是**没做完**？
+>
+> **合格线**：快路径要低延迟，队列+轮询引入额外延迟且 SSE 连接生命周期和 worker
+> 任务生命周期对不上；两条路径共享同一 checkpoint 后端所以状态连贯。
+> **加分项**：提到用契约测试直接读源码断言快路径**不含**任何 `apply_async`/Celery 调用，
+> 防止后人改坏。
+
+**R9 （备选）** 你说引入了 Celery，为什么不用 Temporal / Kafka / Sidekiq？
+
+> ⚠️ **注意**：这是选型开放题，重点听**取舍是否诚实**，不要求背答案。
+> 合理回答包括：当前规模下 Redis broker 够用、Temporal 运维成本不划算、
+> Kafka 是为吞吐而非调度语义。**若候选人说"Kafka 未来会上"却不给触发条件，
+> 属于空泛承诺。**
+
+**R10 （备选）** 你的 Run 事件流是怎么跨进程传到浏览器的？它的投递语义是什么？
+
+> ⚠️ **筛人题**：Redis Streams 很容易被说成"at-most-once"——**这是错的**。
+> 正确答案：best-effort resumable；单连接内 cursor 单调前进所以不重复，
+> 但用**较旧的** `Last-Event-ID` 重连会**重放已处理事件**（重复）；
+> `replay=false` 与 idle 超时造成缺口；`MAXLEN ~` 是**近似**裁剪，
+> 被裁掉的历史不可恢复，且近似裁剪**不是硬上界**。事件流**不是业务真相源**。
+
+### 高可用与容错（3分钟）
 
 **Q11 【必问】** 如果 LLM 调用超时或返回异常，整个链路怎么兜底？降级策略是什么？
 
@@ -157,9 +302,29 @@
 
 **Q13 【必问】** 项目中你遇到过最难的技术问题是什么？怎么解决的？
 
+> ⚠️ **期望答案方向**：候选人**应该**引到分布式 runtime 的续跑 bug
+> （`ainvoke(state, cfg)` 从 START 重跑并覆盖 channel 值，只有传 `None` 才从
+> checkpoint 的 `next` 续跑），或 SSE + checkpoint 的序列化冲突
+> （`stream_callback` 作为 channel 被 checkpointer 序列化，抛
+> `TypeError: Type is not msgpack serializable` —— 内存 saver 和官方 PostgreSQL saver
+> **都**失败，生产默认 PostgreSQL 时 `/api/chat/stream` 必然报错）。
+>
+> 这两题都优于"调 prompt""改阈值"这类答案。若候选人答不出真实踩过的坑，
+> 继续追问"那你最近一次推翻自己设计是什么时候？"
+
 **Q14 【必问】** 如果并发量从 200/天增长到 20000/天，架构上需要做哪些改造？
 
-> 必问 **8 题**，备选 **5 题**
+> 💡 **诚实回答的样子**：区分"已经有机制但没压测"和"还没做"。
+> 已有：Celery worker 横向扩展、`AGENT_RUN_QUEUE` 多队列基础、Redis 锁与
+> checkpoint 已经跨进程正确。**未做**：Kubernetes / HPA、队列背压
+> （入队限流 / 最大 in-flight / 拒绝策略）、worker `SIGTERM` 优雅停机、
+> fencing token。以及**生产级吞吐数字当前 NOT_MEASURED**。
+>
+> ⚠️ **减分项**：给出具体的 QPS / P99 数字而无 artifact 支撑。
+
+> **Q11** 编号延续原高可用段（LLM 异常兜底），原 Q13/Q14 见"追问"段。
+>
+> 必问 **10 题**（其中分布式运行时 R1–R8 为 8 题，全部必问），备选 **7 题**（含 R9/R10）
 
 ---
 
@@ -195,11 +360,26 @@
 
 ## 附录：候选准备建议（三档策略）
 
-### 第一档：必准备（10 个）
+### 第一档：必准备（优先做分布式运行时）
+
+> **优先级已重排**：分布式 Agent Runtime 是当前最强的工程亮点，面试官问
+> "最难的技术问题" / "架构上最大的改造" / "怎么支持多副本" 时**应该**往这里引。
+> 下面标 ⭐ 的是新增/提升的运行时题。
 
 | 题号 | 准备清单 |
 |------|---------|
-| 一面 Q1 | 在白板上画过一遍架构图（四层状态机 + 数据流箭头） |
+| ⭐ 二面 R1 | **证据边界**：Level 1/2/3 怎么划，"CI 验证"≠"生产验证" |
+| ⭐ 二面 R2 | 四个 ID/概念区分 + DLQ 重放为什么必须复用原 run_id |
+| ⭐ 二面 R4 | TTL / lease / fencing 的边界；**主动承认没做 fencing** |
+| ⭐ 二面 R5 | Redis / PG 分别挂掉的行为；fail-closed vs 降级的区分 |
+| ⭐ 二面 R7 | 工具幂等 key 设计；认领租约；冲突怎么处理 |
+| ⭐ 二面 R8 | 为什么快路径不走 worker（是取舍不是没做完） |
+| ⭐ 二面 Q13 | 最难的技术问题 → 续跑 bug 或 SSE checkpoint 序列化 bug |
+| ⭐ 二面 Q14 | 扩容改造：区分"已有机制"与"未做"，不报无据数字 |
+| ⭐ 一面 D1 | 三件套：PG checkpoint + Redis session + Redis 锁 |
+| ⭐ 一面 D2 | at-least-once + 三层幂等 + ledger 边界 |
+| ⭐ 一面 D3 | worker 崩溃三层恢复；续跑 vs 从头重跑 |
+| 一面 Q1 | 在白板上画过一遍架构图（四层状态机 + 数据流箭头 + 分布式 runtime 分叉） |
 | 一面 Q2 | 5 种协作模式的场景 + 切换判断条件 + 终止条件 |
 | 一面 Q5 | LLM vs 规则冲突的 3 种处理策略 |
 | 一面 Q9 | 置信度来源 + 0.75 怎么定的 + 估算捷径占比 |
@@ -208,13 +388,20 @@
 | 二面 Q4 | 一个真实的 bad case + 改进前后对比（用 taxonomy 归类） |
 | 二面 Q5 | 4-config ablation 问题清单（见 Q5 追问弹药）+ provenance 语义 |
 | 二面 Q7 | Redis 降级的完整流程：detect→fallback→sync |
-| 二面 Q9 | 各环节耗时估算（LLM ~60%、检索 ~20%、后处理 ~10%——明确标注为"我的估算/假设"，端到端分布当前 NOT_MEASURED） |
+| 二面 Q9 | 各环节耗时估算（明确标注为"我的估算/假设"，端到端分布当前 NOT_MEASURED） |
 | 二面 Q11 | 全局降级链路：路由捷径→熔断器→规则引擎的层层兜底 |
 
-### 第二档：熟悉即可（5 个）
+> ⚠️ **红线**：以上任何一题都**不能**把 Level 2 说成"生产集群已验证"，
+> 也**不能**给无 artifact 支撑的 RAG 百分比或生产 QPS/P99。
+
+### 第二档：熟悉即可（6 个）
 
 | 题号 | 准备框架 |
 |------|---------|
+| ⭐ 一面 D4 | 分布式锁：owner token + Lua 原子释放；讲出"旧 owner 误删新锁"竞态；声明非 Redlock |
+| ⭐ 二面 R6 | retry 分类 + 退避 + DLQ；能讲"先写库再投递"的顺序选择 |
+| ⭐ 二面 R10 | 事件流投递语义（**不是** at-most-once，重连会重放） |
+| ⭐ 二面 R9 | 为什么不选 Temporal / Kafka（看取舍是否诚实、有无触发条件） |
 | 一面 Q3 | MessageBus = 事件驱动 pub/sub；SharedBlackboard = 共享状态读写 |
 | 一面 Q14 | ContextVar 解决多 session 数据污染 + 对比传参的优劣 |
 | 二面 Q6 | A/B 分流流程：user_id → SHA-256 hash → 模 N 分流 |
@@ -232,4 +419,29 @@
 
 ---
 
-*版本：v1.1 · 基于简历 v5.4.1（2026-06-18）；2026-09-30 更新 RAG 评估口径（PR #19 evidence pipeline；正式指标 NOT_VERIFIED）*
+## 附：分布式 runtime 速查（答题时可直接引用的代码位置）
+
+| 主题 | 位置 |
+|---|---|
+| AgentRun 状态机 | `runtime/statuses.py` |
+| AgentRun 真相源 / 租约 / DLQ | `runtime/run_service.py` |
+| worker 执行与失败分类 | `runtime/executor.py`（含 `_heartbeat_loop`） |
+| checkpoint 续跑判定 | `runtime/bootstrap.py::invoke_graph_with_resume` |
+| Celery 配置（acks_late / visibility_timeout） | `runtime/celery_app.py` |
+| 投递（payload 仅 run_id） | `runtime/dispatch.py` |
+| per-thread 分布式锁 | `runtime/thread_lock.py`、`core/concurrency/distributed_lock.py` |
+| 工具副作用 ledger | `runtime/side_effects.py`、`tools/tool_registry.py` |
+| Redis Stream 事件 | `runtime/events.py` |
+| 生产 fail-fast 校验 | `core/config.py::validate_distributed_runtime_settings` |
+| API 表面 | `api/routes/runs.py` |
+| 设计 / 边界 / runbook | `docs/design/agent-runtime.md`、`docs/design/distributed-agent-runtime.md`、`docs/operations/distributed-runtime-runbook.md` |
+| 证据边界 | `docs/reference/distributed-runtime-interview-evidence.md`、`docs/reference/current-state.md` |
+| 真实基础设施验收 | `tests/integration/runtime/`、`make runtime-e2e`、`make runtime-chaos` |
+
+---
+
+*版本：v2.0 · 2026-10-02 Repository Truth Convergence 重排：新增分布式 Agent Runtime 题组
+（一面 D1–D4 / 二面 R1–R10），必问优先级从"业务链路优先"改为"分布式运行时优先"，
+证据边界（Level 1/2/3）写入题集抬头作为红线。RAG 口径沿用 PR #19 evidence pipeline
+（当前正式指标 NOT_VERIFIED）。简历文本以 `docs/reports/resume-description.md` 为冻结证据快照，
+不在本文档改写。*
