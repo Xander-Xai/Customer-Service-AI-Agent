@@ -254,6 +254,13 @@ try:
     agent_worker_task_total = _counter(
         "agent_worker_task_total", "Worker task outcomes", ["status"]
     )
+    agent_runs_active = _gauge("agent_runs_active", "AgentRuns currently executing")
+    agent_run_failures_total = _counter(
+        "agent_run_failures_total", "AgentRun terminal failures (FAILED/DEAD_LETTER)"
+    )
+    agent_thread_lock_acquire_total = _counter(
+        "agent_thread_lock_acquire_total", "Thread lock acquisitions"
+    )
     agent_thread_lock_contention_total = _counter(
         "agent_thread_lock_contention_total", "Same-thread lock contention deferrals"
     )
@@ -261,6 +268,9 @@ try:
         "agent_thread_lock_wait_seconds",
         "Time spent acquiring the thread lock",
         buckets=[0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10],
+    )
+    checkpoint_errors_total = _counter(
+        "checkpoint_errors_total", "LangGraph checkpoint backend errors"
     )
     idempotency_hit_total = _counter("idempotency_hit_total", "HTTP idempotency key hits")
     tool_idempotency_hit_total = _counter(
@@ -333,8 +343,12 @@ except ImportError:
     agent_run_queue_wait_seconds = _NoopMetric()
     agent_worker_active = _NoopMetric()
     agent_worker_task_total = _NoopMetric()
+    agent_runs_active = _NoopMetric()
+    agent_run_failures_total = _NoopMetric()
+    agent_thread_lock_acquire_total = _NoopMetric()
     agent_thread_lock_contention_total = _NoopMetric()
     agent_thread_lock_wait_seconds = _NoopMetric()
+    checkpoint_errors_total = _NoopMetric()
     idempotency_hit_total = _NoopMetric()
     tool_idempotency_hit_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False

@@ -44,6 +44,16 @@ class CheckpointBackendError(RuntimeError):
     """checkpoint 后端创建/初始化失败。"""
 
 
+def _record_checkpoint_error() -> None:
+    """递增 checkpoint_errors_total（monitoring 不可用时静默）。"""
+    try:
+        from core import monitoring
+
+        monitoring.checkpoint_errors_total.inc()
+    except Exception:
+        pass
+
+
 @dataclass
 class CheckpointRuntime:
     """一个已就绪的 checkpointer 运行时及其可选连接池。"""
@@ -109,6 +119,7 @@ async def build_postgres_checkpointer(
             database_url, autocommit=True, connect_timeout=connect_timeout
         )
     except Exception as e:
+        _record_checkpoint_error()
         raise CheckpointBackendError(
             f"PostgreSQL checkpoint 连接失败（{type(e).__name__}）"
         ) from e
@@ -127,6 +138,7 @@ async def build_postgres_checkpointer(
         # 官方推荐：首次使用时调用 setup() 创建/迁移 checkpoint 表。
         await saver.setup()
     except Exception as e:
+        _record_checkpoint_error()
         await _close_pool(pool)
         raise CheckpointBackendError(
             f"PostgreSQL checkpoint 初始化失败（{type(e).__name__}）"

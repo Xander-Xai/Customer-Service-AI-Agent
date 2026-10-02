@@ -68,6 +68,18 @@ def record_lock_contention() -> None:
     _inc("agent_thread_lock_contention_total")
 
 
+def record_lock_acquire() -> None:
+    _inc("agent_thread_lock_acquire_total")
+
+
+def record_run_failure() -> None:
+    _inc("agent_run_failures_total")
+
+
+def record_checkpoint_error() -> None:
+    _inc("checkpoint_errors_total")
+
+
 def record_idempotency_hit() -> None:
     _inc("idempotency_hit_total")
 
@@ -98,3 +110,11 @@ def inc_worker_active() -> None:
 
 def dec_worker_active() -> None:
     _change("agent_worker_active", -1)
+
+
+def inc_run_active() -> None:
+    _change("agent_runs_active", 1)
+
+
+def dec_run_active() -> None:
+    _change("agent_runs_active", -1)
