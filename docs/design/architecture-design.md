@@ -268,6 +268,23 @@ Checkpoint（图状态，官方表）是两套数据，不要混用。
 **证据边界**：以上为 `IMPLEMENTED / LOCALLY VERIFIED`（本地单测 + 可选真实
 PostgreSQL 集成测试），尚未在真实生产多副本环境验证，不宣称生产级数字。
 
+### 3.7 分布式执行边界（per-thread 锁 + Redis Session + 多 Worker gate）
+
+- **per-thread 锁**：`api/app.py::_run_graph` 是 REST/SSE/WS/multimodal 的统一
+  执行边界，进入前经 `core/concurrency/distributed_lock.py::thread_lock(session_id)`
+  获取 Redis 锁（key `agent:thread-lock:{thread_id}`，owner token + TTL + Lua
+  compare-and-delete）。同一 thread 串行、不同 thread 并行；拿不到锁抛
+  `ThreadBusyError` → REST 409 / SSE、WS 错误帧（`THREAD_BUSY`）。
+  开发/测试用进程内锁（不依赖 Redis）；生产 Redis 不可用时 fail closed
+  （`THREAD_LOCK_UNAVAILABLE`）。
+- **Redis Session 强制**：生产 `SESSION_STORAGE_BACKEND` 必须为 `redis`，否则
+  启动 fail-fast；Redis 初始化失败也不回退 memory（`core/container.py`）。
+- **多 Worker 一致性 gate**：生产 `GUNICORN_WORKERS>1` 要求 postgres checkpoint
+  + redis session + 分布式锁，否则启动失败
+  （`core/config.py::validate_distributed_runtime_settings`）。
+- **状态归属**：见 [runtime-state-ownership](runtime-state-ownership.md)；
+  决策见 [ADR-009](../decisions/009-distributed-agent-runtime.md)。
+
 ---
 
 ## 4. 安全设计

@@ -330,14 +330,49 @@ sequenceDiagram
 
 ## 🤖 功能模块详解
 
-### 分布式 Agent Runtime（异步 Run + Celery Worker）
+### 分布式 Agent Runtime（Distributed Runtime Foundation）
 
-在保留实时 `/api/chat`、`/api/chat/stream`（SSE）快路径的同时，新增长任务异步路径：
+在保留实时 `/api/chat`、`/api/chat/stream`（SSE）快路径的同时，提供可横向扩展的
+分布式运行时。核心是**按状态生命周期分工**：PostgreSQL 存 durable state、Redis 做
+ephemeral coordination、asyncio 只做 run-local 并发（见
+[ADR-009](docs/decisions/009-distributed-agent-runtime.md) 与
+[runtime-state-ownership](docs/design/runtime-state-ownership.md)）。
 
-- `POST /api/runs` 创建 RunRecord(`QUEUED`) 并入队，**立即返回** `run_id`（不等待 Graph 完成）；
-- `GET /api/runs/{run_id}` polling 查询状态与结果；
-- Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是数据库
-  `agent_runs` 表（Celery result backend 不是真相源）。
+```mermaid
+flowchart LR
+    C[Client] --> N[Nginx]
+    N --> A1[FastAPI / Gunicorn Worker 1]
+    N --> A2[FastAPI / Gunicorn Worker 2]
+
+    A1 --> L1{{Redis Thread Lock}}
+    A2 --> L1
+
+    A1 --> LG[LangGraph]
+    A2 --> LG
+    LG --> CP[(PostgreSQL Checkpoint)]
+
+    A1 --> S[(Redis Session)]
+    A2 --> S
+
+    LG --> RUN[(Agent Run Metadata)]
+    LG --> IDEM[(Tool Idempotency)]
+
+    LG --> Q[(Qdrant)]
+    LG --> LLM[LLM / Tools / ERP]
+```
+
+**当前完成（本 PR 验证）**：API 多 Worker + durable PostgreSQL checkpoint +
+强制 Redis Session（生产 fail-fast）+ per-thread 分布式锁（REST/SSE/WS/multimodal
+统一，冲突返回 `THREAD_BUSY` 409）+ tool 幂等 ledger + 多 Worker 一致性启动 gate。
+
+**下一阶段（仅设计，未实现）**：Redis/Celery durable task queue 深化 + 独立 Agent
+Worker Pool + retry/DLQ 强化 + cross-process SSE event bridge
+（[async-agent-worker-architecture](docs/design/async-agent-worker-architecture.md)）。
+
+**异步 Run 路径（已实现）**：`POST /api/runs` 创建 RunRecord(`QUEUED`) 并入队立即
+返回 `run_id`；`GET /api/runs/{run_id}` polling；`GET /api/runs/dead` 查询 DLQ。
+Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是 `agent_runs` 表
+（Celery result backend 不是真相源）。
 
 **三个 ID**：`thread_id`（对话级，多轮复用） / `run_id`（单轮执行，唯一） /
 `task_id`（队列消息 / Worker 执行 ID）。
@@ -350,7 +385,8 @@ redelivery 恢复。**不**宣称 exactly-once、任意指令级无损恢复或 
 
 配置与设计见 [.env.example](.env.example)、
 [docs/design/distributed-agent-runtime.md](docs/design/distributed-agent-runtime.md)。
-崩溃恢复复现：`scripts/repro_worker_crash_recovery.sh`（需真实 Redis + PostgreSQL）。
+崩溃恢复复现：`scripts/repro_worker_crash_recovery.sh`；
+分布式运行时验证：`scripts/verify_distributed_runtime.py`（需真实 Redis + PostgreSQL）。
 
 ### Agent 系统（9 个 Agent 角色 + 评估器）
 

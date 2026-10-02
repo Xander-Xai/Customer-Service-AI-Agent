@@ -47,6 +47,9 @@
 | Redis连接失败 | Redis宕机/网络分区 | 检查Redis状态，重启服务 | P0 |
 | Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，重建 Qdrant 集合 | P0 |
 | 会话数据丢失 | Session过期/Redis故障 | 检查TTL配置，验证Redis | P1 |
+| 请求返回 409 THREAD_BUSY | 同一 thread 有正在执行的 Run（分布式锁未释放/长请求） | 检查 `agent:thread-lock:{thread_id}` TTL 与慢请求；客户端稍后重试 | P1 |
+| 启动失败：SESSION_STORAGE_BACKEND | 生产配了 memory（fail-fast） | 改为 `SESSION_STORAGE_BACKEND=redis` 并确保 Redis 可用 | P0 |
+| 启动失败：GUNICORN_WORKERS gate | 多 worker 但 checkpoint/session/lock 非分布式 | 配 postgres checkpoint + redis session + redis lock | P0 |
 | 响应时间过长 | LLM延迟/资源不足 | 检查SLA，扩容实例 | P0 |
 | 告警频繁触发 | 阈值过低/真实故障 | 调整阈值，排查根因 | P1 |
 

@@ -23,6 +23,14 @@
 - [ ] **LangGraph checkpoint 持久化**：生产 `LANGGRAPH_CHECKPOINT_BACKEND=postgres`、
       官方 saver `setup()` 成功、连接失败 fail closed（本地/受控环境验证；真实多副本
       恢复仍属 PRODUCTION NOT_VERIFIED）
+- [ ] **生产 Redis Session**：`SESSION_STORAGE_BACKEND=redis`（生产 memory 启动
+      fail-fast）；Redis 初始化失败不回退 memory
+- [ ] **per-thread 分布式锁**：`AGENT_RUN_THREAD_LOCK_ENABLED=true` +
+      `AGENT_RUN_THREAD_LOCK_BACKEND=redis`；同一 thread 冲突返回 `THREAD_BUSY`(409)
+- [ ] **多 Worker 一致性 gate**：`GUNICORN_WORKERS>1` + 生产要求 postgres checkpoint
+      + redis session + 分布式锁（否则启动失败）
+- [ ] `DISTRIBUTED_DB_URL=... TEST_REDIS_URL=... python scripts/verify_distributed_runtime.py`
+      生成 `artifacts/distributed-runtime/<ts>/report.json` 且 `overall_status=PASS`
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -52,7 +60,8 @@
 - [x] admin.html 版本号同步至 v6.3
 - [x] _revoked_jtis 已吊销 JTI 集合新增容量限制 10000，防止内存泄漏
 - [x] mypy 已从 requirements.txt 移除，移到 requirements-dev.txt
-- [x] config 启动校验新增 4 项生产环境警告（SESSION_STORAGE_BACKEND/ERP_MODE/SESSION_ENCRYPTION_KEY）
+- [x] config 启动校验新增生产环境检查（SESSION_STORAGE_BACKEND 现为 fail-fast 硬错误；
+      ERP_MODE/SESSION_ENCRYPTION_KEY 仍为 warning；多 worker 一致性 gate 见上）
 - [x] web/index.html 版本号同步至 v6.3
 - [x] README 测试计数/Agent 表/缓存架构全部按代码回填
 - [x] Widget file-type header aligned: frontend sends `file-type` (hyphen) matching FastAPI Header() param conversion (v6.3)
