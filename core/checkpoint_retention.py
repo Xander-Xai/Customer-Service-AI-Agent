@@ -82,7 +82,7 @@ def _parse_ts(value: Any) -> datetime | None:
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         # LangGraph checkpoint 时间戳是 float epoch（秒）
         return datetime.fromtimestamp(float(value), tz=timezone.utc)
     if isinstance(value, str):
