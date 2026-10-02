@@ -20,7 +20,7 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`53`**
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`58`**
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
 ## RAG evaluation / evidence state
@@ -83,6 +83,15 @@ python3 scripts/audit_doc_consistency.py
   确定性压缩、Top-K/token 预算、历史 compaction、专用 compressor、可选
   offload/store/recovery、scope-safe exact reuse cache、可选 semantic summary。
   它不是 Response Cache 的一部分；Session Memory（会话窗口/摘要）是第三种独立概念。
+- **LangGraph Checkpoint**（`core/checkpointer.py`）是第四种独立概念：图状态快照，
+  键为 `thread_id`（当前实现 `thread_id == session_id`），支持断点续传。
+  `LANGGRAPH_CHECKPOINT_BACKEND` 选择 `memory`（开发/测试，进程内
+  `MemorySaver`）或 `postgres`（官方 `langgraph-checkpoint-postgres` 的
+  `AsyncPostgresSaver`，跨 worker/副本共享、重启可恢复；留空时开发→memory、
+  生产→postgres）。checkpoint 表由官方 saver 自管，不与业务 SQLAlchemy Base 耦合。
+  生产初始化失败 fail closed，不静默回退 MemorySaver。
+  四个机制（Session Memory / LangGraph Checkpoint / Response Cache /
+  Tool Result Store）不是同一个概念，禁止互相替代或合并叙述。
 - RAG 链路：rewrite/filter → vector + BM25 → retrieval contract
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
@@ -90,6 +99,129 @@ python3 scripts/audit_doc_consistency.py
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。
+
+## 分布式 Agent Runtime（异步 Run + Celery Worker）
+
+- **Hybrid Architecture**：实时快路径 `POST /api/chat` / `/api/chat/stream`
+  （FastAPI → LangGraph → SSE）保持不变；长任务走异步路径
+  `POST /api/runs`（创建 Run + 入队，立即返回）→ Celery worker →
+  `GET /api/runs/{run_id}` polling。见 `runtime/`、`api/routes/runs.py`。
+- **三个 ID 严格区分**：
+  - `thread_id`：对话级 ID（当前 `thread_id == session_id == LangGraph thread`），
+    同一多轮会话复用；
+  - `run_id`（`agent_runs.id`）：单轮 Graph 执行 ID，每次请求唯一；
+  - `task_id`：队列消息 / Worker 执行 ID（Celery task id）。
+  禁止"每个请求新建 thread_id"。
+- **业务状态真相源**：数据库 `agent_runs` 表（canonical），状态机
+  `PENDING → QUEUED → RUNNING → SUCCEEDED | FAILED | RETRYING → RUNNING |
+  DEAD_LETTER`，任意未终态可 `→ CANCELLED`；终态为
+  `SUCCEEDED | FAILED | DEAD_LETTER | CANCELLED`
+  （`runtime/statuses.py`）。Celery result backend **不是**真相源
+  （`task_ignore_result=True`）。
+- **取消（协作式）**：`POST /api/runs/{run_id}/cancel` 立即置 `CANCELLED`。
+  未开始的 run 不会再被执行；**已进入 RUNNING 的 run 不会被强行中断**，
+  调用方需轮询确认终态。
+- **Checkpoint**：生产 `postgres`（`AsyncPostgresSaver`）跨 worker/副本共享，
+  见上；API 快路径与 worker 异步路径共享同一 checkpoint 后端。
+- **Thread lock（API 执行边界 + worker 共用）**：Redis
+  `agent:thread-lock:{thread_id}`（owner token + TTL + 原子 compare-and-delete 释放）；
+  同一 thread 串行，不同 thread 并发。REST/SSE/WS/multimodal 统一经
+  `api/app.py::_run_graph` 获取锁；拿不到锁返回 `THREAD_BUSY`（HTTP 409 /
+  SSE/WS 错误帧）。实现：`core/concurrency/distributed_lock.py`（复用
+  `runtime/thread_lock.py`）。开发/测试用进程内锁，不依赖 Redis。
+- **生产 Redis Session 强制**：`DEV_MODE=false` 时 `SESSION_STORAGE_BACKEND`
+  必须为 `redis`，否则启动 fail-fast（不再只 warning）；Redis 初始化失败同样
+  fail-fast，绝不静默回退进程内 memory。见
+  `core/config.py::validate_distributed_runtime_settings`、`core/container.py`。
+- **多 Worker 一致性 gate**：生产且 `GUNICORN_WORKERS>1` 时要求
+  `LANGGRAPH_CHECKPOINT_BACKEND=postgres` + `SESSION_STORAGE_BACKEND=redis` +
+  `AGENT_RUN_THREAD_LOCK_ENABLED=true`/`BACKEND=redis`，否则启动失败。生产还要求
+  `AGENT_RUN_DISPATCH=celery`，且 `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` >
+  `AGENT_RUN_TASK_TIME_LIMIT` + safety margin（锁不能在任务仍在执行时过期）。
+- **Reliability 语义（能力边界）**：
+  - at-least-once task delivery（`task_acks_late` + `task_reject_on_worker_lost`
+    + Redis `visibility_timeout`），**不是** exactly-once；
+  - application-level run 幂等（终态重复投递 no-op；`idempotency_key` 唯一约束）；
+  - per-thread distributed mutual exclusion（单 Redis，非 Redlock 集群）；
+  - external PostgreSQL checkpoint persistence；
+  - node/checkpoint-boundary durable execution（失败节点可能重新执行，节点副作用
+    需幂等）；**不**宣称任意 Python 指令级无损恢复；
+  - application-level **dead-letter**：`agent_dead_letters` 表（不可变历史：
+    run_id / thread_id / attempt_count / error_type / error_code / entered_at）+
+    `GET /api/runs/dead`；**不是** broker-native DLX。
+  - **人工重放闭环**：`RunService.requeue_dead_letter` + CLI
+    `python scripts/replay_dead_run.py <run_id>`。重放**复用原 run_id**（只产生新的
+    队列投递）——换新 run_id 会绕过工具幂等键，把已成功的退款/改单再执行一次。
+    原始 DLQ 历史不被改写，`agent_run_dead_letter_replay_total` 计数。
+  - 工具侧幂等 ledger（`tool_side_effects`，`operation_key = run_id:tool_call_id`）
+    + `execute_idempotent_operation` 包裹执行；`ToolRegistry.register(side_effect=True)`
+    的**写工具**在 Run 执行上下文内自动走 ledger（`tools/tool_registry.py`），
+    `agent/base_agent.py` 已把 LLM 的 `tool_call_id` 透传到 registry；
+    PENDING 认领租约未过期时抛 `TransientError`（退避重投）而不是重复执行副作用。
+    外部系统端到端幂等仍需下游 API 接受 idempotency key。
+  - **断点续跑语义（已修）**：LangGraph `ainvoke(state, cfg)` 会**从 START 重新
+    执行**并覆盖 channel 值；只有 `ainvoke(None, cfg)` 才从 checkpoint 的 `next`
+    续跑。`runtime/bootstrap.py::invoke_graph_with_resume` 统一判定：有未完成
+    checkpoint（`next` 非空）则续跑，否则正常执行；API 快路径
+    （`api/app.py::_pending_steps`）同语义。此前 worker 崩溃后是"从头重跑"。
+  - thread lease **执行期间续租**（`runtime/executor.py::_heartbeat_loop` 同时续 DB
+    ownership lease 与 Redis lock TTL，`agent_thread_lease_renewed_total` /
+    `agent_worker_heartbeat` 观测）。仍**无** fencing token：pause 超过 TTL 的旧
+    worker 不会被强制中止，其后续 `mark_succeeded` 会被 `from_statuses={RUNNING}`
+    条件更新挡下。
+  - **Run 事件流（新增）**：worker 写 Redis Stream `agent:run:{run_id}:events`
+    （`runtime/events.py`），API 通过 `GET /api/runs/{run_id}/events` 以 SSE 转发，
+    支持 `Last-Event-ID` 断点续读。事件负载走**字段白名单**，query/用户标识/凭据
+    不入事件流。定位是**观测通道而非业务真相源**：best-effort resumable，
+    **不是** exactly-once——单连接内不重复，但用较旧 `Last-Event-ID` 重连会重放
+    已处理事件（重复），`replay=false` 与 idle 超时会造成缺口，`MAXLEN` 近似裁剪
+    后的历史不可恢复（且近似裁剪不是硬上界）。
+- **SSE + checkpoint 序列化修复（P0）**：`stream_callback` 曾作为 LangGraph channel
+  （`core/state.py`）随 state 一起被 checkpointer 序列化，因是 async 可调用对象而
+  抛 `TypeError: Type is not msgpack serializable: function` —— MemorySaver 与官方
+  `AsyncPostgresSaver` **都**失败，生产默认 postgres 后端下 `/api/chat/stream`
+  必然报错。现改为 contextvar 传递（`core/streaming_context.py`），节点经
+  `get_stream_callback(state)` 读取（仍兼容从 state 取值的老调用方）。
+  CI VERIFIED：真实 PG checkpointer 下 SSE 正常完成、`done` 帧、0 错误帧；
+  回归测试 `tests/integration/runtime/test_sse_checkpoint_serialization.py`。
+- **能力层级**：
+  - Level 1（已实现，代码存在）：Postgres checkpoint、Redis session、Redis
+    per-thread lock、AgentRun 真相源、Celery + Redis broker、worker execution、
+    run_id dispatch、acks_late、reject_on_worker_lost、visibility_timeout、retry
+    基础、tool ledger、idempotency helper、Prometheus metrics。
+  - Level 2（本地验证，有命令 + artifact，真实 PG + Redis + 真实多进程 Celery）：
+    `make runtime-e2e`（tests/integration/runtime，30 个用例，覆盖 checkpoint
+    跨进程恢复 / thread-run 分离 / 同 thread 执行区间不重叠 / 跨 thread 并发耗时 /
+    lease 非 owner 释放与 TTL 接管 / queue-worker 解耦 / worker kill -9 后从
+    checkpoint 续跑 / 三次重试后成功 / permanent 不重试 / DLQ + 重放 / 副作用工具
+    重复投递下的副作用去重 / 事件流与 SSE 续读）与 `make runtime-chaos`
+    （结构化证据 JSON）。
+    CI：`.github/workflows/ci.yml` 的 `runtime-e2e` job（postgres + redis service
+    container）。两者的证据等级是 **CI VERIFIED**，生产集群仍 NOT_VERIFIED。
+  - Level 3（未生产验证）：真实生产集群 / 多副本长期稳定 / 真实用户流量 /
+    真实 ERP 写操作 / 大规模 queue backlog / K8s autoscaling / multi-region。
+- **Evidence SHA 语义**：artifact schema `distributed-runtime-evidence/v2` 使用
+  `tested_code_sha`（生成 evidence 时的被测代码 commit）+ `generated_at` +
+  `overall_status`；artifact 自身随后提交到另一个 commit（生成时无法预知，
+  `artifact_commit_sha` 为 null）。历史 v1 artifact 保留不改。
+- **状态归属**：见 [runtime-state-ownership](../design/runtime-state-ownership.md)
+  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)。下一阶段（**基础
+  Celery/Redis 链路已存在**，这里指深化）worker pool autoscaling / DLQ 运维闭环 /
+  SSE bridge 仅设计：
+  [async-agent-worker-architecture](../design/async-agent-worker-architecture.md)。
+- **验证命令**（需要真实 Redis/PostgreSQL；默认 skip）：
+  ```bash
+  TEST_REDIS_URL=redis://localhost:6379 \
+  TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
+      pytest tests/integration/test_worker_crash_recovery.py tests/integration/test_thread_lock_redis.py -q
+  # 生成机器可读 evidence（artifacts/distributed-runtime/<ts>/report.json）
+  DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
+  TEST_REDIS_URL=redis://localhost:6379 \
+      python scripts/verify_distributed_runtime.py
+  # 或脚本
+  scripts/repro_worker_crash_recovery.sh
+  ```
+  设计细节：[docs/design/distributed-agent-runtime.md](../design/distributed-agent-runtime.md)。
 
 ## 配置层级语义（runtime fallback ≠ 模板推荐值）
 

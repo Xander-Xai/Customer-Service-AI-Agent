@@ -77,7 +77,12 @@ async def health(request: Request):
     llm_key_valid = bool(llm_api_key) and not any(
         llm_api_key.lower().startswith(p) for p in _placeholder_prefixes
     )
-    from core.config import LLM_PROVIDER
+    from core.config import (
+        AGENT_EXECUTION_MODE,
+        AGENT_INLINE_COMPAT_ENDPOINTS,
+        AGENT_QUEUED_RUN_ENDPOINTS,
+        LLM_PROVIDER,
+    )
 
     llm_provider = LLM_PROVIDER
 
@@ -126,8 +131,28 @@ async def health(request: Request):
     uptime_seconds = round(time.time() - getattr(state, "module_load_time", time.time()), 2)
     circuit_state = cb_status["state"]
 
+    # LangGraph Checkpoint 后端 + 连通性（严禁返回 URI/用户名/密码）
+    checkpoint_info = {"backend": "disabled", "status": "unavailable"}
+    container = getattr(state, "container", None)
+    if container is not None:
+        try:
+            from core.checkpointer import probe_checkpoint_runtime
+
+            checkpoint_info = await probe_checkpoint_runtime(
+                getattr(container, "_checkpoint_runtime", None)
+            )
+        except Exception as e:
+            logger.debug(f"[Health] checkpoint 探活失败: {type(e).__name__}")
+            checkpoint_info = {"backend": "unknown", "status": "unavailable"}
+
     overall = "healthy"
     if not db_ok or not llm_key_valid:
+        overall = "unhealthy"
+    elif (
+        checkpoint_info.get("backend") == "postgres"
+        and checkpoint_info.get("status") != "healthy"
+    ):
+        # 生产要求可持久化 checkpoint；后端不可用算不健康
         overall = "unhealthy"
     elif circuit_state == "open" or (not redis_ok and REDIS_URL) or not qdrant_ok:
         overall = "degraded"
@@ -139,6 +164,15 @@ async def health(request: Request):
         "timestamp": now,
         "uptime_seconds": uptime_seconds,
         "python_version": sys.version.split()[0],
+        "langgraph_checkpoint": checkpoint_info,
+        # 自述执行模式，避免"所有请求都经过 Worker"的误读：
+        # 快路径是兼容性 inline 路径，只有 /api/runs 受 AGENT_EXECUTION_MODE 控制。
+        "agent_execution": {
+            "mode": AGENT_EXECUTION_MODE,
+            "durable_async_runs": AGENT_EXECUTION_MODE == "queued",
+            "inline_compat_endpoints": list(AGENT_INLINE_COMPAT_ENDPOINTS),
+            "queued_run_endpoints": list(AGENT_QUEUED_RUN_ENDPOINTS),
+        },
         "components": {
             "circuit_breaker": {
                 "state": circuit_state,
@@ -152,6 +186,7 @@ async def health(request: Request):
             },
             "qdrant": {"connected": qdrant_ok},
             "database": {"connected": db_ok, "latency_ms": db_latency_ms},
+            "langgraph_checkpoint": checkpoint_info,
         },
     }
     state._cached_health_status = res

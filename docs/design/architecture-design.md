@@ -232,6 +232,79 @@ CLOSED ──(连续5次失败)──→ OPEN ──(60秒后)──→ HALF_OPE
 
 图片保留 PNG Alpha 通道（v6.1 修复），语音支持 Widget 麦克风输入。
 
+### 3.6 LangGraph Checkpoint 持久化（生产 PostgreSQL）
+
+**为什么 MemorySaver 不够？**
+- `MemorySaver` 只把 checkpoint 存在当前 Python 进程内；gunicorn 多 worker、
+  FastAPI 多副本之间不共享，实例重启即丢失，与 `docker-compose.scale.yml`
+  声称的水平扩展能力不匹配。
+
+**当前实现（`core/checkpointer.py` + `core/container.py` 生命周期）**
+
+| 场景 | backend | saver | 说明 |
+|------|---------|-------|------|
+| 开发/测试 | `memory`（默认自动） | `MemorySaver` | 进程内，允许显式选择；postgres 不可用时可降级但标记 `degraded` |
+| 生产 | `postgres`（默认自动） | 官方 `AsyncPostgresSaver` | psycopg 异步连接池；初始化失败 fail closed，禁止静默回退 |
+
+- 配置：`LANGGRAPH_CHECKPOINT_BACKEND=memory|postgres`（留空按环境自动），
+  `LANGGRAPH_CHECKPOINT_DATABASE_URL`（留空时安全复用 `DATABASE_URL`，只接受
+  postgres 协议、剥离 SQLAlchemy `+driver` 后缀，SQLite/其它协议拒绝）。
+- 生命周期：`ServiceContainer._init_checkpointer()` 在 `build_graph` **之前**完成
+  连接池 open + 官方 `setup()` 建表；`_close_checkpointer()` 在 shutdown 释放连接池；
+  `_build_graph()` 在生产缺失 checkpointer 时抛 `ConfigurationError`。
+- checkpoint 表（`checkpoints` / `checkpoint_blobs` / `checkpoint_writes` /
+  `checkpoint_migrations`）由官方 saver 管理，不与业务 SQLAlchemy `Base` 耦合；
+  首次部署由 `setup()` 幂等创建/迁移。
+- 健康检查 `/api/health` 返回 `langgraph_checkpoint: {backend, status}`（脱敏，
+  不含 URI/用户名/密码）；生产 postgres 后端不可用时整体状态为 `unhealthy`。
+
+**thread_id 语义审计**：当前 `thread_id == session_id`（`api/app.py::_run_graph`）。
+含义是一个会话对应一条图状态线，同一 `session_id` 在多 worker/多副本间可恢复。
+边界：`session_id` 来自客户端，因此 `/api/sessions/{id}/checkpoint` 与其它会话端点
+一样校验会话归属（非 dev 模式）；checkpoint 端点只返回是否存在及 checkpoint id，
+不返回图状态内容。Session Memory（对话窗口/摘要，独立存储）与 LangGraph
+Checkpoint（图状态，官方表）是两套数据，不要混用。
+
+**证据边界**：以上为 `IMPLEMENTED / LOCALLY VERIFIED`（本地单测 + 可选真实
+PostgreSQL 集成测试），尚未在真实生产多副本环境验证，不宣称生产级数字。
+
+### 3.6b 异步 Run 路径与断点续跑（详见 [agent-runtime.md](agent-runtime.md)）
+
+快路径 `/api/chat`（进程内执行，SSE）与异步 Run 路径 `/api/runs`（落库 + 入队 →
+Celery worker）共用：同一 LangGraph、同一 checkpoint 后端、**同一个 thread lease
+manager 单例**。
+
+断点续跑的关键语义（LangGraph 1.2.x 实测）：`ainvoke(state, cfg)` 会**从 START
+重新执行**并覆盖 channel 值；只有 `ainvoke(None, cfg)` 才从 checkpoint 的 `next`
+续跑。`runtime/bootstrap.py::invoke_graph_with_resume` 统一判定（存在未完成
+checkpoint 则传 `None`），快路径同语义（`api/app.py::_pending_steps`）。判定边界：
+只有 `StateSnapshot.next` 非空才算恢复；已完成的历史快照走正常执行，多轮对话不受影响。
+
+状态机 `runtime/statuses.py`：`PENDING → QUEUED → RUNNING →
+SUCCEEDED | FAILED | RETRYING → DEAD_LETTER`，任意未终态可 `→ CANCELLED`。
+
+投递为 at-least-once（`acks_late` + `reject_on_worker_lost` +
+`visibility_timeout`），因此**有副作用的写工具必须自身幂等**：
+`ToolRegistry.register(side_effect=True)` 的工具在 Run 上下文内自动走
+`tool_side_effects` ledger（`operation_key = run_id:tool_call_id`）。
+
+### 3.7 分布式执行边界（per-thread 锁 + Redis Session + 多 Worker gate）
+
+- **per-thread 锁**：`api/app.py::_run_graph` 是 REST/SSE/WS/multimodal 的统一
+  执行边界，进入前经 `core/concurrency/distributed_lock.py::thread_lock(session_id)`
+  获取 Redis 锁（key `agent:thread-lock:{thread_id}`，owner token + TTL + Lua
+  compare-and-delete）。同一 thread 串行、不同 thread 并行；拿不到锁抛
+  `ThreadBusyError` → REST 409 / SSE、WS 错误帧（`THREAD_BUSY`）。
+  开发/测试用进程内锁（不依赖 Redis）；生产 Redis 不可用时 fail closed
+  （`THREAD_LOCK_UNAVAILABLE`）。
+- **Redis Session 强制**：生产 `SESSION_STORAGE_BACKEND` 必须为 `redis`，否则
+  启动 fail-fast；Redis 初始化失败也不回退 memory（`core/container.py`）。
+- **多 Worker 一致性 gate**：生产 `GUNICORN_WORKERS>1` 要求 postgres checkpoint
+  + redis session + 分布式锁，否则启动失败
+  （`core/config.py::validate_distributed_runtime_settings`）。
+- **状态归属**：见 [runtime-state-ownership](runtime-state-ownership.md)；
+  决策见 [ADR-009](../decisions/009-distributed-agent-runtime.md)。
+
 ---
 
 ## 4. 安全设计
