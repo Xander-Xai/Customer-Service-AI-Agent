@@ -254,6 +254,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Stage test environment
+        # tests/integration/runtime imports runtime.errors -> db.database ->
+        # core.config at collection time, and core/config.py fails closed when
+        # API_KEY_ENABLED=true without an API_KEY. The other lanes (`test`,
+        # `dev-compat`) already stage .env.test; without it this lane died at
+        # collection with exit code 2 before running a single test.
+        run: cp .env.test .env
+
       - name: Runtime end-to-end acceptance
         # checkpoint 跨进程恢复 / thread 串行与跨 thread 并发 / lease 崩溃接管 /
         # queue-worker 解耦 / worker kill 后从 checkpoint 续跑 / retry / DLQ +
