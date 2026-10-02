@@ -265,12 +265,12 @@ jobs:
       - name: Runtime end-to-end acceptance
         # checkpoint 跨进程恢复 / thread 串行与跨 thread 并发 / lease 崩溃接管 /
         # queue-worker 解耦 / worker kill 后从 checkpoint 续跑 / retry / DLQ +
-        # 重放 / 副作用工具恰好执行一次 / run 事件流
+        # 重放 / 副作用工具在本 Agent 侧去重（at-least-once + 幂等，非端到端 exactly-once） / run 事件流
         run: python -m pytest tests/integration/runtime -q -p no:cacheprovider
 
       - name: Runtime chaos acceptance (worker kill -9)
         # 混沌脚本输出结构化证据：崩溃前存在 checkpoint、接管 worker 不同、
-        # 副作用计数器恰好为 1、ledger 命中路径被走到。
+        # 重投后副作用计数器仍为 1 且工具真实调用次数 >= 2、ledger 命中路径被走到。
         run: |
           python scripts/test_worker_crash_recovery.py \
             --output artifacts/runtime/chaos-ci.json
@@ -400,9 +400,15 @@ jobs:
             cd ${{ vars.DEPLOY_PATH || '/opt/csai' }}  # yamllint disable-line rule:line-length
             git pull origin main
             cp .env.prod .env
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+            # compose 文件在 deploy/compose/ 下，仓库根没有 docker-compose.yml
+            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml pull
+            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --build
             # 等待健康检查
             sleep 10
             curl -sf http://localhost:8000/api/health || exit 1
+            # 分布式 Runtime 门禁：worker 必须真的起来，否则异步 Run 会永久停在 QUEUED。
+            # 这里只做最低限度的存活/连通性确认；正确性由 runtime-e2e / runtime-chaos 证明。
+            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml ps worker
+            curl -sf 'http://localhost:8000/api/runs/dead' -H "X-API-Key: $API_KEY" >/dev/null \
+              || echo "::warning::DLQ 端点不可达（可能缺少 API_KEY 或未启动 worker）"
             echo "✅ 部署完成"

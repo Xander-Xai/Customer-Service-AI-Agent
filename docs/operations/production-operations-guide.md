@@ -70,7 +70,7 @@ Run 卡住、线程锁冲突、dead-letter 堆积、副作用重复、事件流�
 日常验收：
 
 ```bash
-make runtime-e2e      # 真实 PG + Redis，30 用例
+make runtime-e2e      # 真实 PG + Redis
 make runtime-chaos    # worker kill -9 混沌验收（结构化证据 JSON）
 ```
 

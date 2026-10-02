@@ -12,6 +12,35 @@ router = APIRouter()
 logger = get_logger("api.sessions")
 
 
+def extract_checkpoint_id(checkpoint: object) -> str | None:
+    """从 checkpoint 结构里取 id，兼容两种形态。
+
+    官方 ``AsyncPostgresSaver`` 的 ``aget_tuple()`` 返回的 ``checkpoint`` 是
+    **mapping**（含 ``"id"`` 键），没有 ``.id`` 属性；只有自定义 saver 才可能返回带
+    ``.id`` 的对象。此前只做 ``hasattr(checkpoint, "id")``，导致真实 PostgreSQL
+    checkpoint 永远被报成 ``checkpoint_id: null``（has_checkpoint 却为 true）。
+
+    顺序：真 mapping 取 ``"id"`` -> 对象取 ``.id`` -> mapping 取 ``"checkpoint_id"``。
+    刻意用 ``isinstance(..., Mapping)`` 而不是鸭子类型的 ``hasattr(x, "get")``：
+    后者对 MagicMock 之类"任何方法都存在"的对象会返回伪造值。
+    取到的值必须是**非空字符串**才算数：``.id`` 若是 MagicMock/数字等非字符串，
+    同样视为"取不到"，返回 ``None``（不猜测、不伪造 id）。
+    """
+    from collections.abc import Mapping
+
+    def _coerce(value: object) -> str | None:
+        return value if isinstance(value, str) and value else None
+
+    if checkpoint is None:
+        return None
+    if isinstance(checkpoint, Mapping):
+        for key in ("id", "checkpoint_id"):
+            if (found := _coerce(checkpoint.get(key))) is not None:
+                return found
+        return None
+    return _coerce(getattr(checkpoint, "id", None))
+
+
 def _extract_user_id(request: Request) -> str | None:
     """从 JWT payload 或 API Key 认证结果中提取 user_id"""
     state = request.app.state
@@ -83,6 +112,50 @@ async def get_session(session_id: str, request: Request):
     return JSONResponse({"error": "session not found"}, status_code=404)
 
 
+async def delete_session_checkpoint(request: Request, session_id: str) -> bool:
+    """删除该会话对应的 LangGraph checkpoint thread。返回是否真的删了。
+
+    thread_id == session_id。兼容三种 saver：
+      - 官方 Async/PostgresSaver：``adelete_thread(thread_id)``
+      - MemorySaver（同步）：``delete_thread(thread_id)``
+      - 无删除能力：返回 False（调用方仍应删除 Session，只是不静默谎称已清理）
+
+    注意：官方 saver 的删除接口接收的是 **thread_id 字符串**，不是 LangGraph
+    ``config`` dict（``adelete_thread(self, thread_id: str)``）。早期实现传了 config，
+    结果 ``DELETE ... WHERE thread_id = '{...}'`` 匹配不到任何行、静默删不掉。
+
+    永不抛错：checkpoint 清理失败不能把"会话已删除"变成 500 —— Session 已经删掉了，
+    残留的 checkpoint 由 retention 任务兜底。
+    """
+    state = request.app.state
+    graph_app = getattr(state, "graph_app", None)
+    checkpointer = getattr(graph_app, "checkpointer", None) if graph_app else None
+    if not checkpointer:
+        return False
+
+    for name in ("adelete_thread", "delete_thread"):
+        fn = getattr(checkpointer, name, None)
+        if fn is None:
+            continue
+        try:
+            import inspect
+
+            result = fn(session_id)
+            if inspect.isawaitable(result):
+                await result
+            return True
+        except Exception as e:
+            logger.warning(
+                "checkpoint thread 删除失败 session=%s saver=%s err=%s",
+                session_id,
+                name,
+                type(e).__name__,
+            )
+            return False
+    logger.debug("checkpoint saver 不支持删除 thread（session=%s）", session_id)
+    return False
+
+
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, request: Request):
     state = request.app.state
@@ -99,7 +172,14 @@ async def delete_session(session_id: str, request: Request):
         if not sm.validate_session_token(session_id, token):
             return JSONResponse({"error": "会话令牌无效或无权删除"}, status_code=403)
     await sm.delete_session(session_id)
-    return {"message": f"会话 {session_id} 已删除"}
+    # 图状态（LangGraph checkpoint）也是该会话的持久数据，必须与 Session 一起删除。
+    # 否则"删除会话"只清了 SessionManager/Redis，图状态仍留在 checkpoints 表里，
+    # 复用同一 session_id 会把本应删除的对话历史合并回新请求。
+    deleted_checkpoint = await delete_session_checkpoint(request, session_id)
+    return {
+        "message": f"会话 {session_id} 已删除",
+        "checkpoint_deleted": deleted_checkpoint,
+    }
 
 
 @router.get("/api/sessions/{session_id}/checkpoint")
@@ -141,9 +221,17 @@ async def get_session_checkpoint(session_id: str, request: Request):
         aget = getattr(checkpointer, "aget_tuple", None)
         if aget is not None and inspect.iscoroutinefunction(aget):
             result = await aget(config)
-            checkpoint = getattr(result, "checkpoint", result) if result else None
         else:
-            checkpoint = checkpointer.get(config)
+            result = checkpointer.get(config)
+        # ``aget_tuple`` / ``get`` return a ``CheckpointTuple`` (a NamedTuple); its
+        # ``checkpoint`` field is the mapping that carries the id. ``isinstance``
+        # (not ``getattr``) avoids a MagicMock fabricating a ``.checkpoint``.
+        if result is None:
+            checkpoint = None
+        elif isinstance(result, tuple) and hasattr(result, "checkpoint"):
+            checkpoint = result.checkpoint
+        else:
+            checkpoint = result
     except Exception as e:
         return JSONResponse({"error": f"查询 checkpoint 失败: {e}"}, status_code=500)
 
@@ -151,7 +239,7 @@ async def get_session_checkpoint(session_id: str, request: Request):
         return {
             "session_id": clean_id,
             "has_checkpoint": True,
-            "checkpoint_id": str(checkpoint.id) if hasattr(checkpoint, "id") else None,
+            "checkpoint_id": extract_checkpoint_id(checkpoint),
         }
     return {"session_id": clean_id, "has_checkpoint": False}
 

@@ -125,6 +125,17 @@ class RunService:
             raise RunNotFound(run_id)
         return run
 
+    def list_recoverable_runs(
+        self, *, limit: int = 100, now: datetime | None = None
+    ) -> list[str]:
+        """列出"卡住"的 run：RETRYING/QUEUED 且 next_retry_at 已到。
+
+        用于重试投递失败后的兜底恢复（见 ``runtime/retry.py::reconcile_stuck_runs``）。
+        """
+        return self.repo.list_recoverable_runs(
+            limit=limit, now=now or _utcnow()
+        )
+
     def get_dead_letter(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get_dead_letter(run_id)
 

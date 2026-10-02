@@ -254,6 +254,15 @@ async def execute_run(
             if lock is not None:
                 with contextlib.suppress(ThreadLockBackendError):
                     await lock.release(thread_id, owner)
+    except RetryPublicationError:
+        # 重试消息投递失败：run 已经在 RETRYING/QUEUED 等一条**不会到来**的消息。
+        # 这里绝不能 ACK，也不能把它改成 FAILED（那会丢掉一次合法重试机会）。
+        # 逃逸出任务 -> Celery acks_late 不 ACK -> broker 重新投递 -> 租约到期后被接管。
+        logger.error(
+            "重试投递失败，让任务逃逸以触发 broker redelivery: run_id=%s", run_id
+        )
+        metrics.record_retry_publication_failure()
+        raise
     except Exception as e:  # pragma: no cover - 未预期错误：标记失败避免卡死
         logger.error("execute_run 未预期异常 run_id=%s: %s", run_id, type(e).__name__)
         with contextlib.suppress(Exception):
@@ -266,6 +275,18 @@ async def execute_run(
                     error_type="permanent",
                 )
                 metrics.record_worker_task("failed")
+            elif latest is not None and latest["status"] in (
+                RunStatus.RETRYING.value,
+                RunStatus.QUEUED.value,
+            ):
+                # 同样不能 ACK：状态在等重投/退避，却没有任何调度器在跑。
+                logger.error(
+                    "run 停在 %s 但无待执行投递，逃逸以触发 redelivery: run_id=%s",
+                    latest["status"],
+                    run_id,
+                )
+                metrics.record_retry_publication_failure()
+                raise
         return RunStatus.FAILED.value
 
 
@@ -402,18 +423,34 @@ async def _defer(
     return latest["status"] if latest else "MISSING"
 
 
+class RetryPublicationError(RuntimeError):
+    """延迟重试的**投递失败**：run 已经进入 RETRYING/QUEUED，但消息没发出去。
+
+    这是一个**必须让异常逃逸**的错误：只要吞掉它，Celery 就会 ACK 当前任务，而队列里
+    又没有替代消息，run 会永远停在 RETRYING（既不会重跑，也不会失败）。让异常逃出
+    任务，Celery 的 ``acks_late`` 就会把它重新投递，由租约到期后的接管者重试。
+    """
+
+
 async def _call_dispatcher(dispatcher: Dispatcher | None, run_id: str, countdown: float) -> None:
+    """投递重试消息。失败时抛 :class:`RetryPublicationError`（不得静默 ACK）。"""
     if dispatcher is None:
         from .dispatch import dispatch_run
 
         dispatcher = dispatch_run
-    if countdown and countdown > 0:
-        try:
-            await dispatcher(run_id, countdown=countdown)
-            return
-        except TypeError:
-            pass
-    await dispatcher(run_id)
+    try:
+        if countdown and countdown > 0:
+            try:
+                await dispatcher(run_id, countdown=countdown)
+                return
+            except TypeError:
+                # dispatcher 不接受 countdown：退回无延迟投递（这不是投递失败）
+                pass
+        await dispatcher(run_id)
+    except Exception as e:
+        raise RetryPublicationError(
+            f"重试投递失败 run_id={run_id} countdown={countdown}: {type(e).__name__}"
+        ) from e
 
 
 async def _heartbeat_loop(

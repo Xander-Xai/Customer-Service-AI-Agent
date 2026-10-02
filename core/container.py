@@ -70,11 +70,18 @@ class ServiceContainer:
         self.session_mgr = default_session_manager
         if SESSION_STORAGE_BACKEND == "redis":
             try:
-                self.session_mgr = EnhancedSessionManager(
+                mgr = EnhancedSessionManager(
                     storage_backend="redis",
                     window_size=SESSION_WINDOW_SIZE,
                     url=REDIS_URL,
                 )
+                # 构造 EnhancedSessionManager **不会**连接 Redis：_get_redis() 是懒加载的，
+                # 而且它自己吞掉连接异常并把 storage_backend 改成 "memory"。因此下面这个
+                # try/except 过去永远抓不到生产 Redis 故障——进程正常启动，到第一个请求才
+                # 静默降级成进程内 memory（多 worker 分片、重启丢失）。
+                # 这里显式 probe：生产必须在启动阶段就失败。
+                self._assert_session_redis_ready(mgr, REDIS_URL)
+                self.session_mgr = mgr
                 # Redis 缓存预热移至 initialize()（异步执行）
                 self._redis_url = REDIS_URL
             except Exception as e:
@@ -136,6 +143,35 @@ class ServiceContainer:
 
         # v6.1: 组件注册表（用于组件计数 + 服务发现）
         self._services: dict[str, Any] = {}
+
+    @staticmethod
+    def _assert_session_redis_ready(mgr: object, redis_url: str) -> None:
+        """启动阶段主动探测 Session Redis；不可用则抛错（生产 -> fail-fast）。
+
+        不能只依赖 ``EnhancedSessionManager._get_redis()``：它在连接失败时把自己降级成
+        memory 并返回 None，静默得很。这里用**独立**的临时连接做 ping，失败就把异常
+        抛给调用方。
+
+        同时校验没有发生降级：万一 ``mgr.storage_backend`` 已经是 memory（说明刚才
+        某处触发了懒加载并降级），也视为失败。
+        """
+        import redis as _redis
+
+        client = _redis.Redis.from_url(
+            redis_url, decode_responses=True, socket_connect_timeout=3, socket_timeout=3
+        )
+        try:
+            client.ping()
+        finally:
+            with contextlib.suppress(Exception):
+                client.close()
+
+        backend = getattr(mgr, "storage_backend", None)
+        if backend is not None and backend != "redis":
+            raise RuntimeError(
+                f"session manager storage_backend degraded to {backend!r} "
+                "despite a successful Redis ping"
+            )
 
     def _create_redis_client(self):
         """v6.1: 创建同步 Redis 客户端（可能失败返回 None）"""

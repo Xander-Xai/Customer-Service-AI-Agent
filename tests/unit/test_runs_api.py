@@ -14,9 +14,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from api.routes.runs import router
+from api.routes.runs import IDEMPOTENCY_KEY_INPUT_MAX, router
 from runtime.repository import AgentRunRepository
-from runtime.run_service import RunService
+from runtime.run_service import RunService, build_idempotency_scope
 from runtime.statuses import RunStatus
 from tests.unit.runtime_helpers import dispose, make_sqlite_session_factory
 
@@ -75,6 +75,52 @@ def test_post_run_idempotency_key_does_not_duplicate(client):
     assert second.status_code == 202
     assert first.json()["run_id"] == second.json()["run_id"]
     assert client.dispatch_calls == [first.json()["run_id"]]
+
+
+@pytest.mark.unit
+def test_idempotency_header_over_limit_rejected_before_db(client):
+    """Header form shares the body's limit and is rejected with 400, not a DB 500."""
+    key = "x" * (IDEMPOTENCY_KEY_INPUT_MAX + 1)
+    resp = client.post(
+        "/api/runs",
+        json={"query": "q", "session_id": "T-api-len-h"},
+        headers={"Idempotency-Key": key},
+    )
+    assert resp.status_code == 400
+    assert client.dispatch_calls == []
+
+
+@pytest.mark.unit
+def test_idempotency_body_over_limit_rejected(client):
+    """Body form is bounded by the same constant (pydantic -> 422)."""
+    key = "x" * (IDEMPOTENCY_KEY_INPUT_MAX + 1)
+    resp = client.post(
+        "/api/runs",
+        json={"query": "q", "session_id": "T-api-len-b", "idempotency_key": key},
+    )
+    assert resp.status_code in (400, 422)
+    assert client.dispatch_calls == []
+
+
+@pytest.mark.unit
+def test_idempotency_key_at_limit_is_accepted(client):
+    key = "x" * IDEMPOTENCY_KEY_INPUT_MAX
+    resp = client.post(
+        "/api/runs",
+        json={"query": "q", "session_id": "T-api-len-ok"},
+        headers={"Idempotency-Key": key},
+    )
+    assert resp.status_code == 202
+
+
+@pytest.mark.unit
+def test_scoped_idempotency_key_never_overflows_column():
+    """Scoped key (user + endpoint + raw) is hashed when it exceeds the column."""
+    long_key = "x" * IDEMPOTENCY_KEY_INPUT_MAX
+    scoped = build_idempotency_scope("u-1", "POST:/api/runs", long_key)
+    assert len(scoped) == 64
+    assert scoped == build_idempotency_scope("u-1", "POST:/api/runs", long_key)
+    assert scoped != build_idempotency_scope("u-2", "POST:/api/runs", long_key)
 
 
 @pytest.mark.unit

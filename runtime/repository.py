@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from db.database import get_db_session
@@ -218,6 +218,52 @@ class AgentRunRepository:
                 .values(queued_at=when, updated_at=_utcnow())
             )
             session.commit()
+        finally:
+            session.close()
+
+    def list_recoverable_runs(
+        self, *, limit: int = 100, now=None, orphan_grace_seconds: int = 60
+    ) -> list[str]:
+        """RETRYING/QUEUED 且已到重投时刻的 run（等待重投但无人调度）。
+
+        两类都要捞：
+
+        1. ``next_retry_at`` 非空且已过期 —— 退避已到、但重投消息没发出去/丢了。
+        2. ``next_retry_at`` 为 **NULL** 的 QUEUED run —— 正常入队的 run 就是
+           ``next_retry_at = NULL``。这正是"已落库但消息丢失"（broker 丢消息）
+           的形态；只匹配非空会把它整类漏掉，run 永远停在 QUEUED。
+
+        NULL 那一类必须带年龄下限（``orphan_grace_seconds``）：刚入队的 QUEUED run
+        消息可能正在投递途中，立刻重投会造成不必要的重复执行。
+        """
+        from datetime import datetime, timedelta, timezone
+
+        now = now or datetime.now(timezone.utc)
+        grace_cutoff = now - timedelta(seconds=max(0, int(orphan_grace_seconds)))
+        stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.status.in_(
+                    [RunStatus.RETRYING.value, RunStatus.QUEUED.value]
+                ),
+                or_(
+                    and_(
+                        AgentRun.next_retry_at.isnot(None),
+                        AgentRun.next_retry_at <= now,
+                    ),
+                    and_(
+                        AgentRun.next_retry_at.is_(None),
+                        AgentRun.status == RunStatus.QUEUED.value,
+                        AgentRun.created_at <= grace_cutoff,
+                    ),
+                ),
+            )
+            .order_by(AgentRun.created_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [row[0] for row in session.execute(stmt).all()]
         finally:
             session.close()
 

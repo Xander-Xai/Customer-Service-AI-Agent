@@ -82,7 +82,7 @@ Layer 3: 响应处理 ──→ 解决状态评估 + 缓存写入 + SLA 监控
 
 **设计决策：为什么用 LangGraph 而不是自己写状态机？**
 - LangGraph 的 `StateGraph` 提供声明式的节点和条件边定义，代码可读性高
-- 内置状态序列化支持，方便未来做检查点（checkpoint）和时间回溯
+- 内置状态序列化 + 官方 checkpointer（`MemorySaver` / `AsyncPostgresSaver`）支持持久化检查点（checkpoint）和时间回溯；生产用 PostgreSQL 后端跨 worker/副本共享
 - 社区生态好，面试官认知度高
 
 **设计决策：为什么缓存前置到 Layer 0？**

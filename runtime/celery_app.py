@@ -6,6 +6,10 @@
 Broker redelivery 与 application retry 是两个不同机制：
   - ``task_acks_late=True`` + ``task_reject_on_worker_lost=True``：worker 崩溃
     导致未 ACK 的任务被 broker 重新投递（at-least-once delivery）；
+  - ``task_acks_on_failure_or_timeout=False``：**异常/超时**的任务也不会被 ACK，
+    而是拒绝并重新投递。Celery 默认值是 True（失败即 ACK），那会让
+    "让异常逃逸以触发 redelivery" 的策略失效 —— run 停在 RETRYING/QUEUED
+    等一条永远不会到的消息。
   - 业务 retry 由 ``runtime/executor.py`` 显式调度（RETRYING + 退避），
     与 ``acks_late`` 无关。
 """
@@ -37,6 +41,13 @@ celery_app.conf.update(
     task_default_queue=AGENT_RUN_QUEUE,
     # 任务完成后才 ack；worker 崩溃则任务可重新投递
     task_acks_late=True,
+    # 关键：Celery 默认 task_acks_on_failure_or_timeout=True，即任务**抛异常**时
+    # 照样 ACK（只把任务标记为 FAILURE），并不会重新投递。acks_late 只推迟"成功
+    # 完成"的 ack，失败路径由这个开关决定。
+    # executor 靠"让异常逃逸出任务"来保证重试投递失败时 run 不会被静默遗忘
+    # （RetryPublicationError -> 依赖这里拒绝消息 -> broker 重新投递）。
+    # 若保持默认 True，run 会停在 RETRYING 且永远等不到替代消息。
+    task_acks_on_failure_or_timeout=False,
     worker_prefetch_multiplier=1,
     task_reject_on_worker_lost=True,
     broker_connection_retry_on_startup=True,

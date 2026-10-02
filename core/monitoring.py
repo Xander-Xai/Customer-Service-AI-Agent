@@ -244,6 +244,10 @@ try:
     agent_run_dead_letter_total = _counter(
         "agent_run_dead_letter_total", "AgentRun retry exhausted -> DEAD_LETTER"
     )
+    agent_run_retry_publication_failure_total = _counter(
+        "agent_run_retry_publication_failure_total",
+        "Delayed-retry publication failures (task escaped to force broker redelivery)",
+    )
     agent_run_dead_letter_replay_total = _counter(
         "agent_run_dead_letter_replay_total",
         "Operator replays of DEAD_LETTER runs (redrive)",
@@ -362,6 +366,7 @@ except ImportError:
     agent_run_total = _NoopMetric()
     agent_run_retry_total = _NoopMetric()
     agent_run_dead_letter_total = _NoopMetric()
+    agent_run_retry_publication_failure_total = _NoopMetric()
     agent_run_dead_letter_replay_total = _NoopMetric()
     agent_run_duration_seconds = _NoopMetric()
     agent_run_queue_wait_seconds = _NoopMetric()

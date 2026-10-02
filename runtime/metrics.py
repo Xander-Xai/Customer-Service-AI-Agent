@@ -60,6 +60,10 @@ def record_retry() -> None:
     _inc("agent_run_retry_total")
 
 
+def record_retry_publication_failure() -> None:
+    _inc("agent_run_retry_publication_failure_total")
+
+
 def record_dead_letter() -> None:
     _inc("agent_run_dead_letter_total")
 

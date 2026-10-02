@@ -37,7 +37,17 @@ services:
       - API_KEY_ENABLED=${API_KEY_ENABLED:-true}
       - API_KEY=${API_KEY:-}
       - ERP_MODE=mock
-      - REDIS_URL=redis://redis:6379
+      # ⚠️ 必须与 base compose 的 app 保持一致：设置 REDIS_PASSWORD 时
+      #    无密码 URL 会认证失败（base 用 redis://:${REDIS_PASSWORD:-changeme}@redis:6379）
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      # ===== 分布式 Runtime 生产门禁（缺任一项都会 fail-fast 拒绝启动）=====
+      - DATABASE_URL=${DATABASE_URL:-postgresql://csai:password@postgres:5432/csai}
+      - LANGGRAPH_CHECKPOINT_BACKEND=postgres
+      - AGENT_EXECUTION_MODE=queued
+      - AGENT_RUN_THREAD_LOCK_ENABLED=true
+      - AGENT_RUN_THREAD_LOCK_BACKEND=redis
+      - AGENT_RUN_THREAD_LOCK_TTL_SECONDS=${AGENT_RUN_THREAD_LOCK_TTL_SECONDS:-300}
+      - AGENT_RUN_TASK_TIME_LIMIT=${AGENT_RUN_TASK_TIME_LIMIT:-180}
       # 灰度标识
       - CANARY=true
       - CANARY_VERSION=${CANARY_VERSION:-latest}
@@ -55,6 +65,9 @@ services:
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
     depends_on:
       redis:
+        condition: service_healthy
+      # 分布式 Runtime 门禁要求 PostgreSQL 可达（checkpoint + AgentRun 真相源）
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
