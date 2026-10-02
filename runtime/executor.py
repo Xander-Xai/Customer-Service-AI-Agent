@@ -153,6 +153,47 @@ def _runtime_accepts_resume(run_callable: Any) -> bool:
     return False
 
 
+def _telemetry_span(name: str, *, attributes: dict[str, Any] | None = None):
+    """Resolve the application span helper, with a last-resort no-op fallback.
+
+    Two levels, deliberately. ``core.telemetry`` is the full implementation, but
+    it is an ordinary import: if it were missing, syntactically broken, or caught in
+    an import cycle, ``from core.telemetry import span`` would raise. This is not
+    hypothetical — a diagnostic-only dependency failing to import must not be able
+    to fail a business run, which is exactly what "tracing never changes AgentRun
+    state, retry, approval or idempotency" requires.
+
+    So the second level lives in ``core.tracing`` and depends on nothing but
+    ``contextlib``. The blast radius of "tracing is broken" is then "there is no
+    trace" rather than "there is no business".
+    """
+    try:
+        from core.telemetry import span as _span
+    except Exception:  # noqa: BLE001 - diagnostics must never break the runtime
+        from core.tracing import safe_span as _span
+    return _span(name, attributes=attributes)
+
+
+def _pending_approval_identity(result: Any) -> tuple[str | None, str | None]:
+    """Extract ``(approval_id, action)`` from an ``__interrupt__`` payload.
+
+    Reads identifiers and the action name only — never the proposal. A proposal
+    carries order numbers, refund amounts and customer identifiers, i.e. exactly
+    the content that must not reach a trace backend.
+    """
+    if not isinstance(result, dict):
+        return None, None
+    items = result.get("__interrupt__") or []
+    if not items:
+        return None, None
+    payload = getattr(items[0], "value", None)
+    if not isinstance(payload, dict):
+        return None, None
+    approval_id = payload.get("approval_id")
+    action = payload.get("action")
+    return (str(approval_id) if approval_id else None, str(action) if action else None)
+
+
 def _config():
     from core import config
 
@@ -322,6 +363,39 @@ async def execute_run(
                 )
             )
             tokens = set_run_context(run_id, thread_id, task_id)
+            # Lightweight tracing: ONE span per execution attempt, opened after the
+            # run context exists so run/thread/task correlation attributes are
+            # available, and closed in the ``finally`` below so every exit path
+            # closes it — normal return, early return for WAITING_APPROVAL, the
+            # exception path, and the heartbeat cancellation.
+            #
+            # Deliberately opened/closed by hand rather than with a ``with`` block:
+            # wrapping the body would re-indent ~70 lines of state-machine code for
+            # no behavioural gain, and hand-closing inside the existing ``finally``
+            # is exactly as total.
+            #
+            # The span records outcome only — never the query, never tool arguments.
+            # Tracing failures are swallowed inside ``core.telemetry`` and can never
+            # change the state machine, retry accounting, approval or idempotency.
+            #
+            # HITL boundary: this segment and the post-approval resume segment are
+            # **not** promised to be one span. A run can sit in WAITING_APPROVAL
+            # until its TTL, and the decision arrives in a different request, so the
+            # two are separate traces correlated by ``run_id`` / ``approval_id``
+            # (see the module docstring of ``core/telemetry.py``).
+            _span_cm = _telemetry_span(
+                "csai.agent.execute.resume"
+                if resume_command is not None
+                else "csai.agent.execute",
+                attributes={
+                    "csai.run_id": run_id,
+                    "csai.thread_id": thread_id,
+                    "csai.task_id": task_id,
+                    "csai.retry_attempt": (running or {}).get("attempt"),
+                    **({"csai.resumed": True} if resume_command is not None else {}),
+                },
+            )
+            trace_ctx = _span_cm.__enter__()
             try:
                 if runtime_provider is None:
                     from .bootstrap import get_default_runtime
@@ -350,6 +424,9 @@ async def execute_run(
                 error_type = classify_exception(e)
                 error_code = type(e).__name__
                 error_message = safe_error_message(e)
+                with contextlib.suppress(Exception):
+                    trace_ctx.set_attribute("csai.error_type", error_type)
+                    trace_ctx.set_attribute("csai.error_code", error_code)
                 logger.error(
                     "AgentRun 执行失败 run_id=%s type=%s code=%s",
                     run_id,
@@ -370,8 +447,27 @@ async def execute_run(
                 if _awaiting_approval(result):
                     # 图挂在 interrupt 上等人工：不是成功，也不是失败。
                     # 转入 WAITING_APPROVAL（非终态），等审批 API 决策后 dispatch。
+                    #
+                    # tracing 边界：这一段与"审批后的恢复"**不**承诺是同一个 span。
+                    # OTel context 不跨进程/跨长时间自动保持，run 可能在
+                    # WAITING_APPROVAL 停留到 TTL。两段各自成 trace，通过
+                    # run_id / approval_id 关联。
+                    with contextlib.suppress(Exception):
+                        trace_ctx.set_attribute(
+                            "csai.run_status", RunStatus.WAITING_APPROVAL.value
+                        )
+                        _approval_id, _risk = _pending_approval_identity(result)
+                        if _approval_id:
+                            trace_ctx.set_attribute("csai.approval_id", _approval_id)
+                        trace_ctx.set_attribute("csai.risk_level", "high")
                     return await _park_for_approval(svc, run_id, result)
                 svc.mark_succeeded(run_id, result)
+                with contextlib.suppress(Exception):
+                    trace_ctx.set_attribute("csai.run_status", RunStatus.SUCCEEDED.value)
+                    trace_ctx.set_attribute(
+                        "csai.duration_ms",
+                        round((time.perf_counter() - exec_started) * 1000, 2),
+                    )
                 with contextlib.suppress(Exception):
                     await _publish(
                         EVENT_COMPLETED,
@@ -394,6 +490,10 @@ async def execute_run(
                 metrics.observe_run_duration(time.perf_counter() - exec_started)
                 metrics.dec_worker_active()
                 metrics.dec_run_active()
+                # Close the execution span last, so its duration covers the graph
+                # run. Never let a tracing problem escape into the state machine.
+                with contextlib.suppress(Exception):
+                    _span_cm.__exit__(None, None, None)
         finally:
             if lock is not None:
                 with contextlib.suppress(ThreadLockBackendError):

@@ -5,14 +5,24 @@ OpenTelemetry 分布式追踪集成（P2-1）
 Usage:
     # 启用 OpenTelemetry
     export OPENTELEMETRY_ENABLED=true
+    export OTEL_ENABLED=true
     export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
     # 在 app_factory.py 中调用:
     from core.tracing import setup_tracing
     setup_tracing(app)
+
+两个开关刻意分开：
+    OPENTELEMETRY_ENABLED —— 进程级：装 TracerProvider + OTLP exporter（有网络开销）
+    OTEL_ENABLED          —— 请求级：是否产出**应用语义** span（每请求都有开销，
+                            见 core/telemetry.py）
 """
 
+from __future__ import annotations
+
+import contextlib
 import os
+from typing import Literal
 
 from core.logger import get_logger
 
@@ -111,3 +121,80 @@ def get_tracer(name: str = "csai"):
     except Exception as e:
         logger.debug(f"获取 Tracer 失败: {e}")
         return None
+
+
+# ---------------------------------------------------------------------------
+# Last-resort no-op span
+#
+# Why it lives here
+# -----------------
+# ``core/telemetry.py`` provides the real application-span implementation
+# (attribute whitelist, privacy filtering, event enrichment). But it is an
+# ordinary import: if it were missing, syntactically broken, or caught in an
+# import cycle, ``from core.telemetry import span`` raises.
+#
+# The failure mode is not hypothetical. During the crash-recovery flake
+# investigation a worker reported ``ModuleNotFoundError: No module named
+# 'core.telemetry'`` and the run was classified as a permanent FAILED — i.e. a
+# purely diagnostic dependency was able to permanently fail a business run, which
+# directly violates the hard requirement that tracing must not change AgentRun
+# state, retry semantics, approval, or idempotency.
+#
+# So call sites resolve the helper in two steps, and this module is the second
+# step. It imports nothing but ``contextlib``/``typing`` — no OpenTelemetry, no
+# business modules — so the probability of it failing is effectively zero. The
+# blast radius of "tracing is broken" becomes "there is no trace" instead of
+# "there is no business".
+# ---------------------------------------------------------------------------
+
+
+class _NullSpan:
+    """Minimal no-op span covering the methods business code actually calls.
+
+    ``__exit__`` returns ``False`` so it can never swallow an exception: a
+    fallback that changed control flow would reintroduce the very bug it exists
+    to contain.
+    """
+
+    __slots__ = ()
+
+    def set_attribute(self, key: str, value: object) -> None:
+        return None
+
+    def set_attributes(self, attributes: dict) -> None:
+        return None
+
+    def add_event(self, name: str, attributes: dict | None = None) -> None:
+        return None
+
+    def record_exception(self, exc: BaseException) -> None:
+        return None
+
+    def set_status(self, *args: object, **kwargs: object) -> None:
+        return None
+
+    def is_recording(self) -> bool:
+        return False
+
+    def get_span_context(self) -> None:
+        return None
+
+    def __enter__(self) -> _NullSpan:
+        return self
+
+    def __exit__(self, *_exc: object) -> Literal[False]:
+        return False
+
+
+@contextlib.contextmanager
+def safe_span(name: str, *, attributes: dict | None = None):
+    """A span context manager that cannot fail.
+
+    Same call signature as :func:`core.telemetry.span`, so a call site can swap
+    one for the other without touching its body.
+    """
+    del name, attributes  # accepted for signature compatibility only
+    yield _NullSpan()
+
+
+__all__ = ["get_tracer", "safe_span", "setup_tracing"]
