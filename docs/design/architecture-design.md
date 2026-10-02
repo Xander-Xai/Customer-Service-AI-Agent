@@ -268,6 +268,26 @@ Checkpoint（图状态，官方表）是两套数据，不要混用。
 **证据边界**：以上为 `IMPLEMENTED / LOCALLY VERIFIED`（本地单测 + 可选真实
 PostgreSQL 集成测试），尚未在真实生产多副本环境验证，不宣称生产级数字。
 
+### 3.6b 异步 Run 路径与断点续跑（详见 [agent-runtime.md](agent-runtime.md)）
+
+快路径 `/api/chat`（进程内执行，SSE）与异步 Run 路径 `/api/runs`（落库 + 入队 →
+Celery worker）共用：同一 LangGraph、同一 checkpoint 后端、**同一个 thread lease
+manager 单例**。
+
+断点续跑的关键语义（LangGraph 1.2.x 实测）：`ainvoke(state, cfg)` 会**从 START
+重新执行**并覆盖 channel 值；只有 `ainvoke(None, cfg)` 才从 checkpoint 的 `next`
+续跑。`runtime/bootstrap.py::invoke_graph_with_resume` 统一判定（存在未完成
+checkpoint 则传 `None`），快路径同语义（`api/app.py::_pending_steps`）。判定边界：
+只有 `StateSnapshot.next` 非空才算恢复；已完成的历史快照走正常执行，多轮对话不受影响。
+
+状态机 `runtime/statuses.py`：`PENDING → QUEUED → RUNNING →
+SUCCEEDED | FAILED | RETRYING → DEAD_LETTER`，任意未终态可 `→ CANCELLED`。
+
+投递为 at-least-once（`acks_late` + `reject_on_worker_lost` +
+`visibility_timeout`），因此**有副作用的写工具必须自身幂等**：
+`ToolRegistry.register(side_effect=True)` 的工具在 Run 上下文内自动走
+`tool_side_effects` ledger（`operation_key = run_id:tool_call_id`）。
+
 ### 3.7 分布式执行边界（per-thread 锁 + Redis Session + 多 Worker gate）
 
 - **per-thread 锁**：`api/app.py::_run_graph` 是 REST/SSE/WS/multimodal 的统一

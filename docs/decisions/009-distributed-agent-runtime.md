@@ -74,14 +74,27 @@ Session 生产模板默认 memory、MessageBus/SharedBlackboard 是进程内对�
 - **重复 tool call**：ledger `(tool_name, operation_key)` 唯一约束 + claim 原子语义，
   第二次返回已保存结果。
 
-## 未来工作
+## 后续落地（本轮已实现，原"未来工作"部分条目已完成）
 
-Redis/Celery durable task queue 深化、独立 Agent Worker Pool、retry/DLQ 强化、
-cross-process SSE event bridge（Redis Streams）、Kubernetes/HPA。
+- **cross-process SSE event bridge**：Redis Stream `agent:run:{run_id}:events` +
+  `GET /api/runs/{run_id}/events`（支持 `Last-Event-ID` 断点续读）。
+- **DLQ 运维闭环（replay）**：`RunService.requeue_dead_letter` +
+  `scripts/replay_dead_run.py`；重放复用原 run_id 以保住工具幂等键。
+- **retry 强化**：三层区分（LLM node retry / run retry / 工具认领租约），
+  上限 `AGENT_RUN_MAX_ATTEMPTS`，耗尽进 DLQ。
+- **断点续跑语义修正**：`ainvoke(None, cfg)` vs `ainvoke(state, cfg)`。
+- **thread lease 执行期间续租**（DB lease + Redis TTL 同时续）。
+
+## 仍未实现（保持为未来工作）
+
+独立 Agent Worker Pool 自动扩缩、backpressure/admission control、DLQ 告警、
+broker-native DLX、Kubernetes/HPA、multi-region。
 见 [docs/design/async-agent-worker-architecture.md](../design/async-agent-worker-architecture.md)。
+完整设计见 [docs/design/agent-runtime.md](../design/agent-runtime.md)。
 
 ## 来源文档
 
+- [docs/design/agent-runtime.md](../design/agent-runtime.md)
 - [docs/design/distributed-agent-runtime.md](../design/distributed-agent-runtime.md)
 - [docs/design/runtime-state-ownership.md](../design/runtime-state-ownership.md)
 - `DISTRIBUTED_RUNTIME_AUDIT.md`

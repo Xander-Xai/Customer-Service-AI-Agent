@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts
+.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -74,6 +74,39 @@ openapi-check: ## 校验 docs/openapi.json 与 app.openapi() 一致
 facts: ## 输出当前 runtime 事实 JSON（版本/模型/路径数/基准查询数）
 	@echo "🧾 当前 runtime 事实..."
 	python3 scripts/project_facts.py
+
+# ===== 分布式 Agent Runtime（真实 PG + Redis 验收）=====
+#
+# 这些目标需要**真实** PostgreSQL 与 Redis。默认连接本机；用
+# TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 覆盖（CI 里指向 service container）。
+# 环境缺失时目标会 FAIL 而不是静默 skip —— 免得"没跑"被当成"通过"。
+
+.PHONY: runtime-e2e runtime-chaos runtime-verify runtime-replay-help
+
+RUNTIME_DB_URL ?= postgresql://postgres:postgres@localhost:5432/csai_runtime_test
+RUNTIME_REDIS_URL ?= redis://localhost:6379
+
+runtime-e2e: ## Runtime 端到端验收（checkpoint/thread 隔离/queue/worker/retry/DLQ/幂等）
+	@echo "🚦 分布式 Runtime E2E（真实 PostgreSQL + Redis）..."
+	@TEST_DISTRIBUTED_DB_URL="$(RUNTIME_DB_URL)" TEST_REDIS_URL="$(RUNTIME_REDIS_URL)" \
+		python3 -m pytest tests/integration/runtime -q -p no:cacheprovider
+	@echo "✅ runtime-e2e PASS"
+
+runtime-chaos: ## 混沌验收：worker kill -9 -> lease 过期 -> checkpoint 恢复 -> 副作用仅一次
+	@echo "💥 分布式 Runtime 混沌验收..."
+	@mkdir -p artifacts/runtime
+	@TEST_DISTRIBUTED_DB_URL="$(RUNTIME_DB_URL)" TEST_REDIS_URL="$(RUNTIME_REDIS_URL)" \
+		python3 scripts/test_worker_crash_recovery.py \
+		--output artifacts/runtime/chaos-$$(date -u +%Y%m%dT%H%M%SZ).json
+	@echo "✅ runtime-chaos PASS"
+
+runtime-verify: ## 生成 runtime 能力证据报告（结构化 JSON）
+	@echo "🧾 分布式 Runtime 能力验证..."
+	@TEST_DISTRIBUTED_DB_URL="$(RUNTIME_DB_URL)" TEST_REDIS_URL="$(RUNTIME_REDIS_URL)" \
+		python3 scripts/verify_distributed_runtime.py
+
+runtime-replay-help: ## 查看 DLQ 重放用法
+	@python3 scripts/replay_dead_run.py --help
 
 # ===== 知识库 & 基准测试 =====
 .PHONY: benchmark generate-knowledge-base component-count
