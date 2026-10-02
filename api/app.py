@@ -126,6 +126,23 @@ def _make_cached_static(app: ASGIApp, max_age: int = 31536000, extra_headers: di
 # ── 图执行引擎（所有路由共用）──
 
 
+async def _pending_steps(graph_app, graph_config: dict[str, Any]) -> tuple[str, ...]:
+    """返回该 thread 最新 checkpoint 的待执行节点；无待执行返回空 tuple。
+
+    探活失败一律按「无待执行」处理（正常执行），绝不让 checkpoint 查询异常阻断业务。
+    """
+    aget_state = getattr(graph_app, "aget_state", None)
+    if aget_state is None:
+        return ()
+    try:
+        snapshot = await aget_state(graph_config)
+    except Exception:
+        return ()
+    if snapshot is None:
+        return ()
+    return tuple(getattr(snapshot, "next", ()) or ())
+
+
 async def _run_graph(
     session_id: str,
     query: str,
@@ -154,8 +171,6 @@ async def _run_graph(
         "resolution_status": "",
         "trace_id": get_trace_id(),
     }
-    if stream_callback:
-        state["stream_callback"] = stream_callback
     if multimodal_content:
         state["multimodal_content"] = multimodal_content
         state["has_multimodal"] = True
@@ -168,16 +183,44 @@ async def _run_graph(
     # 保证同一 thread 同一时刻只有一个 LangGraph Run 修改状态；不同 thread 并行。
     # 拿不到锁抛 ThreadBusyError（由全局 handler 映射 409 / SSE/WS 错误帧）。
     from core.concurrency.distributed_lock import thread_lock
+    from core.streaming_context import reset_stream_callback, set_stream_callback
 
     graph_config = {"configurable": {"thread_id": session_id}}
     async with thread_lock(session_id):
+        # 断点续跑：若该 thread 有**未完成**的 checkpoint（客户端断线重连、进程在
+        # 图中途被杀），必须用 ainvoke(None) 续跑。LangGraph 语义实测：
+        #   ainvoke(None, cfg)  -> 从 checkpoint 的 next 继续，不重跑已完成节点
+        #   ainvoke(state, cfg) -> 从 START 重新执行并用入参覆盖 channel 值
+        # 因此传 state 会把"续传"退化成"从头重跑"。已完成的历史快照（next 为空）
+        # 走正常分支，多轮对话语义不变。
+        pending = await _pending_steps(_graph_app, graph_config)
+        if pending:
+            logger.info(
+                "从 checkpoint 续跑 session=%s pending=%s", session_id, pending
+            )
+            graph_input = None
+        else:
+            graph_input = state
+
+        # 流式回调**不能**放进 state：state 的每个 channel 都会被 checkpointer 序列化，
+        # async 可调用对象会触发 "Type is not msgpack serializable: function"，
+        # MemorySaver 与官方 AsyncPostgresSaver 都会写盘失败。改用 contextvar 传递，
+        # 节点通过 core.streaming_context.get_stream_callback(state) 读取。
+        stream_token = set_stream_callback(stream_callback)
         try:
-            result = await _graph_app.ainvoke(state, config=graph_config)
-        except (AttributeError, TypeError):
             try:
-                result = await _graph_app.ainvoke(state)
-            except AttributeError:
-                result = await asyncio.to_thread(_graph_app.invoke, state)
+                result = await _graph_app.ainvoke(graph_input, config=graph_config)
+            except (AttributeError, TypeError):
+                # 无 checkpointer 的旧图：不接受 config。续跑模式没有 state 可传，
+                # 此时退回有 config 的调用会必然失败，直接抛原始错误更有诊断价值。
+                if graph_input is None:
+                    raise
+                try:
+                    result = await _graph_app.ainvoke(graph_input)
+                except AttributeError:
+                    result = await asyncio.to_thread(_graph_app.invoke, graph_input)
+        finally:
+            reset_stream_callback(stream_token)
 
     elapsed = time.time() - start
     result["elapsed"] = elapsed

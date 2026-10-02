@@ -25,6 +25,7 @@ from langgraph.graph import StateGraph
 from core.container import ServiceContainer
 from core.logger import get_logger, set_trace_id
 from core.state import AgentState
+from core.streaming_context import get_stream_callback
 from router.query_router import RoutingResult
 
 logger = get_logger("graph")
@@ -43,7 +44,7 @@ async def _emit_status(state: AgentState | dict, phase: str, message: str) -> No
     从 state 中获取 stream_callback，发出 status 事件。
     回调不存在或抛出异常时不传播，仅 debug log。
     """
-    cb = state.get("stream_callback") if isinstance(state, dict) else None
+    cb = get_stream_callback(state)
     if cb:
         try:
             await cb({"type": "status", "phase": phase, "content": message})
@@ -214,7 +215,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             await _emit_status(state, "cache", "⚡ 缓存命中，快速响应中...")
 
             # v6.0: 缓存伪流式 — 分块输出缓存内容
-            stream_callback = state.get("stream_callback")
+            stream_callback = get_stream_callback(state)
             if stream_callback:
                 chunk_size = 20
                 interval = 0.03
@@ -262,7 +263,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             # v6.0: emit agent_switch 和 mode 事件
             agent_name = routing_result.agent_name
             await _emit_status(state, "route", f"🔄 协作模式: {mode_name}, Agent: {agent_name}")
-            cb = state.get("stream_callback")
+            cb = get_stream_callback(state)
             if cb:
                 with contextlib.suppress(Exception):
                     await cb({"type": "agent_switch", "from": "router", "to": agent_name})

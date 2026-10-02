@@ -16,6 +16,61 @@ from core.logger import get_logger, get_trace_id, set_trace_id
 logger = get_logger("runtime.bootstrap")
 
 
+async def pending_steps(graph: Any, config: dict[str, Any]) -> tuple[str, ...]:
+    """读取该 thread 最新 checkpoint 的待执行节点（无待执行 = 空 tuple）。
+
+    语义：只有「上一次执行**没走完**」（next 非空）才算崩溃恢复。对话历史留存的
+    已完成快照（next 为空）不算，那是正常多轮续聊。
+    探活失败一律按「无待执行」处理，绝不让 checkpoint 查询异常阻断业务。
+    """
+    aget_state = getattr(graph, "aget_state", None)
+    if aget_state is None:
+        return ()
+    try:
+        snapshot = await aget_state(config)
+    except Exception as e:  # pragma: no cover - 探活失败不阻断执行
+        logger.debug("checkpoint resume 探测失败: %s", type(e).__name__)
+        return ()
+    if snapshot is None:
+        return ()
+    return tuple(getattr(snapshot, "next", ()) or ())
+
+
+async def invoke_graph_with_resume(
+    graph: Any, state: dict[str, Any] | None, config: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    """执行图：存在未完成 checkpoint 时续跑，否则正常执行。返回 ``(result, resumed)``。
+
+    **必须**区分两种调用方式（LangGraph 1.2.x 实测语义）::
+
+        ainvoke(None, cfg)   -> 从 checkpoint 的 next 继续，不重跑已完成节点
+        ainvoke(state, cfg)  -> 从 START 重新执行，并用入参覆盖 channel 值
+
+    因此崩溃恢复若传 state 会退化成「从头重跑」：已完成的上游节点被重复执行，
+    其副作用（工具调用、外部写操作）会被重复触发。worker 崩溃恢复的正确语义是
+    ``ainvoke(None)``。
+
+    同时上报 ``agent_checkpoint_recovery_total``。
+    """
+    pending = await pending_steps(graph, config)
+    resumed = bool(pending)
+
+    from . import metrics as run_metrics
+
+    run_metrics.record_checkpoint_recovery(resumed)
+
+    if resumed:
+        logger.info(
+            "从持久化 checkpoint 续跑（跳过已完成节点）thread=%s pending=%s",
+            config.get("configurable", {}).get("thread_id"),
+            pending,
+        )
+        result = await graph.ainvoke(None, config=config)
+    else:
+        result = await graph.ainvoke(state, config=config)
+    return result, resumed
+
+
 class AgentRuntime:
     """持有已初始化的 ServiceContainer，执行 LangGraph。"""
 
@@ -85,8 +140,12 @@ class AgentRuntime:
 
         graph = self.container.graph_app
         config = {"configurable": {"thread_id": thread_id}}
-        result: dict[str, Any] = await graph.ainvoke(state, config=config)
+        result, _resumed = await invoke_graph_with_resume(graph, state, config)
         return result
+
+    @staticmethod
+    async def _pending_steps(graph: Any, config: dict[str, Any]) -> tuple[str, ...]:
+        return await pending_steps(graph, config)
 
 
 _default_runtime: AgentRuntime | None = None
@@ -145,4 +204,6 @@ __all__ = [
     "shutdown_default_runtime",
     "resolve_runtime_provider",
     "reset_default_runtime_for_tests",
+    "pending_steps",
+    "invoke_graph_with_resume",
 ]

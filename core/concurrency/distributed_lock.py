@@ -29,7 +29,7 @@ from core.logger import get_logger
 from runtime.errors import ThreadLockBackendError
 from runtime.thread_lock import (
     ThreadLock,
-    build_thread_lock,
+    get_thread_lock_manager,
 )
 
 logger = get_logger("core.concurrency")
@@ -65,27 +65,20 @@ def get_api_lock_manager() -> ThreadLock | None:
     """返回 API 执行边界使用的锁管理器（进程内单例）。
 
     - 未启用 -> None（不加锁）；
-    - 开发/测试 + redis 后端 -> 进程内锁（避免测试依赖真实 Redis）；
-    - 生产 -> 配置的后端（默认 redis）。
+    - 否则复用 ``runtime.thread_lock.get_thread_lock_manager()`` 的**同一个单例**，
+      使 API 快路径与 worker 路径共享锁状态。两者若各持一个实例，在后端降级为
+      memory 的 DEV/TEST 下会成为两套互不相干的锁空间，跨路径并发写同一 thread
+      无法被发现。
 
     单例很重要：每次调用都新建 InMemoryThreadLock 会导致进程内完全无互斥。
     """
     global _api_manager
-    from core.config import (
-        AGENT_RUN_THREAD_LOCK_BACKEND,
-        AGENT_RUN_THREAD_LOCK_ENABLED,
-        DEV_MODE,
-        REDIS_URL,
-    )
+    from core.config import AGENT_RUN_THREAD_LOCK_ENABLED
 
     if not AGENT_RUN_THREAD_LOCK_ENABLED:
         return None
     if _api_manager is None:
-        backend = AGENT_RUN_THREAD_LOCK_BACKEND
-        if DEV_MODE and backend == "redis":
-            # 开发/测试：进程内锁，避免每个请求依赖 Redis（生产仍用 Redis）。
-            backend = "memory"
-        _api_manager = build_thread_lock(backend, REDIS_URL)
+        _api_manager = get_thread_lock_manager()
     return _api_manager
 
 
@@ -101,6 +94,9 @@ async def shutdown_api_lock_manager() -> None:
 def reset_api_lock_manager_for_tests() -> None:
     global _api_manager
     _api_manager = None
+    from runtime.thread_lock import reset_thread_lock_manager_for_tests
+
+    reset_thread_lock_manager_for_tests()
 
 
 @asynccontextmanager
@@ -114,7 +110,9 @@ async def thread_lock(
 ) -> AsyncIterator[str | None]:
     """获取 per-thread 锁并在退出时安全释放。
 
-    - 未启用锁：直接 yield ``None``；
+    - 未启用锁（``AGENT_RUN_THREAD_LOCK_ENABLED=false``）：直接 yield ``None``；
+    - ``manager=None`` 表示**解析进程默认 manager**，不等于关闭——要关闭只有配置
+      开关一条路径，避免调用方误以为已禁用而实际仍被串行化；
     - 获取失败（超时）：抛 :class:`ThreadBusyError`（调用方映射 409/THREAD_BUSY）；
     - 后端不可用：生产抛 :class:`ThreadLockUnavailableError`；开发记录告警并放行。
     """

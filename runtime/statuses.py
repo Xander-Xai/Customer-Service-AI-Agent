@@ -5,15 +5,20 @@
 
 状态生命周期::
 
-    QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
-                         ├──► FAILED           (终态，permanent error，不重试)
-                         ├──► RETRYING ──► RUNNING (transient error，退避后重试)
-                         └──► DEAD_LETTER      (终态，retry 用尽)
+    PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
+                          │           ├──► FAILED           (终态，permanent error，不重试)
+                          │           ├──► RETRYING ──► RUNNING (transient error，退避后重试)
+                          │           └──► DEAD_LETTER      (终态，retry 用尽)
+                          └──► CANCELLED                 (终态，用户/管理员取消)
 
 约束：
-  - ``SUCCEEDED`` / ``FAILED`` / ``DEAD_LETTER`` 为终态；
+  - ``SUCCEEDED`` / ``FAILED`` / ``DEAD_LETTER`` / ``CANCELLED`` 为终态；
   - 不允许 ``SUCCEEDED -> RUNNING`` 等回退；
   - retry 走显式 ``RUNNING -> RETRYING -> RUNNING``，并递增 attempt。
+
+``PENDING`` 表示「已落库、尚未投递到队列」。默认创建路径直接写 ``QUEUED``
+（保持既有 ``POST /api/runs`` 语义不变）；需要先落库再投递的两阶段流程可用
+``create_run(status=PENDING)`` + ``mark_queued()``。
 """
 
 from __future__ import annotations
@@ -22,16 +27,23 @@ from enum import Enum
 
 
 class RunStatus(str, Enum):
+    PENDING = "PENDING"
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
     RETRYING = "RETRYING"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     DEAD_LETTER = "DEAD_LETTER"
+    CANCELLED = "CANCELLED"
 
 
 TERMINAL_STATUSES: frozenset[RunStatus] = frozenset(
-    {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.DEAD_LETTER}
+    {
+        RunStatus.SUCCEEDED,
+        RunStatus.FAILED,
+        RunStatus.DEAD_LETTER,
+        RunStatus.CANCELLED,
+    }
 )
 
 #: 可被 worker 领取执行的状态
@@ -39,19 +51,32 @@ EXECUTABLE_STATUSES: frozenset[RunStatus] = frozenset({RunStatus.QUEUED, RunStat
 
 #: 允许迁移
 ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
-    RunStatus.QUEUED: frozenset({RunStatus.RUNNING, RunStatus.DEAD_LETTER}),
+    RunStatus.PENDING: frozenset(
+        {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.DEAD_LETTER}
+    ),
+    RunStatus.QUEUED: frozenset(
+        {
+            RunStatus.RUNNING,
+            RunStatus.DEAD_LETTER,
+            RunStatus.CANCELLED,
+        }
+    ),
     RunStatus.RUNNING: frozenset(
         {
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
             RunStatus.RETRYING,
             RunStatus.DEAD_LETTER,
+            RunStatus.CANCELLED,
         }
     ),
-    RunStatus.RETRYING: frozenset({RunStatus.RUNNING, RunStatus.DEAD_LETTER}),
+    RunStatus.RETRYING: frozenset(
+        {RunStatus.RUNNING, RunStatus.DEAD_LETTER, RunStatus.CANCELLED}
+    ),
     RunStatus.SUCCEEDED: frozenset(),
     RunStatus.FAILED: frozenset(),
     RunStatus.DEAD_LETTER: frozenset(),
+    RunStatus.CANCELLED: frozenset(),
 }
 
 

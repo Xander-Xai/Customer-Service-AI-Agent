@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -22,6 +23,7 @@ from typing import Any
 from .repository import AgentRunRepository
 from .statuses import (
     EXECUTABLE_STATUSES,
+    TERMINAL_STATUSES,
     InvalidRunTransition,
     RunStatus,
     ensure_transition,
@@ -52,12 +54,23 @@ def _default_max_attempts() -> int:
     return AGENT_RUN_MAX_ATTEMPTS
 
 
+#: ``agent_runs.idempotency_key`` 列宽（见 db/models.py / alembic 004）。
+IDEMPOTENCY_KEY_MAX_LENGTH = 128
+
+
 def build_idempotency_scope(user_id: str | None, endpoint: str, raw_key: str) -> str:
     """构造幂等作用域：user + endpoint + idempotency_key。
 
     不同用户/不同端点可复用同一个原始 key；同作用域内 DB 唯一约束保证只创建一个 run。
+
+    作用域串长度不受调用方控制（``Idempotency-Key`` 请求头无长度上限），拼接后可能
+    超过列宽 ``String(128)`` 并在 PostgreSQL 触发 ``value too long``。因此对拼接结果
+    取 sha256，输出固定 64 字符：仍然确定性、仍然按 user+endpoint 分域，且永不溢出。
     """
-    return f"{(user_id or 'anon')}:{endpoint}:{raw_key}"
+    scope = f"{(user_id or 'anon')}:{endpoint}:{raw_key}"
+    if len(scope) <= IDEMPOTENCY_KEY_MAX_LENGTH:
+        return scope
+    return hashlib.sha256(scope.encode("utf-8")).hexdigest()
 
 
 class RunService:
@@ -76,8 +89,14 @@ class RunService:
         max_attempts: int | None = None,
         idempotency_key: str | None = None,
         trace_id: str | None = None,
+        status: str = RunStatus.QUEUED.value,
     ) -> dict[str, Any]:
-        """创建 QUEUED run；提供 idempotency_key（已作用域化）时命中已有 run 直接返回。"""
+        """创建 run；提供 idempotency_key（已作用域化）时命中已有 run 直接返回。
+
+        默认状态 ``QUEUED``（保持既有 ``POST /api/runs`` 语义）；需要「先落库、后
+        投递」的两阶段流程时传 ``status=RunStatus.PENDING``，投递成功后再
+        ``mark_queued()``。
+        """
         if idempotency_key:
             existing = self.repo.get_by_idempotency_key(idempotency_key)
             if existing is not None:
@@ -91,6 +110,7 @@ class RunService:
             max_attempts=(max_attempts if max_attempts is not None else _default_max_attempts()),
             trace_id=trace_id,
             idempotency_key=idempotency_key,
+            status=status,
         )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
@@ -313,6 +333,51 @@ class RunService:
         )
         return updated
 
+    def requeue_dead_letter(
+        self, run_id: str, *, reset_attempts: bool = True
+    ) -> dict[str, Any]:
+        """把 DEAD_LETTER run 重新投递（人工 replay / redrive）。
+
+        刻意**复用原 run_id**，而不是复制出一个新 run：
+          - 工具幂等键 ``operation_key = run_id:tool_call_id`` 依赖 run_id 稳定。换
+            新 run_id 会让重放绕过 side-effect ledger，把已经成功写入外部系统的
+            退款/改单**再执行一次**；这比重放失败严重得多。
+          - 规范里的 ``job_id`` 是「一次队列投递」，重放正是新的一次投递，与
+            run_id 是两个概念。
+
+        历史保留：``agent_dead_letters`` 行不可变（``add_dead_letter`` 对既有行
+        直接返回），因此原始 attempt / error_code / error_type / entered_at 全部留存。
+        仅重置可重试字段与 attempt 计数。
+        """
+        run = self.require_run(run_id)
+        cur = parse_status(run["status"])
+        if cur != RunStatus.DEAD_LETTER:
+            raise InvalidRunTransition(run_id, cur.value, RunStatus.QUEUED.value)
+        fields: dict[str, Any] = {
+            "next_retry_at": None,
+            "lease_expires_at": None,
+            "error_code": None,
+            "error_message": None,
+            "error_type": None,
+            "last_error": None,
+            "finished_at": None,
+            "worker_id": None,
+            "task_id": None,
+        }
+        if reset_attempts:
+            fields["attempt"] = 0
+        queued = self._transition(
+            run_id,
+            RunStatus.QUEUED,
+            from_statuses={RunStatus.DEAD_LETTER},
+            **fields,
+        )
+        queued_at = queued.get("queued_at")
+        if queued_at is not None:
+            # 重新入队时间单独刷新，保留首次 queued_at 作为延迟统计起点
+            self.repo.touch_queued(run_id, _utcnow())
+        return self.repo.get(run_id) or queued
+
     def defer_run(self, run_id: str, *, delay_seconds: float) -> dict[str, Any] | None:
         """thread 竞争时延迟重调度：保持 QUEUED/RETRYING，仅更新 next_retry_at。
 
@@ -330,6 +395,46 @@ class RunService:
             cur,
             from_statuses={cur},
             next_retry_at=now + timedelta(seconds=max(0.0, delay_seconds)),
+        )
+
+    def mark_queued(self, run_id: str) -> dict[str, Any]:
+        """PENDING -> QUEUED（两阶段创建的入队确认）。"""
+        run = self.require_run(run_id)
+        cur = parse_status(run["status"])
+        if cur == RunStatus.QUEUED:
+            return run
+        ensure_transition(cur, RunStatus.QUEUED, run_id)
+        return self._transition(
+            run_id,
+            RunStatus.QUEUED,
+            from_statuses={cur},
+            queued_at=_utcnow(),
+        )
+
+    def cancel_run(self, run_id: str) -> dict[str, Any]:
+        """取消尚未完成的 run -> CANCELLED（终态）。
+
+        语义边界（必须诚实说明）：
+          - 已进入终态（SUCCEEDED/FAILED/DEAD_LETTER/CANCELLED）-> 不改写，返回现状；
+          - QUEUED/RETRYING/PENDING -> 立即置 CANCELLED：worker 领取时会因状态不是
+            EXECUTABLE_STATUSES 而跳过，等价于「投递后被丢弃」，不会执行图；
+          - RUNNING -> 置 CANCELLED 属于**协作式取消**：只改状态，不中断已在运行的
+            asyncio task。worker 的 ``mark_succeeded`` 走
+            ``from_statuses={RUNNING}`` 条件更新，因此不会覆盖 CANCELLED；调用方
+            必须等待 ``finished_at``/轮询确认最终态，不能假设已中断执行。
+        """
+        run = self.require_run(run_id)
+        cur = parse_status(run["status"])
+        if cur in TERMINAL_STATUSES:
+            return run
+        now = _utcnow()
+        return self._transition(
+            run_id,
+            RunStatus.CANCELLED,
+            from_statuses={cur},
+            lease_expires_at=None,
+            next_retry_at=None,
+            finished_at=now,
         )
 
 

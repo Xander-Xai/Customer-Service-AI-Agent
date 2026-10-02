@@ -43,6 +43,7 @@ from core.protocols import (
 )
 from core.session.session_manager import DRIFT_REPAIR_STRATEGIES, DriftType, EnhancedSessionManager
 from core.shared_blackboard import SharedBlackboard
+from core.streaming_context import get_stream_callback
 from core.tool_result_cache import cacheable_result
 from core.tool_result_optimizer import ToolResultOptimizer, compact_old_tool_messages
 from llm.client import LLMServiceError
@@ -623,7 +624,7 @@ class BaseAgent(ABC):
         effective_llm = self._get_effective_llm(state)  # v5.1: 多模态时用 Vision LLM
 
         # v6.0: 全链路流式 — emit thinking + tool_call + tool_result 事件
-        stream_callback = state.get("stream_callback")
+        stream_callback = get_stream_callback(state)
         if stream_callback:
             try:
                 await stream_callback({
@@ -731,15 +732,21 @@ class BaseAgent(ABC):
                     elif TOOL_RESULT_CACHE_ENABLED:
                         record_tool_result_cache_event(p["name"], "bypass")
                     try:
-                        if not cache_hit and (self.tool_result_optimizer.enabled or cache_enabled) and hasattr(self.tool_registry, "execute_raw"):
+                        if (
+                            not cache_hit
+                            and (self.tool_result_optimizer.enabled or cache_enabled)
+                            and hasattr(self.tool_registry, "execute_raw")
+                        ):
                             result = await self.tool_registry.execute_raw(
-                                p["name"], p["args"],
-                                stream_callback=state.get("stream_callback"),
+                                p["name"],
+                                p["args"],
+                                stream_callback=stream_callback,
                             )
                         elif not cache_hit:
                             result = await self.tool_registry.execute(
-                                p["name"], p["args"],
-                                stream_callback=state.get("stream_callback"),
+                                p["name"],
+                                p["args"],
+                                stream_callback=stream_callback,
                             )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
@@ -942,7 +949,7 @@ class BaseAgent(ABC):
         )
 
         # v4.2: 真流式模式 — 有 stream_callback 时逐 token 推送
-        stream_callback = state.get("stream_callback")
+        stream_callback = get_stream_callback(state)
         effective_llm = self._get_effective_llm(state)  # v5.1: 多模态时用 Vision LLM
         if stream_callback:
             response_content = ""
