@@ -1,0 +1,17 @@
+{
+  "schema": "runtime-diagnostics-selftest/v1",
+  "generated_at": "2026-10-02T20:29:52.710574+00:00",
+  "purpose": "evidence that tests/integration/runtime/conftest.py leaves machine-readable evidence on failure, captured deliberately on a clean tree so it is not confused with a real incident",
+  "git_sha": "7ea3d4918c6483112f3dde4626a57b70712b6ffd",
+  "method": "a throwaway test asserting 1 == 2, run once with RUNTIME_DIAGNOSTICS_DIR redirected",
+  "pytest_exit_code": 1,
+  "artifacts": [
+    "suite-at_failure-failed-tests_integration_runtime_test_zz_diag_selftest.py_test_deliberate_failure_for_diagnostics_selftest-20261002T202951Z.json",
+    "suite-post_teardown-failed-tests_integration_runtime_test_zz_diag_selftest.py_test_deliberate_failure_for_diagnostics_selftest-20261002T202952Z.json"
+  ],
+  "assertions": [
+    "at-failure snapshot exists (emitted from the makereport hookwrapper, before teardown)",
+    "post-teardown snapshot exists (emitted from the autouse fixture, exposes leaks)",
+    "no artifact is produced for passing tests"
+  ]
+}

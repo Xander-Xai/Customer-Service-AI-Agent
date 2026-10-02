@@ -615,7 +615,11 @@ def write_suite_snapshot(
         root.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         safe_node = nodeid.replace("/", "_").replace("::", "_")[:120]
-        path = root / f"suite-{outcome}-{safe_node}-{stamp}.json"
+        # ``phase`` must be part of the name: the at-failure and post-teardown
+        # snapshots are written within the same second, so a name built only from
+        # nodeid+timestamp makes the second write silently overwrite the first and
+        # lose the failure-time evidence.
+        path = root / f"suite-{phase}-{outcome}-{safe_node}-{stamp}.json"
         path.write_text(
             json.dumps(_redact(payload), indent=2, ensure_ascii=False, default=_json_default),
             encoding="utf-8",
