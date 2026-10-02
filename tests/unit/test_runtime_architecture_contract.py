@@ -5,13 +5,15 @@ Worker 行为不一致、或生产配置静默退回进程内状态。
 
 Contract 1: 生产 + GUNICORN_WORKERS>1 必须 postgres checkpoint + redis session
             + redis per-thread lock。
-Contract 2: API 执行边界与 Worker 使用**同一** thread lock key namespace。
+Contract 2: API 执行边界与 Worker 使用**同一** thread lock manager 单例与 key namespace。
 Contract 3: 生产不允许 MemorySaver / session memory / lock disabled /
             AGENT_RUN_DISPATCH=inline。
 Contract 4: thread lock TTL 必须 > task time limit + safety margin。
 """
 
 from __future__ import annotations
+
+import asyncio
 
 import pytest
 
@@ -78,15 +80,62 @@ def test_worker_lock_key_shape():
 
 
 @pytest.mark.unit
-def test_api_lock_uses_worker_primitives():
-    # API 边界必须复用 runtime.thread_lock 的实现（不能另起一套锁）
-    import inspect
+def test_api_and_worker_share_one_lock_manager_instance():
+    """API 执行边界与 worker 必须拿到**同一个** lock manager 实例。
 
-    import core.concurrency.distributed_lock as api_lock
+    两套实例 = 两套锁状态：后端降级为 memory 的 DEV/TEST 下，API 快路径与 worker
+    路径会各持一份互不相干的登记表，跨路径并发写同一 thread 无法被发现。
+    """
+    from core.concurrency import distributed_lock as api_lock
+    from runtime import thread_lock as worker_lock
 
-    source = inspect.getsource(api_lock)
-    assert "runtime.thread_lock" in source
-    assert "build_thread_lock" in source
+    api_lock.reset_api_lock_manager_for_tests()
+    worker_lock.reset_thread_lock_manager_for_tests()
+    try:
+        api_manager = api_lock.get_api_lock_manager()
+        worker_manager = worker_lock.get_thread_lock_manager()
+        assert api_manager is not None
+        assert api_manager is worker_manager
+        # 复位后应重新解析为同一实例（幂等，不因调用次数产生新对象）
+        assert api_lock.get_api_lock_manager() is worker_lock.get_thread_lock_manager()
+    finally:
+        api_lock.reset_api_lock_manager_for_tests()
+        worker_lock.reset_thread_lock_manager_for_tests()
+
+
+@pytest.mark.unit
+def test_api_lock_actually_serializes_against_worker_path():
+    """行为级：worker 侧持锁时 API 边界必须观测到 THREAD_BUSY。
+
+    用同一个共享 manager 先占锁，再走 API 的 ``thread_lock`` 上下文。
+    """
+    from core.concurrency import distributed_lock as api_lock
+    from runtime import thread_lock as worker_lock
+
+    api_lock.reset_api_lock_manager_for_tests()
+    worker_lock.reset_thread_lock_manager_for_tests()
+    try:
+        manager = worker_lock.get_thread_lock_manager()
+        thread_id = "shared-manager-contract"
+
+        async def scenario():
+            # worker 路径持锁
+            got = await manager.acquire(thread_id, "worker-owner", 30.0)
+            assert got is True
+            try:
+                with pytest.raises(api_lock.ThreadBusyError):
+                    async with api_lock.thread_lock(thread_id, acquire_timeout=0.2):
+                        pytest.fail("API 不应在 worker 持锁时进入临界区")
+            finally:
+                await manager.release(thread_id, "worker-owner")
+            # 释放后 API 必须能拿到锁
+            async with api_lock.thread_lock(thread_id, acquire_timeout=1.0) as owner:
+                assert owner
+
+        asyncio.run(scenario())
+    finally:
+        api_lock.reset_api_lock_manager_for_tests()
+        worker_lock.reset_thread_lock_manager_for_tests()
 
 
 # ---------------------------------------------------------------------------
@@ -96,17 +145,43 @@ def test_api_lock_uses_worker_primitives():
 
 @pytest.mark.unit
 def test_production_rejects_memory_checkpointer():
+    """生产必须拒绝 MemorySaver，无论 gunicorn worker 数量。
+
+    注意：这条规则由 ``validate_checkpoint_settings`` 强制（与 worker 数量无关），
+    ``validate_distributed_runtime_settings`` 只在多 worker 维度重复要求一次。
+    """
+    from core.config import validate_checkpoint_settings
+
+    problems = validate_checkpoint_settings("memory", dev_mode=False)
+    assert any("LANGGRAPH_CHECKPOINT_BACKEND=postgres" in p for p in problems), problems
+
+    # postgres 但没有可解析的 PG DSN -> 也必须被拒
+    problems = validate_checkpoint_settings("postgres", dev_mode=False, database_url="")
+    assert any("PostgreSQL" in p for p in problems), problems
+
+    # 正确配置通过
+    assert (
+        validate_checkpoint_settings(
+            "postgres",
+            dev_mode=False,
+            explicit_url="postgresql://u:p@db:5432/x",
+        )
+        == []
+    )
+
+    # dev 允许 memory
+    assert validate_checkpoint_settings("memory", dev_mode=True) == []
+
+    # 分布式一致性 gate 在多 worker 下同样要求 postgres
     problems = validate_distributed_runtime_settings(
         dev_mode=False,
         session_backend="redis",
         checkpoint_backend="memory",
-        gunicorn_workers=1,
+        gunicorn_workers=4,
         lock_enabled=True,
         lock_backend="redis",
     )
-    # MemorySaver 在单 worker 也不应作为生产默认；checkpoint 校验由
-    # validate_checkpoint_settings 负责，这里只断言 session/dispatch 维度不误放。
-    assert isinstance(problems, list)
+    assert any("LANGGRAPH_CHECKPOINT_BACKEND=postgres" in p for p in problems), problems
 
 
 @pytest.mark.unit

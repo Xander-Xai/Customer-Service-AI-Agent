@@ -8,10 +8,19 @@
   3. different_thread_parallelism —— 不同 thread 可并发
   4. tool_idempotency          —— 重试不重复副作用
 
-基础设施（未配置则对应检查 NOT_RUN，脚本仍退出 0）：
+基础设施（未配置则对应检查 NOT_RUN）：
 
   DISTRIBUTED_DB_URL / TEST_POSTGRES_CHECKPOINT_URL / DATABASE_URL  (PostgreSQL)
   TEST_REDIS_URL / REDIS_URL                                        (Redis)
+
+退出码（fail-closed）::
+
+    0  全部检查 PASS
+    1  有检查 FAIL（配置了基础设施但没通过）
+    2  基础设施未配置（NOT_RUN）—— 默认**不算成功**
+
+``NOT_RUN`` 默认返回 2 而不是 0：把"没跑"当成"通过"是证据污染。需要把它当成功
+（例如只想生成占位 artifact）时显式传 ``--allow-not-run``。
 
 输出：artifacts/distributed-runtime/<UTC 时间戳>/report.json
 用法：
@@ -249,11 +258,16 @@ async def _run() -> dict[str, Any]:
         checks["tool_idempotency"] = {"status": "FAIL", "error": f"{type(e).__name__}: {e}"}
 
     statuses = {name: c.get("status") for name, c in checks.items()}
-    overall = (
-        "PASS"
-        if statuses and all(s == "PASS" for s in statuses.values())
-        else ("NOT_RUN" if all(s == "NOT_RUN" for s in statuses.values()) else "FAIL")
-    )
+    values = set(statuses.values())
+    if "FAIL" in values:
+        overall = "FAIL"
+    elif values == {"PASS"}:
+        overall = "PASS"
+    elif values == {"NOT_RUN"}:
+        overall = "NOT_RUN"
+    else:
+        # 部分检查跑了、部分没跑：既不是全通过也不是全没跑，不能记成 PASS
+        overall = "PARTIAL"
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -267,6 +281,16 @@ async def _run() -> dict[str, Any]:
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Distributed runtime 能力证据生成")
+    parser.add_argument(
+        "--allow-not-run",
+        action="store_true",
+        help="基础设施未配置（NOT_RUN）时也返回 0（默认返回 2，避免把没跑当成通过）",
+    )
+    args = parser.parse_args()
+
     report = asyncio.run(_run())
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir = REPO_ROOT / "artifacts" / "distributed-runtime" / run_id
@@ -280,8 +304,25 @@ def main() -> int:
             ensure_ascii=False,
         )
     )
-    # 未配置基础设施（NOT_RUN）不算失败；配置了但检查失败才返回 1
-    return 0 if report["overall_status"] in ("PASS", "NOT_RUN") else 1
+    status = report["overall_status"]
+    if status == "PASS":
+        return 0
+    if status in ("NOT_RUN", "PARTIAL"):
+        if args.allow_not_run:
+            return 0
+        print(
+            json.dumps(
+                {
+                    "overall_status": "NOT_RUN",
+                    "hint": "需要 TEST_DISTRIBUTED_DB_URL + TEST_REDIS_URL；"
+                    "或用 make runtime-e2e / make runtime-chaos",
+                },
+                ensure_ascii=False,
+            ),
+            file=sys.stderr,
+        )
+        return 2
+    return 1
 
 
 if __name__ == "__main__":
