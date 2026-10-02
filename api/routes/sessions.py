@@ -23,22 +23,22 @@ def extract_checkpoint_id(checkpoint: object) -> str | None:
     顺序：真 mapping 取 ``"id"`` -> 对象取 ``.id`` -> mapping 取 ``"checkpoint_id"``。
     刻意用 ``isinstance(..., Mapping)`` 而不是鸭子类型的 ``hasattr(x, "get")``：
     后者对 MagicMock 之类"任何方法都存在"的对象会返回伪造值。
-    取不到时返回 ``None``（不猜测、不伪造 id）。
+    取到的值必须是**非空字符串**才算数：``.id`` 若是 MagicMock/数字等非字符串，
+    同样视为"取不到"，返回 ``None``（不猜测、不伪造 id）。
     """
     from collections.abc import Mapping
+
+    def _coerce(value: object) -> str | None:
+        return value if isinstance(value, str) and value else None
 
     if checkpoint is None:
         return None
     if isinstance(checkpoint, Mapping):
         for key in ("id", "checkpoint_id"):
-            value = checkpoint.get(key)
-            if value not in (None, ""):
-                return str(value)
+            if (found := _coerce(checkpoint.get(key))) is not None:
+                return found
         return None
-    value = getattr(checkpoint, "id", None)
-    if value not in (None, ""):
-        return str(value)
-    return None
+    return _coerce(getattr(checkpoint, "id", None))
 
 
 def _extract_user_id(request: Request) -> str | None:
@@ -116,9 +116,13 @@ async def delete_session_checkpoint(request: Request, session_id: str) -> bool:
     """删除该会话对应的 LangGraph checkpoint thread。返回是否真的删了。
 
     thread_id == session_id。兼容三种 saver：
-      - 官方 Async/PostgresSaver：``adelete_thread``
-      - MemorySaver（同步）：``delete_thread``
+      - 官方 Async/PostgresSaver：``adelete_thread(thread_id)``
+      - MemorySaver（同步）：``delete_thread(thread_id)``
       - 无删除能力：返回 False（调用方仍应删除 Session，只是不静默谎称已清理）
+
+    注意：官方 saver 的删除接口接收的是 **thread_id 字符串**，不是 LangGraph
+    ``config`` dict（``adelete_thread(self, thread_id: str)``）。早期实现传了 config，
+    结果 ``DELETE ... WHERE thread_id = '{...}'`` 匹配不到任何行、静默删不掉。
 
     永不抛错：checkpoint 清理失败不能把"会话已删除"变成 500 —— Session 已经删掉了，
     残留的 checkpoint 由 retention 任务兜底。
@@ -129,7 +133,6 @@ async def delete_session_checkpoint(request: Request, session_id: str) -> bool:
     if not checkpointer:
         return False
 
-    config = {"configurable": {"thread_id": session_id}}
     for name in ("adelete_thread", "delete_thread"):
         fn = getattr(checkpointer, name, None)
         if fn is None:
@@ -137,7 +140,7 @@ async def delete_session_checkpoint(request: Request, session_id: str) -> bool:
         try:
             import inspect
 
-            result = fn(config)
+            result = fn(session_id)
             if inspect.isawaitable(result):
                 await result
             return True
@@ -218,9 +221,17 @@ async def get_session_checkpoint(session_id: str, request: Request):
         aget = getattr(checkpointer, "aget_tuple", None)
         if aget is not None and inspect.iscoroutinefunction(aget):
             result = await aget(config)
-            checkpoint = getattr(result, "checkpoint", result) if result else None
         else:
-            checkpoint = checkpointer.get(config)
+            result = checkpointer.get(config)
+        # ``aget_tuple`` / ``get`` return a ``CheckpointTuple`` (a NamedTuple); its
+        # ``checkpoint`` field is the mapping that carries the id. ``isinstance``
+        # (not ``getattr``) avoids a MagicMock fabricating a ``.checkpoint``.
+        if result is None:
+            checkpoint = None
+        elif isinstance(result, tuple) and hasattr(result, "checkpoint"):
+            checkpoint = result.checkpoint
+        else:
+            checkpoint = result
     except Exception as e:
         return JSONResponse({"error": f"查询 checkpoint 失败: {e}"}, status_code=500)
 
