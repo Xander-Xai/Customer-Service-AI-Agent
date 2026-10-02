@@ -230,3 +230,59 @@ def get_side_effect_store() -> SideEffectStore:
 def reset_side_effect_store_for_tests() -> None:
     global _default_store
     _default_store = None
+
+
+async def execute_idempotent_operation(
+    *,
+    tool_name: str,
+    operation_key: str,
+    run_id: str,
+    thread_id: str | None,
+    arguments: dict[str, Any] | None,
+    operation: Callable[[], Any],
+    store: SideEffectStore | None = None,
+) -> Any:
+    """通用写操作幂等包裹：同一 ``(tool_name, operation_key)`` 只真正执行一次。
+
+    at-least-once execution + application-level idempotency：Tool 执行成功但
+    LangGraph 后续失败、整个 run 重试时，第二次调用直接返回已保存结果，
+    **不** 再次触发副作用函数。
+
+    并发安全：唯一索引 + ``claim`` 的原子语义兜底；指纹不一致视为业务冲突
+    （``PermanentError``，不重试）。
+    """
+    from .errors import PermanentError
+
+    store = store or get_side_effect_store()
+    fingerprint = request_fingerprint(arguments)
+    claim = store.claim(
+        tool_name=tool_name,
+        operation_key=operation_key,
+        run_id=run_id,
+        thread_id=thread_id,
+        fingerprint=fingerprint,
+    )
+    if claim.state == CLAIM_SUCCEEDED:
+        from . import metrics
+
+        metrics.record_tool_idempotency_hit()
+        return claim.result
+    if claim.state == CLAIM_CONFLICT:
+        raise PermanentError(
+            f"tool {tool_name} operation_key {operation_key} 已以不同参数执行过"
+        )
+
+    try:
+        result = operation()
+        if hasattr(result, "__await__"):
+            result = await result
+    except Exception as e:
+        store.mark_failed(
+            tool_name,
+            operation_key,
+            error_type=type(e).__name__,
+            error_message=str(e),
+        )
+        raise
+    store.mark_succeeded(tool_name, operation_key, result)
+    return result
