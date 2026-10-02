@@ -40,10 +40,28 @@ STATUS_FAILED = "FAILED"
 CLAIM_EXECUTE = "execute"
 CLAIM_SUCCEEDED = "succeeded"
 CLAIM_CONFLICT = "conflict"
+CLAIM_IN_PROGRESS = "in_progress"
+
+#: PENDING 记录的认领租约：租约未过期时**不允许**第二个执行者重复触发副作用，
+#: 必须抛 transient 让 run 退避重投；租约过期（认领后崩溃）才允许接管重放。
+DEFAULT_CLAIM_TTL_SECONDS = 60.0
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _claim_lease_expired(updated_at: datetime | None, ttl_seconds: float) -> bool:
+    """PENDING 认领租约是否已过期（认领者崩溃后可被接管重放）。
+
+    ``updated_at`` 为 None 视为**未过期**（保守：宁可让调用方退避重试，也不要
+    误判成可接管而重复执行副作用）。
+    """
+    if updated_at is None:
+        return False
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return (_utcnow() - updated_at).total_seconds() > max(0.0, ttl_seconds)
 
 
 def build_tool_idempotency_key(run_id: str, tool_call_id: str) -> str:
@@ -110,12 +128,16 @@ class SideEffectStore:
         run_id: str,
         thread_id: str | None,
         fingerprint: str,
+        claim_ttl_seconds: float = DEFAULT_CLAIM_TTL_SECONDS,
     ) -> SideEffectClaim:
         """尝试声明一次副作用执行。
 
         - 已 SUCCEEDED 且指纹一致 -> succeeded（返回已存结果，不执行）；
         - 已 SUCCEEDED 但指纹不同 -> conflict；
-        - 不存在 / PENDING / FAILED -> execute（更新归属后执行）。
+        - PENDING 且认领租约**未过期** -> in_progress（另一执行者可能正在跑；
+          重复执行会造成双重副作用，调用方须退避重试）；
+        - PENDING 且租约**已过期**（认领后崩溃）-> execute（接管重放）；
+        - FAILED / 不存在 -> execute。
         """
         session = self._session()
         try:
@@ -130,6 +152,10 @@ class SideEffectStore:
                     if row.request_fingerprint == fingerprint:
                         return SideEffectClaim(CLAIM_SUCCEEDED, row.result_reference)
                     return SideEffectClaim(CLAIM_CONFLICT)
+                if row.status == STATUS_PENDING and not _claim_lease_expired(
+                    row.updated_at, claim_ttl_seconds
+                ):
+                    return SideEffectClaim(CLAIM_IN_PROGRESS)
                 row.run_id = run_id
                 row.thread_id = thread_id
                 row.status = STATUS_PENDING
@@ -240,8 +266,9 @@ async def execute_idempotent_operation(
     thread_id: str | None,
     arguments: dict[str, Any] | None,
     operation: Callable[[], Any],
-    store: SideEffectStore | None = None,
-) -> Any:
+store: SideEffectStore | None = None,
+        claim_ttl_seconds: float = DEFAULT_CLAIM_TTL_SECONDS,
+    ) -> Any:
     """通用写操作幂等包裹：同一 ``(tool_name, operation_key)`` 只真正执行一次。
 
     at-least-once execution + application-level idempotency：Tool 执行成功但
@@ -249,9 +276,10 @@ async def execute_idempotent_operation(
     **不** 再次触发副作用函数。
 
     并发安全：唯一索引 + ``claim`` 的原子语义兜底；指纹不一致视为业务冲突
-    （``PermanentError``，不重试）。
+    （``PermanentError``，不重试）；认领租约未过期的重复认领抛 ``TransientError``
+    （退避重投），避免两个 worker 并发执行同一笔写操作。
     """
-    from .errors import PermanentError
+    from .errors import PermanentError, TransientError
 
     store = store or get_side_effect_store()
     fingerprint = request_fingerprint(arguments)
@@ -261,6 +289,7 @@ async def execute_idempotent_operation(
         run_id=run_id,
         thread_id=thread_id,
         fingerprint=fingerprint,
+        claim_ttl_seconds=claim_ttl_seconds,
     )
     if claim.state == CLAIM_SUCCEEDED:
         from . import metrics
@@ -270,6 +299,10 @@ async def execute_idempotent_operation(
     if claim.state == CLAIM_CONFLICT:
         raise PermanentError(
             f"tool {tool_name} operation_key {operation_key} 已以不同参数执行过"
+        )
+    if claim.state == CLAIM_IN_PROGRESS:
+        raise TransientError(
+            f"tool {tool_name} operation_key {operation_key} 正在被另一个执行者处理"
         )
 
     try:

@@ -34,6 +34,13 @@ from .errors import (
     is_retryable,
     safe_error_message,
 )
+from .events import (
+    EVENT_COMPLETED,
+    EVENT_FAILED,
+    EVENT_RETRY,
+    EVENT_STARTED,
+    RunEventPublisher,
+)
 from .retry import compute_backoff
 from .run_service import RunNotFound, RunService
 from .statuses import TERMINAL_STATUSES, InvalidRunTransition, RunStatus
@@ -52,6 +59,24 @@ def _config():
     from core import config
 
     return config
+
+
+async def _publish(event: str, run_id: str, svc: RunService, **payload) -> None:
+    """把 run 生命周期事件写入 Redis Stream（观测通道，失败不影响业务）。"""
+    publisher = getattr(svc, "event_publisher", None)
+    if publisher is None:
+        publisher = _shared_event_publisher()
+    await publisher.publish(run_id, event, payload)
+
+
+_shared_publisher: RunEventPublisher | None = None
+
+
+def _shared_event_publisher() -> RunEventPublisher:
+    global _shared_publisher
+    if _shared_publisher is None:
+        _shared_publisher = RunEventPublisher()
+    return _shared_publisher
 
 
 async def execute_run(
@@ -143,6 +168,15 @@ async def execute_run(
             exec_started = time.perf_counter()
             metrics.inc_worker_active()
             metrics.inc_run_active()
+            with contextlib.suppress(Exception):
+                await _publish(
+                    EVENT_STARTED,
+                    run_id,
+                    svc,
+                    thread_id=thread_id,
+                    status=RunStatus.RUNNING.value,
+                    attempt=running.get("attempt"),
+                )
             started_at = running.get("started_at")
             queued_at = run.get("queued_at")
             if started_at is not None and queued_at is not None:
@@ -155,6 +189,9 @@ async def execute_run(
                     owner,
                     cfg.AGENT_RUN_LEASE_SECONDS,
                     cfg.AGENT_RUN_HEARTBEAT_SECONDS,
+                    lock=lock,
+                    thread_id=thread_id,
+                    lock_ttl_seconds=cfg.AGENT_RUN_THREAD_LOCK_TTL_SECONDS,
                 )
             )
             tokens = set_run_context(run_id, thread_id, task_id)
@@ -191,6 +228,16 @@ async def execute_run(
                 )
             else:
                 svc.mark_succeeded(run_id, result)
+                with contextlib.suppress(Exception):
+                    await _publish(
+                        EVENT_COMPLETED,
+                        run_id,
+                        svc,
+                        thread_id=thread_id,
+                        status=RunStatus.SUCCEEDED.value,
+                        attempt=running.get("attempt"),
+                        duration_seconds=round(time.perf_counter() - exec_started, 3),
+                    )
                 metrics.record_run_status(RunStatus.SUCCEEDED.value)
                 metrics.record_worker_task("succeeded")
                 logger.info("AgentRun 执行成功 run_id=%s", run_id)
@@ -251,6 +298,16 @@ async def _handle_failure(
                 error_message=error_message,
                 error_type=error_type,
             )
+        with contextlib.suppress(Exception):
+            await _publish(
+                EVENT_FAILED,
+                run_id,
+                svc,
+                attempt=attempt,
+                error_code=error_code,
+                error_type=error_type,
+                reason="permanent",
+            )
         metrics.record_run_status(RunStatus.FAILED.value)
         metrics.record_run_failure()
         metrics.record_worker_task("failed")
@@ -265,6 +322,17 @@ async def _handle_failure(
                 error_message=error_message,
                 error_type=error_type,
                 worker_id=worker_id,
+            )
+        with contextlib.suppress(Exception):
+            await _publish(
+                EVENT_FAILED,
+                run_id,
+                svc,
+                attempt=attempt,
+                max_attempts=max_attempts,
+                error_code=error_code,
+                error_type=error_type,
+                reason="dead_letter",
             )
         metrics.record_dead_letter()
         metrics.record_run_status(RunStatus.DEAD_LETTER.value)
@@ -295,6 +363,17 @@ async def _handle_failure(
     except InvalidRunTransition:
         latest = svc.get_run(run_id)
         return latest["status"] if latest else RunStatus.FAILED.value
+    with contextlib.suppress(Exception):
+        await _publish(
+            EVENT_RETRY,
+            run_id,
+            svc,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            error_code=error_code,
+            error_type=error_type,
+            reason="transient",
+        )
     metrics.record_retry()
     metrics.record_run_status(RunStatus.RETRYING.value)
     metrics.record_worker_task("retrying")
@@ -338,12 +417,50 @@ async def _call_dispatcher(dispatcher: Dispatcher | None, run_id: str, countdown
 
 
 async def _heartbeat_loop(
-    svc: RunService, run_id: str, worker_id: str, lease_seconds: float, interval: float
+    svc: RunService,
+    run_id: str,
+    worker_id: str,
+    lease_seconds: float,
+    interval: float,
+    *,
+    lock: Any = None,
+    thread_id: str | None = None,
+    lock_ttl_seconds: float | None = None,
 ) -> None:
+    """执行期间续租：同时维护 DB ownership lease 与 Redis thread lock TTL。
+
+    两层租约含义不同：
+      - DB ``lease_expires_at`` 决定「谁有权把 run 标为 RUNNING/接管」；
+      - Redis thread lock TTL 决定「谁有权执行同一条 LangGraph state lineage」。
+
+    只续 DB 不续 Redis 时，长执行会在图跑完之前丢掉 thread lock，另一个 worker
+    就能进入同一条 state lineage——这正是需要避免的并发写。失去锁后本 worker 不
+    再静默继续：记录指标与告警日志，交由 lease 语义收口。
+    """
     try:
         while True:
             await asyncio.sleep(max(1.0, interval))
-            if not svc.heartbeat(run_id, worker_id=worker_id, lease_seconds=lease_seconds):
+            renewed = svc.heartbeat(run_id, worker_id=worker_id, lease_seconds=lease_seconds)
+            metrics.record_worker_heartbeat(bool(renewed))
+            if lock is not None and thread_id is not None and lock_ttl_seconds is not None:
+                try:
+                    ok = await lock.refresh(thread_id, worker_id, lock_ttl_seconds)
+                except ThreadLockBackendError as e:
+                    ok = False
+                    logger.warning(
+                        "thread lock 续租失败 run_id=%s thread=%s: %s",
+                        run_id,
+                        thread_id,
+                        type(e).__name__,
+                    )
+                metrics.record_thread_lock_renewed(bool(ok))
+                if not ok:
+                    logger.warning(
+                        "thread lock 续租失败（可能已被接管/过期）run_id=%s thread=%s",
+                        run_id,
+                        thread_id,
+                    )
+            if not renewed:
                 return
     except asyncio.CancelledError:
         return

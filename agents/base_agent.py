@@ -732,6 +732,7 @@ class BaseAgent(ABC):
                     elif TOOL_RESULT_CACHE_ENABLED:
                         record_tool_result_cache_event(p["name"], "bypass")
                     try:
+                        tool_call_id = p.get("id")
                         if (
                             not cache_hit
                             and (self.tool_result_optimizer.enabled or cache_enabled)
@@ -741,12 +742,14 @@ class BaseAgent(ABC):
                                 p["name"],
                                 p["args"],
                                 stream_callback=stream_callback,
+                                tool_call_id=tool_call_id,
                             )
                         elif not cache_hit:
                             result = await self.tool_registry.execute(
                                 p["name"],
                                 p["args"],
                                 stream_callback=stream_callback,
+                                tool_call_id=tool_call_id,
                             )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)

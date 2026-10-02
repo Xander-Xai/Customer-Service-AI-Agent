@@ -53,7 +53,7 @@ def _change(name: str, delta: int) -> None:
 
 
 def record_run_status(status: str) -> None:
-    _inc("agent_runs_total", status=status)
+    _inc("agent_run_total", status=status)
 
 
 def record_retry() -> None:
@@ -64,28 +64,45 @@ def record_dead_letter() -> None:
     _inc("agent_run_dead_letter_total")
 
 
+def record_dead_letter_replay() -> None:
+    _inc("agent_run_dead_letter_replay_total")
+
+
 def record_lock_contention() -> None:
-    _inc("agent_thread_lock_contention_total")
+    _inc("agent_thread_lease_contention_total")
 
 
 def record_lock_acquire() -> None:
-    _inc("agent_thread_lock_acquire_total")
+    _inc("agent_thread_lease_acquire_total")
+
+
+def record_thread_lock_renewed(renewed: bool) -> None:
+    _inc("agent_thread_lease_renewed_total", outcome="ok" if renewed else "lost")
+
+
+def record_worker_heartbeat(renewed: bool) -> None:
+    _inc("agent_worker_heartbeat", outcome="ok" if renewed else "lost")
 
 
 def record_run_failure() -> None:
-    _inc("agent_run_failures_total")
+    _inc("agent_run_failed_total")
 
 
 def record_checkpoint_error() -> None:
     _inc("checkpoint_errors_total")
 
 
+def record_checkpoint_recovery(recovered: bool, mode: str = "unknown") -> None:
+    """记录一次执行是否从已有 checkpoint 恢复（未从第一个节点重跑）。"""
+    _inc("agent_checkpoint_recovery_total", mode="recovered" if recovered else mode)
+
+
 def record_idempotency_hit() -> None:
-    _inc("idempotency_hit_total")
+    _inc("agent_run_idempotency_hit_total")
 
 
 def record_tool_idempotency_hit() -> None:
-    _inc("tool_idempotency_hit_total")
+    _inc("agent_tool_idempotency_hit_total")
 
 
 def record_worker_task(status: str) -> None:
@@ -101,7 +118,7 @@ def observe_queue_wait(seconds: float) -> None:
 
 
 def observe_lock_wait(seconds: float) -> None:
-    _observe("agent_thread_lock_wait_seconds", max(0.0, seconds))
+    _observe("agent_thread_lease_wait_seconds", max(0.0, seconds))
 
 
 def inc_worker_active() -> None:
@@ -113,8 +130,8 @@ def dec_worker_active() -> None:
 
 
 def inc_run_active() -> None:
-    _change("agent_runs_active", 1)
+    _change("agent_run_inflight", 1)
 
 
 def dec_run_active() -> None:
-    _change("agent_runs_active", -1)
+    _change("agent_run_inflight", -1)
