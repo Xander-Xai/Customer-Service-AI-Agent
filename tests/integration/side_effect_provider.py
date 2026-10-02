@@ -30,10 +30,21 @@ import asyncio
 import os
 from typing import Any, TypedDict
 
-COUNTER_KEY = "idem:counter"
-HITS_KEY = "idem:ledger_hits"
-PHASE_KEY = "idem:phase"
-TOOL_CALLS_KEY = "idem:tool_invocations"
+#: Redis key 前缀。默认 ``idem`` 保持既有行为；调用方（测试）用
+#: ``SIDE_EFFECT_KEY_PREFIX`` 按 run 打标签。之前四个 key 全局固定，于是
+#: 开头的 ``client.delete`` 清完之后，仍存活的 worker 进程可以继续改写同一组
+#: key：``phase`` 被改写会让下面的命中统计与 ledger 事实脱钩。
+KEY_PREFIX = os.getenv("SIDE_EFFECT_KEY_PREFIX", "idem").strip().rstrip(":") or "idem"
+
+
+def _key(name: str) -> str:
+    return f"{KEY_PREFIX}:{name}"
+
+
+COUNTER_KEY = _key("counter")
+HITS_KEY = _key("ledger_hits")
+PHASE_KEY = _key("phase")
+TOOL_CALLS_KEY = _key("tool_invocations")
 
 TOOL_NAME = "increment_counter"
 BLOCK_SECONDS = float(os.getenv("SIDE_EFFECT_BLOCK_SECONDS", "25"))
@@ -92,6 +103,8 @@ def _build_graph(thread_id: str, registry: Any, checkpointer: Any):
         client = _redis_client()
         tool_call_id = f"{thread_id}:refund"
         client.incr(TOOL_CALLS_KEY)
+        # 记账：本次调用前副作用计数器的值
+        counter_before = int(client.get(COUNTER_KEY) or 0)
         client.close()
 
         # 真实 ToolRegistry 路径：side_effect=True -> 自动套 ledger 幂等
@@ -102,13 +115,20 @@ def _build_graph(thread_id: str, registry: Any, checkpointer: Any):
         )
 
         client = _redis_client()
+        # ledger 是否命中：**直接观测副作用计数器**，而不是用 phase 推断。
+        # 命中 ledger 时 execute_raw 返回历史结果，handler 根本不会执行，
+        # COUNTER_KEY 保持不变；真正执行则必然 +1。
+        # 旧实现用 ``first_pass``（即 phase）决定是否记一次命中，而 phase 只是
+        # 「本次是否阻塞」的标记：残留 worker / 并发 run 改写 phase 时，命中数会
+        # 与 ledger 事实脱钩，既能让真失败通过，也能让真通过误报。
+        counter_after = int(client.get(COUNTER_KEY) or 0)
+        if counter_after == counter_before:
+            client.incr(HITS_KEY)
+
+        # phase 只负责「首次执行要阻塞」这个崩溃窗口，与 ledger 判定解耦。
         first_pass = client.get(PHASE_KEY) != "1"
         if first_pass:
-            # 第一次：副作用刚落地 -> 阻塞，制造「工具成功但未 ACK」的崩溃窗口
             client.set(PHASE_KEY, "1")
-        else:
-            # 重投：走 ledger 命中路径，不再阻塞，让这次执行走完
-            client.incr(HITS_KEY)
         client.close()
 
         if first_pass:

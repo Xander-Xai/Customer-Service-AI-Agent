@@ -47,19 +47,27 @@ VISIBILITY_TIMEOUT = 5
 LEASE_SECONDS = 3
 BLOCK_SECONDS = 25
 
-REDIS_KEYS = (
-    "idem:counter",
-    "idem:ledger_hits",
-    "idem:phase",
-    "idem:tool_invocations",
-)
+
+def redis_keys(prefix: str) -> tuple[str, ...]:
+    """本次 run 专用的 provider Redis key。
+
+    provider 通过 ``SIDE_EFFECT_KEY_PREFIX`` 决定前缀。固定用全局 ``idem:*``
+    会让本脚本与并发/残留的 run 共享同一组 key，``ledger_hits`` 断言因此依赖
+    「机器上没有别人碰过这些 key」这一无法保证的前提。
+    """
+    return (
+        f"{prefix}:counter",
+        f"{prefix}:ledger_hits",
+        f"{prefix}:phase",
+        f"{prefix}:tool_invocations",
+    )
 
 
 class ChaosFailure(RuntimeError):
     pass
 
 
-def worker_env(queue: str) -> dict[str, str]:
+def worker_env(queue: str, key_prefix: str) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
@@ -76,6 +84,7 @@ def worker_env(queue: str) -> dict[str, str]:
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": PROVIDER,
             "SIDE_EFFECT_BLOCK_SECONDS": str(BLOCK_SECONDS),
+            "SIDE_EFFECT_KEY_PREFIX": key_prefix,
             "LANGGRAPH_CHECKPOINT_BACKEND": "postgres",
         }
     )
@@ -138,9 +147,11 @@ def run() -> dict:
     run_id = f"chaos-{tag}"
     thread_id = f"T-chaos-{tag}"
     queue = f"agent_runs_test_{tag}"
+    key_prefix = f"idem:{tag}"
 
     client = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
-    client.delete("unacked", "unacked_index", queue, *REDIS_KEYS)
+    keys = redis_keys(key_prefix)
+    client.delete("unacked", "unacked_index", queue, *keys)
 
     steps: list[dict] = []
     worker_a = None
@@ -165,10 +176,10 @@ def run() -> dict:
         assert client.llen(queue) >= 1, "消息未进入 broker 队列"
         steps.append({"step": 2, "action": "enqueue", "queue": queue, "ok": True})
 
-        env = worker_env(queue)
+        env = worker_env(queue, key_prefix)
         worker_a = start_worker(env, Path("/tmp/csai-chaos-worker-a.log"))
 
-        counter = lambda: int(client.get("idem:counter") or 0)  # noqa: E731
+        counter = lambda: int(client.get(f"{key_prefix}:counter") or 0)  # noqa: E731
         wait_for(lambda: counter() >= 1, 90, "副作用工具执行")
         if counter() != 1:
             raise ChaosFailure(f"崩前副作用应恰好 1 次，实际 {counter()}")
@@ -230,8 +241,8 @@ def run() -> dict:
         )
 
         final_counter = counter()
-        invocations = int(client.get("idem:tool_invocations") or 0)
-        hits = int(client.get("idem:ledger_hits") or 0)
+        invocations = int(client.get(f"{key_prefix}:tool_invocations") or 0)
+        hits = int(client.get(f"{key_prefix}:ledger_hits") or 0)
         ledger = _ledger(engine, thread_id)
 
         if final_counter != 1:
@@ -292,7 +303,7 @@ def run() -> dict:
                 text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id}
             )
         with contextlib.suppress(Exception):
-            client.delete(*REDIS_KEYS, queue, "unacked", "unacked_index")
+            client.delete(*keys, queue, "unacked", "unacked_index")
             client.close()
 
 
