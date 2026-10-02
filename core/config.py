@@ -455,6 +455,10 @@ AGENT_RUN_THREAD_LOCK_TTL_SECONDS = _float_env("AGENT_RUN_THREAD_LOCK_TTL_SECOND
 AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS = _float_env(
     "AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS", 5.0
 )
+# API 执行边界获取锁的最大等待时间（秒）；超时返回 THREAD_BUSY（HTTP 409）
+AGENT_RUN_THREAD_LOCK_ACQUIRE_TIMEOUT_SECONDS = _float_env(
+    "AGENT_RUN_THREAD_LOCK_ACQUIRE_TIMEOUT_SECONDS", 5.0
+)
 # worker ownership lease / heartbeat（崩溃后 lease 过期可被接管）
 AGENT_RUN_LEASE_SECONDS = _float_env("AGENT_RUN_LEASE_SECONDS", 180.0)
 AGENT_RUN_HEARTBEAT_SECONDS = _float_env("AGENT_RUN_HEARTBEAT_SECONDS", 30.0)
@@ -468,6 +472,52 @@ if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
         f"AGENT_RUN_THREAD_LOCK_BACKEND 非法: {AGENT_RUN_THREAD_LOCK_BACKEND!r}"
         "（仅支持 redis | memory）"
     )
+
+
+def validate_distributed_runtime_settings(
+    *,
+    dev_mode: bool,
+    session_backend: str,
+    checkpoint_backend: str,
+    gunicorn_workers: int,
+    lock_enabled: bool,
+    lock_backend: str,
+) -> list[str]:
+    """生产分布式运行时一致性校验（纯函数，返回问题列表，空 = 通过）。
+
+    规则：
+      - 生产必须 Redis Session（进程内 memory 在多 worker 下分片、重启丢失）；
+      - gunicorn 多 worker 时要求 postgres checkpoint + redis session +
+        分布式 thread lock，否则跨 worker 正确性无法保证。
+    开发/测试不做约束。
+    """
+    problems: list[str] = []
+    if dev_mode:
+        return problems
+    if session_backend != "redis":
+        problems.append(
+            "Production requires SESSION_STORAGE_BACKEND=redis "
+            f"(got {session_backend!r}); in-process memory sessions are not shared "
+            "across gunicorn workers/replicas and are lost on restart"
+        )
+    if gunicorn_workers > 1:
+        if checkpoint_backend != "postgres":
+            problems.append(
+                f"GUNICORN_WORKERS={gunicorn_workers}>1 requires "
+                "LANGGRAPH_CHECKPOINT_BACKEND=postgres (memory checkpoint is per-process)"
+            )
+        if session_backend != "redis":
+            problems.append(
+                f"GUNICORN_WORKERS={gunicorn_workers}>1 requires "
+                "SESSION_STORAGE_BACKEND=redis"
+            )
+        if not lock_enabled or lock_backend != "redis":
+            problems.append(
+                f"GUNICORN_WORKERS={gunicorn_workers}>1 requires "
+                "AGENT_RUN_THREAD_LOCK_ENABLED=true and "
+                "AGENT_RUN_THREAD_LOCK_BACKEND=redis (per-thread cross-process lock)"
+            )
+    return problems
 
 # ===== v4.1: SSE 流式输出配置 =====
 SSE_CHUNK_SIZE = _int_env("SSE_CHUNK_SIZE", 50)  # 每次发送的字符数
@@ -586,6 +636,18 @@ def validate_required_config():
             )
         )
 
+    # P0-2 / P0-6: 生产 session + gunicorn 多 worker 一致性（纯函数，便于测试）
+    errors.extend(
+        validate_distributed_runtime_settings(
+            dev_mode=_DEV_MODE,
+            session_backend=SESSION_STORAGE_BACKEND,
+            checkpoint_backend=LANGGRAPH_CHECKPOINT_BACKEND,
+            gunicorn_workers=_int_env("GUNICORN_WORKERS", 0),
+            lock_enabled=AGENT_RUN_THREAD_LOCK_ENABLED,
+            lock_backend=AGENT_RUN_THREAD_LOCK_BACKEND,
+        )
+    )
+
     if errors:
         for err in errors:
             print(f"🚨 配置校验失败: {err}", file=sys.stderr)
@@ -598,8 +660,6 @@ def validate_required_config():
         warnings.append("RAG_PERSIST_DIRECTORY not set, vector DB will run in-memory")
     if not _DEV_MODE and not ALERT_WEBHOOKS and not SMTP_HOST:
         warnings.append("No alert notification channels configured")
-    if not _DEV_MODE and SESSION_STORAGE_BACKEND == "memory":
-        warnings.append("SESSION_STORAGE_BACKEND=memory: sessions lost on restart, use 'redis' for production")
     if not _DEV_MODE and ERP_MODE == "mock":
         warnings.append("ERP_MODE=mock: using fake ERP data, set to 'real' for production")
     if not _DEV_MODE and not SESSION_ENCRYPTION_KEY:
