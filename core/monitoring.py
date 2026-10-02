@@ -234,7 +234,7 @@ try:
     tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
     tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
-    # v6.4: 分布式 Agent Run 可靠性 + 可观测性
+    # 分布式 Agent Run 可靠性 + 可观测性（未发布版本；runtime 版本仍为 6.3）
     #
     # label 基数纪律：只允许低基数维度（status / mode / agent / error_type）。
     # 严禁把 run_id / thread_id / user_id / query 放进 label —— 这些是每请求唯一值，
@@ -302,6 +302,38 @@ try:
     )
     agent_tool_idempotency_hit_total = _counter(
         "agent_tool_idempotency_hit_total", "Side-effect tool idempotency hits"
+    )
+    # human-in-the-loop 审批治理。
+    #
+    # label 基数纪律同上：只用 risk_level / decision / outcome 这类低基数维度。
+    # ``action``（工具名）是**有界**集合（注册表里的工具），但为避免第三方插件
+    # 动态注册导致基数无界，action 只进 log 与审批表，不进 Prometheus label。
+    agent_approval_requested_total = _counter(
+        "agent_approval_requested_total",
+        "High-risk side effects gated for human approval",
+        ["risk_level"],
+    )
+    agent_approval_decided_total = _counter(
+        "agent_approval_decided_total",
+        "Human approval decisions recorded",
+        ["decision"],
+    )
+    agent_approval_pending = _gauge(
+        "agent_approval_pending", "Applications awaiting human decision"
+    )
+    agent_approval_wait_seconds = _histogram(
+        "agent_approval_wait_seconds",
+        "Time from approval request to human decision",
+        buckets=[5, 30, 60, 300, 900, 1800, 3600, 14400],
+    )
+    agent_approval_expired_total = _counter(
+        "agent_approval_expired_total",
+        "Approvals auto-expired past their TTL without a decision",
+    )
+    agent_approval_execution_total = _counter(
+        "agent_approval_execution_total",
+        "Outcomes of approved side-effect executions",
+        ["outcome"],
     )
 
     PROMETHEUS_BUSINESS_ENABLED = True
@@ -383,6 +415,12 @@ except ImportError:
     agent_checkpoint_recovery_total = _NoopMetric()
     agent_run_idempotency_hit_total = _NoopMetric()
     agent_tool_idempotency_hit_total = _NoopMetric()
+    agent_approval_requested_total = _NoopMetric()
+    agent_approval_decided_total = _NoopMetric()
+    agent_approval_pending = _NoopMetric()
+    agent_approval_wait_seconds = _NoopMetric()
+    agent_approval_expired_total = _NoopMetric()
+    agent_approval_execution_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 

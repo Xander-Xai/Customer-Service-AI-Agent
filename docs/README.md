@@ -13,6 +13,7 @@
 |---|---|
 | 系统架构、技术设计 | → [design/](#designdesign) |
 | **分布式 Agent Runtime（Celery worker / checkpoint / 幂等 / DLQ）** | → [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009](decisions/009-distributed-agent-runtime.md)、[operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) |
+| **高风险工具为什么要人工审批（退款/改单）** | → [design/human-in-the-loop.md](design/human-in-the-loop.md) |
 | API 接口、模型参数、配置速查 | → [reference/](#referencereference) |
 | 为什么选这个方案（ADR） | → [decisions/](#decisionsdecisions) |
 | 编码规范、项目约定、AI 助手指令 | → [standards/](#standardsstandards) |
@@ -77,6 +78,7 @@
 | RAG 评估方法/口径/当前评测状态 | [reference/rag-evaluation.md](reference/rag-evaluation.md) | 🟢 CURRENT（评测实现变更时更新；历史小节单独标注） |
 | provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟣 EVIDENCE |
 | 分布式 Runtime 为什么这么设计 | [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009-distributed-agent-runtime.md](decisions/009-distributed-agent-runtime.md) | 🔵 DESIGN / ADR |
+| 高风险副作用的审批治理与证据边界 | [design/human-in-the-loop.md](design/human-in-the-loop.md) | 🔵 DESIGN |
 | 分布式 Runtime 运维操作 | [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) | 🟠 RUNBOOK |
 | 分布式 Runtime 能宣称到什么程度 | [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) | 🟣 EVIDENCE |
 | 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
@@ -125,6 +127,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [architecture-design.md](design/architecture-design.md) | 四层状态机、9 个 Agent、5 种协作模式 | 开发者、新人 |
 | [agent-runtime.md](design/agent-runtime.md) | 分布式 Agent Runtime 完整设计（状态机 / 锁 / 幂等 / DLQ） | 开发者、面试者 |
 | [distributed-agent-runtime.md](design/distributed-agent-runtime.md) | 分布式 Runtime 架构与可靠性边界（能力/非能力） | 开发者、审计者 |
+| [human-in-the-loop.md](design/human-in-the-loop.md) | 高风险工具副作用的人工审批治理（风险模型 / 职责分离 / TTL / 幂等双防线 / 证据边界） | 开发者、审计者 |
 | [runtime-state-ownership.md](design/runtime-state-ownership.md) | 四类状态归属表（checkpoint / session / cache / tool store） | 开发者、审计者 |
 | [async-agent-worker-architecture.md](design/async-agent-worker-architecture.md) | Worker pool 深化设计（已实现部分 vs 纯设计部分） | 开发者 |
 | [context-engineering.md](design/context-engineering.md) | Tool Result / Session Context Engineering | 开发者 |

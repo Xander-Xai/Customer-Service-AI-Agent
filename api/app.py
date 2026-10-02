@@ -416,6 +416,7 @@ def create_app(
     app.add_exception_handler(ThreadLockUnavailableError, _thread_lock_unavailable_handler)
 
     # ── 挂载路由模块 ──
+    from api.routes.approvals import router as approvals_router
     from api.routes.chat import router as chat_router
     from api.routes.chat_multimodal import router as chat_multimodal_router
     from api.routes.feedback import router as feedback_router
@@ -430,6 +431,7 @@ def create_app(
     app.include_router(chat_router)
     app.include_router(chat_multimodal_router)
     app.include_router(runs_router)
+    app.include_router(approvals_router)
     app.include_router(ws_router)
 
     # ── 静态资源（使用缓存包装器，不依赖中间件）──

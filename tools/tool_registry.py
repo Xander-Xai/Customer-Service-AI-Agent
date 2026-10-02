@@ -33,6 +33,17 @@ class ToolDefinition:
 
     只读工具保持 False：不落 ledger，也不承担重复执行风险。
     """
+    risk_level: str | None = None
+    """显式风险等级（low / medium / high），供 human-in-the-loop 审批闸门使用。
+
+    None 表示「未声明」，此时由 ``core.hitl.risk.classify_risk`` 按工具名白名单 +
+    金额阈值推断。显式声明优先，且优先级高于白名单——这样单个工具的风险语义
+    写在工具定义处，而不是散落在环境变量里。
+
+    high 的语义是「必须人工审批」；high 且 ``side_effect=True`` 才是完整形态
+    （审批防不该做的被做，ledger 防做了被重做）。只读工具标 high 不会造成损害
+    （闸门只拦 pending_actions，不拦只读工具的执行）。
+    """
 
 
 class ToolRegistry:
@@ -52,6 +63,7 @@ class ToolRegistry:
         handler: Callable[..., Any],
         cache_policy: ToolCachePolicy | None = None,
         side_effect: bool = False,
+        risk_level: str | None = None,
     ):
         """注册一个工具"""
         self._tools[name] = ToolDefinition(
@@ -61,6 +73,7 @@ class ToolRegistry:
             handler=handler,
             cache_policy=cache_policy or ToolCachePolicy(),
             side_effect=side_effect,
+            risk_level=risk_level,
         )
         logger.debug(f"工具已注册: {name}")
 
@@ -205,3 +218,13 @@ class ToolRegistry:
         """该工具是否声明为写操作（需要幂等 ledger 保护）。"""
         tool = self._tools.get(name)
         return bool(tool.side_effect) if tool else False
+
+    def risk_level_for(self, name: str) -> str | None:
+        """该工具显式声明的风险等级；未声明/不存在返回 None。
+
+        None 是有意义的「不知道」而不是「低风险」：调用方据此回退到
+        ``core.hitl.risk.classify_risk`` 的白名单 + 金额阈值推断。未知工具返回
+        None 而非 low，避免「查不到定义就当安全」的 fail-open。
+        """
+        tool = self._tools.get(name)
+        return tool.risk_level if tool else None

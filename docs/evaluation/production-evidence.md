@@ -176,6 +176,12 @@ This is the current evidence contract, not a claim that production has been vali
 | RAG quality (649-query formal metrics) | `NOT_VERIFIED` (provider-auth blocker in committed preflight evidence) | Must name dataset, code, model, K, population, and artifact; never conflate Hit@K with Recall@K |
 | **Distributed runtime correctness** (checkpoint / locking / crash recovery / idempotency) | **Level 2 — CI VERIFIED** via `make runtime-e2e` / `runtime-chaos` / `runtime-verify` against real PostgreSQL + Redis + multi-process Celery | Proves the listed dimensions against real infrastructure; **never** report this as production-cluster validation |
 | **Distributed runtime in production** (real cluster, sustained multi-replica, real ERP writes, backlog, autoscaling) | **Level 3 — `NOT_VERIFIED`** | Must not be claimed in docs, résumés, or interview answers |
+| **Human-in-the-loop governance** (`WAITING_APPROVAL`, `core/hitl/`, `/api/approvals`) | **Level 2 — CI VERIFIED** via `pytest tests/unit/test_hitl_*` and `pytest tests/integration/runtime/test_hitl_*` against real PostgreSQL + Redis (deterministic staging tools) | Proves the governance contract (pre-execution gating, separation of duties, TTL fail-closed, single-consumption resume, ledger-protected approved side effects) — **not** real ERP writes |
+| **HITL against a real ERP** (real refund/order-write behind approval) | **Level 3 — `NOT_VERIFIED`** | No enterprise staging artifact exists; verification used deterministic staging tools (`tools/hitl_staging_tools.py`), which is a different claim |
+| **Realtime fast path (`/api/chat`) under HITL** | **Not covered by design** | The fast path has no run context, so `core/hitl/gate.py` does not gate it and no approval record is produced. Never describe `/api/chat` as HITL-protected |
+| **Proactive approval notification** (webhook / IM push to reviewers) | **`TODO` — not implemented** | Approvals are discoverable only via `GET /api/approvals?status=PENDING`; an unattended approval silently expires at TTL |
+| **Approval SLA / human-efficiency** | **`NOT_MEASURED`** | `agent_approval_wait_seconds` has no production distribution |
+| **Distributed tracing / LLM tracing** | **`TODO` — not implemented** | OpenTelemetry wiring exists as a configurable seam but is not enabled; no trace-propagation evidence exists |
 | FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
 
 Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,

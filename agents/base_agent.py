@@ -77,6 +77,30 @@ _AGENT_REPAIR_PROMPTS = {
 }
 
 
+def _should_gate_tool(
+    tool_name: str,
+    arguments: dict[str, Any] | None,
+    registry: Any = None,
+) -> bool:
+    """该工具调用是否必须先经人工审批（human-in-the-loop 闸门判定）。
+
+    委托给 ``core.hitl.gate.should_propose_approval``，本函数只做一层存在性
+    保护：``core.hitl`` 不可导入或判定抛错时**不放行**（返回 True 把工具挂起成
+    待审批，属保守方向；返回 False 则等于静默放行高风险写操作，是危险方向）。
+
+    这里是「**执行前**拦截」：返回 True 时工具根本没被执行，后续由
+    ``human_approval_gate`` 节点 interrupt 等人工决策。
+    """
+    try:
+        from core.hitl.gate import should_propose_approval
+    except Exception:
+        return True
+    try:
+        return bool(should_propose_approval(tool_name, arguments or {}, registry))
+    except Exception:
+        return True
+
+
 class BaseAgent(ABC):
     def __init__(
         self,
@@ -635,6 +659,11 @@ class BaseAgent(ABC):
             except Exception:
                 pass
 
+        # human-in-the-loop：本轮被摘出、等待人工审批的高风险动作。
+        # 声明在循环**之外**：循环可能一次都不进 `if response.tool_calls:`
+        # 就 break（无工具调用 / LLM 异常），在分支内声明会 NameError。
+        _deferred: list[dict] = []
+
         for round_num in range(max_tool_rounds):
             try:
                 response = await effective_llm.async_invoke(messages, tools=tools)
@@ -733,6 +762,35 @@ class BaseAgent(ABC):
                         record_tool_result_cache_event(p["name"], "bypass")
                     try:
                         tool_call_id = p.get("id")
+                        # human-in-the-loop：高风险副作用在**执行之前**摘出，
+                        # 交给 human_approval_gate 节点 interrupt 等人工决策。
+                        # 这里必须是「不执行」而不是「执行完再问」——审批的意义
+                        # 就是阻止不该发生的写操作。
+                        if _should_gate_tool(p["name"], p["args"], self.tool_registry):
+                            _deferred.append(
+                                {
+                                    "tool": p["name"],
+                                    "arguments": p["args"],
+                                    "tool_call_id": tool_call_id,
+                                    "agent": self.name,
+                                    "risk_level": "high",
+                                }
+                            )
+                            self.logger.info(
+                                "[HITL] 高风险工具已摘出待人工审批 tool=%s agent=%s",
+                                p["name"],
+                                self.name,
+                            )
+                            messages.append(
+                                ToolMessage(
+                                    content=(
+                                        "该操作需要人工审批，已提交审批请求；"
+                                        "在审批完成前请勿重复发起。"
+                                    ),
+                                    tool_call_id=p["id"],
+                                )
+                            )
+                            continue
                         if (
                             not cache_hit
                             and (self.tool_result_optimizer.enabled or cache_enabled)
@@ -907,6 +965,13 @@ class BaseAgent(ABC):
         state["ab_variant"] = variant
         if exp_name:
             state["ab_experiment"] = exp_name
+
+        # human-in-the-loop：把摘出的高风险动作合并进 state，交由
+        # human_approval_gate 节点处理。合并而非覆盖：多轮工具调用 / 多 Agent
+        # 协作时各自摘出的动作都要保留。
+        if _deferred:
+            state["pending_actions"] = list(state.get("pending_actions") or []) + _deferred
+            self.logger.info("[HITL] 本轮摘出 %d 个高风险动作待审批", len(_deferred))
 
         # v6.3: 事件发布 fire-and-forget
         if self.bus:

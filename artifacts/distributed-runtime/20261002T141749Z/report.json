@@ -1,0 +1,28 @@
+{
+  "schema_version": "distributed-runtime-evidence/v2",
+  "generated_at": "2026-10-02T14:17:49.276109+00:00",
+  "tested_code_sha": "2e3a5b10b4c92c56ae220a7c1a664e2457a91f67+dirty",
+  "artifact_commit_sha": null,
+  "overall_status": "PASS",
+  "checks": {
+    "checkpoint_cross_process": {
+      "status": "PASS",
+      "thread_id": "verify-cp-f9dc909dd5cb4727b346ec568975ebbe"
+    },
+    "same_thread_serialization": {
+      "status": "PASS",
+      "acquired_first": true,
+      "second_acquired_while_held": false,
+      "second_acquired_after_release": true
+    },
+    "different_thread_parallelism": {
+      "status": "PASS",
+      "t1": true,
+      "t2": true
+    },
+    "tool_idempotency": {
+      "status": "PASS",
+      "side_effect_calls": 1
+    }
+  }
+}
