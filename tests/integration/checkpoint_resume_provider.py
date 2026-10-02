@@ -30,10 +30,21 @@ import asyncio
 import os
 from typing import Any, TypedDict
 
-_FIRST_KEY = "ckpt:node_first"
-_SECOND_KEY = "ckpt:node_second"
-_TRACE_KEY = "ckpt:trace"
-_RECOVERED_KEY = "ckpt:recovered"
+#: Redis key 前缀。默认 ``ckpt`` 保持既有行为；测试用
+#: ``CHECKPOINT_RESUME_KEY_PREFIX`` 按 run 打标签。之前这四个 key 全局固定，
+#: 于是用例开头的 ``client.delete`` 清完之后，仍存活的 worker 进程可以继续改写
+#: 同一组 key，让 ``node_first``/``recovered`` 这类计数断言失真。
+KEY_PREFIX = os.getenv("CHECKPOINT_RESUME_KEY_PREFIX", "ckpt").strip().rstrip(":") or "ckpt"
+
+
+def _key(name: str) -> str:
+    return f"{KEY_PREFIX}:{name}"
+
+
+_FIRST_KEY = _key("node_first")
+_SECOND_KEY = _key("node_second")
+_TRACE_KEY = _key("trace")
+_RECOVERED_KEY = _key("recovered")
 
 
 class _ResumeState(TypedDict, total=False):
