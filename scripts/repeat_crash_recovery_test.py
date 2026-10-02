@@ -83,6 +83,26 @@ def _git(*args: str) -> str:
     ).stdout.strip()
 
 
+def _code_is_dirty(artifact_root: Path) -> tuple[bool, list[str]]:
+    """Is the **code** dirty? Ignore this harness's own artifact output.
+
+    ``artifacts/`` is not gitignored (only ``artifacts/evidence/`` is), so writing
+    this harness's own report would make every iteration look dirty and render
+    ``clean_tree_throughout`` useless. What matters for a measurement is whether
+    the code under test differs from the recorded SHA, so paths under the
+    artifact root are excluded. Everything else counts.
+    """
+    root = str(artifact_root.resolve())
+    entries = _git("status", "--porcelain").splitlines()
+    offending: list[str] = []
+    for line in entries:
+        path = line[3:].strip().strip('"')
+        if path == root or path.startswith(root + os.sep):
+            continue
+        offending.append(line)
+    return bool(offending), offending
+
+
 def _redact_url(url: str) -> str:
     return re.sub(r"//[^@/]+@", "//***@", url)
 
@@ -101,6 +121,7 @@ def _run_iteration(
     timeout: float,
     pytest_args: list[str],
     iteration_dir: Path,
+    artifact_root: Path,
 ) -> dict[str, object]:
     diag_root = _new_diagnostics()
     before = {p.name for p in diag_root.glob("*.json")}
@@ -128,6 +149,8 @@ def _run_iteration(
     for name in produced:
         shutil.copy2(diag_root / name, iteration_dir / name)
 
+    code_dirty, dirty_paths = _code_is_dirty(artifact_root)
+
     tail = combined.strip().splitlines()[-40:]
     return {
         "index": index,
@@ -137,7 +160,8 @@ def _run_iteration(
         "duration_seconds": round(duration, 2),
         "timed_out": False,
         "git_sha": _git("rev-parse", "HEAD"),
-        "git_dirty": bool(_git("status", "--porcelain")),
+        "git_dirty": code_dirty,
+        "git_dirty_paths": dirty_paths,
         "diagnostics_artifacts": produced,
         "output_tail": tail,
     }
@@ -213,6 +237,7 @@ def main() -> int:
                 timeout=args.timeout,
                 pytest_args=args.pytest_args,
                 iteration_dir=iter_dir,
+                artifact_root=outdir,
             )
         except subprocess.TimeoutExpired as exc:
             record = {
@@ -223,7 +248,8 @@ def main() -> int:
                 "duration_seconds": args.timeout,
                 "timed_out": True,
                 "git_sha": _git("rev-parse", "HEAD"),
-                "git_dirty": bool(_git("status", "--porcelain")),
+                "git_dirty": True,
+                "git_dirty_paths": ["<iteration timed out>"],
                 "diagnostics_artifacts": [],
                 "output_tail": [
                     f"iteration exceeded {args.timeout}s and was killed"
@@ -272,6 +298,19 @@ def main() -> int:
         "single_sha": len(shas) == 1,
         "dirty_iterations": dirty_iterations,
         "clean_tree_throughout": not dirty_iterations,
+        "dirty_paths_seen": sorted(
+            {
+                path
+                for r in iterations
+                for path in (r.get("git_dirty_paths") or [])
+                if not str(path).startswith("<")
+            }
+        ),
+        "dirty_paths_note": (
+            "paths under this run's own artifact directory are excluded; "
+            "'artifacts/' is not gitignored, so the harness would otherwise "
+            "report every iteration as dirty"
+        ),
         "failed_iterations": [
             {
                 "index": r["index"],
