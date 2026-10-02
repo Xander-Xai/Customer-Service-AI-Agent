@@ -5,10 +5,11 @@
 """
 
 import os
+import re
 import sys
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool  # noqa: F401
+from sqlalchemy import create_engine, engine_from_config, pool  # noqa: F401
 
 from alembic import context
 
@@ -49,23 +50,85 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode.
 
-    Creates an Engine and associates a connection with the context.
+    The target is ``_resolve_database_url()``, i.e. ``DATABASE_URL`` when set.
+    Previously this ignored the resolved URL and always used the module-level
+    ``db.database.engine``. That made ``alembic upgrade head`` impossible to
+    point at PostgreSQL: the URL contract was documented (and migrations carry
+    dialect-specific logic such as TIMESTAMPTZ) yet silently ignored, so
+    migrations could be "verified" against SQLite while production runs
+    PostgreSQL.
+
+    When no URL is configured we reuse the shared engine so the app and the
+    migration still see the same connection pool and event listeners.
     """
-    connectable = _default_engine
-    with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
-        with context.begin_transaction():
-            context.run_migrations()
+    url = _resolve_database_url()
+    default_url = str(_default_engine.url)
+    if url and url != default_url:
+        own_engine = create_engine(url, poolclass=pool.NullPool)
+        try:
+            with own_engine.connect() as connection:
+                _run_migrations_on_connection(connection)
+        finally:
+            own_engine.dispose()
+        return
+
+    with _default_engine.connect() as connection:
+        _run_migrations_on_connection(connection)
+
+
+def _run_migrations_on_connection(connection) -> None:
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+    )
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
+
+
+def _candidate_url(key: str) -> str:
+    """Read a URL env var, rejecting values that are not usable URLs.
+
+    ``.env.example`` ships ``DATABASE_URL=   # 为空使用 SQLite（开发环境）``.
+    python-dotenv keeps that inline comment as the **value**, and
+    ``core/config.py`` runs ``load_dotenv(override=True)``, so a copied
+    ``.env`` makes ``os.environ["DATABASE_URL"]`` literally
+    ``'# 为空使用 SQLite（开发环境）'``. Passing that to ``create_engine`` raises
+    ``ArgumentError: Could not parse SQLAlchemy URL``. Treat anything without a
+    ``scheme://`` prefix as unset so the default engine is used instead.
+
+    (The previous code never hit this only because it bypassed URL resolution
+    entirely — the failure was latent, not absent.)
+    """
+    value = (os.getenv(key) or "").strip().strip("\"'")
+    if not value or not _URL_SCHEME_RE.match(value):
+        return ""
+    return value
 
 
 def _resolve_database_url() -> str:
-    """从环境变量或 engine 解析数据库连接 URL"""
-    url = os.getenv("DATABASE_URL", "")
-    if url:
-        return url
+    """从环境变量或 engine 解析数据库连接 URL。
+
+    优先级：
+
+    1. ``ALEMBIC_DATABASE_URL`` —— 迁移工具专用的显式覆盖。
+    2. ``DATABASE_URL``。
+    3. ``db.database.engine`` 的实际 URL（兜底，保持与 app 同一连接）。
+
+    为什么需要 (1)：``core/config.py`` 在 import 时执行
+    ``load_dotenv(override=True)``，**仓库内的 ``.env`` 会覆盖进程环境里的同名
+    变量**。开发者本地 ``.env`` 里通常写的是空值或注释，于是
+    ``DATABASE_URL=postgresql://... alembic upgrade head`` 会被静默改写成
+    SQLite —— 这正是「只用 SQLite 证明了 TIMESTAMPTZ / 并发正确性」而生产跑
+    PostgreSQL 的成因。``ALEMBIC_DATABASE_URL`` 不在任何 ``.env`` 模板里声明，
+    因此不会被 dotenv 覆盖，可以确定性地把迁移指向真实 PostgreSQL。
+    """
+    for key in ("ALEMBIC_DATABASE_URL", "DATABASE_URL"):
+        url = _candidate_url(key)
+        if url:
+            return url
     # 从默认 engine 获取 URL
     return str(_default_engine.url)
 

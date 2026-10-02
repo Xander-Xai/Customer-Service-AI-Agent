@@ -48,7 +48,19 @@ router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 logger = get_logger("api.approvals")
 
 #: 可审批的高级角色。customer / agent 永不在列。
-REVIEWER_ROLES = ("admin", "supervisor")
+#:
+#: 唯一真相源是 ``core/config.py::HITL_REVIEWER_ROLES``（env ``HITL_REVIEWER_ROLES``，
+#: 默认 ``admin,supervisor``）。这里**不**再硬编码第二份列表——一个只写在
+#: .env.example / 文档里、代码从不读取的旋钮就是配置漂移：运维改了 env 却没有任何
+#: 效果，而文档声称它可配。
+def _reviewer_roles() -> tuple[str, ...]:
+    from core.config import HITL_REVIEWER_ROLES
+
+    return tuple(HITL_REVIEWER_ROLES)
+
+
+#: 模块级快照，保留原有可导入符号（``from ... import REVIEWER_ROLES``）。
+REVIEWER_ROLES = _reviewer_roles()
 
 
 def _require_reviewer(request: Request):
@@ -68,10 +80,13 @@ def _require_reviewer(request: Request):
 
     user = require_auth(request)  # 未认证 -> 401
     role = str(getattr(user, "role", "") or "").lower()
-    if role not in REVIEWER_ROLES:
+    if role not in _reviewer_roles():
         raise HTTPException(
             status_code=403,
-            detail="需要管理员或主管权限（可审批角色：admin / supervisor）",
+            detail=(
+                "需要管理员或主管权限"
+                f"（可审批角色：{' / '.join(_reviewer_roles())}）"
+            ),
         )
     return user
 

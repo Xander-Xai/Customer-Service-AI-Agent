@@ -187,6 +187,65 @@ redis-cli XLEN 'agent:run:<run_id>:events'
   **近似**裁剪（不是硬上界），被裁历史**不可恢复**。权威状态始终用
   `GET /api/runs/{run_id}`。
 
+### 3.7 Run 卡在 `WAITING_APPROVAL`
+
+图挂在 human-in-the-loop 的 `interrupt()` 上等人工决策。**这不是故障，也不是失败**：
+该状态是非终态，且刻意**不进**通用队列轮询（`EXECUTABLE_STATUSES = {QUEUED,
+RETRYING}`），所以没有 worker 会反复捞起它。等待审批**不消耗** `attempt`。
+
+```sql
+-- 1) 该 run 在等谁的审批
+SELECT approval_id, run_id, action, risk_level, status, requested_at, expires_at
+FROM human_approvals WHERE run_id = '<run_id>' ORDER BY requested_at DESC;
+
+-- 2) run 侧确认确实是非终态、且没有被错误地标成功
+SELECT id, status, attempt, worker_id, lease_expires_at
+FROM agent_runs WHERE id = '<run_id>';
+```
+
+处置顺序：
+
+1. **先查审批人是谁**。`human_approvals.reviewer_id IS NULL` 表示还没人批；
+   `status='EXPIRED'` 表示 TTL 到期按拒绝收敛（`HITL_APPROVAL_TTL_SECONDS`，默认
+   3600s）——**过期不会被当作批准**，需要重新发起。
+2. **审批 API 决策**（只有 admin / supervisor，且 `reviewer_id != user_id`）：
+
+   ```bash
+   curl -X POST "http://localhost:8000/api/approvals/<approval_id>/decision" \
+     -H "Authorization: Bearer <JWT>" \
+     -H "Content-Type: application/json" \
+     -d '{"decision":"approve","reason":"值班确认"}'
+   ```
+
+   `decision` ∈ `approve` / `edit`（须带 `edited_args`）/ `reject`。重复提交是幂等
+   的 no-op（返回 `newly_decided=false`），不会重复执行副作用。
+3. **确认恢复投递**。响应里的 `resume_dispatched=false` 表示决策已记录但 dispatch
+   失败；此时 run 会停在 `WAITING_APPROVAL`，需运维重投
+   （`python3 scripts/replay_dead_run.py` 只处理 DLQ，审批场景按 §3.7.1 手工
+   重投队列消息，**不要**改数据库状态）。
+4. **兜底逃逸口**：`WAITING_APPROVAL → DEAD_LETTER` / `CANCELLED` 合法。审批被
+   永久搁置（例如人离职）时用它收口，而不是让 run 无限期悬着。
+
+> **边界**：`/api/chat` 实时快路径**不在**该治理边界内（无 run 上下文、
+> 无 durable checkpoint）。快路径上的高风险工具不会产生审批记录——不要按
+> "有审批保护" 假设部署。真实 ERP 写操作仍是 `NOT_VERIFIED`（验证走确定性
+> staging 工具）。
+
+### 3.7.1 审批已决策但 run 没恢复
+
+```sql
+SELECT run_id, action, status, reviewed_at, resumed_at
+FROM human_approvals WHERE approval_id = '<approval_id>';
+```
+
+- `status='APPROVED'` 且 `resumed_at IS NULL` → 决策已记录、无 worker 消费。
+  重投该 `run_id` 到队列即可；`consume_resume` 以 `WHERE resumed_at IS NULL`
+  原子认领，重复投递安全。
+- `resumed_at` 非空但 run 仍在 `WAITING_APPROVAL` → 恢复执行本身失败，查
+  `agent_runs.error_code` 与 DLQ。
+- `status='REJECTED'` / `'EXPIRED'` → 图已按拒绝恢复，**不会**产生副作用
+  （`operation_key = run_id:approval:{approval_id}` 从未写入 ledger）。
+
 ---
 
 ## 4. 值班指标速查
@@ -217,4 +276,9 @@ redis-cli XLEN 'agent:run:<run_id>:events'
 6. 无 backpressure：永久锁死的 thread 会持续按
    `AGENT_RUN_THREAD_LOCK_RETRY_DELAY_SECONDS` 重投。
 7. Worker Pool 无自动扩缩。
-8. **生产集群未验证**：以上全部为本地 + CI 证据，`PRODUCTION NOT_VERIFIED`。
+8. **审批通知不推送**：审批请求只在 `GET /api/approvals?status=PENDING` 里可见，
+   没有主动 webhook / IM 通知；长时间无人处理会静默等到 TTL 过期。需要值班盯
+   `agent_approval_requested_total` 与 `agent_approval_expired_total`。
+9. **审批 SLA 未测量**：`agent_approval_wait_seconds` 的分布没有生产数据，
+   `NOT_MEASURED`。
+10. **生产集群未验证**：以上全部为本地 + CI 证据，`PRODUCTION NOT_VERIFIED`。

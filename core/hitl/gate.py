@@ -39,7 +39,7 @@ Side Effect」建立一条企业可用的治理边界：
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from core.logger import get_logger
 
@@ -137,9 +137,13 @@ async def run_approval_gate(state: dict[str, Any], config: Any, container: Any) 
 
     # langgraph 1.2.12 + Python 3.10：interrupt() 依赖的 get_config() 在深层
     # async 节点里拿不到 runnable config，必须显式注入（见模块 docstring 的实测）。
-    from langchain_core.runnables.config import var_child_runnable_config
+    from langchain_core.runnables.config import (
+        RunnableConfig,
+        var_child_runnable_config,
+    )
 
-    token = var_child_runnable_config.set(config or {})
+    runnable_config: RunnableConfig = cast(RunnableConfig, config) if config else {}
+    token = var_child_runnable_config.set(runnable_config)
     try:
         for action in pending:
             # 幂等：worker 重投递 / 节点重放都复用同一条审批，不重复打扰审批人。

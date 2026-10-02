@@ -234,7 +234,7 @@ try:
     tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
     tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
 
-    # v6.4: 分布式 Agent Run 可靠性 + 可观测性
+    # 分布式 Agent Run 可靠性 + 可观测性（未发布版本；runtime 版本仍为 6.3）
     #
     # label 基数纪律：只允许低基数维度（status / mode / agent / error_type）。
     # 严禁把 run_id / thread_id / user_id / query 放进 label —— 这些是每请求唯一值，

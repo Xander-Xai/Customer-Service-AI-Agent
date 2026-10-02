@@ -1520,3 +1520,337 @@ def test_real_repo_declares_all_runtime_capabilities_implemented():
         assert audit._capability_is_implemented(REAL_ROOT, markers), (
             f"{capability} marker set is not fully present in the repository"
         )
+
+
+# ===========================================================================
+# HITL / canonical AgentRun state-machine drift guards (AA-AF).
+#
+# Each test drives the underlying check function with a synthetic doc so the
+# guard is proven to *fire*, not merely present. A guard that cannot fail is
+# indistinguishable from no guard at all, which is how "58 paths" and the
+# WAITING_APPROVAL omission survived review.
+# ===========================================================================
+
+
+def _hitl_repo(tmp_repo: Path, *, hitl_enabled: str = "false") -> Path:
+    """Minimal repo with a runtime/statuses.py + core/config.py the guards read."""
+    write(
+        tmp_repo,
+        "runtime/statuses.py",
+        "class RunStatus(str, Enum):\n"
+        '    PENDING = "PENDING"\n'
+        '    QUEUED = "QUEUED"\n'
+        '    RUNNING = "RUNNING"\n'
+        '    RETRYING = "RETRYING"\n'
+        '    WAITING_APPROVAL = "WAITING_APPROVAL"\n'
+        '    SUCCEEDED = "SUCCEEDED"\n',
+    )
+    write(
+        tmp_repo,
+        "core/config.py",
+        "import os\n"
+        f'HITL_ENABLED = os.getenv("HITL_ENABLED", "{hitl_enabled}").lower() == "true"\n',
+    )
+    return tmp_repo
+
+
+# ------------------------------------------------------------- Guard AA
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "当前 API 共 58 个 HTTP 路径。",
+        "OpenAPI paths=62 与 operations=64 已确认。",
+        "OpenAPI 重新生成：docs/openapi.json = 58 个 HTTP 路径。",
+        "操作数 60，快照已生成。",
+        "`app.openapi()` = 58 个路径。",
+        "openapi_path_count = 62 已同步。",
+    ],
+)
+def test_guard_aa_handwritten_openapi_count_is_detected(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "README.md", f"# readme\n\n{line}\n")
+    errors: list[str] = []
+    audit.check_openapi_counts_are_generated([doc], errors, root=tmp_repo)
+    assert errors, f"hand-written OpenAPI count escaped the guard: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "HTTP 路径数以 `python3 scripts/project_facts.py` 输出为准。",
+        "路径数由生成器输出，请勿手工修改（`make openapi-check`）。",
+        "路径数/操作数以快照为准，不写入文档。",
+    ],
+)
+def test_guard_aa_allows_generator_delegation(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "README.md", f"# readme\n\n{line}\n")
+    errors: list[str] = []
+    audit.check_openapi_counts_are_generated([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_aa_anchor_docs_are_exempt(tmp_repo: Path):
+    """The two generator-bound docs may carry the number: current-state.md is
+    checked by project_facts --check and api-reference.md by the surface anchor."""
+    for rel in audit.OPENAPI_COUNT_ANCHOR_DOCS:
+        doc = write(tmp_repo, rel, "# doc\n\n当前 62 个 HTTP 路径。\n")
+        errors: list[str] = []
+        audit.check_openapi_counts_are_generated([doc], errors, root=tmp_repo)
+        assert errors == [], f"{rel} must be allowed to carry the generated count"
+
+
+def test_real_repo_has_no_handwritten_openapi_count_outside_anchor_docs():
+    """The repository itself must satisfy guard AA."""
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_openapi_counts_are_generated(docs, errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AB
+
+def test_guard_ab_state_chain_without_waiting_approval_is_detected(tmp_repo: Path):
+    _hitl_repo(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/design/architecture-design.md",
+        "状态机 `runtime/statuses.py`：`PENDING → QUEUED → RUNNING → "
+        "SUCCEEDED | FAILED | RETRYING → DEAD_LETTER`。\n",
+    )
+    errors: list[str] = []
+    audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
+    assert errors and "WAITING_APPROVAL" in errors[0]
+
+
+def test_guard_ab_unified_chain_is_allowed(tmp_repo: Path):
+    _hitl_repo(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/design/architecture-design.md",
+        "状态机：`PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING → "
+        "SUCCEEDED`。\n",
+    )
+    errors: list[str] = []
+    audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ab_multiline_fenced_state_machine_is_allowed(tmp_repo: Path):
+    """The unified model is drawn as a fenced ASCII diagram whose chain wraps
+    across lines; a single-line check would flag the correct rendering."""
+    _hitl_repo(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/design/architecture-design.md",
+        "```text\n"
+        "PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED\n"
+        "                  │              ├──► WAITING_APPROVAL ──► RUNNING\n"
+        "                  └──► CANCELLED\n"
+        "```\n",
+    )
+    errors: list[str] = []
+    audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ab_inactive_when_statuses_lacks_the_state(tmp_repo: Path):
+    """If the state is removed from code, the guard must go quiet rather than
+    force a stale mention forever."""
+    write(
+        tmp_repo,
+        "runtime/statuses.py",
+        'class RunStatus(str, Enum):\n    PENDING = "PENDING"\n    QUEUED = "QUEUED"\n',
+    )
+    doc = write(tmp_repo, "docs/design/x.md", "状态机：`PENDING → QUEUED → RUNNING`。\n")
+    errors: list[str] = []
+    audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_state_chains_mention_waiting_approval():
+    errors: list[str] = []
+    audit.check_run_state_machine_completeness(audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AC
+
+def test_guard_ac_hitl_enabled_default_drift_is_detected(tmp_repo: Path):
+    _hitl_repo(tmp_repo, hitl_enabled="false")
+    doc = write(tmp_repo, "docs/design/hitl.md", "| `HITL_ENABLED` | `true` | 总开关 |\n")
+    errors: list[str] = []
+    audit.check_hitl_enabled_default([doc], errors, root=tmp_repo)
+    assert errors and "HITL_ENABLED" in errors[0]
+
+
+def test_guard_ac_matching_default_is_allowed(tmp_repo: Path):
+    _hitl_repo(tmp_repo, hitl_enabled="false")
+    doc = write(
+        tmp_repo,
+        "docs/design/hitl.md",
+        "`HITL_ENABLED` 默认 `false`：开启会让高风险调用转为阻塞式人工流程。\n",
+    )
+    errors: list[str] = []
+    audit.check_hitl_enabled_default([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ac_reads_the_boolean_compare_idiom(tmp_repo: Path):
+    """`os.getenv("HITL_ENABLED", "false").lower() == "true"` must resolve to
+    ``false`` (the fallback), not be skipped as an unresolvable expression."""
+    from config_fallback import extract_fallback_defaults
+
+    assert extract_fallback_defaults(write(tmp_repo, "core/config.py",
+        'import os\nHITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() == "true"\n',
+    ) and tmp_repo / "core/config.py").get("HITL_ENABLED") == "false"
+
+
+def test_real_repo_hitl_enabled_default_matches_config():
+    from config_fallback import extract_fallback_defaults
+
+    expected = extract_fallback_defaults(REAL_ROOT / "core/config.py")["HITL_ENABLED"]
+    errors: list[str] = []
+    audit.check_hitl_enabled_default(audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT)
+    assert errors == [], f"documented HITL_ENABLED default must equal config fallback {expected}"
+
+
+# ------------------------------------------------------------- Guard AD
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "`POST /api/chat` 已纳入 HITL 人工审批覆盖范围。",
+        "HITL 人工审批覆盖 `/api/chat` 快路径。",
+        "`/api/chat` 快路径受审批闸门保护。",
+    ],
+)
+def test_guard_ad_fastpath_hitl_claim_is_detected(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_hitl_fastpath_not_claimed([doc], errors, root=tmp_repo)
+    assert errors, f"durable-HITL fast-path claim escaped the guard: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "`/api/chat` 快路径无 run 上下文，不在该治理边界内。",
+        "不得宣称 `/api/chat` 受 durable HITL 保护。",
+        "fast path 的 HITL coverage 由部署形态决定。",
+    ],
+)
+def test_guard_ad_allows_explicit_boundary_disclaimer(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_hitl_fastpath_not_claimed([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ad_does_not_match_unrelated_coverage_wording(tmp_repo: Path):
+    """Regression: an ungrouped alternation once made any line containing
+    「已覆盖」 a false positive."""
+    doc = write(
+        tmp_repo,
+        "docs/decisions/009.md",
+        "- 自研队列：Celery + Redis 已覆盖，重复造轮子。\n",
+    )
+    errors: list[str] = []
+    audit.check_hitl_fastpath_not_claimed([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AE
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "真实 ERP 写操作已验证通过（生产联调完成）。",
+        "真实 ERP 写入已实测。",
+        "Real ERP write operations are VERIFIED.",
+    ],
+)
+def test_guard_ae_real_erp_write_verified_claim_is_detected(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_real_erp_write_not_verified([doc], errors, root=tmp_repo)
+    assert errors, f"real-ERP-write VERIFIED claim escaped the guard: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "真实 ERP 写操作 **NOT_VERIFIED**（无企业 staging）。",
+        "真实 ERP 写操作未验证；副作用验证走确定性 staging 工具。",
+        "真实 ERP 写操作尚无企业 staging 环境。",
+    ],
+)
+def test_guard_ae_allows_not_verified_framing(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_real_erp_write_not_verified([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "| HITL governance | **Level 2 - CI VERIFIED** | ... **not** real ERP writes |",
+        "CI VERIFIED for the governance contract; never claim real ERP writes |",
+    ],
+)
+def test_guard_ae_allows_verified_for_another_capability_with_erp_exclusion(
+    tmp_repo: Path, line: str
+):
+    """A line may claim VERIFIED for capability X while explicitly excluding
+    real ERP writes — the exclusion is the point, not a contradiction."""
+    doc = write(tmp_repo, "docs/evaluation/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_real_erp_write_not_verified([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AF
+
+def _approval_repo(tmp_repo: Path, *, mounted: bool = True, drop: str | None = None) -> Path:
+    write(tmp_repo, "api/routes/approvals.py", "router = APIRouter(prefix='/api/approvals')\n")
+    app_src = "from api.routes.approvals import router as approvals_router\n"
+    app_src += "app.include_router(approvals_router)\n" if mounted else ""
+    # An unmounted router still has its import present; the guard must key
+    # on the registration call, not on the import.
+    if not mounted:
+        app_src = "from api.app import app\n"
+    write(tmp_repo, "api/app.py", app_src)
+    paths = {p: {"get": {}} for p in audit.HITL_APPROVAL_PATHS}
+    if drop:
+        paths.pop(drop, None)
+    write(tmp_repo, "docs/openapi.json", json.dumps({"paths": paths}))
+    write(tmp_repo, "docs/reference/api-reference.md", "# API\n\n`/api/approvals` 审批队列。\n")
+    return tmp_repo
+
+
+def test_guard_af_detects_missing_approval_endpoint(tmp_repo: Path):
+    _approval_repo(tmp_repo, drop="/api/approvals/{approval_id}/decision")
+    errors: list[str] = []
+    audit.check_approval_surface_present(errors, root=tmp_repo)
+    assert errors and "decision" in errors[0]
+
+
+def test_guard_af_detects_undocumented_approval_surface(tmp_repo: Path):
+    _approval_repo(tmp_repo)
+    write(tmp_repo, "docs/reference/api-reference.md", "# API\n\n没有审批端点。\n")
+    errors: list[str] = []
+    audit.check_approval_surface_present(errors, root=tmp_repo)
+    assert any("/api/approvals" in e for e in errors)
+
+
+def test_guard_af_inactive_when_router_not_mounted(tmp_repo: Path):
+    _approval_repo(tmp_repo, mounted=False, drop="/api/approvals")
+    errors: list[str] = []
+    audit.check_approval_surface_present(errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_approval_surface_is_present():
+    errors: list[str] = []
+    audit.check_approval_surface_present(errors, root=REAL_ROOT)
+    assert errors == []
