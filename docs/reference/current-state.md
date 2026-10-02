@@ -129,7 +129,9 @@ python3 scripts/audit_doc_consistency.py
   `core/config.py::validate_distributed_runtime_settings`、`core/container.py`。
 - **多 Worker 一致性 gate**：生产且 `GUNICORN_WORKERS>1` 时要求
   `LANGGRAPH_CHECKPOINT_BACKEND=postgres` + `SESSION_STORAGE_BACKEND=redis` +
-  `AGENT_RUN_THREAD_LOCK_ENABLED=true`/`BACKEND=redis`，否则启动失败。
+  `AGENT_RUN_THREAD_LOCK_ENABLED=true`/`BACKEND=redis`，否则启动失败。生产还要求
+  `AGENT_RUN_DISPATCH=celery`，且 `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` >
+  `AGENT_RUN_TASK_TIME_LIMIT` + safety margin（锁不能在任务仍在执行时过期）。
 - **Reliability 语义（能力边界）**：
   - at-least-once task delivery（`task_acks_late` + `task_reject_on_worker_lost`
     + Redis `visibility_timeout`），**不是** exactly-once；
@@ -138,14 +140,35 @@ python3 scripts/audit_doc_consistency.py
   - external PostgreSQL checkpoint persistence；
   - node/checkpoint-boundary durable execution（失败节点可能重新执行，节点副作用
     需幂等）；**不**宣称任意 Python 指令级无损恢复；
-  - application-level dead-letter（`agent_dead_letters` 表，retry 用尽后可查询
-    哪个 run / 失败几次 / 最后错误 / 何时进入 DLQ），**不是** broker-native DLX。
+  - application-level **dead-letter state / terminal failure foundation**
+    （`agent_dead_letters` 表 + `GET /api/runs/dead`，可查询哪个 run / 失败几次 /
+    最后错误 / 何时进入）；**不是** broker-native DLX，也**没有** replay/requeue
+    运维闭环；
   - 工具侧幂等 ledger（`tool_side_effects`，`run_id + tool_call_id`）+
     `execute_idempotent_operation` 包裹执行；外部系统端到端幂等仍需下游 API
     接受 idempotency key。
+  - 锁 stale-worker 边界：owner token + Lua compare-and-delete 只防"旧 owner
+    错删新锁"，**不**严格消除"pause 超过 TTL 后旧 worker 继续执行"；无 lease
+    renewal / fencing token。当前用 `TTL > task time limit` + checkpoint/idempotency
+    降低风险。
+- **能力层级**：
+  - Level 1（已实现，代码存在）：Postgres checkpoint、Redis session、Redis
+    per-thread lock、AgentRun 真相源、Celery + Redis broker、worker execution、
+    run_id dispatch、acks_late、reject_on_worker_lost、visibility_timeout、retry
+    基础、tool ledger、idempotency helper、Prometheus metrics。
+  - Level 2（本地验证，有命令 + artifact）：checkpoint cross-process、
+    same-thread serialization、different-thread parallelism、tool idempotency、
+    worker crash recovery、fresh DB migration、真实 PG/Redis integration。
+  - Level 3（未生产验证）：真实生产集群 / 多副本长期稳定 / 真实用户流量 /
+    真实 ERP 写操作 / 大规模 queue backlog / K8s autoscaling / multi-region。
+- **Evidence SHA 语义**：artifact schema `distributed-runtime-evidence/v2` 使用
+  `tested_code_sha`（生成 evidence 时的被测代码 commit）+ `generated_at` +
+  `overall_status`；artifact 自身随后提交到另一个 commit（生成时无法预知，
+  `artifact_commit_sha` 为 null）。历史 v1 artifact 保留不改。
 - **状态归属**：见 [runtime-state-ownership](../design/runtime-state-ownership.md)
-  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)；下一阶段
-  （worker pool / retry-DLQ / SSE bridge）仅设计：
+  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)。下一阶段（**基础
+  Celery/Redis 链路已存在**，这里指深化）worker pool autoscaling / DLQ 运维闭环 /
+  SSE bridge 仅设计：
   [async-agent-worker-architecture](../design/async-agent-worker-architecture.md)。
 - **验证命令**（需要真实 Redis/PostgreSQL；默认 skip）：
   ```bash

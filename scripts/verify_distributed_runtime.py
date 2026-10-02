@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = "distributed-runtime-evidence/v1"
+SCHEMA_VERSION = "distributed-runtime-evidence/v2"
 
 
 def _git_sha() -> str:
@@ -256,8 +256,11 @@ async def _run() -> dict[str, Any]:
     )
     return {
         "schema_version": SCHEMA_VERSION,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "git_sha": _git_sha(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        # 被测代码的 commit（生成 evidence 时的 HEAD，忽略未跟踪的 evidence 文件）。
+        # artifact 自身随后被提交到另一个 commit（artifact_commit_sha），生成时无法预知。
+        "tested_code_sha": _git_sha(),
+        "artifact_commit_sha": None,
         "overall_status": overall,
         "checks": checks,
     }

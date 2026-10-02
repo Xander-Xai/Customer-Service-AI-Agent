@@ -105,27 +105,38 @@
 - 新增 `docs/design/runtime-state-ownership.md`、`docs/decisions/009-*.md`、
   `docs/design/async-agent-worker-architecture.md`。
 
-## 9. 只需设计、不在本 PR 实现的能力
+## 9. 已实现 vs 仅设计（事实口径）
 
-- Redis/Celery durable task queue 的进一步化（异步路径已存在，但本任务定位为
-  「foundation」；不扩展 queue/DLQ 行为）。
-- 独立 Agent Worker Pool 扩缩容。
+**已实现（代码存在，本分支）**：Celery + Redis broker、`runtime/tasks.py`、
+`runtime/dispatch.py`、`POST/GET /api/runs`、`GET /api/runs/dead`、AgentRun 真相源、
+worker 消费 `run_id`、`acks_late` / `reject_on_worker_lost` / `visibility_timeout`、
+retry 基础（RETRYING + 退避）、dead-letter state + `agent_dead_letters` 表、独立
+compose `worker` service、Postgres checkpointer、Redis session、Redis per-thread
+lock、tool ledger + idempotency helper、Prometheus metrics。
+
+**仅设计（不在本 Foundation 实现）**：
+
+- Worker Pool autoscaling / 多队列编排（基础单 worker service 已实现）。
+- DLQ 运维闭环（replay / requeue / 告警）——当前只有 dead-letter state + 查询 API。
 - cross-process SSE event bridge（Redis Streams replay）。
+- backpressure / queue admission control。
+- lease renewal / fencing token（锁 stale-worker 边界）。
 - Kubernetes / HPA / Service Mesh / 分布式事务。
 - Kafka / RabbitMQ / Temporal / Saga / Outbox。
 
 ## 10. 本次结论（Foundation 定义）
 
-本次要补齐的**真实缺口**：
+本次收口补齐/收紧的**真实缺口**：
 
 1. **API 执行边界 per-thread 分布式锁**（REST/SSE/WS/multimodal 统一），
    拿不到锁返回明确 `THREAD_BUSY`（HTTP 409）。
 2. **生产强制 Redis Session**（fail-fast，不再静默回退 memory）。
 3. **多 Worker 配置一致性 gate**（`GUNICORN_WORKERS>1` + 生产 →
-   要求 postgres checkpoint + redis session + distributed lock）。
+   要求 postgres checkpoint + redis session + distributed lock；生产要求 celery
+   dispatch；lock TTL > task time limit）。
 4. **缺失的可运营 metrics** 与统一 trace/run/request/thread 日志字段。
 5. **通用 tool 幂等执行 helper**（ledger 已有，补包裹执行 + 测试）。
-6. **文档/ADR/ownership/async 设计/README Mermaid + 可复现 evidence 脚本**。
+6. **文档/ADR/ownership/async 设计/README Mermaid/面试 evidence + 可复现脚本**。
 
-已具备、无需重做的：Postgres checkpointer、Run 模型/迁移、worker 侧 thread
-lock、side-effect ledger、Celery 异步路径、fresh-DB migration 修复。
+已具备、无需重做的：Celery 异步链路、Postgres checkpointer、Run 模型/迁移、worker
+侧 thread lock、side-effect ledger、fresh-DB migration 修复。

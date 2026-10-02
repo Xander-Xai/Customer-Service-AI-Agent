@@ -19,23 +19,41 @@ Session 生产模板默认 memory、MessageBus/SharedBlackboard 是进程内对�
 - **PostgreSQL** 承担 durable state：LangGraph checkpoint（`AsyncPostgresSaver`）、
   Agent Run metadata（`agent_runs`）、tool 幂等 ledger（`tool_side_effects`）、
   dead letter（`agent_dead_letters`）。
-- **Redis** 承担 ephemeral coordination：per-thread 分布式锁
+- **Redis** 承担 ephemeral coordination 与 broker：per-thread 分布式锁
   （`agent:thread-lock:{thread_id}`，owner + TTL + Lua compare-and-delete）、
-  Session、Response cache L1。
+  Session、Response cache L1、Celery broker。
+- **Celery** 承担 background execution transport：`runtime.execute_agent_run`
+  消费 `run_id`，`acks_late` + `reject_on_worker_lost` + `visibility_timeout`。
 - **asyncio / 进程内** 承担 run-local 并发与通信：MessageBus、SharedBlackboard、
   SSE event queue、circuit breaker。
 - 生产 + 多 worker 强制一致性 gate（postgres checkpoint + redis session +
-  distributed lock），否则启动 fail-fast。
+  distributed lock + celery dispatch），否则启动 fail-fast。
+
+## Celery transport 边界（为什么 payload 只放 run_id）
+
+`Celery result backend != source of truth`；`AgentRun`（PostgreSQL）才是业务真相源
+（`runtime/celery_app.py::task_ignore_result=True`）。
+
+队列消息**只传 `run_id`**（`runtime/dispatch.py` → `apply_async(args=[run_id])`），
+不把 `prompt` / conversation state / tool results 塞进 broker，理由：
+
+- 避免 broker payload 膨胀（大 state 会拖慢 Redis 并增加序列化成本）；
+- 避免把敏感对话状态复制到 broker（减少泄露面）；
+- 避免 broker 事实源化（Redis 是 ephemeral，不能承担 canonical state）；
+- worker 可从 DB 恢复完整上下文（崩溃/重投递时更一致）；
+- 提高 retry / crash recovery 一致性（同一 run_id 重放读同一 DB 记录）。
 
 ## 理由
 
 - PostgreSQL 有事务/唯一约束/持久化，适合 canonical 状态与幂等最后防线；
-  Redis 有低延迟 TTL/原子操作，适合锁与会话；asyncio 零开销，适合 run-local。
+  Redis 有低延迟 TTL/原子操作，适合锁与会话；Celery 提供成熟的 at-least-once
+  投递与 worker-lost 重投递；asyncio 零开销，适合 run-local。
 - 替代方案：
   - 只用 sticky session：不能替代 durable state（实例重启/扩缩容即失效）。
   - 全量 Redis 化 Blackboard/MessageBus：无必要，且引入序列化与一致性成本。
   - 全局 `asyncio.Lock`：跨进程无效，是伪分布式。
   - 引入 Kafka/Temporal：当前规模不需要，增加运维复杂度。
+  - 自研队列：Celery + Redis 已覆盖，重复造轮子。
 
 ## 影响
 

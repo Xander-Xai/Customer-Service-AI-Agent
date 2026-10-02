@@ -361,30 +361,63 @@ flowchart LR
     LG --> LLM[LLM / Tools / ERP]
 ```
 
-**当前完成（本 PR 验证）**：API 多 Worker + durable PostgreSQL checkpoint +
-强制 Redis Session（生产 fail-fast）+ per-thread 分布式锁（REST/SSE/WS/multimodal
-统一，冲突返回 `THREAD_BUSY` 409）+ tool 幂等 ledger + 多 Worker 一致性启动 gate。
+**仓库此前已经具备** Celery + Redis 的异步 Agent Run 基础链路：`POST /api/runs` /
+`GET /api/runs/{run_id}`、`AgentRun` 真相源、`runtime/tasks.py` + `runtime/dispatch.py`、
+Celery worker（`acks_late` / `reject_on_worker_lost` / `visibility_timeout`）、
+独立 compose `worker` service、retry（`RETRYING` + 指数退避）与 dead-letter state。
 
-**下一阶段（仅设计，未实现）**：Redis/Celery durable task queue 深化 + 独立 Agent
-Worker Pool + retry/DLQ 强化 + cross-process SSE event bridge
-（[async-agent-worker-architecture](docs/design/async-agent-worker-architecture.md)）。
+**本轮 Distributed Runtime Foundation 主要补齐/收紧**：
+
+- API 快路径 per-thread distributed lock（REST/SSE/WS/multimodal 统一，冲突 409）；
+- API 与 Worker **共用同一** `agent:thread-lock:{thread_id}` key；
+- 生产 Redis Session fail-fast（不再静默回退 memory）；
+- multi-worker configuration gate（含 lock TTL > task time limit）；
+- tool idempotency helper（`execute_idempotent_operation`）；
+- distributed runtime metrics；
+- 真实 PostgreSQL + Redis evidence + 架构一致性 contract 测试。
+
+**本轮没有继续扩展**：Redis Streams SSE bridge、完整 DLQ 运维闭环
+（replay/requeue/告警）、大规模 Worker Pool autoscaling、backpressure/admission
+control、Kubernetes/HPA、multi-region。
 
 **异步 Run 路径（已实现）**：`POST /api/runs` 创建 RunRecord(`QUEUED`) 并入队立即
-返回 `run_id`；`GET /api/runs/{run_id}` polling；`GET /api/runs/dead` 查询 DLQ。
-Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是 `agent_runs` 表
-（Celery result backend 不是真相源）。
+返回 `run_id`；`GET /api/runs/{run_id}` polling；`GET /api/runs/dead` 查询
+dead-letter 记录。Celery + Redis worker 独立于 API 进程执行 LangGraph，状态真相源是
+`agent_runs` 表（Celery result backend 不是真相源，`task_ignore_result=True`）。
 
 **三个 ID**：`thread_id`（对话级，多轮复用） / `run_id`（单轮执行，唯一） /
-`task_id`（队列消息 / Worker 执行 ID）。
+`task_id`（队列消息 / Worker 执行 ID）。**快路径与异步路径共用同一 thread lock
+key，因此不能同时修改同一 conversation thread。**
 
 **可靠性能力（诚实边界）**：at-least-once delivery + application-level run 幂等；
 per-thread 分布式互斥（Redis 锁）；external PostgreSQL checkpoint；transient retry
 （指数退避 + jitter，上限 `AGENT_RUN_MAX_ATTEMPTS`）；retry 用尽进入
-application-level DLQ（`agent_dead_letters` 可查询）；worker 崩溃后经 broker
+application-level **dead-letter state / terminal failure foundation**
+（`agent_dead_letters` 可查询；**DLQ 运维闭环尚未完成**）；worker 崩溃后经 broker
 redelivery 恢复。**不**宣称 exactly-once、任意指令级无损恢复或 broker-native DLX。
 
+### Distributed Runtime Evidence Boundary
+
+> 面试一眼判断能力边界，避免夸大。
+
+**Implemented（代码存在）**：PostgreSQL Checkpoint、Redis Session、Redis per-thread
+Lock、AgentRun PostgreSQL truth source、Celery + Redis Broker、Celery Worker
+execution、run_id dispatch、`acks_late`、`reject_on_worker_lost`、
+`visibility_timeout`、retry 基础、tool side-effect ledger、tool idempotency helper、
+Prometheus metrics。
+
+**Locally Verified（有真实命令 + artifact）**：checkpoint cross-process、
+same-thread serialization、different-thread parallelism、tool idempotency、
+worker crash recovery、fresh DB migration、真实 PostgreSQL/Redis integration。
+见 `artifacts/distributed-runtime/` 与 `scripts/verify_distributed_runtime.py`。
+
+**Not Production Verified（未验证，勿声称）**：真实公网生产集群、多副本长期稳定
+运行、真实用户流量、真实 ERP 写操作、真实退款/工单副作用、大规模 queue backlog、
+Kubernetes autoscaling、multi-region、cross-process SSE replay。
+
 配置与设计见 [.env.example](.env.example)、
-[docs/design/distributed-agent-runtime.md](docs/design/distributed-agent-runtime.md)。
+[docs/design/distributed-agent-runtime.md](docs/design/distributed-agent-runtime.md)、
+[面试 Evidence](docs/reference/distributed-runtime-interview-evidence.md)。
 崩溃恢复复现：`scripts/repro_worker_crash_recovery.sh`；
 分布式运行时验证：`scripts/verify_distributed_runtime.py`（需真实 Redis + PostgreSQL）。
 
