@@ -131,7 +131,11 @@ async def test_transient_retry_then_success(env):
     second = await _run(service, run["id"], runtime, dispatcher, lock)
     assert second == RunStatus.SUCCEEDED.value
     assert service.get_run(run["id"])["attempt"] == 2
-    assert counter_value("agent_run_retry_total") >= retries_before + 1
+    # retry metric 仅在 prometheus_client 可用时存在（CI 可能未安装）
+    from core.monitoring import PROMETHEUS_BUSINESS_ENABLED
+
+    if PROMETHEUS_BUSINESS_ENABLED:
+        assert counter_value("agent_run_retry_total") >= retries_before + 1
 
 
 # ---------------------------------------------------------------------------
