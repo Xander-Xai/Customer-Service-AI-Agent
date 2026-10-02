@@ -1,0 +1,148 @@
+{
+  "schema_version": "rag-eval-evidence/v2",
+  "run_id": "preflight-20261002T194209Z",
+  "timestamp": "2026-10-02T19:42:09.776253+00:00",
+  "status": "BLOCKED",
+  "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+  "blockers": [
+    {
+      "code": "EMBEDDING_PROVIDER_AUTH",
+      "stage": "embedding",
+      "blocking": true,
+      "blocks_experiments": [
+        "vector_only",
+        "hybrid_no_rerank",
+        "hybrid_rerank"
+      ],
+      "blocks_corpus_import": true,
+      "http_status": 401,
+      "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行"
+    },
+    {
+      "code": "VECTOR_INDEX_EMPTY",
+      "stage": "qdrant",
+      "blocking": true,
+      "blocks_experiments": [
+        "vector_only",
+        "bm25_only",
+        "hybrid_no_rerank",
+        "hybrid_rerank"
+      ],
+      "detail": "评测 collection 全部为 0 points；BM25 索引由 Qdrant 重建，因此 bm25_only 同样被阻塞；修复根因后运行 python3 scripts/import_eval_corpus.py 导入语料",
+      "caused_by": "EMBEDDING_PROVIDER_AUTH"
+    },
+    {
+      "code": "RERANKER_PROVIDER_AUTH",
+      "stage": "reranker",
+      "blocking": false,
+      "blocks_experiments": [
+        "hybrid_rerank"
+      ],
+      "http_status": 401,
+      "detail": "reranker 探针未确认真实 rerank（silent_fallback 或 API 失败）；仅阻塞 hybrid_rerank，其余实验照常运行"
+    }
+  ],
+  "git_sha": "260662213a7160850cf42c7543f2832d2adcf3f4+dirty",
+  "benchmark": {
+    "sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+    "declared_queries": 649,
+    "executed_queries": 649
+  },
+  "environment": {
+    "python": "3.10.12",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35"
+  },
+  "config": {
+    "vector_db_mode": "qdrant_only",
+    "hybrid_search_enabled": true,
+    "hybrid_vector_top_k": 8,
+    "hybrid_bm25_top_k": 8,
+    "hybrid_rrf_k": 60,
+    "rag_n_results": 3,
+    "rag_query_rewriting": false,
+    "embedding_model": "BAAI/bge-large-zh-v1.5",
+    "embedding_dim": 1024,
+    "reranker_model": "BAAI/bge-reranker-v2-m3"
+  },
+  "preflight": {
+    "qdrant": {
+      "reachable": true,
+      "versions": {
+        "client": "1.18.0",
+        "server": "1.12.0"
+      },
+      "collections": {
+        "product_knowledge": 0,
+        "faq": 0,
+        "tech_support": 0,
+        "complaint_knowledge": 0
+      },
+      "total_points": 0
+    },
+    "embedding": {
+      "configured": true,
+      "probe": "failed",
+      "error": "EmbeddingUnavailableError",
+      "detail": "embedding unavailable: encode_failed (provider='ApiEmbedding', model='BAAI/bge-large-zh-v1.5')",
+      "http_status": 401
+    },
+    "bm25_rebuild": {
+      "executed": true,
+      "readiness": "BM25Readiness.READY",
+      "document_count": 0
+    },
+    "reranker": {
+      "configured": true,
+      "model": "BAAI/bge-reranker-v2-m3",
+      "probe": "silent_fallback",
+      "http_status": 401,
+      "detail": "rerank API 调用失败或未附加 rerank_score（ApiReranker 静默回退）"
+    },
+    "status": "BLOCKED",
+    "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+    "blockers": [
+      {
+        "code": "EMBEDDING_PROVIDER_AUTH",
+        "stage": "embedding",
+        "blocking": true,
+        "blocks_experiments": [
+          "vector_only",
+          "hybrid_no_rerank",
+          "hybrid_rerank"
+        ],
+        "blocks_corpus_import": true,
+        "http_status": 401,
+        "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行"
+      },
+      {
+        "code": "VECTOR_INDEX_EMPTY",
+        "stage": "qdrant",
+        "blocking": true,
+        "blocks_experiments": [
+          "vector_only",
+          "bm25_only",
+          "hybrid_no_rerank",
+          "hybrid_rerank"
+        ],
+        "detail": "评测 collection 全部为 0 points；BM25 索引由 Qdrant 重建，因此 bm25_only 同样被阻塞；修复根因后运行 python3 scripts/import_eval_corpus.py 导入语料",
+        "caused_by": "EMBEDDING_PROVIDER_AUTH"
+      },
+      {
+        "code": "RERANKER_PROVIDER_AUTH",
+        "stage": "reranker",
+        "blocking": false,
+        "blocks_experiments": [
+          "hybrid_rerank"
+        ],
+        "http_status": 401,
+        "detail": "reranker 探针未确认真实 rerank（silent_fallback 或 API 失败）；仅阻塞 hybrid_rerank，其余实验照常运行"
+      }
+    ],
+    "hint": "修复 provider 认证（http_status 见 blockers），然后重新运行 make rag-eval-import 导入语料"
+  },
+  "notes": [
+    "formal evaluation not run; no metrics generated",
+    "credential material is never recorded; only availability/probe outcome and provider HTTP status codes",
+    "blocker semantics v2: primary_blocker is the root cause; downstream symptoms (e.g. VECTOR_INDEX_EMPTY) carry caused_by links to it"
+  ]
+}

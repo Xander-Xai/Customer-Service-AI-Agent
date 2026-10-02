@@ -1,0 +1,24 @@
+{
+  "schema": "crash-kill-gate-probe/v1",
+  "generated_at": "2026-10-02T19:17:19.557228+00:00",
+  "git_sha": "260662213a7160850cf42c7543f2832d2adcf3f4",
+  "git_dirty": true,
+  "langgraph_version": "1.2.12",
+  "cycles_requested": 120,
+  "cycles_measured": 120,
+  "cycles_gate_unreached": 0,
+  "kill_before_durable_cycles": 4,
+  "kill_before_durable_rate": 0.0333,
+  "durable_first_channel": "branch:to:second",
+  "replicates_gate_from": "tests/integration/runtime/test_worker_checkpoint_recovery.py@617cbe0 (count(*) >= 1)",
+  "probe_poll_seconds": 0.3,
+  "duration_seconds": 263.87,
+  "artifacts_dir": "/tmp/opencode/main-work/artifacts/flake-investigation/killgate-20261002T191255Z",
+  "verdict": "RACE_DEMONSTRATED",
+  "hit_cycles": [
+    7,
+    8,
+    55,
+    103
+  ]
+}

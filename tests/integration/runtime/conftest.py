@@ -132,3 +132,106 @@ def side_effect_store(pg_engine):
     from runtime.side_effects import SideEffectStore
 
     return SideEffectStore(session_factory=_session_factory(pg_engine))
+
+
+@pytest.hookimpl(hookwrapper=True, tryfirst=True)
+def pytest_runtest_makereport(item, call):
+    """Attach each phase report to its node, and snapshot failures at once.
+
+    Without the ``setattr``, a fixture cannot tell a failing test from a passing
+    one, and the diagnostics below would have to guess.
+
+    The ``call`` phase report is emitted after the test body finishes but
+    **before** its teardown fixtures run, which is the only moment where the
+    failing test's own rows and broker keys still exist. That is why the
+    snapshot happens here rather than in a fixture: by teardown time the evidence
+    has already been cleaned up.
+
+    Only failures are captured. Snapshotting every passing run would write an
+    artifact per test per suite run, which is both noise and enough I/O to
+    perturb a suite that is being measured for timing.
+    """
+    outcome = yield
+    rep = outcome.get_result()
+    setattr(item, f"rep_{rep.when}", rep)
+    if rep.when != "call" or not rep.failed:
+        return
+    try:
+        from tests.integration.runtime.crash_diagnostics import write_suite_snapshot
+
+        path = write_suite_snapshot(
+            phase="at_failure",
+            nodeid=item.nodeid,
+            outcome="failed",
+            extra={
+                "when": "makereport(call), before teardown fixtures",
+                "note": (
+                    "state at the moment of failure, with the failing test's own "
+                    "rows and broker keys still present"
+                ),
+                "failure_text": str(rep.longrepr)[:8000] if rep.longrepr else None,
+            },
+        )
+        if path is not None:
+            item.user_properties.append(("runtime_diagnostics_at_failure", str(path)))
+            print(f"\n[runtime-diagnostics] at-failure artifact: {path}")
+    except Exception as exc:  # noqa: BLE001 - never mask the real failure
+        print(f"[runtime-diagnostics] snapshot failed: {type(exc).__name__}: {exc}")
+
+
+@pytest.fixture(autouse=True)
+def failure_diagnostics(request, record_property):
+    """After teardown, record any state a failing test left behind.
+
+    Why this is a directory-wide hook and not per-test code
+    -------------------------------------------------------
+    The recorded Gate 7 symptom is *"1 failure in 7 real-infra suite runs"* — a
+    **suite-level** rate. A snapshot scoped to one test cannot distinguish
+
+    * "this run raced", from
+    * "an earlier test in the same process corrupted shared state".
+
+    Three tests here (``test_worker_checkpoint_recovery``,
+    ``test_tool_idempotency``, ``test_queue_worker_decoupling``) each SIGKILL a
+    worker and each ``DELETE`` the Redis broker's **global** ``unacked`` /
+    ``unacked_index`` bookkeeping — those keys are not per-queue. Whether a
+    leaked worker process or a surviving broker key was present after teardown is
+    exactly the evidence needed, and it is only observable at suite scope.
+
+    What it records
+    ---------------
+    Read-only: live ``celery_worker_runner`` processes, the broker's global
+    bookkeeping plus every ``agent_runs_test_*`` queue with its depth, the
+    production ``agent_runs`` queue depth, and the PostgreSQL state (runs grouped
+    by status, all non-terminal runs, checkpoint row counts).
+
+    Cost and scope: it runs **only on failure**, and it never writes to
+    PostgreSQL, never publishes to the broker and never signals a process, so it
+    cannot perturb what it is measuring. Artifacts land in
+    ``artifacts/runtime-diagnostics/`` (override with ``RUNTIME_DIAGNOSTICS_DIR``).
+    """
+    yield
+    rep = getattr(request.node, "rep_call", None)
+    if rep is None or not rep.failed:
+        return
+    try:
+        from tests.integration.runtime.crash_diagnostics import write_suite_snapshot
+
+        path = write_suite_snapshot(
+            phase="post_teardown",
+            nodeid=request.node.nodeid,
+            outcome="failed",
+            extra={
+                "when": "after the failing test's teardown fixtures",
+                "note": (
+                    "state captured after teardown, so a live worker process or a "
+                    "surviving broker key reported here is a leak, not a transient"
+                ),
+                "failure_text": str(rep.longrepr)[:8000] if rep.longrepr else None,
+            },
+        )
+        if path is not None:
+            record_property("runtime_diagnostics_post_teardown", str(path))
+            print(f"\n[runtime-diagnostics] post-teardown artifact: {path}")
+    except Exception as exc:  # noqa: BLE001 - never mask the real failure
+        print(f"[runtime-diagnostics] snapshot failed: {type(exc).__name__}: {exc}")
