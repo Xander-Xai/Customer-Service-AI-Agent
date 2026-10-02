@@ -232,6 +232,11 @@ class ToolSideEffect(Base):
     result_reference = Column(JSON, nullable=True)
     error_type = Column(String(16), nullable=True)
     error_message = Column(Text, nullable=True)
+    # 认领所有权：只有持有当前 claim_owner 的执行者才能把这次副作用标记为
+    # 成功/失败。否则并发重试可能互相覆盖结果（两个 worker 都在跑同一笔写操作时，
+    # 后完成的那个会盖掉先完成的结果）。
+    claim_owner = Column(String(64), nullable=True)
+    claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at = Column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow

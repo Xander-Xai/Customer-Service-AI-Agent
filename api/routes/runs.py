@@ -34,12 +34,16 @@ logger = get_logger("api.runs")
 
 _IDEMPOTENCY_ENDPOINT = "POST:/api/runs"
 
+#: 调用方可提交的原始 Idempotency-Key 上限。header 与 body **必须一致** —— 之前
+#: body 有 128 上限而 ``Idempotency-Key`` header 完全没有校验，导致契约不统一。
+IDEMPOTENCY_KEY_INPUT_MAX = 128
+
 
 class CreateRunRequest(BaseModel):
     query: str = Field(..., max_length=MAX_QUERY_LENGTH)
     session_id: str = Field(default="", max_length=36)
     session_token: str = Field(default="", max_length=64)
-    idempotency_key: str | None = Field(default=None, max_length=128)
+    idempotency_key: str | None = Field(default=None, max_length=IDEMPOTENCY_KEY_INPUT_MAX)
 
 
 def _get_service(request: Request) -> RunService:
@@ -105,6 +109,12 @@ async def create_run(
 
     service = _get_service(request)
     raw_key = (idempotency_key or data.idempotency_key or "").strip()
+    if len(raw_key) > IDEMPOTENCY_KEY_INPUT_MAX:
+        # header 与 body 走同一契约：超限直接 400，而不是等 DB 报 value too long。
+        return JSONResponse(
+            {"error": f"Idempotency-Key 长度超限（上限 {IDEMPOTENCY_KEY_INPUT_MAX}）"},
+            status_code=400,
+        )
     scoped_key = (
         build_idempotency_scope(session.user_id, _IDEMPOTENCY_ENDPOINT, raw_key)
         if raw_key
