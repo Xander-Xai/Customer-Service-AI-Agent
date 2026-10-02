@@ -84,8 +84,22 @@ QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
 | Locking | 单 Redis 上的 per-thread 跨进程互斥（owner + TTL + 原子释放） | Redlock 集群 / 多 Redis 容灾 |
 | Retry | transient/timeout 指数退避 + jitter + max_attempts 上限 | 无上限重试 |
 | Checkpoint | external PostgreSQL 持久化；node/checkpoint-boundary 恢复 | 任意 Python 指令级无损恢复 |
-| DLQ | application-level（`agent_dead_letters` 可查询） | broker-native DLX |
+| DLQ | application-level **dead-letter state / terminal failure foundation**（`agent_dead_letters` 可查询） | broker-native DLX；replay/requeue 运维闭环（未实现） |
 | 工具副作用 | 同 Agent 不重复发起同一副作用（ledger 去重） | 下游系统端到端幂等（需下游接受 idempotency key） |
+
+### 5.1 锁 TTL 过期边界（重要）
+
+当前机制：Redis lock + owner token + TTL + Lua compare-and-delete。
+
+- **能解决**：A 的锁超时被 B 获取后，A 的释放**不会**误删 B 的锁（owner-safe release）。
+- **不能严格解决**：A 长时间 pause（GC/网络/宿主机卡顿）超过 TTL → B 获取锁 → A 恢复
+  继续执行 → A 与 B 可能同时修改同一 thread。当前**没有** lease renewal / heartbeat /
+  fencing token / DB version check。
+
+当前缓解：`AGENT_RUN_THREAD_LOCK_TTL_SECONDS > AGENT_RUN_TASK_TIME_LIMIT + safety
+margin`（启动校验，`core/config.py::validate_distributed_runtime_settings`）+
+checkpoint/idempotency + 任务超时。若进入更严格生产场景，应增加 lease renewal 或
+fencing token（下一阶段设计，不在本 Foundation 实现）。
 
 ## 6. 执行流程（Worker）
 

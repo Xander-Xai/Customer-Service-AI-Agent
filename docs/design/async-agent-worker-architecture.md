@@ -1,7 +1,12 @@
-# Async Agent Worker Architecture（设计；部分已实现）
+# Async Agent Worker Architecture（基础已实现；深化为设计）
 
-> Status: DESIGN（下一阶段）。本文描述异步 Agent Worker 的目标架构与失败语义。
+> Status: 基础链路 **IMPLEMENTED**；本文其余部分为 DESIGN（下一阶段深化）。
 > **明确区分已实现 / 设计**，不得把设计当成已实现。
+>
+> 已实现基础：Celery + Redis broker、`runtime/tasks.py`、`runtime/dispatch.py`、
+> `POST/GET /api/runs`、AgentRun 真相源、worker 消费 `run_id`、`acks_late` /
+> `reject_on_worker_lost` / `visibility_timeout`、retry 基础、dead-letter state。
+> 本文的 worker pool autoscaling / DLQ 运维闭环 / SSE bridge / backpressure 为设计。
 
 ## 目标
 
