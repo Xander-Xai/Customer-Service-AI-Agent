@@ -55,6 +55,104 @@ def _new_worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
+def _awaiting_approval(result: Any) -> bool:
+    """执行结果是否表示图正挂在人工审批的 interrupt 上。
+
+    LangGraph 在 interrupt 时不抛异常，而是在返回值注入 ``__interrupt__``。实测
+    （langgraph 1.2.12）：该 key 非空 == 节点待重放 == 需要人工决策。
+    """
+    if not isinstance(result, dict):
+        return False
+    return bool(result.get("__interrupt__"))
+
+
+def _build_resume_command(run_id: str) -> Any:
+    """构造审批恢复用的 ``Command(resume=<decision>)``；无可消费决策时返回 None。
+
+    ``ApprovalService.consume_resume`` 以 ``WHERE resumed_at IS NULL`` 原子认领，
+    因此 at-least-once 重投递 / 多 worker 并发恢复时**只有一个**能拿到决策并真正
+    恢复执行；其余返回 None，本次不碰 run 状态。
+
+    返回 None 的三种情况：审批仍在 PENDING 未过期 / 已被他人消费 / 该 run 根本
+    没有审批记录。前两种是正常等待，第三种说明状态机被外部改坏（保守不动）。
+    """
+    try:
+        from core.hitl.approval_service import get_approval_service
+
+        decision = get_approval_service().consume_resume(run_id)
+    except Exception as e:  # pragma: no cover - 审批服务不可用时不误恢复
+        logger.error(
+            "读取审批决策失败 run_id=%s err=%s（不恢复，保持等待）",
+            run_id,
+            type(e).__name__,
+        )
+        return None
+    if decision is None:
+        return None
+    try:
+        from langgraph.types import Command
+    except Exception:  # pragma: no cover - langgraph 必有 Command
+        return None
+    logger.info(
+        "审批决策已消费 run_id=%s action=%s decision=%s approval=%s",
+        run_id,
+        decision.get("action"),
+        decision.get("decision"),
+        decision.get("approval_id"),
+    )
+    return Command(resume=decision)
+
+
+async def _park_for_approval(svc: RunService, run_id: str, result: Any) -> str:
+    """RUNNING -> WAITING_APPROVAL：图挂起等人工决策。
+
+    刻意**不算成功也不算失败**：既不 ``mark_succeeded``（副作用还没发生）也不进
+    ``_handle_failure``（这不是失败，不该消耗 retry / 进 DLQ）。WAITING_APPROVAL
+    是非终态，审批 API 决策后会重新 dispatch 该 run。
+    """
+    interrupt_payload = None
+    if isinstance(result, dict):
+        items = result.get("__interrupt__") or []
+        if items:
+            first = items[0]
+            interrupt_payload = getattr(first, "value", None)
+    try:
+        svc.mark_waiting_approval(run_id)
+    except InvalidRunTransition:
+        latest = svc.get_run(run_id)
+        return str(latest["status"]) if latest else "MISSING"
+    metrics.record_run_status(RunStatus.WAITING_APPROVAL.value)
+    metrics.record_worker_task("waiting_approval")
+    action = (interrupt_payload or {}).get("action") if isinstance(interrupt_payload, dict) else None
+    logger.info(
+        "高风险操作挂起等待人工审批 run_id=%s action=%s", run_id, action
+    )
+    return RunStatus.WAITING_APPROVAL.value
+
+
+def _runtime_accepts_resume(run_callable: Any) -> bool:
+    """注入的 ``runtime.run()`` 是否接受 ``resume_command``。
+
+    签名不可判定时（``**kwargs``、C 函数、mock）一律返回 True：宁可让下游自己
+    报错，也不要在**没有**审批要恢复的普通路径上误判。
+    """
+    import inspect
+
+    try:
+        sig = inspect.signature(run_callable)
+    except (TypeError, ValueError):
+        return True
+    for param in sig.parameters.values():
+        if param.kind is inspect.Parameter.VAR_KEYWORD:
+            return True
+        if param.name == "resume_command" and param.kind in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return True
+    return False
+
+
 def _config():
     from core import config
 
@@ -149,13 +247,42 @@ async def execute_run(
                 )
 
         try:
+            resuming_approval = status == RunStatus.WAITING_APPROVAL.value
+
+            # 审批恢复：先把该 run 已决策的审批**原子消费**掉，再决定是否真的恢复。
+            # 消费不到（仍在 PENDING 未过期 / 已被别的 worker 消费）就不动 run 状态。
+            resume_command = None
+            if resuming_approval:
+                resume_command = _build_resume_command(run_id)
+
+            # mark_running 语义是「领取」，可能返回 None（他人持有有效 lease）；
+            # mark_resumed_running 恒返回记录。显式标注联合类型，否则首个赋值分支
+            # 会把 running 收窄成 dict，后续 `if running is None` 分支就变成
+            # 不可达（mypy 会因此在 else 分支报 assignment 错误）。
+            running: dict[str, Any] | None
             try:
-                running = svc.mark_running(
-                    run_id,
-                    worker_id=owner,
-                    task_id=task_id,
-                    lease_seconds=cfg.AGENT_RUN_LEASE_SECONDS,
-                )
+                if resuming_approval and resume_command is not None:
+                    # WAITING_APPROVAL -> RUNNING，且**不递增 attempt**
+                    # （等待人不是失败，不能消耗 AGENT_RUN_MAX_ATTEMPTS）。
+                    running = svc.mark_resumed_running(
+                        run_id,
+                        worker_id=owner,
+                        task_id=task_id,
+                        lease_seconds=cfg.AGENT_RUN_LEASE_SECONDS,
+                    )
+                elif resuming_approval:
+                    # 没有可消费的决策：审批仍在等待（或已被他人恢复）。
+                    logger.info(
+                        "run=%s 仍无可消费的审批决策，保持 WAITING_APPROVAL", run_id
+                    )
+                    return RunStatus.WAITING_APPROVAL.value
+                else:
+                    running = svc.mark_running(
+                        run_id,
+                        worker_id=owner,
+                        task_id=task_id,
+                        lease_seconds=cfg.AGENT_RUN_LEASE_SECONDS,
+                    )
             except InvalidRunTransition:
                 latest = svc.get_run(run_id)
                 return str(latest["status"]) if latest else "MISSING"
@@ -201,11 +328,24 @@ async def execute_run(
 
                     runtime_provider = get_default_runtime
                 runtime = await runtime_provider()
-                result = await runtime.run(
-                    thread_id=thread_id,
-                    query=run["query"],
-                    user_id=run.get("user_id"),
-                )
+                run_kwargs: dict[str, Any] = {
+                    "thread_id": thread_id,
+                    "query": run["query"],
+                    "user_id": run.get("user_id"),
+                }
+                if resume_command is not None:
+                    # 只在**确实要恢复审批**时才传该 kwarg：``runtime_provider`` 是
+                    # 公开注入点，既有实现（测试替身 / 自定义 runtime）普遍按固定
+                    # 签名实现 run()，无条件多传会让所有普通执行都 TypeError。
+                    if not _runtime_accepts_resume(runtime.run):
+                        # 静默忽略会把「审批已决策」吞掉：图永远不恢复，run 卡在
+                        # WAITING_APPROVAL。宁可响亮失败（走 permanent -> DLQ 可观测）。
+                        raise TypeError(
+                            "注入的 runtime.run() 不支持 resume_command；"
+                            "无法恢复人工审批（human-in-the-loop 需要该参数支持）"
+                        )
+                    run_kwargs["resume_command"] = resume_command
+                result = await runtime.run(**run_kwargs)
             except Exception as e:
                 error_type = classify_exception(e)
                 error_code = type(e).__name__
@@ -227,6 +367,10 @@ async def execute_run(
                     worker_id=owner,
                 )
             else:
+                if _awaiting_approval(result):
+                    # 图挂在 interrupt 上等人工：不是成功，也不是失败。
+                    # 转入 WAITING_APPROVAL（非终态），等审批 API 决策后 dispatch。
+                    return await _park_for_approval(svc, run_id, result)
                 svc.mark_succeeded(run_id, result)
                 with contextlib.suppress(Exception):
                     await _publish(

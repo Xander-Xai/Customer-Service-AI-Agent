@@ -50,9 +50,9 @@ def pg_engine(pg_url: str):
     from sqlalchemy import create_engine
 
     engine = create_engine(pg_url, pool_pre_ping=True)
-    from db.models import AgentDeadLetter, AgentRun, ToolSideEffect
+    from db.models import AgentDeadLetter, AgentRun, HumanApproval, ToolSideEffect
 
-    for table in (AgentRun, AgentDeadLetter, ToolSideEffect):
+    for table in (AgentRun, AgentDeadLetter, ToolSideEffect, HumanApproval):
         table.__table__.create(engine, checkfirst=True)
     yield engine
     engine.dispose()
