@@ -56,15 +56,25 @@ _PROVIDER = "tests.integration.side_effect_provider:provide"
 _VISIBILITY_TIMEOUT = 5
 _BLOCK_SECONDS = 25
 
-_REDIS_KEYS = (
-    "idem:counter",
-    "idem:ledger_hits",
-    "idem:phase",
-    "idem:tool_invocations",
-)
+
+#: 本次 run 专用的 Redis key 名称。**必须**按 run 打标签（见 ``_worker_env``
+#: 的 SIDE_EFFECT_KEY_PREFIX）：这四个 key 曾是全局固定的
+#: ``idem:counter / idem:ledger_hits / idem:phase / idem:tool_invocations``。
+#: 用例开头的 ``client.delete`` 只能清掉**当时**的值；一个仍存活的 worker 进程
+#: 之后继续写同一组 key，本用例的计数断言就会失真。是否就是某次
+#: ``hits >= 1`` 偶发失败的确切交错尚未复现（未抓到失败现场），但「共享命名空间
+#: + 残留进程」这一前提本身已被证实：``finally`` 漏掉 worker_a 时确实会留下
+#: 存活的 Celery 进程。按 run 隔离后本用例不再依赖「机器上没有别人碰过这些 key」。
+def _redis_keys(prefix: str) -> tuple[str, ...]:
+    return (
+        f"{prefix}:counter",
+        f"{prefix}:ledger_hits",
+        f"{prefix}:phase",
+        f"{prefix}:tool_invocations",
+    )
 
 
-def _worker_env(queue: str) -> dict[str, str]:
+def _worker_env(queue: str, key_prefix: str) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
@@ -81,6 +91,7 @@ def _worker_env(queue: str) -> dict[str, str]:
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": _PROVIDER,
             "SIDE_EFFECT_BLOCK_SECONDS": str(_BLOCK_SECONDS),
+            "SIDE_EFFECT_KEY_PREFIX": key_prefix,
             "LANGGRAPH_CHECKPOINT_BACKEND": "postgres",
         }
     )
@@ -137,9 +148,11 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
     run_id = f"idem-{tag}"
     thread_id = f"T-idem-{tag}"
     queue = f"agent_runs_test_{tag}"
+    key_prefix = f"idem:{tag}"
+    redis_keys = _redis_keys(key_prefix)
 
     client = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
-    client.delete("unacked", "unacked_index", queue, *_REDIS_KEYS)
+    client.delete("unacked", "unacked_index", queue, *redis_keys)
 
     with engine.begin() as conn:
         conn.execute(
@@ -159,7 +172,7 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
     )
 
     def counter():
-        return int(client.get("idem:counter") or 0)
+        return int(client.get(f"{key_prefix}:counter") or 0)
 
     def status():
         with engine.connect() as conn:
@@ -168,8 +181,14 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
                 {"id": run_id},
             ).fetchone()
 
-    env = _worker_env(queue)
+    env = _worker_env(queue, key_prefix)
+    # 记录所有已启动的 worker：``finally`` 必须收掉**每一个**，包括崩溃窗口之前
+    # 就断言失败的情况。此前只 stop 了 worker_b，worker_a 在提前失败时会泄漏成
+    # 存活的 Celery 进程（实测注入一次提前失败即残留 2 个孤儿 worker），继续消费
+    # 队列并写共享 key，污染后续所有运行。
+    started: list[subprocess.Popen] = []
     worker_a = _start_worker(env, "/tmp/csai-idem-worker-a.log")
+    started.append(worker_a)
     worker_b = None
     try:
         # 1) 等副作用真实落地（counter == 1），此时工具已成功但图还在阻塞
@@ -191,6 +210,7 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
         # 3) 等未 ACK 消息重新可见，启动 Worker B
         time.sleep(_VISIBILITY_TIMEOUT + 3)
         worker_b = _start_worker(env, "/tmp/csai-idem-worker-b.log")
+        started.append(worker_b)
 
         final = _wait_for(
             lambda: (r := status()) is not None
@@ -209,8 +229,11 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
         )
 
         # 5) 并且确实重投过（否则 counter==1 只是因为没重跑）
-        invocations = int(client.get("idem:tool_invocations") or 0)
-        hits = int(client.get("idem:ledger_hits") or 0)
+        # ``ledger_hits`` 由 provider 在**观测到副作用计数器没变**时递增，
+        # 即「execute_raw 返回了 ledger 历史结果、handler 未执行」，因此它证明的
+        # 是 ledger 真的生效，而不是「节点又跑了一遍」。
+        invocations = int(client.get(f"{key_prefix}:tool_invocations") or 0)
+        hits = int(client.get(f"{key_prefix}:ledger_hits") or 0)
         assert invocations >= 2, f"工具应被再次调用，实际 {invocations} 次"
         assert hits >= 1, f"第二次调用应命中 ledger，实际命中 {hits} 次"
 
@@ -230,8 +253,10 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
             ).scalar()
         assert count == 1, f"ledger 不应出现重复行，实际 {count}"
     finally:
-        if worker_b is not None:
-            _stop_worker(worker_b)
+        # 收掉**所有**已启动的 worker（含崩溃窗口之前就失败的情况），杜绝孤儿
+        # Celery 进程存活并继续写共享 key。
+        for proc in started:
+            _stop_worker(proc)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
             conn.execute(
@@ -243,7 +268,7 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
             conn.execute(
                 text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id}
             )
-        client.delete(*_REDIS_KEYS, queue, "unacked", "unacked_index")
+        client.delete(*redis_keys, queue, "unacked", "unacked_index")
         client.close()
 
 

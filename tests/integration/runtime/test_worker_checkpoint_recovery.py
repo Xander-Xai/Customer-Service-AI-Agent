@@ -62,15 +62,18 @@ _VISIBILITY_TIMEOUT = 5
 _LEASE_SECONDS = 3
 _BLOCK_SECONDS = 25
 
-_CKPT_KEYS = (
-    "ckpt:node_first",
-    "ckpt:node_second",
-    "ckpt:trace",
-    "ckpt:recovered",
-)
+
+def _ckpt_keys(prefix: str) -> tuple[str, ...]:
+    """本次 run 专用的 provider key（见 checkpoint_resume_provider 的 KEY_PREFIX）。"""
+    return (
+        f"{prefix}:node_first",
+        f"{prefix}:node_second",
+        f"{prefix}:trace",
+        f"{prefix}:recovered",
+    )
 
 
-def _worker_env(queue: str) -> dict[str, str]:
+def _worker_env(queue: str, key_prefix: str) -> dict[str, str]:
     env = dict(os.environ)
     env.update(
         {
@@ -88,6 +91,7 @@ def _worker_env(queue: str) -> dict[str, str]:
             "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(_LEASE_SECONDS),
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": _PROVIDER,
+            "CHECKPOINT_RESUME_KEY_PREFIX": key_prefix,
             "CKPT_BLOCK_SECONDS": str(_BLOCK_SECONDS),
             # 关键：必须是 postgres。memory 只能证明重跑，证明不了续跑。
             "LANGGRAPH_CHECKPOINT_BACKEND": "postgres",
@@ -158,9 +162,11 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
 
     # 独立队列：隔离本次测试与任何遗留 worker
     queue = f"agent_runs_test_{tag}"
+    key_prefix = f"ckpt:{tag}"
+    ckpt_keys = _ckpt_keys(key_prefix)
 
     client = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
-    client.delete("unacked", "unacked_index", queue, *_CKPT_KEYS)
+    client.delete("unacked", "unacked_index", queue, *ckpt_keys)
 
     with engine.begin() as conn:
         conn.execute(
@@ -198,13 +204,17 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
                 or 0
             )
 
-    env = _worker_env(queue)
+    env = _worker_env(queue, key_prefix)
+    # 记录所有已启动的 worker：``finally`` 必须收掉**每一个**，包括崩溃窗口之前
+    # 就断言失败的情况。此前只 stop 了 worker_b。
+    started: list[subprocess.Popen] = []
     worker_a = _start_worker(env, "/tmp/csai-ckpt-worker-a.log")
+    started.append(worker_a)
     worker_b = None
     try:
         # 1) 等 Worker A 跑完 first（已 checkpoint）并阻塞在 second
         entered_second = _wait_for(
-            lambda: int(client.get("ckpt:node_second") or 0) >= 1, 60
+            lambda: int(client.get(f"{key_prefix}:node_second") or 0) >= 1, 60
         )
         assert entered_second, "Worker A 未进入 second 节点"
 
@@ -213,7 +223,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         assert ckpts_before_crash, (
             "崩溃前 PostgreSQL checkpoints 表为空，无法证明断点续跑"
         )
-        first_before = int(client.get("ckpt:node_first") or 0)
+        first_before = int(client.get(f"{key_prefix}:node_first") or 0)
         assert first_before == 1, f"first 应恰好执行一次，实际 {first_before}"
 
         running = _wait_for(
@@ -229,6 +239,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         # 4) 等未 ACK 消息超过 visibility_timeout，启动 Worker B 触发 redelivery
         time.sleep(_VISIBILITY_TIMEOUT + 3)
         worker_b = _start_worker(env, "/tmp/csai-ckpt-worker-b.log")
+        started.append(worker_b)
 
         final = _wait_for(
             lambda: (r := row()) is not None
@@ -240,10 +251,10 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         assert final[0] == "SUCCEEDED", f"未恢复成功: {final}"
 
         # 5) 断点续跑证据：first 未被重跑，second 被重做
-        first_after = int(client.get("ckpt:node_first") or 0)
-        second_after = int(client.get("ckpt:node_second") or 0)
-        recovered = int(client.get("ckpt:recovered") or 0)
-        trace = client.lrange("ckpt:trace", 0, -1) or []
+        first_after = int(client.get(f"{key_prefix}:node_first") or 0)
+        second_after = int(client.get(f"{key_prefix}:node_second") or 0)
+        recovered = int(client.get(f"{key_prefix}:recovered") or 0)
+        trace = client.lrange(f"{key_prefix}:trace", 0, -1) or []
 
         assert first_after == 1, (
             f"first 被执行 {first_after} 次 —— 说明是从头重跑而非从 checkpoint 续跑；trace={trace}"
@@ -263,14 +274,16 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
             ).scalar()
         assert count == 1
     finally:
-        if worker_b is not None:
-            _stop_worker(worker_b)
+        # 收掉**所有**已启动的 worker。此前只 stop worker_b，worker_a 在提前失败
+        # 时会泄漏成存活的 Celery 进程，继续消费队列并改写共享 key。
+        for proc in started:
+            _stop_worker(proc)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
             conn.execute(
                 text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
             )
-        client.delete(*_CKPT_KEYS, queue)
+        client.delete(*ckpt_keys, queue)
         client.close()
         with engine.begin() as conn:
             conn.execute(
