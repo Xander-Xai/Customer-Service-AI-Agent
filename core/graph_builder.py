@@ -281,6 +281,16 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         state["response"] = result.get("response", "")
         state["collaboration_mode"] = result.get("mode", mode_name)
         state["agents_used"] = result.get("agents_used", [])
+        # human-in-the-loop：Agent 工具循环把 HIGH 风险副作用**摘出**到
+        # pending_actions（此处并未执行）。必须透传给下游 human_approval_gate
+        # 节点，否则被摘出的动作会被静默丢弃 —— 那等于「高风险写操作既没执行
+        # 也没审批」，是最危险的失败模式。
+        pending = result.get("pending_actions") or []
+        if pending:
+            state["pending_actions"] = list(state.get("pending_actions") or []) + list(pending)
+            logger.info(
+                "[%s] %d 个高风险动作待人工审批", mode_name, len(state["pending_actions"])
+            )
         logger.info(f"[{mode_name}] agents={state['agents_used']} {_format_duration(elapsed)}")
         return state
 
@@ -293,6 +303,20 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         _node.__doc__ = f"{mode_name} 协作模式节点"
         _node.__name__ = f"{mode_name}_node"
         return _node
+
+    async def _human_approval_gate_node(state: AgentState, config) -> AgentState:
+        """human-in-the-loop 审批闸门节点（见 ``core/hitl/gate.py``）。
+
+        无 ``pending_actions`` 时直接返回 —— 这是绝大多数请求的路径，因此这里是
+        纯 no-op，**不得**为普通问答引入任何审批开销或 interrupt 行为。
+        """
+        from core.hitl.gate import run_approval_gate
+
+        result = await run_approval_gate(dict(state), config, c)
+        if not result:
+            return state
+        state.update(result)
+        return state
 
     async def _final_response_node(state: AgentState) -> AgentState:
         """最终响应节点（v4.3: 集成质量评估 + 自动模式升级重试）
@@ -376,6 +400,11 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     workflow.add_node("consultation", _make_collaboration_node("consultation"))
     workflow.add_node("hierarchical", _make_collaboration_node("hierarchical"))
     workflow.add_node("react", _make_collaboration_node("react"))
+    # human-in-the-loop 审批闸门：必须位于「协作模式」与「final_response」之间。
+    # 放这里的原因：工具副作用由 Agent 工具循环发起（协作节点内），闸门在其之后
+    # 统一拦截；而 final_response 之前完成审批，才能让最终回复反映真实执行结果
+    # （被拒绝时不能让 Agent 宣称「已退款」）。
+    workflow.add_node("human_approval_gate", _human_approval_gate_node)
     workflow.add_node("final_response", _final_response_node)
 
     # 入口：缓存检查（命中直接跳到 final_response，跳过 LLM 路由）
@@ -404,12 +433,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         },
     )
 
-    # 所有协作模式 -> final_response
-    workflow.add_edge("sequential", "final_response")
-    workflow.add_edge("parallel", "final_response")
-    workflow.add_edge("consultation", "final_response")
-    workflow.add_edge("hierarchical", "final_response")
-    workflow.add_edge("react", "final_response")
+    # 所有协作模式 -> human_approval_gate -> final_response
+    workflow.add_edge("sequential", "human_approval_gate")
+    workflow.add_edge("parallel", "human_approval_gate")
+    workflow.add_edge("consultation", "human_approval_gate")
+    workflow.add_edge("hierarchical", "human_approval_gate")
+    workflow.add_edge("react", "human_approval_gate")
+    workflow.add_edge("human_approval_gate", "final_response")
 
     # 结束
     workflow.set_finish_point("final_response")

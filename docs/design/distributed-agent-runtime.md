@@ -72,6 +72,7 @@ worker 与 API 进程**共用同一套 key namespace**，见
 PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
                                  ├──► FAILED           (终态，permanent error，不重试)
                                  ├──► RETRYING ──► RUNNING (transient error，退避后重试)
+                                 ├──► WAITING_APPROVAL ──► RUNNING (非终态，人工审批)
                                  └──► DEAD_LETTER      (终态，retry 用尽)
                 └──► CANCELLED                     (终态，任意未终态均可迁入)
 ```
@@ -80,6 +81,10 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 - `PENDING` 表示"已落库、尚未投递到队列"；默认创建路径直接写 `QUEUED`
   （保持 `POST /api/runs` 既有语义），两阶段流程可用
   `create_run(status=PENDING)` + `mark_queued()`。
+- `WAITING_APPROVAL` 是 **human-in-the-loop 专用的非终态**（见
+  [human-in-the-loop.md](human-in-the-loop.md)）：高风险副作用被拦下等人工决策。
+  它刻意**不进** `EXECUTABLE_STATUSES`（通用轮询不捞起，否则忙循环），且
+  `→ RUNNING` **不递增 attempt**（等人不是失败，不该消耗重试预算）。
 - `CANCELLED` 由 `POST /api/runs/{run_id}/cancel` 写入，**协作式**：已进入 `RUNNING`
   的执行不会被强行中断，调用方需轮询确认终态。
 - `attempt` 在 `mark_running` 时递增（已开始的执行次数）。
@@ -119,6 +124,7 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 | Checkpoint | external PostgreSQL 持久化；node/checkpoint-boundary 恢复 | 任意 Python 指令级无损恢复 |
 | DLQ | application-level **dead-letter 闭环**：`agent_dead_letters` 不可变历史 + `GET /api/runs/dead` + `RunService.requeue_dead_letter` + `scripts/replay_dead_run.py` 人工重放（**复用原 run_id**，避免绕过工具幂等键） | broker-native DLX |
 | 工具副作用 | 同 Agent 不重复发起同一副作用（ledger 去重） | 下游系统端到端幂等（需下游接受 idempotency key） |
+| 高风险副作用治理 | HIGH 风险工具未获人工批准**不执行**（服务端闸门，见 [human-in-the-loop.md](human-in-the-loop.md)） | 真实 ERP 写操作的端到端正确性（无企业 staging，`NOT_VERIFIED`） |
 
 ### 5.1 锁 TTL 过期边界（重要）
 

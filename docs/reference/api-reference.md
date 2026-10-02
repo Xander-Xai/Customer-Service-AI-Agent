@@ -13,13 +13,13 @@
 
 ## 当前接口总览
 
-<!-- openapi-surface: paths=58 operations=60 api_operations=54 -->
+<!-- openapi-surface: paths=62 operations=64 api_operations=58 -->
 
 | 类型 | 数量 | 来源 |
 |------|------|------|
-| HTTP 路径 | **58** | `app.openapi()["paths"]` |
-| HTTP 操作 | **60** | 同一路径可含多 method |
-| `/api/*` 业务操作 | **54** | 认证、对话、多模态、异步 Run、会话、监控、知识库、缓存、告警、Prompt 管理 |
+| HTTP 路径 | **62** | `app.openapi()["paths"]` |
+| HTTP 操作 | **64** | 同一路径可含多 method |
+| `/api/*` 业务操作 | **58** | 认证、对话、多模态、异步 Run、人工审批、会话、监控、知识库、缓存、告警、Prompt 管理 |
 | 非 `/api/*` 路径 | 6 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话（OpenAPI 不含 WebSocket 路由，单独列出） |
 
@@ -30,8 +30,9 @@
 | `/api/auth` | 8 | `/api/monitoring` | 5 |
 | `/api/chat` | 7 | `/api/admin` | 5 |
 | **`/api/runs`（异步 Run）** | **5** | `/api/sessions` | 4 |
-| `/api/alerts` | 4 | `/api/knowledge` | 4 |
-| `/api/cache` | 2 | `/api/feedback` | 2 |
+| **`/api/approvals`（人工审批）** | **4** | `/api/alerts` | 4 |
+| `/api/knowledge` | 4 | `/api/cache` | 2 |
+| `/api/feedback` | 2 |
 | `/api/history` | 2 | `/api/tts` | 2 |
 | `/api/health` | 1 | `/api/kpi` | 1 |
 | `/api/metrics` | 1 | `/api/circuit-breaker` | 1 |

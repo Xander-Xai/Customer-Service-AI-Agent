@@ -191,6 +191,52 @@ make db-downgrade # 回滚迁移
 > **Level 2 ≠ 生产验证。** 文档、简历、面试材料都不得把 Level 2 表述为
 > "生产集群已验证"。
 
+### Human-in-the-Loop 高风险审批治理（已实现，非计划）
+
+目标不是展示 LangGraph `interrupt` API，而是给**高风险 Tool Side Effect**
+建立服务端治理边界（完整设计：
+[docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md)）。
+
+- **风险分级** `core/hitl/risk.py`：LOW / MEDIUM / HIGH；优先级为
+  「工具显式声明 > 工具名白名单 > 金额阈值 > 默认 LOW」；**只有 HIGH 需要
+  人工审批**。判定失败时 fail-closed（挂起而非放行）。
+- **拦在执行之前**：Agent 工具循环把 HIGH 风险调用**摘出**到
+  `state["pending_actions"]`（不执行），由图节点 `human_approval_gate`
+  （协作模式与 `final_response` 之间）逐个 `interrupt()`。
+- **durable 审批**：`human_approvals` 表（`alembic 006`，唯一约束
+  `(run_id, action, proposal_fingerprint)`）；`PENDING → APPROVED | REJECTED |
+  EXPIRED`，均为终态。
+- **职责分离**：`reviewer_id != user_id`，在 **service 层**强制
+  （`ApprovalService._guard_reviewer`），API 层不是唯一防线。
+- **RBAC**：仅 `admin` / `supervisor`（4 级 RBAC 的高级角色）可读可决策。
+- **TTL**：`HITL_APPROVAL_TTL_SECONDS`（默认 3600s），到期落 `EXPIRED`
+  **按拒绝处理，绝不默认放行**；可在决策 / 读取 / 恢复三处收敛，图不会死等。
+- **脱敏留痕**：`core/hitl/sanitize.py` 黑名单 + 定长截断（**不用**事件流白名单
+  语义——那会把提案整个抹掉，审批退化成盲批）。
+- **幂等双防线（缺一不可）**：审批防「不该做的被做了」；side-effect ledger 防
+  「做了一次被重做」。已批准执行走
+  `operation_key = run_id:approval:{approval_id}`（由 `approval_id` 派生，
+  在任意次重试中恒定）→ 恰好一次。**复用** `runtime/side_effects.py` 的原子
+  `claim`（PR #28），不重复实现。
+- **新非终态 `WAITING_APPROVAL`**（`runtime/statuses.py`）：**不进**
+  `EXECUTABLE_STATUSES`（通用轮询不捞起，否则忙循环）；`→ RUNNING`
+  **不递增 attempt**（等人不是失败，不该消耗 `AGENT_RUN_MAX_ATTEMPTS`）。
+- **API**：`GET /api/approvals`、`GET /api/approvals/{id}`、
+  `POST /api/approvals/{id}/decision`（approve / edit / reject）、
+  `GET /api/approvals/by-run/{run_id}`。
+- **验证过的 LangGraph 语义**（langgraph 1.2.12 / Python 3.10，真实 PG
+  checkpoint 上实测，测试
+  `tests/integration/runtime/test_hitl_langgraph_interrupt.py`）：
+  `interrupt()` 不抛异常而注入 `__interrupt__`；`ainvoke(None)` **解除不了**
+  interrupt（故崩溃恢复与审批恢复必须分两条路径）；`Command(resume=...)` 需要
+  checkpointer；已完成的 run 返回值**不得**再带 `__interrupt__`（依赖图状态声明
+  为 TypedDict）。
+- **边界（不得越界宣称）**：`HITL_ENABLED` 默认 `false`；`/api/chat` 快路径无
+  run 上下文，**明确不在该治理边界内**；**真实 ERP 退款/改单未验证**（无企业
+  staging，`NOT_VERIFIED`）——副作用验证走 `tools/hitl_staging_tools.py`
+  确定性 staging 工具，它验证的是**治理机制**而非 ERP 集成正确性；无审批主动
+  通知链路（需轮询待审批队列）。
+
 ### 安全要点
 - API Key (系统间) + JWT (终端用户) 双认证模式
 - Argon2id 密码哈希（v5.4 升级，OWASP 2023 推荐，64MB 内存硬度）+ PBKDF2-SHA256 向后兼容

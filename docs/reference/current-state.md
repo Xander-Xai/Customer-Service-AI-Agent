@@ -118,6 +118,17 @@ python3 scripts/audit_doc_consistency.py
   `SUCCEEDED | FAILED | DEAD_LETTER | CANCELLED`
   （`runtime/statuses.py`）。Celery result backend **不是**真相源
   （`task_ignore_result=True`）。
+- **Human-in-the-loop（高风险副作用治理）**：`WAITING_APPROVAL` 是额外的
+  **非终态**——HIGH 风险工具副作用在**执行前**被拦下，durable 审批记录落
+  `human_approvals` 表（`alembic 006`），图在 `interrupt()` 处挂起、checkpoint
+  落库；人工 approve/edit/reject（仅 admin/supervisor，且 `reviewer != requester`）
+  后由 worker 以 `Command(resume=...)` 恢复，执行仍经 side-effect ledger
+  （`operation_key = run_id:approval:{approval_id}`，恰好一次）。实现见
+  `core/hitl/`、`api/routes/approvals.py`、
+  [design/human-in-the-loop.md](../design/human-in-the-loop.md)。
+  **边界**：`HITL_ENABLED` 默认 `false`；`/api/chat` 快路径无 run 上下文，
+  明确不在该治理边界内；**真实 ERP 写操作未验证**（无企业 staging，
+  副作用验证走确定性 staging 工具，见该文档 §9）。
 - **取消（协作式）**：`POST /api/runs/{run_id}/cancel` 立即置 `CANCELLED`。
   未开始的 run 不会再被执行；**已进入 RUNNING 的 run 不会被强行中断**，
   调用方需轮询确认终态。

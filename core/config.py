@@ -556,6 +556,32 @@ AGENT_RUN_RETRY_BASE_DELAY = _float_env("AGENT_RUN_RETRY_BASE_DELAY", 2.0)
 AGENT_RUN_RETRY_MAX_DELAY = _float_env("AGENT_RUN_RETRY_MAX_DELAY", 60.0)
 AGENT_RUN_RETRY_JITTER = _float_env("AGENT_RUN_RETRY_JITTER", 0.3)
 
+# ---------------------------------------------------------------------------
+# Human-in-the-loop（高风险工具副作用的人工审批治理）
+# ---------------------------------------------------------------------------
+# 总开关。关闭时 HIGH 风险工具**直接执行**（不拦），仅 MEDIUM/LOW 记录。
+# 生产建议保持 true：关闭等于主动放弃该治理边界。
+HITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() == "true"
+
+# 强制人工审批的工具名（逗号分隔，大小写不敏感）
+HITL_HIGH_RISK_TOOLS = os.getenv("HITL_HIGH_RISK_TOOLS", "")
+# 只记录不拦截的工具名（逗号分隔）
+HITL_MEDIUM_RISK_TOOLS = os.getenv("HITL_MEDIUM_RISK_TOOLS", "")
+
+# 金额阈值：提案参数中任一金额字段 >= 该值即判为 HIGH（覆盖工具名白名单之外的
+# 大额写操作）。0 = 关闭金额维度。
+HITL_HIGH_AMOUNT_THRESHOLD = _float_env("HITL_HIGH_AMOUNT_THRESHOLD", 0.0)
+
+# 审批有效期：超时未决策 -> EXPIRED（等同拒绝，但可与「明确拒绝」区分统计）。
+HITL_APPROVAL_TTL_SECONDS = _float_env("HITL_APPROVAL_TTL_SECONDS", 3600.0)
+
+# 可审批的角色（4 级 RBAC 中的高级角色）。customer 永不拥有审批权。
+HITL_REVIEWER_ROLES = tuple(
+    r.strip().lower()
+    for r in os.getenv("HITL_REVIEWER_ROLES", "admin,supervisor").split(",")
+    if r.strip()
+)
+
 if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
     raise ConfigurationError(
         f"AGENT_RUN_THREAD_LOCK_BACKEND 非法: {AGENT_RUN_THREAD_LOCK_BACKEND!r}"
