@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from db.database import get_db_session
 from db.models import AgentDeadLetter, AgentRun
 
-from .statuses import RunStatus
+from .statuses import RunStatus, parse_status
 
 
 def _utcnow() -> datetime:
@@ -88,19 +88,21 @@ class AgentRunRepository:
         max_attempts: int = 3,
         trace_id: str | None = None,
         idempotency_key: str | None = None,
+        status: str = RunStatus.QUEUED.value,
     ) -> dict[str, Any]:
         now = _utcnow()
+        initial = parse_status(status)
         run = AgentRun(
             id=run_id,
             thread_id=thread_id,
             session_id=session_id,
             user_id=user_id,
-            status=RunStatus.QUEUED.value,
+            status=initial.value,
             query=query,
             attempt=0,
             max_attempts=max(1, int(max_attempts)),
             created_at=now,
-            queued_at=now,
+            queued_at=now if initial == RunStatus.QUEUED else None,
             updated_at=now,
             trace_id=trace_id,
             idempotency_key=idempotency_key,
@@ -205,6 +207,19 @@ class AgentRunRepository:
         finally:
             session.close()
         return self.get(run_id)
+
+    def touch_queued(self, run_id: str, when: datetime) -> None:
+        """刷新 queued_at（重放重新投递时使用）。"""
+        session = self._session()
+        try:
+            session.execute(
+                update(AgentRun)
+                .where(AgentRun.id == run_id)
+                .values(queued_at=when, updated_at=_utcnow())
+            )
+            session.commit()
+        finally:
+            session.close()
 
     # ---- Dead letter ----
 

@@ -50,7 +50,11 @@ class ThreadLock(Protocol):
 
 
 class InMemoryThreadLock:
-    """进程内锁（开发/测试）。语义与 Redis 版一致：owner + TTL + 原子比较。"""
+    """进程内锁（开发/测试）。语义与 Redis 版一致：owner + TTL + 原子比较。
+
+    每实例一份登记表；因此**同一进程内只能有一个实例**才具备互斥意义，manager
+    获取函数（``get_thread_lock_manager`` / ``core.concurrency``）共享同一单例。
+    """
 
     def __init__(self, clock=time.monotonic):
         self._locks: dict[str, tuple[str, float]] = {}
@@ -157,14 +161,25 @@ def build_thread_lock(backend: str, redis_url: str) -> ThreadLock:
 
 
 def get_thread_lock_manager() -> ThreadLock:
-    """进程内单例 lock manager（worker 使用）。"""
+    """进程内唯一的 thread lock manager 单例（worker 与 API 执行边界共用）。
+
+    必须是**同一个实例**：API 快路径（``core.concurrency.get_api_lock_manager``）与
+    worker 路径（``runtime.executor``）都经由此处获取锁，否则进程内会出现两套互不
+    相干的锁状态，"同一 key 前缀" 的一致性没有任何实际意义。
+
+    DEV_MODE 下 ``redis`` 后端降级为进程内锁：开发/测试不应强依赖 Redis，生产
+    （``DEV_MODE=false``）始终使用配置的后端。
+    """
     global _manager
     if _manager is not None:
         return _manager
 
-    from core.config import AGENT_RUN_THREAD_LOCK_BACKEND, REDIS_URL
+    from core.config import AGENT_RUN_THREAD_LOCK_BACKEND, DEV_MODE, REDIS_URL
 
-    _manager = build_thread_lock(AGENT_RUN_THREAD_LOCK_BACKEND, REDIS_URL)
+    backend = AGENT_RUN_THREAD_LOCK_BACKEND
+    if DEV_MODE and backend == "redis":
+        backend = "memory"
+    _manager = build_thread_lock(backend, REDIS_URL)
     return _manager
 
 

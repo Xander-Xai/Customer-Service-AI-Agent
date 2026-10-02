@@ -440,8 +440,26 @@ def validate_checkpoint_settings(
 
 # ===== 分布式 Agent Runtime（异步 Run + Celery Worker）=====
 # AgentRun 业务状态真相源是数据库；Redis/Celery 仅调度。
+#
+# ---- 执行模式（canonical 开关）----
+#
+# AGENT_EXECUTION_MODE 决定的是**异步 Run 路径**（``POST /api/runs``）在哪里执行：
+#   inline : API 进程内执行。适合开发/测试；**不是** durable —— 进程崩溃该 run
+#            直接丢失，且没有 worker 重投 / lease 接管 / 事件流。
+#   queued : 落库 + 入队，由独立 Celery worker 执行。生产推荐。
+#
+# 它**不影响** 快路径 ``/api/chat``、``/api/chat/stream``、``/api/chat/multimodal``：
+# 那些接口是既有的**兼容性 inline 路径**，始终在 API 进程内执行 LangGraph
+# （见 ``api/app.py::_run_graph``）。把流式接口改走队列会改变延迟与响应结构，
+# 因此本仓库**不做**这种改写；不要宣称"所有请求都经过 Worker"。
+#
+# AGENT_RUN_DISPATCH 是同义的历史变量（celery=inline 的旧命名）。未显式设置
+# AGENT_EXECUTION_MODE 时由它派生，两者冲突时报错，避免出现两个互相矛盾的旋钮。
+AGENT_EXECUTION_MODE_RAW = os.getenv("AGENT_EXECUTION_MODE", "").strip().lower()
+AGENT_RUN_DISPATCH_RAW = os.getenv("AGENT_RUN_DISPATCH", "").strip().lower()
+
 # dispatch: celery（生产，解耦到 worker）| inline（开发/测试 fallback，进程内执行）
-AGENT_RUN_DISPATCH = os.getenv("AGENT_RUN_DISPATCH", "celery").strip().lower()
+AGENT_RUN_DISPATCH = AGENT_RUN_DISPATCH_RAW or "celery"
 AGENT_RUN_QUEUE = os.getenv("AGENT_RUN_QUEUE", "agent_runs").strip() or "agent_runs"
 AGENT_RUN_MAX_ATTEMPTS = _int_env("AGENT_RUN_MAX_ATTEMPTS", 3)
 AGENT_RUN_TASK_SOFT_TIME_LIMIT = _int_env("AGENT_RUN_TASK_SOFT_TIME_LIMIT", 120)
@@ -456,6 +474,46 @@ if AGENT_RUN_DISPATCH not in ("celery", "inline"):
     raise ConfigurationError(
         f"AGENT_RUN_DISPATCH 非法: {AGENT_RUN_DISPATCH!r}（仅支持 celery | inline）"
     )
+
+
+def _resolve_execution_mode() -> str:
+    """归一化 ``AGENT_EXECUTION_MODE`` / ``AGENT_RUN_DISPATCH`` 为单一权威值。
+
+    优先级：显式设置的 ``AGENT_EXECUTION_MODE`` **优先**于历史变量
+    ``AGENT_RUN_DISPATCH``。两者不一致时**告警但不拒绝启动**——否则仓库 ``.env``
+    里的 ``AGENT_RUN_DISPATCH=inline``（开发默认）会让任何
+    ``AGENT_EXECUTION_MODE=queued`` 配置直接起不来。非法取值仍然 fail-fast。
+    """
+    if not AGENT_EXECUTION_MODE_RAW:
+        # 未设置 canonical 旋钮：沿用历史变量
+        return "queued" if AGENT_RUN_DISPATCH == "celery" else "inline"
+    if AGENT_EXECUTION_MODE_RAW not in ("inline", "queued"):
+        raise ConfigurationError(
+            f"AGENT_EXECUTION_MODE 非法: {AGENT_EXECUTION_MODE_RAW!r}"
+            "（仅支持 inline | queued）"
+        )
+    expected_dispatch = "celery" if AGENT_EXECUTION_MODE_RAW == "queued" else "inline"
+    if AGENT_RUN_DISPATCH_RAW and expected_dispatch != AGENT_RUN_DISPATCH:
+        import warnings
+
+        warnings.warn(
+            f"AGENT_EXECUTION_MODE={AGENT_EXECUTION_MODE_RAW!r} 覆盖 "
+            f"AGENT_RUN_DISPATCH={AGENT_RUN_DISPATCH!r}（canonical 旋钮优先；"
+            "AGENT_RUN_DISPATCH 仅作向后兼容，建议只保留 AGENT_EXECUTION_MODE）",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return AGENT_EXECUTION_MODE_RAW
+
+
+AGENT_EXECUTION_MODE = _resolve_execution_mode()
+# canonical 模式是权威值，据此同步实际派发方式（worker 执行入口读 AGENT_RUN_DISPATCH）
+AGENT_RUN_DISPATCH = "celery" if AGENT_EXECUTION_MODE == "queued" else "inline"
+
+#: 快路径接口始终 inline（不由 AGENT_EXECUTION_MODE 控制）。
+#: 仅用于文档/健康检查自述，避免出现"所有请求都经过 Worker"的误读。
+AGENT_INLINE_COMPAT_ENDPOINTS = ("/api/chat", "/api/chat/stream", "/api/chat/multimodal")
+AGENT_QUEUED_RUN_ENDPOINTS = ("/api/runs",)
 
 # Thread 串行执行锁（同一 thread 的 Run 不得并发；不同 thread 可并发）
 AGENT_RUN_THREAD_LOCK_ENABLED = os.getenv("AGENT_RUN_THREAD_LOCK_ENABLED", "true").lower() == "true"
