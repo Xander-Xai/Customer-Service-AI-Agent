@@ -19,6 +19,7 @@ Revises: 004_distributed_agent_runtime
 from __future__ import annotations
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "005_tool_side_effect_claim_owner"
