@@ -136,42 +136,40 @@ def side_effect_store(pg_engine):
 
 @pytest.hookimpl(hookwrapper=True, tryfirst=True)
 def pytest_runtest_makereport(item, call):
-    """Attach each phase report to its node so fixtures can read it.
+    """Attach each phase report to its node, and snapshot failures at once.
 
-    Without this, a fixture cannot tell a failing test from a passing one, and
-    the diagnostics below would have to guess.
+    Without the ``setattr``, a fixture cannot tell a failing test from a passing
+    one, and the diagnostics below would have to guess.
+
+    The ``call`` phase report is emitted after the test body finishes but
+    **before** its teardown fixtures run, which is the only moment where the
+    failing test's own rows and broker keys still exist. That is why the
+    snapshot happens here rather than in a fixture: by teardown time the evidence
+    has already been cleaned up.
+
+    Only failures are captured. Snapshotting every passing run would write an
+    artifact per test per suite run, which is both noise and enough I/O to
+    perturb a suite that is being measured for timing.
     """
     outcome = yield
     rep = outcome.get_result()
     setattr(item, f"rep_{rep.when}", rep)
-
-
-@pytest.hookimpl(tryfirst=True)
-def pytest_runtest_call(item):
-    """Snapshot shared state at the instant a test fails, before its teardown.
-
-    Runs for the ``call`` phase only, and only on failure. The teardown phase
-    removes the test's own rows and keys, so a snapshot taken afterwards can no
-    longer answer "what did the broker look like when this failed". The
-    post-teardown snapshot (see ``failure_diagnostics``) answers the complementary
-    question — what leaked.
-
-    Read-only by construction: no PostgreSQL writes, no broker publishes, no
-    signals sent.
-    """
+    if rep.when != "call" or not rep.failed:
+        return
     try:
         from tests.integration.runtime.crash_diagnostics import write_suite_snapshot
 
         path = write_suite_snapshot(
             phase="at_failure",
             nodeid=item.nodeid,
-            outcome="running",
+            outcome="failed",
             extra={
-                "when": "pytest_runtest_call, before teardown",
+                "when": "makereport(call), before teardown fixtures",
                 "note": (
                     "state at the moment of failure, with the failing test's own "
                     "rows and broker keys still present"
                 ),
+                "failure_text": str(rep.longrepr)[:8000] if rep.longrepr else None,
             },
         )
         if path is not None:

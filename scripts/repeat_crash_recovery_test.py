@@ -84,20 +84,24 @@ def _git(*args: str) -> str:
 
 
 def _code_is_dirty(artifact_root: Path) -> tuple[bool, list[str]]:
-    """Is the **code** dirty? Ignore this harness's own artifact output.
+    """Is the **code** dirty? Ignore this harness's and the suite's own output.
 
     ``artifacts/`` is not gitignored (only ``artifacts/evidence/`` is), so writing
-    this harness's own report would make every iteration look dirty and render
-    ``clean_tree_throughout`` useless. What matters for a measurement is whether
-    the code under test differs from the recorded SHA, so paths under the
-    artifact root are excluded. Everything else counts.
+    the harness report — or the failure diagnostics that
+    ``tests/integration/runtime/conftest.py`` emits — would make every iteration
+    look dirty and render ``clean_tree_throughout`` useless. What matters for a
+    measurement is whether the code under test differs from the recorded SHA, so
+    paths under the artifact roots are excluded. Everything else counts.
     """
-    root = str(artifact_root.resolve())
+    roots = [
+        str(artifact_root.resolve()),
+        str((REPO_ROOT / "artifacts" / "runtime-diagnostics").resolve()),
+    ]
     entries = _git("status", "--porcelain").splitlines()
     offending: list[str] = []
     for line in entries:
         path = line[3:].strip().strip('"')
-        if path == root or path.startswith(root + os.sep):
+        if any(path == root or path.startswith(root + os.sep) for root in roots):
             continue
         offending.append(line)
     return bool(offending), offending
