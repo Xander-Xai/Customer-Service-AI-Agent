@@ -78,7 +78,18 @@ class ServiceContainer:
                 # Redis 缓存预热移至 initialize()（异步执行）
                 self._redis_url = REDIS_URL
             except Exception as e:
-                logger.warning(f"Redis 初始化失败，回退到内存模式: {e}")
+                # 生产：Redis Session 初始化失败必须 fail-fast，绝不静默回退进程内
+                # memory（gunicorn 多 worker 会分片、重启丢失）。
+                from core.config import DEV_MODE
+                from core.config import ConfigurationError as _CfgError
+
+                if not DEV_MODE:
+                    raise _CfgError(
+                        "Production requires a working Redis for "
+                        "SESSION_STORAGE_BACKEND=redis; refusing to fall back to "
+                        f"in-process memory ({type(e).__name__})"
+                    ) from e
+                logger.warning(f"Redis 初始化失败，开发环境回退到内存模式: {e}")
 
         # ===== 延迟初始化组件（initialize() 中设置）=====
         self.llm: LLMProtocol | None = None
