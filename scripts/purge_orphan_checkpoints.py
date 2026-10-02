@@ -50,9 +50,15 @@ def _load_live_session_ids() -> set[str]:
 
     只读 Redis（若配置了 SESSION_STORAGE_BACKEND=redis 且可用）并回落到内存会话
     管理器；两者都拿不到时抛错——宁可让人显式处理，也不要凭猜测删除历史。
-    """
-    from core.config import DEV_MODE, REDIS_URL
 
+    Key 形状必须由 ``REDIS_SESSION_PREFIX`` 推导：会话管理器实际写入的是
+    ``{prefix}{session_id}:messages`` / ``{prefix}{session_id}:meta``（默认 prefix
+    为 ``csai:session:``）。硬编码 ``session:*`` 匹配不到任何 key，会让枚举恒为空
+    并直接中止 purge。
+    """
+    from core.config import DEV_MODE, REDIS_SESSION_PREFIX, REDIS_URL
+
+    prefix = REDIS_SESSION_PREFIX or "csai:session:"
     ids: set[str] = set()
     if REDIS_URL:
         try:
@@ -62,9 +68,17 @@ def _load_live_session_ids() -> set[str]:
                 REDIS_URL, decode_responses=True, socket_timeout=3
             )
             try:
-                for key in client.scan_iter(match="session:*", count=500):
-                    if key.startswith("session:"):
-                        ids.add(key.split(":", 1)[1])
+                for key in client.scan_iter(match=f"{prefix}*", count=500):
+                    if not key.startswith(prefix):
+                        continue
+                    remainder = key[len(prefix) :]
+                    # `{prefix}{session_id}:messages` / `:meta` -> session_id
+                    for suffix in (":messages", ":meta"):
+                        if remainder.endswith(suffix):
+                            session_id = remainder[: -len(suffix)]
+                            if session_id:
+                                ids.add(session_id)
+                            break
             finally:
                 client.close()
             if ids:
@@ -127,9 +141,11 @@ def main() -> int:
             try:
                 for candidate in plan.candidates:
                     try:
-                        await saver.adelete_thread(
-                            {"configurable": {"thread_id": candidate.thread_id}}
-                        )
+                        # 必须是 **thread_id 字符串**：官方 saver 的签名是
+                        # ``adelete_thread(thread_id: str)``。传 LangGraph 的 config
+                        # dict 会生成 ``WHERE thread_id = '{...}'``，匹配 0 行却
+                        # "成功"返回 —— 于是每个候选都进 plan.failed，命令从不删除。
+                        await saver.adelete_thread(candidate.thread_id)
                         plan.deleted.append(candidate.thread_id)
                     except Exception as e:
                         plan.failed[candidate.thread_id] = type(e).__name__

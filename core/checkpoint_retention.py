@@ -130,11 +130,19 @@ def find_orphans(
 
 
 def load_checkpoint_threads(conn: Any) -> dict[str, dict[str, Any]]:
-    """从一条 DBAPI 连接统计每个 thread 的 checkpoint 数量与最新时间戳。"""
+    """从一条 DBAPI 连接统计每个 thread 的 checkpoint 数量与最新时间戳。
+
+    时间戳**不在列上**：``AsyncPostgresSaver.setup()`` 建出的 ``checkpoints`` 表只有
+    ``thread_id / checkpoint_ns / checkpoint_id / parent_checkpoint_id / type /
+    checkpoint(jsonb) / metadata(jsonb)``，没有 ``checkpoint_ts`` 列。真实 schema 已核对
+    （见 tests/integration/runtime/test_checkpoint_setup_and_session_delete.py）。
+    checkpoint 的写入时间在 ``checkpoint`` 负载的 ``ts`` 字段（ISO-8601），所以这里用
+    ``checkpoint->>'ts'`` 取代不存在的列。
+    """
     cur = conn.cursor()
     try:
         cur.execute(
-            "SELECT thread_id, count(*) AS c, max(checkpoint_ts) AS latest "
+            "SELECT thread_id, count(*) AS c, max(checkpoint->>'ts') AS latest "
             "FROM checkpoints GROUP BY thread_id"
         )
         rows = cur.fetchall()
