@@ -1,0 +1,32 @@
+{
+  "schema": "crash-recovery-repeat/v2",
+  "generated_at": "2026-10-02T21:12:35.095661+00:00",
+  "target": "tests/integration/runtime/test_worker_checkpoint_recovery.py",
+  "pytest_args": [],
+  "requested_runs": 50,
+  "executed_runs": 50,
+  "passed": 50,
+  "failed": 0,
+  "failure_rate": 0.0,
+  "timeout_seconds_per_iteration": 900,
+  "db_url": "postgresql://***@localhost:5432/csai_runtime_test",
+  "redis_url": "redis://localhost:6379",
+  "duration_seconds": {
+    "min": 38.5,
+    "p50": 39.24,
+    "p95": 39.67,
+    "max": 39.7
+  },
+  "total_wall_seconds": 1969.94,
+  "git_shas_observed": [
+    "4fddcfa59550f4445fd7d120599c6fe0087699e7"
+  ],
+  "single_sha": true,
+  "dirty_iterations": [],
+  "clean_tree_throughout": true,
+  "dirty_paths_seen": [],
+  "dirty_paths_note": "paths under this run's own artifact directory are excluded; 'artifacts/' is not gitignored, so the harness would otherwise report every iteration as dirty",
+  "failed_iterations": [],
+  "iterations_with_diagnostics": [],
+  "artifacts_dir": "/tmp/opencode/main-work/artifacts/flake-investigation/repeat-20261002T203933Z"
+}

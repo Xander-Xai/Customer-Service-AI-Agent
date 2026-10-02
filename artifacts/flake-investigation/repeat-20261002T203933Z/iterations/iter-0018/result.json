@@ -1,0 +1,16 @@
+{
+  "index": 18,
+  "target": "tests/integration/runtime/test_worker_checkpoint_recovery.py",
+  "passed": true,
+  "exit_code": 0,
+  "duration_seconds": 39.24,
+  "timed_out": false,
+  "git_sha": "4fddcfa59550f4445fd7d120599c6fe0087699e7",
+  "git_dirty": false,
+  "git_dirty_paths": [],
+  "diagnostics_artifacts": [],
+  "output_tail": [
+    ".                                                                        [100%]",
+    "1 passed in 37.85s"
+  ]
+}
