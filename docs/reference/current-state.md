@@ -117,8 +117,19 @@ python3 scripts/audit_doc_consistency.py
   Celery result backend **不是**真相源（`task_ignore_result=True`）。
 - **Checkpoint**：生产 `postgres`（`AsyncPostgresSaver`）跨 worker/副本共享，
   见上；API 快路径与 worker 异步路径共享同一 checkpoint 后端。
-- **Thread lock**：Redis `agent:thread-lock:{thread_id}`（owner token + TTL +
-  原子 compare-and-delete 释放）；同一 thread 串行，不同 thread 并发。
+- **Thread lock（API 执行边界 + worker 共用）**：Redis
+  `agent:thread-lock:{thread_id}`（owner token + TTL + 原子 compare-and-delete 释放）；
+  同一 thread 串行，不同 thread 并发。REST/SSE/WS/multimodal 统一经
+  `api/app.py::_run_graph` 获取锁；拿不到锁返回 `THREAD_BUSY`（HTTP 409 /
+  SSE/WS 错误帧）。实现：`core/concurrency/distributed_lock.py`（复用
+  `runtime/thread_lock.py`）。开发/测试用进程内锁，不依赖 Redis。
+- **生产 Redis Session 强制**：`DEV_MODE=false` 时 `SESSION_STORAGE_BACKEND`
+  必须为 `redis`，否则启动 fail-fast（不再只 warning）；Redis 初始化失败同样
+  fail-fast，绝不静默回退进程内 memory。见
+  `core/config.py::validate_distributed_runtime_settings`、`core/container.py`。
+- **多 Worker 一致性 gate**：生产且 `GUNICORN_WORKERS>1` 时要求
+  `LANGGRAPH_CHECKPOINT_BACKEND=postgres` + `SESSION_STORAGE_BACKEND=redis` +
+  `AGENT_RUN_THREAD_LOCK_ENABLED=true`/`BACKEND=redis`，否则启动失败。
 - **Reliability 语义（能力边界）**：
   - at-least-once task delivery（`task_acks_late` + `task_reject_on_worker_lost`
     + Redis `visibility_timeout`），**不是** exactly-once；
@@ -129,13 +140,22 @@ python3 scripts/audit_doc_consistency.py
     需幂等）；**不**宣称任意 Python 指令级无损恢复；
   - application-level dead-letter（`agent_dead_letters` 表，retry 用尽后可查询
     哪个 run / 失败几次 / 最后错误 / 何时进入 DLQ），**不是** broker-native DLX。
-  - 工具侧幂等 ledger（`tool_side_effects`，`run_id + tool_call_id`）已提供接口与
-    DB 唯一约束；外部系统端到端幂等仍需下游 API 接受 idempotency key。
+  - 工具侧幂等 ledger（`tool_side_effects`，`run_id + tool_call_id`）+
+    `execute_idempotent_operation` 包裹执行；外部系统端到端幂等仍需下游 API
+    接受 idempotency key。
+- **状态归属**：见 [runtime-state-ownership](../design/runtime-state-ownership.md)
+  与 [ADR-009](../decisions/009-distributed-agent-runtime.md)；下一阶段
+  （worker pool / retry-DLQ / SSE bridge）仅设计：
+  [async-agent-worker-architecture](../design/async-agent-worker-architecture.md)。
 - **验证命令**（需要真实 Redis/PostgreSQL；默认 skip）：
   ```bash
   TEST_REDIS_URL=redis://localhost:6379 \
   TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
       pytest tests/integration/test_worker_crash_recovery.py tests/integration/test_thread_lock_redis.py -q
+  # 生成机器可读 evidence（artifacts/distributed-runtime/<ts>/report.json）
+  DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/cosmetics_ai \
+  TEST_REDIS_URL=redis://localhost:6379 \
+      python scripts/verify_distributed_runtime.py
   # 或脚本
   scripts/repro_worker_crash_recovery.sh
   ```
