@@ -84,7 +84,10 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 - `WAITING_APPROVAL` 是 **human-in-the-loop 专用的非终态**（见
   [human-in-the-loop.md](human-in-the-loop.md)）：高风险副作用被拦下等人工决策。
   它刻意**不进** `EXECUTABLE_STATUSES`（通用轮询不捞起，否则忙循环），且
-  `→ RUNNING` **不递增 attempt**（等人不是失败，不该消耗重试预算）。
+  `→ RUNNING` **不递增 attempt**（等人不是失败，不该消耗重试预算）。刻意**没有**
+  `WAITING_APPROVAL → QUEUED` 这条边；保留 `→ DEAD_LETTER` / `→ CANCELLED`
+  逃生口，避免审批被永久搁置时 run 无处可去。
+  合法迁移集合以 `runtime/statuses.py::ALLOWED_TRANSITIONS` 为唯一真相源。
 - `CANCELLED` 由 `POST /api/runs/{run_id}/cancel` 写入，**协作式**：已进入 `RUNNING`
   的执行不会被强行中断，调用方需轮询确认终态。
 - `attempt` 在 `mark_running` 时递增（已开始的执行次数）。

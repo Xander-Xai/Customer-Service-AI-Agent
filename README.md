@@ -856,13 +856,18 @@ make env-check   # 查看当前环境配置摘要
 | Prompt | 5 | Agent 列表 / 版本列表 / 创建版本 / 激活版本 / 查询当前版本 |
 | 反馈 | 2 | 提交 / 统计 |
 | 异步 Run | 5 | 创建 / 查询 / 取消 / 事件流（SSE）/ DLQ 列表 |
+| 人工审批 | 4 | 待审批队列 / 按 run 查询 / 审批详情 / 决策（approve·edit·reject） |
 | 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
 | WebSocket | 1 | 实时双向聊天 `/ws/chat` |
 
 **合计：`docs/openapi.json` 快照由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-HTTP 路径数/操作数以快照与 `python3 scripts/project_facts.py` 输出为准（当前 58 个 HTTP 路径 / 60 个操作，
-其中 54 个 `/api/*` 操作 + `/metrics/prometheus` + 5 个后端直出页面），另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。
-这些数字由生成工具产生并由 `make openapi-check` 校验，**不要手工修改**。**
+HTTP 路径数 / 操作数**不在此手写**（会随端点增删漂移），以
+`python3 scripts/project_facts.py` 的 `openapi_path_count` 与
+`make openapi-check` 的输出为准；`docs/reference/current-state.md` 记录生成出的当前值，
+`docs/reference/api-reference.md` 携带机器可校验的 `<!-- openapi-surface: ... -->`
+锚点。另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。
+这些数字由生成工具产生并由 `make openapi-check` +
+`python3 scripts/audit_doc_consistency.py` 校验，**不要手工修改**。**
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 

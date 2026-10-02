@@ -46,12 +46,22 @@
       smoke run 不是正式证据）
 - [ ] production evidence harness 已生成脱敏且带 provenance 的 artifact
 - [ ] provider auth/staging 已验证；HTTP 401、token usage/billing unavailable 仍是 **NOT_VERIFIED**
+- [ ] **HITL 治理边界已就位（`HITL_ENABLED=true`）**：HIGH 风险工具在**执行前**被拦下
+      （`WAITING_APPROVAL` 非终态）、`/api/approvals` 已挂载、审批人身份（RBAC
+      admin/supervisor + `reviewer != requester`）已配置、`HITL_APPROVAL_TTL_SECONDS`
+      已确认。**默认 `HITL_ENABLED=false`；不打开等于主动放弃该边界。**
+- [ ] **HITL 已知缺口已登记**：审批无主动通知（只能靠 `GET /api/approvals` 拉取，
+      无人处理会静默过期到 `EXPIRED`）；审批 SLA `NOT_MEASURED`；`/api/chat` 快路径
+      **不在**该边界内；真实 ERP 写操作 `NOT_VERIFIED`。见
+      [docs/operations/distributed-runtime-runbook.md](../operations/distributed-runtime-runbook.md) §3.7/§5
+- [ ] **HITL 值班演练已做**：制造一个 HIGH 风险 run → 确认进入 `WAITING_APPROVAL` →
+      审批 reject/approve/超时三条路径各自的结果与 `agent_approval_*` 指标
 
 ## 1. 结构性实现事实（IMPLEMENTED / LOCALLY VERIFIED；不构成 production validation）
 
 - [x] 前端单测可运行：`npm test`（当前 7 个 Vitest 测试文件；通过数以命令输出为准）
 - [x] 前端生产构建通过：`npm run build`
-- [x] OpenAPI 当前可正常生成：`app.openapi()` = `58` 个 HTTP 路径（校验命令 `make openapi-check`；v6.1.1 新增 `/api/cache/invalidate`、`/api/chat/multimodal`）
+- [x] OpenAPI 当前可正常生成（校验命令 `make openapi-check`；路径数以 `python3 scripts/project_facts.py` 的 `openapi_path_count` 与生成器输出为准，**不手写**）
 - [x] 前后端上传约束已对齐：统一 `5MB` 上限
 - [x] 前后端图片白名单已对齐：`JPEG/PNG/WebP`
 - [x] `/api/chat/voice` 已修复 MIME 传递错误，非法音频改为 4xx/5xx 显式返回，而不是误把 `filename` 当 `content_type`
@@ -64,7 +74,7 @@
 - [x] 后端已有 Knowledge Base 5000 条文档（成分数据 1500+ / FAQ 2500+ / 场景文档 1000+）
 - [x] LLM 客户端已实现指数退避 + 全抖动重试策略
 - [x] `POST /api/cache/invalidate` 端点已实现主动缓存失效
-- [x] OpenAPI 重新生成：`docs/openapi.json` = 58 个 HTTP 路径（54 个 `/api/*` + `/metrics/prometheus` + 5 个页面路径；操作数 60，快照由 `scripts/generate_openapi.py` 生成）
+- [x] OpenAPI 重新生成：`docs/openapi.json` 快照由 `scripts/generate_openapi.py` 生成，`/api/*` 操作数与总路径数以其输出为准（`make openapi-check`）
 - [x] admin.html 版本号同步至 v6.3
 - [x] _revoked_jtis 已吊销 JTI 集合新增容量限制 10000，防止内存泄漏
 - [x] mypy 已从 requirements.txt 移除，移到 requirements-dev.txt

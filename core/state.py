@@ -25,7 +25,7 @@ class AgentState(TypedDict, total=False):
     # P0-04: 认证用户身份 — 由 _run_graph 在可信请求边界写入，供下游
     # Cache / Quota / Tool AuthZ / Audit 消费。所有 transport 必须一致传递。
     user_id: str | None
-    # v6.4: human-in-the-loop 审批闸门。
+    # human-in-the-loop 审批闸门（未发布版本；runtime 版本仍为 6.3）。
     # ``pending_actions``：被判定为 HIGH 风险、已从工具循环**摘出**（尚未执行）
     # 的副作用动作，交由 ``human_approval_gate`` 节点逐个 interrupt 等人工决策。
     # ``approval_results``：闸门恢复后每条动作的执行/拒绝结果。

@@ -354,3 +354,40 @@ class TestListing:
         body = env.get(f"/api/approvals/{rec['approval_id']}", headers=_sup()).json()
         assert body["expired"] is False
         assert body["expires_at"] is not None
+
+
+def test_reviewer_roles_knob_is_actually_consumed():
+    """``HITL_REVIEWER_ROLES`` must be read by the route module.
+
+    A knob that only exists in ``core/config.py`` / ``.env.example`` / docs is
+    configuration drift: an operator changes the env var and nothing happens
+    while the docs claim it is configurable. The route module must resolve its
+    allowed roles through config rather than hardcoding a second list.
+    """
+    import api.routes.approvals as approvals_mod
+    from core.config import HITL_REVIEWER_ROLES
+
+    assert tuple(HITL_REVIEWER_ROLES) == approvals_mod.REVIEWER_ROLES
+    assert tuple(HITL_REVIEWER_ROLES) == approvals_mod._reviewer_roles()
+    assert "admin" in approvals_mod._reviewer_roles()
+    assert "supervisor" in approvals_mod._reviewer_roles()
+    # customer / agent must never be grantable via the knob's default
+    assert "customer" not in approvals_mod._reviewer_roles()
+    assert "agent" not in approvals_mod._reviewer_roles()
+
+
+def test_reviewer_roles_respects_env_override(monkeypatch):
+    import importlib
+
+    import api.routes.approvals as approvals_mod
+    import core.config as config_mod
+
+    monkeypatch.setenv("HITL_REVIEWER_ROLES", "admin,supervisor,auditor")
+    reloaded = importlib.reload(config_mod)
+    try:
+        assert reloaded.HITL_REVIEWER_ROLES == ("admin", "supervisor", "auditor")
+        assert "auditor" in approvals_mod._reviewer_roles()
+    finally:
+        monkeypatch.delenv("HITL_REVIEWER_ROLES", raising=False)
+        importlib.reload(config_mod)
+        importlib.reload(approvals_mod)

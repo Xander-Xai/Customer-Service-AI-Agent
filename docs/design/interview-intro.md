@@ -152,6 +152,14 @@
 ### Q10：前端是怎么实现的？
 > 原生 JavaScript ES Module，没用框架。理由是可嵌入（widget 页能直接嵌到任意网站）和体积小。实现了聊天界面、主题切换、无障碍支持、SSE 真流式、WebSocket 实时通信和管理后台。
 
+### Q10b：高风险操作怎么防止 AI 乱执行？（human-in-the-loop）
+> 我加了一条独立的治理边界：HIGH 风险工具副作用在**执行前**就被拦下——Agent 的工具循环只把它摘进 `pending_actions`，图在一个 `human_approval_gate` 节点上 `interrupt()` 挂起，durable 审批记录落 PostgreSQL，run 转入 `WAITING_APPROVAL`（非终态）。几个我会主动讲清楚的取舍：**等待审批不消耗 retry 预算**（人等三小时不该算三次失败，所以我专门把 `WAITING_APPROVAL → RUNNING` 从 `mark_running` 里拆出来，不递增 attempt）；**等待中的 run 不进通用队列轮询**（否则没人处理的审批会变忙循环）；**TTL 到期按拒绝收敛**，绝不默认放行；**职责分离在 service 层强制**，不只在 API 层。
+> 审批和幂等 ledger 是两条独立防线：审批防「不该做的被做了」，ledger 防「做了一次被重做」，缺一不可。
+> 边界我会直说：**只有异步 Run 路径**（`POST /api/runs`）在治理范围内，`/api/chat` 实时快路径没有 run 上下文，**不在**边界内；**真实 ERP 写操作仍是 NOT_VERIFIED**，我验证用的是确定性 staging 工具，不是真实退款。
+
+### Q10c：还有什么没做？
+> 三件事我知道缺口：**审批的主动通知**还没实现（只能靠接口拉取，长时间无人处理会静默过期），**审批 SLA / 人工效率**没有任何生产数据所以 NOT_MEASURED，还有 **fencing token**（Q9）。我更愿意把这些列成 backlog，而不是用"基本完成"含糊过去。
+
 ---
 
 ## 相关文档
@@ -159,5 +167,6 @@
 - 分布式 runtime 完整设计：[agent-runtime.md](agent-runtime.md)
 - 架构边界与可靠性语义：[distributed-agent-runtime.md](distributed-agent-runtime.md)
 - 状态归属（checkpoint / session / cache / tool store 的区别）：[runtime-state-ownership.md](runtime-state-ownership.md)
+- High-risk side-effect approval governance：[human-in-the-loop.md](human-in-the-loop.md)
 - 证据边界（能宣称什么、不能宣称什么）：[../reference/distributed-runtime-interview-evidence.md](../reference/distributed-runtime-interview-evidence.md)
 - 当前事实入口：[../reference/current-state.md](../reference/current-state.md)

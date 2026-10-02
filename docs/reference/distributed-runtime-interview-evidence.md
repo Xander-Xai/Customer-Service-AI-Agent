@@ -84,6 +84,23 @@ TEST_DISTRIBUTED_DB_URL=postgresql://... TEST_REDIS_URL=redis://... \
 multi-region、cross-process SSE replay。
 **Not claimed**：exactly-once、零丢失、高可用已验证、broker-native DLX。
 
+### HITL governance boundary（可以说 / 不能说）
+
+| 可以说（Level 2 — CI VERIFIED） | 不能说 |
+|---|---|
+| HIGH 风险副作用在**执行前**被拦下，挂 `WAITING_APPROVAL`（非终态） | 「`/api/chat` 快路径也受审批保护」——快路径无 run 上下文，**不在**该边界内 |
+| `WAITING_APPROVAL → RUNNING` 不递增 `attempt`，等人不消耗重试预算 | 「审批等待计入重试 / 会自动 DLQ」 |
+| reviewer ≠ requester 在 **service 层**强制，审批人身份拿不到就 401 | 「所有 admin-token 决策共用一个 reviewer」（不会退化） |
+| TTL 到期按 **EXPIRED（拒绝）** 收敛，绝不默认放行 | 「超时自动批准 / 自动执行」 |
+| 决策幂等、`resume` 原子消费一次 | 「审批通过 = 已执行」（决策≠执行，执行仍走 ledger） |
+| 已批准副作用仍经 `tool_side_effects` ledger，`operation_key` 在 replay 后稳定 | 「端到端 exactly-once」（外部系统仍需接受 idempotency key） |
+| 用确定性 staging 工具验证了审批—执行闭环 | 「真实 ERP 写操作已验证」——`NOT_VERIFIED` |
+| — | 「审批 SLA / 人工效率已优化」——`NOT_MEASURED` |
+| — | 「有审批主动通知」——**未实现**，只能靠 `GET /api/approvals` 拉取 |
+
+**Not claimed（HITL）**：真实 ERP 写操作（`NOT_VERIFIED`）、审批 SLA
+（`NOT_MEASURED`）、主动通知（TODO）、快路径覆盖（设计上不覆盖）。
+
 ## Interview Questions
 
 ### Q1 为什么 Postgres Checkpoint，而不是 Redis？

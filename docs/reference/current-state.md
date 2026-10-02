@@ -20,7 +20,8 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`58`**
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`62`**（`docs/openapi.json` 快照；
+  数字随 approval endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
 ## RAG evaluation / evidence state
@@ -112,23 +113,44 @@ python3 scripts/audit_doc_consistency.py
   - `run_id`（`agent_runs.id`）：单轮 Graph 执行 ID，每次请求唯一；
   - `task_id`：队列消息 / Worker 执行 ID（Celery task id）。
   禁止"每个请求新建 thread_id"。
-- **业务状态真相源**：数据库 `agent_runs` 表（canonical），状态机
-  `PENDING → QUEUED → RUNNING → SUCCEEDED | FAILED | RETRYING → RUNNING |
-  DEAD_LETTER`，任意未终态可 `→ CANCELLED`；终态为
-  `SUCCEEDED | FAILED | DEAD_LETTER | CANCELLED`
-  （`runtime/statuses.py`）。Celery result backend **不是**真相源
-  （`task_ignore_result=True`）。
-- **Human-in-the-loop（高风险副作用治理）**：`WAITING_APPROVAL` 是额外的
-  **非终态**——HIGH 风险工具副作用在**执行前**被拦下，durable 审批记录落
+- **业务状态真相源**：数据库 `agent_runs` 表（canonical）。**完整合法迁移集合以
+  `runtime/statuses.py::ALLOWED_TRANSITIONS` 为唯一真相源**，本节只是它的可读
+  投影（不允许在别处再写第二份状态机）：
+
+  ```text
+  PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED              (终态)
+                    │              ├──► FAILED                 (终态，permanent error，不重试)
+                    │              ├──► RETRYING ──► RUNNING   (transient error，退避后重试)
+                    │              ├──► WAITING_APPROVAL ──► RUNNING  (人工审批决策后恢复)
+                    │              └──► DEAD_LETTER            (终态，retry 用尽)
+                    └──► CANCELLED                            (终态，用户/管理员取消)
+
+  任意未终态 ──► CANCELLED（escape path）
+  WAITING_APPROVAL ──► DEAD_LETTER / CANCELLED（审批被永久搁置时的逃生口）
+  ```
+
+  - `WAITING_APPROVAL` 是**非终态**，且**不在** `EXECUTABLE_STATUSES`
+    （`{QUEUED, RETRYING}`）里：等待审批的 run 只能由审批 API 显式投递恢复，
+    通用队列轮询不会把它当成待办反复捞起（否则无人处理的审批会变成忙循环）。
+  - `WAITING_APPROVAL → RUNNING` 由 `RunService.mark_resumed_running()` 执行且
+    **不递增 attempt**——等待人不是失败，不该消耗 `AGENT_RUN_MAX_ATTEMPTS`。
+  - 刻意**没有** `WAITING_APPROVAL → QUEUED` 这条边（原因同上：改回 QUEUED 会走
+    `mark_running`，而它每次领取都 `attempt + 1`）。
+  - 终态：`SUCCEEDED | FAILED | DEAD_LETTER | CANCELLED`。Celery result backend
+    **不是**真相源（`task_ignore_result=True`）。
+- **Human-in-the-loop（高风险副作用治理）**：HIGH 风险工具副作用在**执行前**被拦下
+  （Agent 工具循环只把它摘进 `pending_actions`，并未执行），durable 审批记录落
   `human_approvals` 表（`alembic 006`），图在 `interrupt()` 处挂起、checkpoint
-  落库；人工 approve/edit/reject（仅 admin/supervisor，且 `reviewer != requester`）
-  后由 worker 以 `Command(resume=...)` 恢复，执行仍经 side-effect ledger
-  （`operation_key = run_id:approval:{approval_id}`，恰好一次）。实现见
-  `core/hitl/`、`api/routes/approvals.py`、
+  落库，run 转入上述 `WAITING_APPROVAL`；人工 approve/edit/reject（仅
+  admin/supervisor，且 `reviewer != requester`）后由 worker 以
+  `Command(resume=...)` 恢复，执行仍经 side-effect ledger
+  （`operation_key = run_id:approval:{approval_id}`）。实现见 `core/hitl/`、
+  `api/routes/approvals.py`、
   [design/human-in-the-loop.md](../design/human-in-the-loop.md)。
   **边界**：`HITL_ENABLED` 默认 `false`；`/api/chat` 快路径无 run 上下文，
-  明确不在该治理边界内；**真实 ERP 写操作未验证**（无企业 staging，
-  副作用验证走确定性 staging 工具，见该文档 §9）。
+  明确**不在**该治理边界内（不得宣称其受 durable HITL 保护）；
+  **真实 ERP 写操作 NOT_VERIFIED**（无企业 staging，副作用验证走确定性 staging
+  工具，见该文档 §9）。
 - **取消（协作式）**：`POST /api/runs/{run_id}/cancel` 立即置 `CANCELLED`。
   未开始的 run 不会再被执行；**已进入 RUNNING 的 run 不会被强行中断**，
   调用方需轮询确认终态。
