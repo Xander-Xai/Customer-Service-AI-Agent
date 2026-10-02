@@ -95,7 +95,7 @@ def default_operation_key(tool_name: str, arguments: dict[str, Any] | None) -> s
 
 
 def _serialize_reference(result: Any) -> Any:
-    if result is None or isinstance(result, (dict, list, str, int, float, bool)):
+    if result is None or isinstance(result, dict | list | str | int | float | bool):
         return result
     return str(result)[:2000]
 
