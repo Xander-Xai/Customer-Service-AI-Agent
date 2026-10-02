@@ -111,6 +111,12 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 - 项目介绍 → [design/interview-intro.md](design/interview-intro.md)
 - 深入 Q&A → [design/interview-deep-dive.md](design/interview-deep-dive.md)
 - 面试题集 → [interview-questions-final.md](interview-questions-final.md)
+- **源码溯源地图（问题 → 源码 → 测试 → 证据）** → [interview/source-map.md](interview/source-map.md)
+- 架构逐问（15 问 + 证据分级 + 不宣称清单） → [interview/architecture-walkthrough.md](interview/architecture-walkthrough.md)
+- Runtime 深入（Celery/ACK/租约/崩溃恢复 + flaky 根因） → [interview/runtime-deep-dive.md](interview/runtime-deep-dive.md)
+- RAG 深入（检索链路、评测口径、失败分析；指标 NOT_VERIFIED） → [interview/rag-deep-dive.md](interview/rag-deep-dive.md)
+- HITL 深入（风险分级、执行前拦截、TTL、职责分离、approval ≠ idempotency） → [interview/hitl-deep-dive.md](interview/hitl-deep-dive.md)
+- 失败模式与取舍（为什么不做 / 代价 / 我们犯过的错） → [interview/failure-and-tradeoffs.md](interview/failure-and-tradeoffs.md)
 - Tool Result 面试材料 → [interview/context-engineering-interview.md](interview/context-engineering-interview.md)
 - 简历描述（证据冻结） → [reports/resume-description.md](reports/resume-description.md)
 
