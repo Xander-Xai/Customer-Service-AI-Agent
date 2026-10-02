@@ -12,10 +12,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from runtime.executor import execute_run
+from runtime.executor import RetryPublicationError, execute_run
 from runtime.repository import AgentRunRepository
 from runtime.run_service import RunService
 from runtime.statuses import RunStatus
@@ -28,6 +29,17 @@ from tests.unit.runtime_helpers import (
     make_sqlite_session_factory,
     runtime_provider,
 )
+
+
+class FailingDispatcher:
+    """投递器：模拟 Redis/Celery broker 抖动（延迟重试消息发不出去）。"""
+
+    def __init__(self):
+        self.calls: list[tuple[str, float | None]] = []
+
+    async def __call__(self, run_id: str, countdown: float | None = None):
+        self.calls.append((run_id, countdown))
+        raise ConnectionError("broker down")
 
 
 @pytest.fixture
@@ -259,3 +271,75 @@ async def test_different_threads_run_in_parallel(env):
     )
     assert results == [RunStatus.SUCCEEDED.value, RunStatus.SUCCEEDED.value]
     assert count["max"] == 2  # 确实并发，而不是全局大锁
+
+
+# ---------------------------------------------------------------------------
+# PR #27-B — 重试投递失败绝不能静默 ACK
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+async def test_call_dispatcher_wraps_failure_as_retry_publication_error():
+    from runtime.executor import _call_dispatcher
+
+    async def boom(run_id, countdown=None):
+        raise ConnectionError("redis down")
+
+    with pytest.raises(RetryPublicationError):
+        await _call_dispatcher(boom, "run-x", 5.0)
+
+    # 正常投递不抛
+    calls: list[str] = []
+
+    async def ok(run_id, countdown=None):
+        calls.append(run_id)
+
+    await _call_dispatcher(ok, "run-y", 5.0)
+    assert calls == ["run-y"]
+
+
+@pytest.mark.unit
+async def test_retry_publication_failure_escapes_instead_of_silent_ack(env):
+    """run 进入 RETRYING 但重试消息发不出去 -> 异常必须逃逸（Celery 不 ACK）。"""
+    service = env
+    run = service.create_run(query="q", session_id="T-pubfail", max_attempts=3)
+
+    def always_timeout(**kwargs):
+        raise TimeoutError("provider timeout")
+
+    runtime = FakeRuntime(always_timeout)
+    dispatcher = FailingDispatcher()
+    lock = InMemoryThreadLock()
+
+    with pytest.raises(RetryPublicationError):
+        await _run(service, run["id"], runtime, dispatcher, lock)
+
+    # run 停在 RETRYING（等待 broker redelivery / reconciler），而不是被 ACK 后遗忘
+    stored = service.get_run(run["id"])
+    assert stored["status"] == RunStatus.RETRYING.value
+    assert stored["next_retry_at"] is not None
+    assert len(dispatcher.calls) == 1
+
+
+@pytest.mark.unit
+async def test_reconciler_redispatches_retrying_run_lost_by_broker(env):
+    """durable recovery：投递彻底丢失后，扫描器重新投递 RETRYING/QUEUED 的 run。"""
+    from runtime.retry import reconcile_stuck_runs
+
+    service = env
+    run = service.create_run(query="q", session_id="T-reconcile", max_attempts=3)
+    service.mark_running(run["id"], worker_id="w1", lease_seconds=60)
+    service.mark_retrying(
+        run["id"], delay_seconds=0.0, error_type="timeout", error_message="timeout"
+    )
+
+    dispatcher = RecordingDispatcher()
+    later = datetime.now(timezone.utc) + timedelta(seconds=5)
+    dispatched = await reconcile_stuck_runs(service, dispatcher=dispatcher, now=later)
+
+    assert run["id"] in dispatched
+    assert [rid for rid, _ in dispatcher.calls] == [run["id"]]
+    # 重新投递后仍可由 worker 领取
+    again = service.mark_running(run["id"], worker_id="w2", lease_seconds=60)
+    assert again is not None
+    assert again["attempt"] == 2
