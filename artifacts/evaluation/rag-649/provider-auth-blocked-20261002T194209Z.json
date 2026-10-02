@@ -1,0 +1,56 @@
+{
+  "schema": "rag-649-provider-auth-blocked/v1",
+  "generated_at": "2026-10-02T19:42:35.756779+00:00",
+  "git_sha": "260662213a7160850cf42c7543f2832d2adcf3f4",
+  "formal_649_query_evaluation": "BLOCKED",
+  "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+  "blockers": [
+    {
+      "code": "EMBEDDING_PROVIDER_AUTH",
+      "stage": "embedding",
+      "blocking": true,
+      "http_status": 401,
+      "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行",
+      "caused_by": null
+    },
+    {
+      "code": "VECTOR_INDEX_EMPTY",
+      "stage": "qdrant",
+      "blocking": true,
+      "http_status": null,
+      "detail": "评测 collection 全部为 0 points；BM25 索引由 Qdrant 重建，因此 bm25_only 同样被阻塞；修复根因后运行 python3 scripts/import_eval_corpus.py 导入语料",
+      "caused_by": "EMBEDDING_PROVIDER_AUTH"
+    },
+    {
+      "code": "RERANKER_PROVIDER_AUTH",
+      "stage": "reranker",
+      "blocking": false,
+      "http_status": 401,
+      "detail": "reranker 探针未确认真实 rerank（silent_fallback 或 API 失败）；仅阻塞 hybrid_rerank，其余实验照常运行",
+      "caused_by": null
+    }
+  ],
+  "independent_direct_probe": {
+    "endpoint": "https://api.siliconflow.cn/v1/embeddings",
+    "model": "BAAI/bge-large-zh-v1.5",
+    "http_status": 401,
+    "provider_message": "Token is invalid.",
+    "api_key_present": true,
+    "note": "direct probe issued outside the harness, same credential; provider rejected the token"
+  },
+  "qdrant": {
+    "reachable": true,
+    "collections": [
+      "faq",
+      "product_knowledge",
+      "tech_support",
+      "complaint_knowledge"
+    ],
+    "note": "container customer-service-qdrant-eval was exited (143/SIGTERM); restarted locally so the preflight could reach the index. Vector index remains empty because corpus import requires embeddings, which require provider auth."
+  },
+  "metrics_produced": null,
+  "evidence_semantics": "NOT_MEASURED / NOT_VERIFIED. No 649-query metrics are produced, quoted or estimated in this round.",
+  "model_substitution": "NOT_PERFORMED. Swapping providers would break comparability with the historical experiment, so it was not done.",
+  "preflight_artifact": "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+  "next_step_for_humans": "Provide a working provider credential (or a funded replacement endpoint) and re-run: make rag-eval-import && make rag-eval-649-preflight && make rag-eval-649"
+}

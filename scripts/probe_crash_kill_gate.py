@@ -209,7 +209,15 @@ def _commit_state(engine, thread_id: str) -> dict[str, object]:
     }
 
 
-def run_cycle(engine, redis_client, index: int, workdir: Path) -> dict[str, object]:
+def run_cycle(
+    engine,
+    redis_client,
+    index: int,
+    workdir: Path,
+    *,
+    tail_on_hit: bool = False,
+    kill_immediately: bool = False,
+) -> dict[str, object]:
     tag = uuid.uuid4().hex[:8]
     run_id = f"killgate-{tag}"
     thread_id = f"T-killgate-{tag}"
@@ -240,6 +248,7 @@ def run_cycle(engine, redis_client, index: int, workdir: Path) -> dict[str, obje
     Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
     worker = None
+    worker_b = None
     record: dict[str, object] = {
         "index": index,
         "tag": tag,
@@ -263,13 +272,22 @@ def run_cycle(engine, redis_client, index: int, workdir: Path) -> dict[str, obje
         record["t_entered_second_s"] = round(time.perf_counter() - t0, 4)
 
         # --- the test's own gate, verbatim ---------------------------------
-        def _gate() -> bool:
-            with engine.connect() as conn:
-                count = int(conn.execute(text(_COUNT_SQL), {"t": thread_id}).scalar() or 0)
-            return count >= 1
+        if kill_immediately:
+            # Maximum-race configuration: skip the gate entirely and kill the
+            # instant ``second`` is observed. Used to (a) smoke-test the recovery
+            # tail deterministically and (b) bound how wide the durability
+            # window actually is. Not the test's behaviour — the test does run
+            # the gate checks.
+            record["gate_satisfied"] = True
+            record["gate_skipped"] = True
+        else:
+            def _gate() -> bool:
+                with engine.connect() as conn:
+                    count = int(conn.execute(text(_COUNT_SQL), {"t": thread_id}).scalar() or 0)
+                return count >= 1
 
-        gate = _wait_for(_gate, PROBE_GATE_TIMEOUT)
-        record["gate_satisfied"] = bool(gate)
+            gate = _wait_for(_gate, PROBE_GATE_TIMEOUT)
+            record["gate_satisfied"] = bool(gate)
         record["gate_checkpoint_count"] = _checkpoint_count(engine, thread_id)
 
         record["first_before"] = int(redis_client.get(f"{key_prefix}:node_first") or 0)
@@ -280,18 +298,66 @@ def run_cycle(engine, redis_client, index: int, workdir: Path) -> dict[str, obje
         record["running_row"] = list(running) if running is not None else None
 
         # --- durability at the kill instant --------------------------------
-        state = _commit_state(engine, thread_id)
-        record.update(state)
+        # Read *immediately before* the SIGKILL. This read is itself a couple of
+        # milliseconds of latency, and LangGraph commits super-step checkpoints
+        # on a background executor, so a "not yet durable" reading here does NOT
+        # prove the commit was lost. The post-kill read below closes that gap:
+        # if the newest checkpoint gains first's channel between the two reads,
+        # the commit landed inside the kill window and nothing was lost.
+        pre = _commit_state(engine, thread_id)
+        record.update({f"pre_{k}": v for k, v in pre.items()})
+        record["durable_has_first_result"] = pre["durable_has_first_result"]
+        record["checkpoint_count"] = pre["checkpoint_count"]
+        record["channels"] = pre["channels"]
         record["t_kill_s"] = round(time.perf_counter() - t0, 4)
-        record["kill_before_durable"] = bool(
-            record["gate_satisfied"] and not record["durable_has_first_result"]
-        )
 
         _stop_worker(worker)
         worker = None
+        record["t_postkill_read_s"] = round(time.perf_counter() - t0, 4)
+
+        post = _commit_state(engine, thread_id)
+        record["post_checkpoint_count"] = post["checkpoint_count"]
+        record["post_channels"] = post["channels"]
+        record["post_durable_has_first_result"] = post["durable_has_first_result"]
+
+        record["gate_admitted_kill"] = bool(
+            record["gate_satisfied"] and not pre["durable_has_first_result"]
+        )
+        # Classify the "hit": did the commit land inside the kill window (a
+        # measurement artifact of this probe) or was it genuinely absent?
+        record["commit_landed_during_kill_window"] = bool(
+            not pre["durable_has_first_result"] and post["durable_has_first_result"]
+        )
+        record["commit_absent_after_kill"] = bool(
+            not pre["durable_has_first_result"] and not post["durable_has_first_result"]
+        )
+        # Kept as the original headline metric so earlier artifacts stay
+        # comparable; see ``gate_admitted_kill`` for the honest interpretation.
+        record["kill_before_durable"] = record["gate_admitted_kill"]
+
+        if not (tail_on_hit and record["gate_admitted_kill"]):
+            return record
+
+        # --- full recovery tail, only for a caught race ---------------------
+        # A kill before durability is *deterministically* fatal to the test's
+        # assertions: recovery resumes from the input checkpoint, so ``first``
+        # runs a second time. Running the real tail here turns the cheap
+        # detector into an end-to-end reproducer, and costs the ~30s recovery
+        # only on the cycles that actually hit the window.
+        record["tail"] = _run_recovery_tail(
+            engine, redis_client, thread_id, run_id, key_prefix, workdir, index
+        )
+        record["tail"]["worker_b_started"] = True
+        worker_b = _start_worker(
+            _worker_env(queue, key_prefix), str(workdir / f"cycle-{index:03d}.worker-b.log")
+        )
+        record["tail"].update(
+            _await_recovery(engine, redis_client, thread_id, run_id, key_prefix)
+        )
         return record
     finally:
         _stop_worker(worker)
+        _stop_worker(worker_b)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
             conn.execute(
@@ -300,9 +366,76 @@ def run_cycle(engine, redis_client, index: int, workdir: Path) -> dict[str, obje
         redis_client.delete(*ckpt_keys, queue, "unacked", "unacked_index")
 
 
+def _run_recovery_tail(engine, redis_client, thread_id, run_id, key_prefix, workdir, index):
+    """Wait out the visibility timeout before the recovering worker starts."""
+    time.sleep(PROBE_VISIBILITY_TIMEOUT + 3)
+    return {"visibility_timeout_elapsed_s": PROBE_VISIBILITY_TIMEOUT + 3}
+
+
+def _await_recovery(engine, redis_client, thread_id, run_id, key_prefix) -> dict[str, object]:
+    """Mirror the test's post-recovery waits and record the outcome verbatim."""
+
+    def _row():
+        with engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT status, attempt, worker_id, result FROM agent_runs WHERE id=:id"
+                ),
+                {"id": run_id},
+            ).fetchone()
+
+    final = _wait_for(
+        lambda: (
+            (r := _row()) is not None and r[0] in ("SUCCEEDED", "FAILED", "DEAD_LETTER") and r
+        ),
+        150,
+    )
+    out: dict[str, object] = {"final_state": list(final) if final is not None else None}
+    out["first_after"] = int(redis_client.get(f"{key_prefix}:node_first") or 0)
+    out["second_after"] = int(redis_client.get(f"{key_prefix}:node_second") or 0)
+    out["recovered"] = int(redis_client.get(f"{key_prefix}:recovered") or 0)
+    out["trace"] = redis_client.lrange(f"{key_prefix}:trace", 0, -1) or []
+    out["checkpoint_state_after"] = _commit_state(engine, thread_id)
+    # Exactly the two assertions that break when the kill precedes durability.
+    out["assertion_first_after_equals_1"] = out["first_after"] == 1
+    out["assertion_recovered_at_least_1"] = out["recovered"] >= 1
+    out["test_would_pass"] = bool(
+        final is not None
+        and final[0] == "SUCCEEDED"
+        and out["assertion_first_after_equals_1"]
+        and out["second_after"] >= 2
+        and out["assertion_recovered_at_least_1"]
+    )
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cycles", type=int, default=60)
+    parser.add_argument(
+        "--tail-on-hit",
+        action="store_true",
+        help=(
+            "when a cycle lands the kill before first's checkpoint is committed, "
+            "run the full visibility-timeout + redelivery + recovery tail and record "
+            "the resulting assertions (turns the detector into an end-to-end reproducer)"
+        ),
+    )
+    parser.add_argument(
+        "--kill-immediately",
+        action="store_true",
+        help=(
+            "maximum-race diagnostic: skip the gate checks and SIGKILL the instant "
+            "'second' is observed, instead of replaying the test's gate sequence. "
+            "Not the test's behaviour; used to bound the durability window and to "
+            "smoke-test the recovery tail deterministically."
+        ),
+    )
+    parser.add_argument(
+        "--stop-after-first-repro",
+        action="store_true",
+        help="with --tail-on-hit: stop as soon as one cycle reproduces the failure",
+    )
     parser.add_argument(
         "--out-root",
         default=str(REPO_ROOT / "artifacts" / "flake-investigation"),
@@ -323,9 +456,17 @@ def main() -> int:
     redis_client = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=5)
 
     cycles: list[dict[str, object]] = []
+    repros: list[dict[str, object]] = []
     started = time.perf_counter()
     for index in range(1, args.cycles + 1):
-        record = run_cycle(engine, redis_client, index, workdir)
+        record = run_cycle(
+            engine,
+            redis_client,
+            index,
+            workdir,
+            tail_on_hit=args.tail_on_hit,
+            kill_immediately=args.kill_immediately,
+        )
         cycles.append(record)
         (outdir / f"cycle-{index:03d}.json").write_text(
             json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -337,10 +478,22 @@ def main() -> int:
             f"count={record.get('checkpoint_count')} {flag}",
             flush=True,
         )
+        tail = record.get("tail")
+        if isinstance(tail, dict) and tail.get("test_would_pass") is False:
+            repros.append(record)
+            print(
+                f"      REPRODUCED: first_after={tail.get('first_after')} "
+                f"recovered={tail.get('recovered')} trace={tail.get('trace')}",
+                flush=True,
+            )
+            if args.stop_after_first_repro:
+                break
 
     measured = [c for c in cycles if "kill_before_durable" in c]
     hits = [c for c in measured if c["kill_before_durable"]]
     gate_unreached = [c for c in measured if not c["gate_satisfied"]]
+    landed_in_window = [c for c in hits if c.get("commit_landed_during_kill_window")]
+    absent_after_kill = [c for c in hits if c.get("commit_absent_after_kill")]
     summary = {
         "schema": "crash-kill-gate-probe/v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -361,6 +514,21 @@ def main() -> int:
         "cycles_gate_unreached": len(gate_unreached),
         "kill_before_durable_cycles": len(hits),
         "kill_before_durable_rate": round(len(hits) / len(measured), 4) if measured else None,
+        "kill_before_durable_interpretation": (
+            "COUNTING ARTIFACT UNLESS END-END REPRODUCED: this metric is read "
+            "immediately BEFORE the SIGKILL, and LangGraph commits super-step "
+            "checkpoints on a background executor, so a not-yet-visible reading "
+            "here does not mean the commit was lost. "
+            "'commit_landed_during_kill_window' counts how many of these hits the "
+            "post-kill read shows were commits landing inside the measurement gap. "
+            "Only 'end_to_end_reproductions' is ground truth."
+        ),
+        "hits_with_commit_landed_in_kill_window": len(landed_in_window),
+        "hits_with_commit_absent_after_kill": len(absent_after_kill),
+        "tail_on_hit": bool(args.tail_on_hit),
+        "kill_immediately": bool(args.kill_immediately),
+        "end_to_end_reproductions": len(repros),
+        "repro_cycles": [c["index"] for c in repros],
         "durable_first_channel": DURABLE_FIRST_CHANNEL,
         "replicates_gate_from": (
             "tests/integration/runtime/test_worker_checkpoint_recovery.py"
@@ -369,7 +537,7 @@ def main() -> int:
         "probe_poll_seconds": PROBE_POLL_SECONDS,
         "duration_seconds": round(time.perf_counter() - started, 2),
         "artifacts_dir": str(outdir),
-        "verdict": _verdict(len(hits), len(measured)),
+        "verdict": _verdict(len(repros), len(measured), len(landed_in_window)),
         "hit_cycles": [c["index"] for c in hits],
     }
     (outdir / "summary.json").write_text(
@@ -388,12 +556,29 @@ def _langgraph_version() -> str:
         return "unknown"
 
 
-def _verdict(hits: int, measured: int) -> str:
+def _verdict(repros: int, measured: int, landed_in_window: int = 0) -> str:
+    """Ground-truth verdict.
+
+    A gate-admitted kill is *not* a demonstrated race. LangGraph persists
+    super-step checkpoints on a background executor it does not await, so the
+    "input checkpoint only" state is observable for a few milliseconds before
+    the commit lands. Only a full redelivery + recovery cycle that actually
+    re-runs ``first`` demonstrates the race end to end.
+    """
     if not measured:
         return "NOT_MEASURED"
-    if hits:
-        return "RACE_DEMONSTRATED"
-    return "NOT_REPRODUCED"
+    if repros:
+        return "RACE_REPRODUCED_END_TO_END"
+    if landed_in_window:
+        return (
+            "H1_FALSIFIED_commit_lands_in_kill_window"
+            f" ({landed_in_window} hit(s) recovered without re-running 'first')"
+        )
+    return "NO_HIT"
+    # NOTE: a bare "NOT_REPRODUCED" is reserved for the case where the gate never
+    # admitted a pre-durability kill at all, i.e. the hypothesis was never even
+    # exercised. Distinguishing it from a falsified hypothesis matters: the first
+    # means "untested", the second means "tested and wrong".
 
 
 if __name__ == "__main__":
