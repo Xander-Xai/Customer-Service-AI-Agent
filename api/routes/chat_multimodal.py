@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, Header, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from api.utils import sanitize_input
+from core.concurrency.distributed_lock import ThreadBusyError
 from core.config import MAX_QUERY_LENGTH, MULTIMODAL_ENABLED
 from core.logger import get_logger
 
@@ -445,6 +446,8 @@ async def chat_multimodal(
                 "transcription": transcription,
                 "message": transcription,
             }
+        except ThreadBusyError:
+            raise  # 交给全局 handler -> 409
         except Exception as e:
             logger.warning(f"语音处理失败: {e}")
             return JSONResponse({"error": "语音转录处理失败"}, status_code=500)
@@ -482,6 +485,8 @@ async def chat_multimodal(
                 "image_url": data_url,
                 "message": message,
             }
+        except ThreadBusyError:
+            raise  # 交给全局 handler -> 409
         except Exception as e:
             logger.warning(f"图片处理失败: {e}")
             return JSONResponse({"error": "图片分析处理失败"}, status_code=500)
