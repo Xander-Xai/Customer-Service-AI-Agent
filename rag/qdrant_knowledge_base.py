@@ -18,6 +18,7 @@ Qdrant 知识库管理器（internal feature milestone: hybrid retrieval）
 import asyncio
 import threading
 import time
+from enum import Enum
 from typing import Any, cast
 
 from qdrant_client import QdrantClient
@@ -56,6 +57,10 @@ from rag.embedding_status import (
     validate_embedding_vector,
 )
 from rag.point_id import assert_no_point_id_collision, document_id_to_point_id
+from rag.reranker import (
+    REASON_INSUFFICIENT_CANDIDATES,
+    REASON_RERANK_DEGRADED,
+)
 from rag.retrieval_contract import (
     STAGE_BM25,
     STAGE_FILTER,
@@ -752,18 +757,31 @@ class QdrantKnowledgeBase:
 
         # ---- 6. RERANK — at most one canonical stage (spec step 15) ----
         t0 = time.perf_counter()
+        rerank_outcome: Any = None
         if request.rerank and len(fused) > 1:
-            reranked = self._apply_reranker(canonical, fused, top_k=top_k)
-            rerank_status = StageStatus.EXECUTED
+            rerank_outcome = self._apply_reranker_with_outcome(canonical, fused, top_k=top_k)
+            reranked = rerank_outcome.results
+            # The stage reports what actually happened, not what was requested.
+            # A provider failure that returns a plausible-looking ordering is
+            # DEGRADED — never EXECUTED.
+            if rerank_outcome.applied:
+                rerank_status = StageStatus.EXECUTED
+                rerank_reason = ""
+            else:
+                rerank_status = StageStatus.DEGRADED
+                rerank_reason = rerank_outcome.reason_value or REASON_RERANK_DEGRADED
         else:
             reranked = fused
             rerank_status = StageStatus.SKIPPED
+            rerank_reason = (
+                "rerank_disabled" if not request.rerank else REASON_INSUFFICIENT_CANDIDATES
+            )
         trace.add(TraceStage(
             STAGE_RERANK, rerank_status,
             candidate_in=len(fused),
             candidate_out=len(reranked),
             duration_ms=(time.perf_counter() - t0) * 1000.0,
-            reason="" if request.rerank else "rerank_disabled",
+            reason=rerank_reason,
         ))
 
         # ---- 7. FINAL — evidence + degraded meta (4-combo contract; step 23) ----
@@ -814,6 +832,31 @@ class QdrantKnowledgeBase:
             candidate_out=len(evidence),
             duration_ms=(time.perf_counter() - t0) * 1000.0,
         ))
+
+        # ---- Reranker truth, merged into meta WITHOUT erasing the root cause ----
+        # A reranker degradation is a *component* fact; the embedding/BM25
+        # degradation above is the *channel* fact. When both happen the channel
+        # reason stays in `degraded_reason` (it is the upstream root cause) and
+        # the reranker reason lives in its own component fields. Overwriting
+        # would hide an embedding outage behind a reranker timeout.
+        rerank_requested = bool(request.rerank and len(fused) > 1)
+        rerank_applied = bool(rerank_outcome is not None and rerank_outcome.applied)
+        rerank_degraded = bool(rerank_outcome is not None and rerank_outcome.degraded)
+        rerank_reason = (
+            rerank_outcome.reason_value if rerank_outcome is not None else ""
+        )
+        meta["rerank_requested"] = rerank_requested
+        meta["rerank_applied"] = rerank_applied
+        meta["rerank_degraded"] = rerank_degraded
+        meta["rerank_reason"] = rerank_reason
+        if rerank_outcome is not None and rerank_outcome.http_status is not None:
+            meta["reranker_http_status"] = rerank_outcome.http_status
+        if rerank_degraded and not meta.get("retrieval_degraded"):
+            # Retrieval channels were healthy; only reranking degraded. Promote
+            # it to an overall degradation so no caller sees a healthy-looking
+            # result that was never actually reranked.
+            meta["retrieval_degraded"] = True
+            meta["degraded_reason"] = f"reranker_{rerank_reason or REASON_RERANK_DEGRADED}"
 
         # P0-05: surface degraded state to the caller's state (no query text)
         if request.state is not None and meta.get("retrieval_degraded"):
@@ -1380,8 +1423,34 @@ class QdrantKnowledgeBase:
     def _apply_reranker(
         self, query: str, results: list[dict[str, Any]], top_k: int = 3
     ) -> list[dict[str, Any]]:
+        """历史 list 契约入口，保持不变（测试与旧调用方依赖返回值是 list）。
+
+        会**丢弃** applied/degraded 事实。canonical pipeline 用
+        :meth:`_apply_reranker_with_outcome`。
+        """
+        return self._apply_reranker_with_outcome(query, results, top_k).results
+
+    def _apply_reranker_with_outcome(
+        self, query: str, results: list[dict[str, Any]], top_k: int = 3
+    ) -> Any:
+        """Canonical rerank entry: returns this call's immutable outcome.
+
+        Never raises and never returns an empty list just because the reranker
+        is broken — availability is preserved. What changes is that the caller
+        can finally distinguish "reranked" from "fell back to the fused order".
+        """
+        from rag.reranker import RerankOutcome, RerankReason
+
         if not results or len(results) <= 1:
-            return results
+            # Too few candidates to rerank: not a failure, not a rerank.
+            return RerankOutcome(
+                results=results,
+                applied=False,
+                degraded=False,
+                reason=RerankReason.OK,
+                provider_called=False,
+            )
+
         if self._reranker is None:
             try:
                 from rag.reranker import create_reranker
@@ -1389,16 +1458,89 @@ class QdrantKnowledgeBase:
                 self._reranker = create_reranker()
                 logger.info(f"Reranker 初始化完成: {type(self._reranker).__name__}")
             except Exception as e:
-                logger.debug(f"Reranker 初始化失败: {e}")
+                # Initialization failure is a provider-side problem: surface it
+                # as a degradation instead of pretending the stage ran.
+                logger.error(
+                    "Reranker 初始化失败，降级为原始排序: error_type=%s",
+                    type(e).__name__,
+                )
                 self._reranker = False
-                return results
+                return RerankOutcome(
+                    results=results,
+                    applied=False,
+                    degraded=True,
+                    reason=RerankReason.UNAVAILABLE,
+                    provider_called=False,
+                )
         if self._reranker is False:
-            return results
+            return RerankOutcome(
+                results=results,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.UNAVAILABLE,
+                provider_called=False,
+            )
+
+        if hasattr(self._reranker, "rerank_with_outcome"):
+            try:
+                outcome = self._reranker.rerank_with_outcome(query, results, top_k=top_k)
+            except Exception as e:
+                logger.error(
+                    "Rerank 调用异常，降级为原始排序: error_type=%s",
+                    type(e).__name__,
+                )
+                return RerankOutcome(
+                    results=results[:top_k],
+                    applied=False,
+                    degraded=True,
+                    reason=RerankReason.PROVIDER_ERROR,
+                    provider_called=True,
+                )
+            # Strict isinstance, not duck typing: a MagicMock auto-creates any
+            # attribute, so `hasattr` alone would accept an object whose
+            # "outcome" is not an outcome at all and then report a
+            # non-list as the retrieval ordering.
+            if isinstance(outcome, RerankOutcome):
+                return outcome
+            logger.warning(
+                "Reranker %s 的 typed outcome 契约不满足，按未证明重排处理",
+                type(self._reranker).__name__,
+            )
+            return RerankOutcome(
+                results=list(results[:top_k]),
+                applied=False,
+                degraded=True,
+                reason=RerankReason.INVALID_RESPONSE,
+                provider_called=True,
+            )
+
+        # Legacy / injected reranker without the typed entry point. Its return
+        # value cannot prove a rerank happened, so it is treated as degraded
+        # rather than optimistically reported as executed.
+        logger.warning(
+            "Reranker %s 无 typed outcome 入口，按未证明重排处理",
+            type(self._reranker).__name__,
+        )
         try:
-            return cast(list[dict[str, Any]], self._reranker.rerank(query, results, top_k=top_k))
+            legacy = cast(list[dict[str, Any]], self._reranker.rerank(query, results, top_k=top_k))
         except Exception as e:
-            logger.warning(f"Rerank 失败，使用原始排序: {e}")
-            return results
+            logger.error(
+                "Rerank 调用失败，降级为原始排序: error_type=%s", type(e).__name__
+            )
+            return RerankOutcome(
+                results=results,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.PROVIDER_ERROR,
+                provider_called=True,
+            )
+        return RerankOutcome(
+            results=legacy,
+            applied=False,
+            degraded=True,
+            reason=RerankReason.INVALID_RESPONSE,
+            provider_called=True,
+        )
 
     async def rewrite_query(self, query: str, llm_client=None) -> str:
         if not llm_client:
@@ -1463,6 +1605,20 @@ class QdrantKnowledgeBase:
         return self._clip_enabled
 
 
+def _stage_field(obj: Any, field: str, default: Any = "") -> Any:
+    """Read a TraceStage field, normalising Enum members to their wire value.
+
+    ``str(StageStatus.EXECUTED)`` is ``"StageStatus.EXECUTED"``, not
+    ``"executed"``: a ``str``-mixin Enum still uses ``Enum.__str__``. Writing
+    that into telemetry would publish a Python repr instead of the bounded
+    contract value, and comparing it against ``StageStatus.X.value`` would never
+    match. Everything that leaves this module as a status/reason goes through
+    here.
+    """
+    value = getattr(obj, field, default)
+    return value.value if isinstance(value, Enum) else value
+
+
 def _apply_retrieval_span(span_obj: Any, result: Any) -> None:
     """Write a retrieval's **observable facts** onto its span — no source text.
 
@@ -1496,18 +1652,29 @@ def _apply_retrieval_span(span_obj: Any, result: Any) -> None:
             span_obj.add_event(
                 f"rag.stage.{name}",
                 {
-                    "csai.stage.status": str(getattr(stage, "status", "") or "")[:40],
+                    "csai.stage.status": str(_stage_field(stage, "status") or "")[:40],
                     "csai.stage.candidate_in": int(getattr(stage, "candidate_in", 0) or 0),
                     "csai.stage.candidate_out": int(getattr(stage, "candidate_out", 0) or 0),
                     "csai.stage.duration_ms": round(
                         float(getattr(stage, "duration_ms", 0.0) or 0.0), 2
                     ),
+                    # Bounded reason enum only. Never an exception message.
+                    "csai.stage.reason": str(_stage_field(stage, "reason") or "")[:40],
                 },
             )
-        final = getattr(pipeline_trace, "stage", lambda _n: None)("FINAL") if stages else None
-        if final is not None:
+        # csai.reranker_count must mean "candidates a reranker actually
+        # reordered". Deriving it from FINAL.candidate_out claimed reranking had
+        # happened on every request, including the ones where the provider
+        # failed and the pre-rerank ordering was returned untouched — which is
+        # precisely the lie this attribute must not tell.
+        rerank_stage = getattr(pipeline_trace, "stage", lambda _n: None)(STAGE_RERANK) if stages else None
+        if rerank_stage is not None and _stage_field(rerank_stage, "status") == (
+            StageStatus.EXECUTED.value
+        ):
             span_obj.set_attribute(
-                "csai.reranker_count", int(getattr(final, "candidate_out", 0) or 0)
+                "csai.reranker_count", int(getattr(rerank_stage, "candidate_out", 0) or 0)
             )
+        else:
+            span_obj.set_attribute("csai.reranker_count", 0)
     except Exception as exc:  # noqa: BLE001 - observability must not break retrieval
         logger.debug("retrieval span enrich 失败（忽略）: %s", exc)

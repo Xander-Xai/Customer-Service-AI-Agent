@@ -37,6 +37,7 @@ import numpy as np
 import pytest
 
 from rag.bm25_retriever import BM25Retriever
+from rag.embedding_status import REASON_EMBEDDING_UNAVAILABLE
 from rag.qdrant_knowledge_base import _EMBEDDING_DIM, QdrantKnowledgeBase
 
 # The unified contract module does not exist on the old architecture. These
@@ -513,3 +514,316 @@ class TestAgentsUseUnifiedEntrypoint:
             assert ".search(" not in src and ".query_multiple(" not in src, (
                 f"{mod.__name__} calls the KB directly instead of _retrieve_knowledge"
             )
+
+
+# ---------------------------------------------------------------------------
+# Reranker truthfulness in the canonical pipeline
+#
+# The defect these pin: `RERANK` was recorded EXECUTED whenever reranking was
+# *requested*, even when the provider failed and the pre-rerank ordering was
+# handed back untouched. A caller could not tell real reranking from a
+# plausible-looking fallback.
+# ---------------------------------------------------------------------------
+
+
+from rag.reranker import RerankOutcome, RerankReason  # noqa: E402
+
+
+class _StubReranker:
+    """Typed reranker double. Returns a real RerankOutcome, by construction."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+        self.calls = 0
+
+    def rerank_with_outcome(self, query, results, top_k=3):
+        self.calls += 1
+        return self._outcome
+
+    def rerank(self, query, results, top_k=3):  # legacy entry, must stay unused
+        raise AssertionError("canonical pipeline must use rerank_with_outcome")
+
+
+def _outcome(*, applied, degraded, reason, results=None):
+    return RerankOutcome(
+        results=results if results is not None else [],
+        applied=applied,
+        degraded=degraded,
+        reason=RerankReason(reason),
+        http_status=401 if reason == "http_error" else None,
+        provider_called=reason != "unavailable",
+    )
+
+
+async def _retrieve_with(kb, mock_client, *, rerank: bool, outcome):
+    _seed_bm25(kb, "product_knowledge", ["烟酰胺", "精华液", "功效"])
+    mock_client.query_points.return_value = MagicMock(
+        points=[_point("d1", "烟酰胺"), _point("d2", "精华液"), _point("d3", "功效")]
+    )
+    kb._reranker = _StubReranker(outcome)
+    return await kb.retrieve(
+        RetrievalRequest(
+            query="烟酰胺精华液", collections=["product_knowledge"], rerank=rerank
+        )
+    )
+
+
+def _rerank_stage(result):
+    return result.trace.stage(STAGE_RERANK)
+
+
+class TestRerankStageTruth:
+    @pytest.mark.asyncio
+    async def test_real_rerank_is_executed(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        fused = [{"content": "d1", "id": "d1"}, {"content": "d2", "id": "d2"}]
+        res = await _retrieve_with(
+            kb, mc, rerank=True,
+            outcome=_outcome(applied=True, degraded=False, reason="", results=fused),
+        )
+        stage = _rerank_stage(res)
+        assert stage.status is StageStatus.EXECUTED
+        assert stage.reason == ""
+        assert res.meta["rerank_requested"] is True
+        assert res.meta["rerank_applied"] is True
+        assert res.meta["rerank_degraded"] is False
+        assert res.meta["rerank_reason"] == ""
+        assert res.meta["retrieval_degraded"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reason", ["unavailable", "timeout", "http_error",
+                                        "provider_error", "invalid_response"])
+    async def test_provider_failure_is_degraded_never_executed(self, reason):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        fused = [{"content": "d1", "id": "d1"}, {"content": "d2", "id": "d2"}]
+        res = await _retrieve_with(
+            kb, mc, rerank=True,
+            outcome=_outcome(applied=False, degraded=True, reason=reason, results=fused),
+        )
+        stage = _rerank_stage(res)
+        assert stage.status is StageStatus.DEGRADED
+        assert stage.reason == reason
+        assert res.meta["rerank_applied"] is False
+        assert res.meta["rerank_degraded"] is True
+        assert res.meta["rerank_reason"] == reason
+        # Availability preserved: real evidence still returned, not an error.
+        assert len(res) > 0
+
+    @pytest.mark.asyncio
+    async def test_unavailable_failure_preserves_fused_order(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        fused = [{"content": "first"}, {"content": "second"}]
+        res = await _retrieve_with(
+            kb, mc, rerank=True,
+            outcome=_outcome(applied=False, degraded=True, reason="unavailable",
+                             results=fused),
+        )
+        assert [e.get("content") for e in res] == ["first", "second"]
+
+    @pytest.mark.asyncio
+    async def test_rerank_failure_promotes_overall_degradation(self):
+        """Healthy channels + failed reranker is still a degraded result."""
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        res = await _retrieve_with(
+            kb, mc, rerank=True,
+            outcome=_outcome(applied=False, degraded=True, reason="timeout", results=[]),
+        )
+        assert res.meta["retrieval_degraded"] is True
+        assert res.meta["degraded_reason"] == "reranker_timeout"
+
+    @pytest.mark.asyncio
+    async def test_http_status_is_exposed_as_a_code(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        res = await _retrieve_with(
+            kb, mc, rerank=True,
+            outcome=_outcome(applied=False, degraded=True, reason="http_error", results=[]),
+        )
+        assert res.meta["reranker_http_status"] == 401
+
+    @pytest.mark.asyncio
+    async def test_rerank_disabled_is_skipped(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        res = await _retrieve_with(
+            kb, mc, rerank=False,
+            outcome=_outcome(applied=False, degraded=False, reason="", results=[]),
+        )
+        stage = _rerank_stage(res)
+        assert stage.status is StageStatus.SKIPPED
+        assert stage.reason == "rerank_disabled"
+        assert res.meta["rerank_requested"] is False
+        assert res.meta["rerank_degraded"] is False
+        assert res.meta["retrieval_degraded"] is False
+
+    @pytest.mark.asyncio
+    async def test_single_candidate_is_skipped_not_degraded(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺"])
+        mc.query_points.return_value = MagicMock(points=[_point("d1", "烟酰胺")])
+        stub = _StubReranker(_outcome(applied=False, degraded=False, reason="", results=[]))
+        kb._reranker = stub
+        res = await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+        stage = _rerank_stage(res)
+        assert stage.status is StageStatus.SKIPPED
+        assert stage.reason == "insufficient_candidates"
+        assert stub.calls == 0, "reranker must not be called for one candidate"
+        assert res.meta["rerank_degraded"] is False
+
+    @pytest.mark.asyncio
+    async def test_reranker_without_typed_contract_is_degraded(self):
+        """An injected reranker that cannot prove a rerank is not reported as one."""
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺", "精华液"])
+        mc.query_points.return_value = MagicMock(
+            points=[_point("d1", "烟酰胺"), _point("d2", "精华液")]
+        )
+
+        class _LegacyOnly:
+            def rerank(self, query, results, top_k=3):
+                return results[:top_k]
+
+        kb._reranker = _LegacyOnly()
+        res = await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+        stage = _rerank_stage(res)
+        assert stage.status is StageStatus.DEGRADED
+        assert res.meta["rerank_applied"] is False
+        assert res.meta["rerank_degraded"] is True
+
+    @pytest.mark.asyncio
+    async def test_embedding_degradation_is_not_overwritten_by_rerank(self):
+        """Both facts survive: channel root cause AND component degradation."""
+        kb, mc = _make_kb(embed_fn=None)  # no embed_fn -> vector channel fails closed
+        # Seed docs that all match the query so BM25 yields >1 candidate and the
+        # RERANK stage is genuinely reached (1 candidate would be SKIPPED).
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺功效", "烟酰胺美白", "烟酰胺推荐"])
+        kb._reranker = _StubReranker(
+            _outcome(applied=False, degraded=True, reason="timeout", results=[])
+        )
+        res = await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+        assert _rerank_stage(res).status is StageStatus.DEGRADED
+        meta = res.meta
+        assert meta["retrieval_degraded"] is True
+        # The channel root cause is still the headline reason...
+        assert meta["degraded_reason"] == REASON_EMBEDDING_UNAVAILABLE
+        # ...and the reranker fact is preserved alongside it.
+        assert meta["rerank_degraded"] is True
+        assert meta["rerank_reason"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_degradation_propagates_to_agent_state(self):
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺", "精华液", "功效"])
+        mc.query_points.return_value = MagicMock(
+            points=[_point("d1", "烟酰胺"), _point("d2", "精华液"), _point("d3", "功效")]
+        )
+        kb._reranker = _StubReranker(
+            _outcome(applied=False, degraded=True, reason="http_error", results=[])
+        )
+        state: dict = {}
+        await kb.retrieve(
+            RetrievalRequest(
+                query="烟酰胺精华液", collections=["product_knowledge"],
+                rerank=True, state=state,
+            )
+        )
+        assert state["retrieval_degraded"] is True
+        assert state["degraded_reason"] == "reranker_http_error"
+
+
+class TestRerankOutcomeIsNotDerivedFromSharedState:
+    """The canonical outcome must come from this call, not from the instance.
+
+    `last_error_status` is instance-level mutable state. With one reranker
+    shared across concurrent requests, `call A -> rerank() -> switch ->
+    call B writes last_error_status -> call A reads it` mis-attributes B's
+    failure to A. So runtime attribution is pinned structurally, not just by a
+    happy-path test.
+    """
+
+    def test_canonical_helpers_never_read_last_error_status(self):
+        """Structural guarantee: no runtime decision reads the shared field."""
+        import inspect
+
+        from rag.qdrant_knowledge_base import QdrantKnowledgeBase
+
+        for fn in (QdrantKnowledgeBase._apply_reranker_with_outcome,):
+            src = inspect.getsource(fn)
+            assert "last_error_status" not in src, (
+                f"{fn.__name__} must derive its outcome from the returned value, "
+                f"not from shared mutable state"
+            )
+
+    def test_retrieve_inner_rerank_block_never_reads_last_error_status(self):
+        import inspect
+
+        src = inspect.getsource(QdrantKnowledgeBase._retrieve_inner)
+        rerank_block = src.split("# ---- 6. RERANK", 1)[1].split("# ---- 7. FINAL", 1)[0]
+        assert "last_error_status" not in rerank_block
+
+    @pytest.mark.asyncio
+    async def test_interleaved_failure_does_not_poison_another_request(self):
+        """Request A succeeds; B then fails; A's own meta must stay truthful."""
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+
+        class _Interleaving:
+            def __init__(self):
+                self.n = 0
+                self.last_error_status = None
+
+            def rerank_with_outcome(self, query, results, top_k=3):
+                self.n += 1
+                if self.n == 2:
+                    # Second request fails and writes the shared field.
+                    self.last_error_status = 401
+                    return RerankOutcome(results=results[:top_k], applied=False,
+                                         degraded=True, reason=RerankReason.TIMEOUT)
+                return RerankOutcome(results=results[:top_k], applied=True,
+                                     degraded=False, reason=RerankReason.OK)
+
+        kb._reranker = _Interleaving()
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺功效", "烟酰胺美白", "烟酰胺推荐"])
+        mc.query_points.return_value = MagicMock(
+            points=[_point("d1", "烟酰胺功效"), _point("d2", "烟酰胺美白"),
+                    _point("d3", "烟酰胺推荐")]
+        )
+
+        first = await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+        # A concurrent failure happens after A completed.
+        kb._reranker.last_error_status = 401
+        second = await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+
+        assert first.meta["rerank_applied"] is True
+        assert first.meta["rerank_degraded"] is False
+        assert first.trace.stage(STAGE_RERANK).status is StageStatus.EXECUTED
+
+        assert second.meta["rerank_applied"] is False
+        assert second.meta["rerank_degraded"] is True
+        assert second.meta["rerank_reason"] == "timeout"
+        assert second.trace.stage(STAGE_RERANK).status is StageStatus.DEGRADED
+
+    @pytest.mark.asyncio
+    async def test_stub_legacy_rerank_is_never_called_by_canonical_path(self):
+        """The typed entry must be the one the pipeline uses."""
+        kb, mc = _make_kb(embed_fn=_embed_fn())
+        stub = _StubReranker(
+            _outcome(applied=True, degraded=False, reason="", results=[])
+        )
+        kb._reranker = stub
+        _seed_bm25(kb, "product_knowledge", ["烟酰胺功效", "烟酰胺美白", "烟酰胺推荐"])
+        mc.query_points.return_value = MagicMock(
+            points=[_point("d1", "烟酰胺功效"), _point("d2", "烟酰胺美白"),
+                    _point("d3", "烟酰胺推荐")]
+        )
+        await kb.retrieve(
+            RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)
+        )
+        assert stub.calls == 1

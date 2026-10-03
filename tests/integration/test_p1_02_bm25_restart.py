@@ -94,6 +94,25 @@ def _make_kb(path: str):
     return kb, client
 
 
+class _WorkingReranker:
+    """Typed reranker double that reports a real rerank.
+
+    `.env.test` provides a placeholder `RERANKER_API_KEY`, so a real
+    `ApiReranker` counts as available, attempts a live provider call and fails.
+    Under the reranker degradation contract that correctly marks the retrieval
+    degraded, which would make BM25/dense restart assertions depend on provider
+    reachability. Stubbing keeps this integration test about index persistence.
+    """
+
+    def rerank_with_outcome(self, query, results, top_k=3):
+        from rag.reranker import RerankOutcome, RerankReason
+
+        return RerankOutcome(
+            results=results[:top_k], applied=True, degraded=False,
+            reason=RerankReason.OK, provider_called=True,
+        )
+
+
 def _populate(kb, client):
     """Create the collection and add DOCS through the KB (Qdrant + BM25)."""
     client._client.create_collection(
@@ -150,6 +169,7 @@ class TestRestartRebuild:
         del kbA
 
         kbB, clientB = _make_kb(persist_path)
+        kbB._reranker = _WorkingReranker()
         kbB.rebuild_bm25_from_qdrant([COLLECTION])
 
         # Dense channel: vector search is functional after restart (returns
