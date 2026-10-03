@@ -708,12 +708,11 @@ class TestMcpContractWiring:
         worse, starts skipping) on an unrelated change."""
         run = _step_run_exact(self.CI_MCP_STEP)
         ci_specs = {
-            re.sub(r"\s+", " ", m.replace("\"", "").replace("'", "").strip())
+            re.sub(r"\s+", " ", m.replace('"', "").replace("'", "").strip())
             for m in re.findall(r"[\"']mcp[^\"']*[\"']", run)
         }
         assert ci_specs, (
-            f"No quoted mcp requirement specifier found in the "
-            f"'{self.CI_MCP_STEP}' step:\n{run}"
+            f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
         )
         declared = self._declared_mcp_spec(self.REQ_OPT)
         assert declared is not None, (
