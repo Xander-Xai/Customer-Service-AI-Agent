@@ -294,14 +294,17 @@ MCP 被定位为 **tool transport（传输层），不是新的安全边界**。
 - **RBAC 是请求级、不是 per-tool**。不能说"MCP 工具经过了 RBAC"。
 - **响应侧结果大小当前不设上限**（只限制请求 payload 字节）。已知缺口。
 
-**Evidence**：`IMPLEMENTED`。本 PR 只落地**纯函数契约**（命名空间化、schema
-归一化、风险只向上收敛、allowlist 解析、启动期结构校验、注册表 `source`
-可观测性），由 `tests/unit/test_mcp_adapter.py` 覆盖并已运行通过。
+**Evidence**：`IMPLEMENTED`。纯函数契约（命名空间化、schema 归一化、风险只向上
+收敛、allowlist 解析、启动期结构校验、注册表 `source` 可观测性）由
+`tests/unit/test_mcp_adapter.py` 覆盖；端到端契约由
+`tests/integration/test_mcp_contract_e2e.py` + 本地 deterministic fake MCP server
+取证，命令 `make test-mcp` —— `registry → adapter → server → result → policy/
+telemetry` 每一段都是真的（真实子进程 + 官方 `mcp` SDK 作 client），
+**不依赖任何外部公开 MCP 服务**。
 
-跨进程 / 传输 / 策略 / 时序的**端到端契约取证**（deterministic fake MCP server
-+ `registry → adapter → server → policy/telemetry` 全链路）**不在本 PR**，
-当前状态为 `NOT_VERIFIED`。在它落地并跑出真实结果之前，不得声称 MCP
-端到端可用。
+**仍未验证**：真实第三方 MCP server、生产网络与鉴权、多副本部署。
+fake server 证明的是"本仓适配器的契约成立"，**不等于**"接入任意第三方 server
+也成立" —— 后者需要真实第三方对端才能取证。
 
 **代价**（仍然成立）：默认关闭意味着默认部署**用不到** MCP；要启用必须显式
 配置 allowlist 并逐个声明 `risk_level`，运维成本高于 native 工具。
