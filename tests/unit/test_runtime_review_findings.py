@@ -24,6 +24,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -595,3 +596,120 @@ def test_retry_publication_failure_depends_on_rejection_not_acks_late():
     assert issubclass(RetryPublicationError, RuntimeError)
     # ...and it only achieves redelivery because failures are not ACKed
     assert not celery_app.conf.task_acks_on_failure_or_timeout
+
+
+# ---------------------------------------------------------------------------
+# J. Gate 11 wait-helper timeout contract
+#
+# Finding: ``tests/integration/runtime/test_tool_idempotency.py::_wait_for``
+# returned the *last predicate value* on timeout. The terminal-state predicate
+# yields ``False`` when the run never reaches a terminal state, so
+# ``assert final is not None`` passed and the next line raised
+# ``TypeError: 'bool' object is not subscriptable`` — replacing the intended,
+# diagnosable "run did not reach a terminal state" failure with an unreadable
+# crash. PR #32 fixed the same bug class at a *call site* in the sibling file;
+# the helper's own contract was left ambiguous and this caller still returned
+# False.
+#
+# The helper is loaded by path on purpose: ``tests/integration`` deliberately has
+# no ``__init__.py`` (importing it would shadow the application ``runtime``
+# package), and the module's top level only computes constants — no DB, no Redis,
+# no worker, no network.
+# ---------------------------------------------------------------------------
+
+
+def _load_idempotency_module():
+    import importlib.util
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "integration"
+        / "runtime"
+        / "test_tool_idempotency.py"
+    )
+    spec = importlib.util.spec_from_file_location("_tiem_idem_module", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class TestWaitForTimeoutContract:
+    def test_false_predicate_timeout_returns_none(self):
+        """The exact regression: old code returned False here."""
+        mod = _load_idempotency_module()
+        result = mod._wait_for(lambda: False, 0)
+        assert result is None, (
+            "timeout must be reported as 'no result'; returning a falsy predicate "
+            "value lets `assert final is not None` pass and turns the real failure "
+            "into a bool-subscript TypeError"
+        )
+
+    def test_none_predicate_timeout_returns_none(self):
+        mod = _load_idempotency_module()
+        assert mod._wait_for(lambda: None, 0) is None
+
+    def test_never_true_predicate_timeout_returns_none(self):
+        mod = _load_idempotency_module()
+        assert mod._wait_for(lambda: 0, 0) is None
+
+    def test_truthy_payload_is_preserved_verbatim(self):
+        """Not normalised to True — callers index into the real result.
+
+        A real (small) timeout is used here on purpose: with ``timeout=0`` the
+        loop body never runs, which is the correct "deadline already passed"
+        behaviour asserted in the separate no-post-deadline-I/O test, not the
+        "predicate succeeds" case.
+        """
+        mod = _load_idempotency_module()
+        payload = ("SUCCEEDED", 2)
+        assert mod._wait_for(lambda: payload, 1) == payload
+
+    def test_eventually_true_payload_is_preserved(self):
+        mod = _load_idempotency_module()
+        payload = ("SUCCEEDED", 3)
+        calls = {"n": 0}
+
+        def _predicate():
+            calls["n"] += 1
+            return payload if calls["n"] >= 2 else None
+
+        assert mod._wait_for(_predicate, 5) == payload
+        assert calls["n"] >= 2
+
+    def test_predicate_is_not_invoked_after_the_deadline(self):
+        """Deadline reached -> None, with no extra DB/Redis round trip."""
+        mod = _load_idempotency_module()
+        calls = {"n": 0}
+
+        def _predicate():
+            calls["n"] += 1
+            return None
+
+        assert mod._wait_for(_predicate, 0) is None
+        assert calls["n"] == 0, "predicate ran after the deadline expired"
+
+    def test_timeout_surfaces_the_real_assertion_not_a_typeerror(self):
+        """The failure shape Gate 11 must now produce.
+
+        Old: final=False -> `assert final is not None` passes -> final[0] raises
+        TypeError. New: final=None -> the intended AssertionError fires.
+        """
+        mod = _load_idempotency_module()
+
+        def _never_terminal():
+            return None
+
+        final = mod._wait_for(_never_terminal, 0)
+
+        with pytest.raises(AssertionError, match="run 未进入终态"):
+            assert final is not None, f"run 未进入终态: {('RUNNING', 1)}"
+
+        # and crucially the subscript is never reached with a bool
+        assert final is None
+
+    def test_regression_is_zero_real_time(self):
+        """Must not burn a real timeout; assert the helper is instant."""
+        mod = _load_idempotency_module()
+        started = time.monotonic()
+        mod._wait_for(lambda: False, 0)
+        assert time.monotonic() - started < 1.0, "regression test must not wait"
