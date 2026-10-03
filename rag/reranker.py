@@ -8,9 +8,37 @@ RAG Reranker（v6.2）
 
 使用方式：
     reranker = create_reranker()
-    reranked = reranker.rerank(query, results, top_k=3)
+    reranked = reranker.rerank(query, results, top_k=3)          # 兼容：只要 list
+    outcome = reranker.rerank_with_outcome(query, results, 3)   # 新：typed 事实
+
+为什么有两个入口
+----------------
+``rerank()`` 保留历史 list 契约（preflight gate、旧调用方、测试都依赖它）。
+``rerank_with_outcome()`` 返回**本次调用自己的**不可变事实：到底有没有真的
+重排过。canonical retrieval pipeline 只用后者。
+
+这一点是刻意的：``last_error_status`` 是**实例级共享可变状态**。同一个
+reranker 实例被并发请求共享时，
+``call A -> rerank() -> 上下文切换 -> call B 改写 last_error_status ->
+call A 读 last_error_status`` 会把 B 的失败算到 A 头上。所以 runtime 的
+applied/degraded 必须来自本次调用的返回值，不能靠事后反查实例状态。
+``last_error_status`` 仅保留给 preflight/评测 gate 诊断，不再参与 runtime 判定。
+
+降级策略不变（不是 fail-closed）
+--------------------------------
+provider 不可用/失败时**仍然**返回融合后的原始排序，不抛异常、不让整个 RAG
+请求失败。可用性优先于严格性。改变的只是：这次降级从此**可见、可观测、
+不可伪装成成功**。
+
+隐私边界
+--------
+``reason`` 是有界枚举；日志只记录 reason 枚举、HTTP 状态码和模型名。
+**不记录** query、documents、Authorization、API key，也不记录 provider 响应体
+（``e.response.text`` 可能回显用户内容或 provider 细节）。
 """
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 import httpx
@@ -19,6 +47,54 @@ from core.config import RERANKER_API_KEY, RERANKER_BASE_URL, RERANKER_MODEL
 from core.logger import get_logger
 
 logger = get_logger("rag.reranker")
+
+
+class RerankReason(str, Enum):
+    """Bounded, machine-readable rerank outcome reasons.
+
+    Deliberately an enum: these values reach ``RetrievalResult.meta``, the
+    ``RetrievalTrace`` and trace telemetry, so they must be low-cardinality and
+    must never carry an exception message, a response body or user text.
+    """
+
+    OK = ""
+    UNAVAILABLE = "unavailable"
+    TIMEOUT = "timeout"
+    HTTP_ERROR = "http_error"
+    PROVIDER_ERROR = "provider_error"
+    INVALID_RESPONSE = "invalid_response"
+
+
+#: Pipeline-level rerank reasons (not provider outcomes). Kept next to the
+#: outcome enum so the whole rerank vocabulary lives in one place.
+REASON_RERANK_DISABLED = "rerank_disabled"
+REASON_INSUFFICIENT_CANDIDATES = "insufficient_candidates"
+#: Generic label used only if an outcome ever degrades with an empty reason, so
+#: a degraded RERANK stage is never reported without a cause.
+REASON_RERANK_DEGRADED = "reranker_degraded"
+
+
+@dataclass(frozen=True)
+class RerankOutcome:
+    """Immutable per-call result of one rerank attempt.
+
+    ``results`` is always usable (the fused/pre-rerank ordering truncated to
+    ``top_k`` when reranking did not happen), so availability is preserved.
+    ``applied``/``degraded``/``reason`` are the truth about whether a real
+    rerank occurred.
+    """
+
+    results: list[dict[str, Any]]
+    applied: bool
+    degraded: bool
+    reason: RerankReason
+    http_status: int | None = None
+    provider_called: bool = False
+
+    @property
+    def reason_value(self) -> str:
+        """``reason`` as a plain string, for meta/trace/telemetry surfaces."""
+        return self.reason.value
 
 
 class ApiReranker:
@@ -58,11 +134,49 @@ class ApiReranker:
     def rerank(
         self, query: str, results: list[dict[str, Any]], top_k: int = 3
     ) -> list[dict[str, Any]]:
-        """对检索结果进行 API 重排序"""
-        if not self._available or not results:
-            return results[:top_k]
+        """对检索结果进行 API 重排序（历史 list 契约，保持不变）
 
-        documents = [r.get("content", "") for r in results]
+        兼容入口。**丢弃**了本次调用的 applied/degraded 事实 —— 需要区分
+        "真的重排过" 与 "回退到原始排序" 的调用方必须改用
+        :meth:`rerank_with_outcome`。
+        """
+        return self.rerank_with_outcome(query, results, top_k).results
+
+    def rerank_with_outcome(
+        self, query: str, results: list[dict[str, Any]], top_k: int = 3
+    ) -> RerankOutcome:
+        """重排并返回本次调用的**不可变**事实。
+
+        Availability first: every failure path still returns the original
+        ordering truncated to ``top_k``. Truthfulness second: each path also
+        says whether a real rerank happened, and why not if it did not.
+        """
+        fallback = list(results[:top_k])
+
+        if not results:
+            # Nothing to rerank is not a failure and not a rerank.
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=False,
+                reason=RerankReason.OK,
+                provider_called=False,
+            )
+
+        if not self._available:
+            # No key configured: no provider call was made, so this is a
+            # configuration state, not a provider failure.
+            logger.warning(
+                "Reranker 不可用（未配置 API Key），返回原始排序: model=%s",
+                self._model,
+            )
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.UNAVAILABLE,
+                provider_called=False,
+            )
 
         url = f"{self._base_url}/rerank"
         headers = {
@@ -72,7 +186,7 @@ class ApiReranker:
         payload = {
             "model": self._model,
             "query": query,
-            "documents": documents,
+            "documents": [r.get("content", "") for r in results],
         }
 
         try:
@@ -83,27 +197,131 @@ class ApiReranker:
             data = response.json()
         except httpx.TimeoutException:
             self.last_error_status = None
-            logger.warning(f"Reranker API 超时 ({self._timeout}s)，使用原始排序")
-            return results[:top_k]
-        except httpx.HTTPStatusError as e:
-            self.last_error_status = e.response.status_code
-            logger.warning(
-                f"Reranker API HTTP {e.response.status_code}: {e.response.text[:200]}"
+            # A provider request WAS issued and did not complete: fail loud.
+            logger.error(
+                "Reranker provider 超时，降级为原始排序: reason=%s model=%s timeout_s=%s",
+                RerankReason.TIMEOUT.value,
+                self._model,
+                self._timeout,
             )
-            return results[:top_k]
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.TIMEOUT,
+                provider_called=True,
+            )
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            self.last_error_status = status
+            # Status code + bounded reason + model only. The response body is
+            # deliberately NOT logged: it can echo user documents or provider
+            # internals back into the logs.
+            logger.error(
+                "Reranker provider HTTP 失败，降级为原始排序: reason=%s "
+                "http_status=%s model=%s",
+                RerankReason.HTTP_ERROR.value,
+                status,
+                self._model,
+            )
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.HTTP_ERROR,
+                http_status=status,
+                provider_called=True,
+            )
         except Exception as e:
             self.last_error_status = None
-            logger.warning(f"Reranker API 调用失败: {e}")
-            return results[:top_k]
+            # Exception *class* only — the message can carry request content.
+            logger.error(
+                "Reranker provider 调用失败，降级为原始排序: reason=%s "
+                "error_type=%s model=%s",
+                RerankReason.PROVIDER_ERROR.value,
+                type(e).__name__,
+                self._model,
+            )
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=True,
+                reason=RerankReason.PROVIDER_ERROR,
+                provider_called=True,
+            )
 
-        # 将分数附加到结果中，按分数降序排列
-        for item in data.get("results", []):
-            idx = item["index"]
-            if idx < len(results):
-                results[idx]["rerank_score"] = item.get("relevance_score", 0.0)
+        scored, invalid_reason = self._apply_scores(results, data, top_k)
+        if scored is None:
+            # HTTP 200 is not proof of reranking. Without usable relevance
+            # scores we cannot claim the candidates were actually reranked.
+            logger.error(
+                "Reranker provider 返回不可用结果，降级为原始排序: reason=%s model=%s",
+                invalid_reason.value if invalid_reason else RerankReason.INVALID_RESPONSE.value,
+                self._model,
+            )
+            return RerankOutcome(
+                results=fallback,
+                applied=False,
+                degraded=True,
+                reason=invalid_reason or RerankReason.INVALID_RESPONSE,
+                http_status=response.status_code,
+                provider_called=True,
+            )
 
-        results.sort(key=lambda r: r.get("rerank_score", 0), reverse=True)
-        return results[:top_k]
+        return RerankOutcome(
+            results=scored,
+            applied=True,
+            degraded=False,
+            reason=RerankReason.OK,
+            http_status=response.status_code,
+            provider_called=True,
+        )
+
+    def _apply_scores(
+        self,
+        results: list[dict[str, Any]],
+        data: Any,
+        top_k: int,
+    ) -> tuple[list[dict[str, Any]] | None, RerankReason | None]:
+        """Map provider relevance scores back onto candidates.
+
+        Returns ``(ordered, None)`` only when the response genuinely proves a
+        rerank happened, otherwise ``(None, reason)``. A malformed ``200 OK``
+        must never be reported as a successful rerank.
+        """
+        if not isinstance(data, dict):
+            return None, RerankReason.INVALID_RESPONSE
+        items = data.get("results")
+        if not isinstance(items, list) or not items:
+            return None, RerankReason.INVALID_RESPONSE
+
+        usable = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            idx = item.get("index")
+            if not isinstance(idx, int) or isinstance(idx, bool):
+                continue
+            if idx < 0 or idx >= len(results):
+                continue
+            score = item.get("relevance_score")
+            if not isinstance(score, (int, float)) or isinstance(score, bool):
+                continue
+            results[idx]["rerank_score"] = float(score)
+            usable += 1
+
+        if usable == 0:
+            # Every entry was unusable: no candidate has a relevance score, so
+            # the ordering below would be the input ordering wearing a rerank's
+            # clothes.
+            return None, RerankReason.INVALID_RESPONSE
+
+        ordered = sorted(
+            results,
+            key=lambda r: r.get("rerank_score", 0),
+            reverse=True,
+        )
+        return ordered[:top_k], None
 
 
 def create_reranker() -> ApiReranker:

@@ -356,3 +356,132 @@ def test_telemetry_does_not_require_the_sdk_at_import_time() -> None:
         if name.startswith("opentelemetry")
     ]
     assert source_modules == []
+
+
+# ---------------------------------------------------------------------------
+# 7. Reranker degradation is visible in telemetry
+#
+# The trace must be able to answer "did a reranker actually reorder anything?"
+# without any request content. `csai.reranker_count > 0` on a request whose
+# reranker silently failed was the original lie.
+# ---------------------------------------------------------------------------
+
+from rag.qdrant_knowledge_base import _apply_retrieval_span  # noqa: E402
+from rag.reranker import RerankOutcome, RerankReason  # noqa: E402
+from rag.retrieval_contract import (  # noqa: E402
+    STAGE_FINAL,
+    STAGE_RERANK,
+    RetrievalResult,
+    RetrievalTrace,
+    StageStatus,
+    TraceStage,
+)
+
+
+def _span_capture():
+    """A _NoopSpan already opened, so we can read captured attributes/events."""
+    ctx = span("csai.rag.retrieve")
+    s = ctx.__enter__()
+    return ctx, s
+
+
+def _result_with_rerank(status: StageStatus, reason: str) -> RetrievalResult:
+    trace = RetrievalTrace()
+    trace.add(TraceStage(STAGE_RERANK, status, candidate_in=4, candidate_out=3,
+                         duration_ms=1.0, reason=reason))
+    trace.add(TraceStage(STAGE_FINAL, StageStatus.EXECUTED, candidate_out=3))
+    meta: dict = {"retrieval_degraded": False, "degraded_reason": "",
+                 "rerank_requested": True,
+                 "rerank_applied": status is StageStatus.EXECUTED,
+                 "rerank_degraded": status is StageStatus.DEGRADED,
+                 "rerank_reason": reason}
+    if status is StageStatus.DEGRADED:
+        meta["retrieval_degraded"] = True
+        meta["degraded_reason"] = f"reranker_{reason}"
+    return RetrievalResult([{"content": "x"}], meta=meta, trace=trace)
+
+
+def _rerank_event(s):
+    for name, attrs in s.captured_events:
+        if name == f"rag.stage.{STAGE_RERANK}":
+            return attrs
+    raise AssertionError("no RERANK stage event on the span")
+
+
+class TestRerankerTelemetryTruth:
+    def test_stage_reason_attribute_is_whitelisted(self):
+        assert "csai.stage.reason" in ALLOWED_ATTRIBUTES
+
+    def test_stage_reason_survives_the_scrubber(self):
+        assert scrub_attributes({"csai.stage.reason": "timeout"}) == {
+            "csai.stage.reason": "timeout"
+        }
+
+    @pytest.mark.parametrize(
+        ("status", "reason", "expected_status"),
+        [
+            (StageStatus.EXECUTED, "", "executed"),
+            (StageStatus.DEGRADED, "timeout", "degraded"),
+            (StageStatus.DEGRADED, "unavailable", "degraded"),
+            (StageStatus.SKIPPED, "rerank_disabled", "skipped"),
+            (StageStatus.SKIPPED, "insufficient_candidates", "skipped"),
+        ],
+    )
+    def test_stage_status_and_reason_reach_the_span(self, status, reason, expected_status):
+        ctx, s = _span_capture()
+        _apply_retrieval_span(s, _result_with_rerank(status, reason))
+        ctx.__exit__(None, None, None)
+        ev = _rerank_event(s)
+        assert ev["csai.stage.status"] == expected_status
+        assert ev["csai.stage.reason"] == reason
+
+    def test_reranker_count_is_positive_only_for_a_real_rerank(self):
+        """The core truthfulness property for this attribute."""
+        ctx, s = _span_capture()
+        _apply_retrieval_span(s, _result_with_rerank(StageStatus.EXECUTED, ""))
+        ctx.__exit__(None, None, None)
+        assert s.captured_attributes["csai.reranker_count"] == 3
+
+    @pytest.mark.parametrize(
+        ("status", "reason"),
+        [
+            (StageStatus.DEGRADED, "timeout"),
+            (StageStatus.DEGRADED, "http_error"),
+            (StageStatus.DEGRADED, "unavailable"),
+            (StageStatus.DEGRADED, "invalid_response"),
+            (StageStatus.SKIPPED, "rerank_disabled"),
+            (StageStatus.SKIPPED, "insufficient_candidates"),
+        ],
+    )
+    def test_reranker_count_is_zero_when_nothing_was_reranked(self, status, reason):
+        ctx, s = _span_capture()
+        _apply_retrieval_span(s, _result_with_rerank(status, reason))
+        ctx.__exit__(None, None, None)
+        assert s.captured_attributes["csai.reranker_count"] == 0
+
+    def test_degradation_is_visible_on_the_span(self):
+        ctx, s = _span_capture()
+        _apply_retrieval_span(s, _result_with_rerank(StageStatus.DEGRADED, "http_error"))
+        ctx.__exit__(None, None, None)
+        assert s.captured_attributes["csai.retrieval_degraded"] is True
+        assert s.captured_attributes["csai.degraded_reason"] == "reranker_http_error"
+
+    def test_outcome_reason_enum_cannot_smuggle_content(self):
+        """Only enum values may be used as a stage reason."""
+        assert {r.value for r in RerankReason} <= {
+            "", "unavailable", "timeout", "http_error",
+            "provider_error", "invalid_response",
+        }
+        out = RerankOutcome(results=[], applied=False, degraded=True,
+                            reason=RerankReason.HTTP_ERROR, http_status=401)
+        assert scrub_attributes({"csai.stage.reason": out.reason_value}) == {
+            "csai.stage.reason": "http_error"
+        }
+
+    def test_content_keys_are_still_refused_alongside_the_new_attribute(self):
+        """Adding csai.stage.reason must not weaken the two existing gates."""
+        assert scrub_attributes({"csai.stage.reason": "SENSITIVE"}) == {
+            "csai.stage.reason": "SENSITIVE"
+        }
+        assert scrub_attributes({"csai.stage.query": "用户的问句"}) == {}
+        assert scrub_attributes({"csai.stage.document": "召回正文"}) == {}

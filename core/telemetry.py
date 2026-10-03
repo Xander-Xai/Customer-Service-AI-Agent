@@ -92,6 +92,10 @@ ALLOWED_ATTRIBUTES: frozenset[str] = frozenset(
         "csai.stage.candidate_in",
         "csai.stage.candidate_out",
         "csai.stage.duration_ms",
+        # Bounded, low-cardinality stage cause (e.g. "timeout", "rerank_disabled").
+        # Only ever a value from a reason enum — never an exception message, a
+        # query, a document or a provider response.
+        "csai.stage.reason",
         # tools / HITL / side effects
         "csai.tool_name",
         "csai.tool_side_effect",
