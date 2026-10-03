@@ -1742,6 +1742,141 @@ def check_semantic_tracing_drift(docs: list[Path], errors: list[str], root: Path
             )
 
 
+# ---------------------------------------------------------------------------
+# Guard AA: CURRENT docs must point at the latest COMMITTED RAG preflight.
+#
+# Truth source: the preflight report.json files that Git actually tracks.
+# Ordering comes from the artifact's own ``timestamp`` (falling back to the
+# directory-name UTC stamp), never from filesystem mtime and never from a
+# hardcoded id — otherwise the guard would itself drift on the next run.
+# ---------------------------------------------------------------------------
+
+RAG_EVIDENCE_GLOB = "artifacts/evaluation/rag-649/preflight-*/report.json"
+_PREFLIGHT_RUN_ID_RE = re.compile(r"preflight-(\d{8}T\d{6}Z)")
+#: A doc line that names a preflight artifact AND claims it is the current /
+#: latest one. "current" is included because the drift this guard catches is
+#: exactly "a newer artifact is committed but the doc still calls the old one
+#: the current evidence".
+PREFLIGHT_CLAIM_RE = re.compile(
+    r"latest|newest|current(?:ly)?\s+(?:committed|archived|preflight|evidence)|"
+    r"最新|当前(?:已)?提交|最新已提交|current\s+preflight|committed\s+preflight|"
+    r"archived\s+preflight",
+    re.IGNORECASE,
+)
+#: How many lines after a claim line still count as part of that claim. Markdown
+#: wraps long artifact paths onto the next line, so a strictly per-line match
+#: would miss the exact wording this guard exists to protect.
+PREFLIGHT_CLAIM_LOOKAHEAD = 3
+#: Markers that reframe the sentence as history rather than current truth.
+PREFLIGHT_HISTORICAL_RE = re.compile(
+    r"历史|上一版|早期|此前|先前|旧版|原样保留|不回填|保留为历史|作为历史|"
+    r"historical|as\s+history|previously\s+committed|earlier\s+preflight|"
+    r"previous\s+attempt|not\s+backfilled|preserved\s+as-is|was\s+then|"
+    r"at\s+the\s+time|v1\s+schema\s+artifact",
+    re.IGNORECASE,
+)
+
+
+def _sort_key(stamp: str) -> tuple[int, ...]:
+    """Ordering key for a ``YYYYMMDDTHHMMSSZ`` stamp; unparsable sorts first."""
+    try:
+        return (
+            int(stamp[0:4]),
+            int(stamp[4:6]),
+            int(stamp[6:8]),
+            int(stamp[9:11]),
+            int(stamp[11:13]),
+            int(stamp[13:15]),
+        )
+    except (ValueError, IndexError):
+        return (0,)
+
+
+def latest_committed_preflight(root: Path = ROOT) -> tuple[str, str] | None:
+    """``(run_id, report_path)`` of the newest Git-tracked preflight report.
+
+    Only files Git tracks count: an untracked or ignored local run is not
+    repository evidence, and promoting one would be a fabricated claim.
+    Ordering uses the artifact's own ``timestamp``; the directory-name stamp is
+    the documented fallback.
+    """
+    try:
+        import subprocess
+
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z", RAG_EVIDENCE_GLOB],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        tracked = ""
+    candidates: list[tuple[tuple[int, ...], str, str]] = []
+    for rel in (p for p in tracked.split("\0") if p):
+        path = root / rel
+        if not path.exists():
+            continue
+        run_id = path.parent.name
+        stamp = ""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+            raw = str(data.get("timestamp") or data.get("generated_at") or "")
+            iso = re.match(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})", raw)
+            if iso:
+                stamp = "".join(iso.groups())
+            run_id = str(data.get("run_id") or run_id)
+        except (ValueError, TypeError):
+            pass
+        if not stamp:
+            found = _PREFLIGHT_RUN_ID_RE.search(run_id) or _PREFLIGHT_RUN_ID_RE.search(rel)
+            stamp = found.group(1) if found else ""
+        candidates.append((_sort_key(stamp), run_id, rel))
+    if not candidates:
+        return None
+    _, run_id, rel = max(candidates)
+    return run_id, rel
+
+
+def check_rag_preflight_pointer_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard AA: a CURRENT doc must not call a superseded preflight the latest.
+
+    Scoped to CURRENT docs only (historical snapshots legitimately keep the
+    artifact that was current when they were written) and scoped to
+    preflight claims only — it says nothing about formal-metric status, which
+    stays owned by ``scripts/rag_evidence_status.py``.
+    """
+    latest = latest_committed_preflight(root)
+    if latest is None:
+        return
+    latest_run_id, latest_rel = latest
+    latest_hit = _PREFLIGHT_RUN_ID_RE.search(latest_run_id)
+    latest_stamp = latest_hit.group(1) if latest_hit else latest_run_id
+    for path in docs:
+        rel = path.relative_to(root)
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line_no, line in enumerate(lines, 1):
+            if not PREFLIGHT_CLAIM_RE.search(line):
+                continue
+            # A markdown claim routinely wraps the path onto the next lines, so
+            # the evidence window is the claim line plus a short look-ahead.
+            window = "\n".join(lines[line_no - 1 : line_no + PREFLIGHT_CLAIM_LOOKAHEAD])
+            cited = set(_PREFLIGHT_RUN_ID_RE.findall(window))
+            cited.discard(latest_stamp)
+            if not cited:
+                continue
+            if PREFLIGHT_HISTORICAL_RE.search(window):
+                continue
+            stale = sorted(cited)
+            errors.append(
+                f"rag preflight pointer drift in {rel}:{line_no} — claims "
+                f"{', '.join(stale)} is the current/latest preflight, but the latest "
+                f"Git-tracked preflight is {latest_run_id} ({latest_rel}). Either "
+                f"repoint the claim at {latest_rel} or mark the older artifact as "
+                f"historical; do not silently rewrite history"
+            )
+
+
 def check_docs_index_coverage(errors: list[str], root: Path = ROOT) -> None:
     """Rule W: the docs index must expose every current ADR/design/runbook for
     a shipped capability, otherwise a CURRENT doc is effectively unreachable."""
@@ -2047,6 +2182,8 @@ def main() -> int:
     check_runtime_future_claims(docs, errors)
     # Application-level semantic tracing drift guard.
     check_semantic_tracing_drift(docs, errors)
+    # RAG preflight evidence-pointer drift guard.
+    check_rag_preflight_pointer_drift(docs, errors)
     check_docs_index_coverage(errors)
     check_api_reference_surface(errors)
     check_multi_worker_deployment_truth(docs, errors)
@@ -2074,7 +2211,8 @@ def main() -> int:
         f"make targets (all active docs), tracked-ignored hygiene, "
         f"negative-existence claims, stale embedding-fallback semantics, "
         f"latency absolutes, production framing, env references, "
-        f"runtime future-claims, semantic-tracing drift, docs-index coverage, "
+        f"runtime future-claims, semantic-tracing drift, rag preflight pointer drift, "
+        "docs-index coverage, "
         "API-reference surface, "
         f"multi-worker deployment truth, root-level snapshot hygiene, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "

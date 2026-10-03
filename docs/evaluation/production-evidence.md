@@ -91,7 +91,7 @@ Historical `distributed-runtime-evidence/v1` artifacts are preserved unmodified.
 - **evaluation populations**: `all_queries` (primary end-to-end denominator), `retrieval_eligible`, `full_gold_covered` — all computed at runtime, never hardcoded; citations must name the population
 - **failure taxonomy**: TIMEOUT / PROVIDER_ERROR / GOLD_NOT_INDEXED / MISS_ALL / LOW_RANK (+ channel diagnostics)
 
-**Current status: the formal 649-query metrics are `NOT_VERIFIED`.** The committed preflight evidence (`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`, v1 schema, preserved as-is) shows the provider-authentication blocker; no formal metrics artifact exists yet. See rag-evaluation.md §3.4 for the live status.
+**Current status: the formal 649-query metrics are `NOT_VERIFIED`.** The latest committed preflight evidence (`artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`, schema `rag-eval-evidence/v2`, `status: BLOCKED`, `primary_blocker: EMBEDDING_PROVIDER_AUTH`) shows the provider-authentication blocker; no formal metrics artifact exists yet. Blocker semantics are per-stage and must not be flattened: `EMBEDDING_PROVIDER_AUTH` (HTTP 401, blocks corpus import) is the root cause, `VECTOR_INDEX_EMPTY` is a downstream symptom carrying `caused_by`, and `RERANKER_PROVIDER_AUTH` (HTTP 401) is `blocking: false` and blocks only `hybrid_rerank`. The artifact states `formal evaluation not run; no metrics generated`, so `declared_queries: 649` is not a completed formal evaluation. The earlier v1 artifact (`preflight-20260929T191128Z`) is retained as historical evidence, not backfilled. See rag-evaluation.md §3.4 for the live status.
 
 ## Local run
 
