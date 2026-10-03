@@ -43,6 +43,16 @@ from tools.mcp_adapter import (  # noqa: E402
 
 MCP_ADAPTER_PATH = Path(__file__).resolve().parents[2] / "tools" / "mcp_adapter.py"
 
+#: 本文件专属的 ``server`` label 值。
+#:
+#: ``REGISTRY`` 是**进程级全局**的，而本文件用绝对计数（``== 1`` / ``== 3``）证明
+#: 样本真的产生——这些断言只在对应 label 组合**只被本文件写过**时成立。
+#: 其它 MCP 测试文件（如 ``test_mcp_adapter_runtime.py``）也用 ``server="catalog"`` /
+#: ``tool="get_sku"`` 观测同一个直方图，两者落进同一进程就会互相污染计数，且结果
+#: 取决于 pytest 的文件执行顺序。给本文件一个专属 server 名即可互不干扰，与
+#: ``TestCardinalityDiscipline`` 里 ``catalog_cardinality`` 的用法同一理由。
+_METRICS_CONTRACT_SERVER = "metrics_contract_catalog"
+
 # 声明侧的权威契约。任何一个 MCP 指标的 label 名变化都必须同步改这里，且必须先
 # 回答"这个值是否由配置决定、是否有界"。
 EXPECTED_MCP_LABELS: dict[str, tuple[str, ...]] = {
@@ -171,7 +181,7 @@ class TestDurationSamplesActuallyRecorded:
     """真实 client + 真实 ``invoke``：断言样本真的产生（PR #42 缺的正是这条证据）。"""
 
     async def test_successful_invoke_records_labelled_duration_sample(self):
-        server, tool = "catalog", "get_sku"
+        server, tool = _METRICS_CONTRACT_SERVER, "get_sku"
         adapter = _adapter(server, (tool,), _FakeMCPClient(result=_ok_result()))
 
         assert await adapter.invoke(tool, {"sku": "X1"}) == "sku-1"
@@ -180,7 +190,7 @@ class TestDurationSamplesActuallyRecorded:
     async def test_timeout_still_records_duration_sample(self):
         """耗时观测在 ``finally`` 里：超时是最该被看到的慢调用，绝不能因为抛异常
         而从延迟分布里消失。"""
-        server, tool = "catalog", "get_sku_slow"
+        server, tool = _METRICS_CONTRACT_SERVER, "get_sku_slow"
         adapter = _adapter(
             server,
             (tool,),
@@ -193,7 +203,7 @@ class TestDurationSamplesActuallyRecorded:
         assert _duration_count(server=server, tool=tool) == 1
 
     async def test_tool_error_result_still_records_duration_sample(self):
-        server, tool = "catalog", "get_sku_toolerr"
+        server, tool = _METRICS_CONTRACT_SERVER, "get_sku_toolerr"
         adapter = _adapter(
             server,
             (tool,),
@@ -206,7 +216,7 @@ class TestDurationSamplesActuallyRecorded:
 
     async def test_histogram_count_sum_and_inf_bucket_advance_together(self):
         """只让 count 涨、sum 不动（或 +Inf 桶不动）说明 observe 没落到真实 client。"""
-        server, tool = "catalog", "get_sku_stats"
+        server, tool = _METRICS_CONTRACT_SERVER, "get_sku_stats"
         adapter = _adapter(server, (tool,), _FakeMCPClient(result=_ok_result()))
         for _ in range(3):
             await adapter.invoke(tool, {})
@@ -233,7 +243,7 @@ class TestDurationSamplesActuallyRecorded:
     async def test_counters_sharing_the_same_labels_also_land(self):
         """同一个 ``invoke`` 里的 counter 有声明 label，行为应当一致；
         顺带证明 duration 的失败不是普遍性的 client 问题。"""
-        server, tool = "catalog", "get_sku_counter"
+        server, tool = _METRICS_CONTRACT_SERVER, "get_sku_counter"
         adapter = _adapter(server, (tool,), _FakeMCPClient(result=_ok_result()))
         await adapter.invoke(tool, {})
 
