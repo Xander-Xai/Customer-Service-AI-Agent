@@ -90,6 +90,24 @@ class ToolRegistry:
         )
         logger.debug(f"工具已注册: {name}")
 
+    def unregister(self, name: str) -> bool:
+        """撤销注册，返回是否真的移除过一个工具。
+
+        存在的唯一理由是**注册的事务性**：MCP 工具是运行时叠加进同一个注册表的
+        （见 ``tools.mcp_adapter.register_mcp_tools``），一次多 server 初始化可能
+        前一个 server 已注册成功、后一个失败。fail-closed 时必须能把「本次 attempt
+        新增的那些」撤销掉，否则注册表会留下指向已关闭 adapter 的工具 ——
+        LLM 仍会看到并调用它们，只会在调用瞬间炸。
+
+        未注册的名字是 **no-op**（返回 ``False``）而不是抛错：回滚路径必须能对
+        「可能已经删过了」的名字安全重试，且撤销失败不应掩盖真正的初始化错误。
+        """
+        if name in self._tools:
+            del self._tools[name]
+            logger.debug(f"工具已注销: {name}")
+            return True
+        return False
+
     def get_openai_tools(self) -> list[dict[str, Any]]:
         """返回 OpenAI Function Calling 格式的工具列表"""
         return [

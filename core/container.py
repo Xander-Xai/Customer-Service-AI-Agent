@@ -620,7 +620,21 @@ class ServiceContainer:
           配错了却静默跑成 native-only，会让「以为已生效」的运维假设与实际不符。
         - ``false``（开发默认）：降级为 native-only + 告警，不影响可用性。
 
-        幂等：``mcp_adapters`` 非空说明已初始化过，重复调用直接返回。
+        **fail-closed 时本次 attempt 是原子的**：``MCP_SERVERS`` 是「整体声明」，
+        多个 server 里任何一个不可用就意味着运维声明的能力没有完整生效。因此失败
+        时必须把这一轮**已经做过的全部事情**回滚掉，而不是只收拾失败的那一个：
+
+        - 之前已连接成功的 adapter 持有的 stdio 子进程 / SSE 会话；
+        - 之前已注册进共享 ``tool_registry`` 的 MCP 工具（它们的 handler 闭包引用
+          那些即将被关闭的 adapter，留着就是让 LLM 去调一个必然失败的工具）；
+        - 容器自身状态（``mcp_adapters`` / Tool Result Cache 里可能已有的 MCP 条目）。
+
+        否则会同时踩三个坑：孤儿子进程累积、注册表进入 partial MCP state、以及
+        ``mcp_adapters`` 非空被误当成「已初始化」而让后续重试直接短路返回
+        （``close()`` 也救不了：``_initialized`` 仍是 ``False``，它会提前 return）。
+
+        幂等：**成功**初始化后 ``mcp_adapters`` 非空，重复调用直接返回；失败回滚后
+        ``mcp_adapters`` 仍为空，因此重试会真正重新初始化而不是被跳过。
         """
         if self.mcp_adapters or self.tool_registry is None:
             return
@@ -655,23 +669,91 @@ class ServiceContainer:
             logger.warning("%s；MCP 工具不可用，native 工具不受影响", msg)
             return
 
+        # 本次 attempt 的事务缓冲：只有整轮成功才提交进 self.mcp_adapters。
+        attempt_adapters: list[Any] = []
+        attempt_tools: list[str] = []
+
         for adapter in build_mcp_adapters(configs):
             try:
                 registered = await register_mcp_tools(self.tool_registry, adapter)
             except Exception as e:
-                # 该 server 的连接/发现失败：先释放它已经拉起的子进程或会话，
+                msg = f"MCP server '{adapter.config.name}' 注册失败: {type(e).__name__}: {e}"
+                if MCP_FAIL_CLOSED:
+                    # 先回滚再抛：回滚异常绝不能顶掉真正的初始化失败原因。
+                    await self._rollback_mcp_attempt(attempt_adapters, attempt_tools, adapter)
+                    raise ConfigurationError(msg) from e
+                # 降级路径只关掉失败者，已成功的 server 继续可用（行为不变）。
+                # 该 server 的连接/发现失败会留下已拉起的子进程或会话，
                 # 否则 stdio 子进程会泄漏成孤儿进程。
                 with contextlib.suppress(Exception):
                     await adapter.close()
-                msg = f"MCP server '{adapter.config.name}' 注册失败: {type(e).__name__}: {e}"
-                if MCP_FAIL_CLOSED:
-                    raise ConfigurationError(msg) from e
                 logger.warning("%s；降级为 native-only", msg)
                 continue
             logger.info(
                 "MCP server %s 注册 %d 个工具", adapter.config.name, len(registered)
             )
-            self.mcp_adapters.append(adapter)
+            attempt_adapters.append(adapter)
+            attempt_tools.extend(registered)
+
+        self.mcp_adapters.extend(attempt_adapters)
+
+    async def _rollback_mcp_attempt(
+        self,
+        adapters: list[Any],
+        tool_names: list[str],
+        failed_adapter: Any,
+    ):
+        """把一次失败的 MCP 初始化 attempt 回滚到「本轮什么都没做」。
+
+        ``adapters`` 是本轮**已经成功**的 adapter，``tool_names`` 是它们已注册进
+        共享 registry 的工具名，``failed_adapter`` 是失败的那个（可能已经拉起了
+        子进程才失败，所以也要关）。
+
+        刻意做成 **best-effort 且不抛异常**：回滚是清理路径，不是主路径。清理失败
+        （某个 ``close()`` 自己炸、某个 ``unregister`` 撞上并发改动）只记日志，因为
+        把它抛出去会**顶掉调用方真正要看到的初始化失败原因**。每一步都独立尝试，
+        不因为前一步失败就跳过后面的资源。
+
+        ``CancelledError`` 是 BaseException：``suppress(Exception)`` 抓不到它。
+        这里的取舍与 ``_close_mcp_tools`` 一致 —— teardown 期间的取消不是调用方的
+        bug，best-effort 走完比中断清理更安全；但它**不会**被静默吞掉后继续假装
+        成功，回滚函数本身不返回任何「成功」信号。
+        """
+        # 1. 先撤工具：让 registry 不再暴露指向即将关闭的 adapter 的 handler。
+        for name in tool_names:
+            try:
+                self.tool_registry.unregister(name)
+            except Exception as e:
+                logger.warning(
+                    "MCP 初始化回滚：注销工具 %s 失败: %s", name, type(e).__name__
+                )
+        if tool_names:
+            logger.warning(
+                "MCP 初始化回滚：已注销本轮新增的 %d 个工具 %s", len(tool_names), tool_names
+            )
+
+        # 2. 再关会话 / 子进程：先注册的后释放，失败的排在最后（它可能半开）。
+        for adapter in [*adapters, failed_adapter]:
+            try:
+                await adapter.close()
+            except Exception as e:
+                logger.warning(
+                    "MCP 初始化回滚：关闭 server %s 失败: %s",
+                    getattr(getattr(adapter, "config", None), "name", "?"),
+                    type(e).__name__,
+                )
+
+        # 3. 容器状态：attempt 缓冲是在整轮成功后才 extend 进 mcp_adapters 的，
+        #    所以本轮 adapter 正常情况下根本不在 self.mcp_adapters 里。这里仍然按
+        #    「不得进入 partial MCP state」收敛一次 —— 若将来提交点被挪进循环，
+        #    这里的兜底保证重试不会被残留引用短路掉。
+        committed = [a for a in self.mcp_adapters if a not in adapters]
+        if len(committed) != len(self.mcp_adapters):
+            logger.warning(
+                "MCP 初始化回滚：清空本轮残留的 adapter 引用（%d 个）",
+                len(self.mcp_adapters) - len(committed),
+            )
+        self.mcp_adapters = committed
 
     async def _close_mcp_tools(self):
         """关闭所有 MCP adapter 持有的会话 / stdio 子进程（shutdown 路径）。"""
