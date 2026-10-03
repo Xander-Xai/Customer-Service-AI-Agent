@@ -35,22 +35,35 @@
 - Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
   `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
 - **最新已提交的 preflight evidence**：
-  `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
-  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
-  `status: BLOCKED`）。blocker 语义按 v2 结构化记录，**必须分开表述**：
-  - `primary_blocker: EMBEDDING_PROVIDER_AUTH`（embedding 探针 HTTP 401，
-    `blocks_corpus_import: true`）是**根因**；
-  - `VECTOR_INDEX_EMPTY`（评测集合 0 points）是 **downstream 症状**，
-    `caused_by: EMBEDDING_PROVIDER_AUTH`；因 BM25 索引由 Qdrant 重建，
-    连 `bm25_only` 也被它阻塞；
-  - `RERANKER_PROVIDER_AUTH`（reranker 探针 HTTP 401，`silent_fallback`）是
-    **`blocking: false`**，只阻塞 `hybrid_rerank`，**不得**据此声称其它实验
-    也被 reranker 阻塞。
-  该 artifact 自述 `formal evaluation not run; no metrics generated`——
-  `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
-  **不是** 649-query 正式评测完成，正式指标仍为 `NOT_VERIFIED`。
-  上一版 artifact（`preflight-20260929T191128Z`，v1 schema，顶层
-  `status: BLOCKED_VECTOR_INDEX`）作为历史记录原样保留，不回填。
+  `artifacts/evaluation/rag-649/preflight-20261003T212439Z/report.json`
+  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-03T21:24:39Z`，
+  `status: OK`，`primary_blocker: null`，`blockers: []`）。四个 gate 全绿：
+  Qdrant 四个集合共 **5000** points、embedding 探针 OK（dim 1024）、
+  BM25 `READY`（5000 docs）、reranker 探针 HTTP 200。
+  **provider 认证阻塞已解除**：此前 `BLOCKED` 的根因是活动 `.env` 只含
+  `sk-placeholder-*`（provider 401 / code 30014），换用真实凭据后
+  embeddings / chat / rerank 三通道均 200。
+- **正式 649 全量评测仍未执行，`NOT_VERIFIED`；`primary_blocker` 已从
+  `EMBEDDING_PROVIDER_AUTH` 换成 `INVALID_GOLD_LABELS`（数据集缺陷，非基础设施）**：
+  `tests/eval/rag_benchmark.json` 的 `expected_doc_ids`
+  由 `scripts/regenerate_benchmark_ids.py` 用
+  `random.seed(42)` + `random.sample(pool, 3)` 生成，`pool` 是该 query
+  类别映射下的**全部**文档（865–1500 篇）——它对齐 doc ID，不做相关性标注。
+  用评测自身 embedding 模型检验：`cos(query, gold)=0.3732` vs
+  `cos(query, 随机同类文档)=0.3696`（差 +0.0036，Welch **p=0.63**，
+  统计上不可区分）；同时 label-free 的检索健康检查显示
+  `cos(query, top-1 检索结果)=0.6265` vs `cos(query, 随机文档)=0.3093`。
+  即**检索链路正常，坏的是标签**；正确检索器在此 gold 上必然≈0 分。
+  证据：`artifacts/evaluation/rag-649/blocked-invalid-gold-labels-20261003T214052Z.json`
+  （`metrics_produced: null`）。benchmark 校验和未变，649 条 query 与
+  1250 个 gold id 全部保留，未剔除任何坏 case。
+- 历史 artifact 原样保留、不回填、不改写：
+  - `preflight-20261002T194209Z`（v2，`status: BLOCKED`，
+    `primary_blocker: EMBEDDING_PROVIDER_AUTH`；`VECTOR_INDEX_EMPTY` 为
+    downstream 症状带 `caused_by`；`RERANKER_PROVIDER_AUTH` 是
+    `blocking: false`、只阻塞 `hybrid_rerank`）——**认证阻塞的历史记录**；
+  - `preflight-20260929T191128Z`（v1 schema，顶层
+    `status: BLOCKED_VECTOR_INDEX`）。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、
   blocker 语义与评测状态：[docs/reference/rag-evaluation.md](rag-evaluation.md)。
   canonical 命令链：`make rag-eval-import` → `make rag-eval-649-preflight` →

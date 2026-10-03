@@ -191,10 +191,38 @@ artifact 使用上述结构化语义。
 > 会将文档行与推导状态比对，双向漂移都算 FAIL。
 >
 > **最新已提交的 preflight evidence**：
-> `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
-> （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
-> `status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`）。该 artifact
-> 直接使用 §3.3.1 的结构化 blocker 语义，三个 blocker **必须分开表述**：
+> `artifacts/evaluation/rag-649/preflight-20261003T212439Z/report.json`
+> （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-03T21:24:39Z`，
+> `status: OK`，`primary_blocker: null`，`blockers: []`）。
+> 四个 gate 全绿：Qdrant 5000 points（`product_knowledge` 1466 / `faq` 902 /
+> `tech_support` 1827 / `complaint_knowledge` 805）、embedding 探针 OK
+> （dim 1024）、BM25 `READY`（5000 docs）、reranker 探针 HTTP 200。
+> **provider 认证阻塞已解除**（见下方历史条目：根因是活动 `.env` 只含
+> `sk-placeholder-*`，provider 返回 401 / code 30014）。
+>
+> **但正式 649 全量评测仍未执行，`NOT_VERIFIED` 的原因已改为数据集缺陷。**
+> `tests/eval/rag_benchmark.json` 的 `expected_doc_ids` 由
+> `scripts/regenerate_benchmark_ids.py` 以
+> `random.seed(42)` + `random.sample(pool, 3)` 生成，`pool` 为该 query 类别
+> 映射下的全部文档（865–1500 篇）：它做的是 doc-ID 对齐，不是相关性标注。
+> `tests/eval/golden/expected_doc_ids.json` 与之内容一致，仓库内不存在
+> 相关性标注版 gold。检验（评测自身 embedding 模型）：
+> `cos(query, gold)=0.3732` vs `cos(query, 随机同类文档)=0.3696`
+> （差 +0.0036，Welch **p=0.63**）；label-free 检索健康检查
+> `cos(query, top-1)=0.6265` vs `cos(query, 随机文档)=0.3093`。
+> 结论：**检索链路正常，标签是缺陷**；正确检索器在此 gold 上必然≈0 分，
+> 而抬高 Hit@K 的唯一办法是退化成同类随机推荐器。证据 artifact：
+> `artifacts/evaluation/rag-649/blocked-invalid-gold-labels-20261003T214052Z.json`
+> （`metrics_produced: null`，`NOT_MEASURED` / `NOT_VERIFIED`）。
+> benchmark sha256 `0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c`
+> 未变，649 条 query 与 1250 个 gold id 全部保留，未剔除坏 case。
+> 解除条件：为 649 条 query 建相关性标注 gold（对齐 corpus sha256
+> `a81ea7f3347b45b3adefe474790fabd0b2277eada05327422134d3ca0737502d`），
+> 然后直接重跑 `make rag-eval-649`；基础设施无需再动。
+>
+> 历史 artifact（保留不改、不回填）：`preflight-20261002T194209Z`
+> （v2，`status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`）。
+> 该 artifact 的三个 blocker 按 §3.3.1 **必须分开表述**：
 >
 > | blocker code | stage | blocking | 影响范围 |
 > |---|---|---|---|
@@ -204,7 +232,9 @@ artifact 使用上述结构化语义。
 >
 > 该 artifact 的 notes 明写 `formal evaluation not run; no metrics generated`。
 > `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
-> **不等于** 649-query 正式评测已完成；正式指标仍为 `NOT_VERIFIED`。
+> **不等于** 649-query 正式评测已完成。最新 preflight 的 notes 首条同样是
+> `formal evaluation not run; no metrics generated`——**preflight 通过不等于
+> 正式评测完成**，正式指标仍为 `NOT_VERIFIED`。
 >
 > 历史尝试（保留不改）：2026-09-30 的评测尝试在 preflight gate 被阻塞
 > （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，

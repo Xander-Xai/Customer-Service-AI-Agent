@@ -1,14 +1,25 @@
 # RAG Deep Dive — 检索链路、评测口径与失败分析
 
 > ⚠️ **先读这一段**：当前正式 649-query RAG 指标是 **`NOT_VERIFIED`**。
-> provider 认证返回 HTTP 401（`{"code":30014,"message":"Token is invalid."}`），
-> 因此 **Recall@K / MRR / NDCG / reranker uplift 全部 `NOT_MEASURED`**。
+> **preflight 已通过**（最新已提交 evidence
+> `artifacts/evaluation/rag-649/preflight-20261003T212439Z/report.json`，
+> `rag-eval-evidence/v2`，`status: OK`，`primary_blocker: null`；Qdrant 5000
+> points / BM25 `READY` / reranker 200），此前 provider 认证 401 的阻塞
+> （`{"code":30014,"message":"Token is invalid."}`，根因是活动 `.env` 只有
+> `sk-placeholder-*`）**已解除**。
+> **但正式评测仍未执行**，原因不是基础设施而是**数据集缺陷**：
+> benchmark 的 `expected_doc_ids` 由 `scripts/regenerate_benchmark_ids.py`
+> 以 `random.sample(同类文档池, 3)` 生成（池容量 865–1500 篇），做的是 doc-ID
+> 对齐而非相关性标注。实测 `cos(query, gold)=0.3732` 与
+> `cos(query, 随机同类)=0.3696` 无统计差异（Welch **p=0.63**），而检索本身
+> `cos(query, top-1)=0.6265` 远高于随机文档 `0.3093`——**检索链路正常，
+> 标签是缺陷**。因此 Recall@K / MRR / NDCG / reranker uplift 全部
+> **`NOT_MEASURED`**。
 > 本文件**不包含任何指标数字**。任何声称本项目"RAG 指标是 XX%"的说法都没有 artifact
-> 支撑。见 Issue #7 与最新已提交的 preflight evidence
-> `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
-> （`rag-eval-evidence/v2`，`status: BLOCKED`，
-> `primary_blocker: EMBEDDING_PROVIDER_AUTH`；blocker 字段口径的 canonical 定义见
-> [rag-evaluation.md](../reference/rag-evaluation.md) §3.3.1）。
+> 支撑。见 Issue #7、blocked evidence
+> `artifacts/evaluation/rag-649/blocked-invalid-gold-labels-20261003T214052Z.json`
+> 与 blocker 字段口径的 canonical 定义
+> [rag-evaluation.md](../reference/rag-evaluation.md) §3.3.1。
 >
 > 交叉引用：[source-map.md](source-map.md)、
 > [rag-evaluation.md](../reference/rag-evaluation.md)（评测口径的 canonical 定义）。
@@ -273,14 +284,29 @@ reranker uplift 仍是 `NOT_MEASURED`，formal 649-query 指标仍是 `NOT_VERIF
 无法归因 —— 数字好坏可能来自 BM25、也可能来自 rerank。ablation 才能回答
 "哪个组件贡献了什么"。
 
-**当前状态：BLOCKED**，但主因不是 reranker。preflight 判定
-（`preflight-20261002T194209Z`，`rag-eval-evidence/v2`）：
-`primary_blocker: EMBEDDING_PROVIDER_AUTH`（HTTP 401，`blocks_corpus_import: true`，
-阻塞 `vector_only` / `hybrid_no_rerank` / `hybrid_rerank`）；
-`VECTOR_INDEX_EMPTY` 是 **downstream 症状**（`caused_by: EMBEDDING_PROVIDER_AUTH`，
-因 BM25 索引由 Qdrant 重建，连 `bm25_only` 也被阻塞）；
-`RERANKER_PROVIDER_AUTH`（HTTP 401，`probe: silent_fallback`）是
-**`blocking: false`**，只影响 `hybrid_rerank` 的有效性，不是全局 blocker。
+**当前状态：BLOCKED（`INVALID_GOLD_LABELS`），但主因既不是 reranker 也不是认证。**
+preflight 本身已通过（`preflight-20261003T212439Z`，`rag-eval-evidence/v2`，
+`status: OK`，`primary_blocker: null`）；认证 401 的根因是活动 `.env` 只含
+`sk-placeholder-*`，换真实凭据后 embeddings / chat / rerank 三通道均 200，
+5000 篇语料已导入、BM25 `READY`。
+
+真正的阻塞是**评测集标签无效**：`tests/eval/rag_benchmark.json` 的
+`expected_doc_ids` 由 `scripts/regenerate_benchmark_ids.py` 用
+`random.seed(42)` + `random.sample(pool, 3)` 从**同类全部文档**（865–1500 篇）
+里随机取，对齐的是 doc ID 而不是相关性。后果是可量化的：
+`cos(query, gold)=0.3732` 与 `cos(query, 随机同类)=0.3696` 无统计差异
+（Welch p=0.63），而检索 top-1 达 `0.6265`（随机文档 `0.3093`）。
+也就是说**一个语义正确的检索器在这套 gold 上必然拿 0 分**，而唯一能抬高
+Hit@K 的做法是放弃语义检索、退化成"返回任意同类文档"——这是把系统改坏去迎合
+测试集，不是改进。证据：
+`artifacts/evaluation/rag-649/blocked-invalid-gold-labels-20261003T214052Z.json`
+（`metrics_produced: null`）。解除条件是重建相关性标注 gold，不是调检索参数。
+
+> 历史记录（认证阻塞期，原样保留）：`preflight-20261002T194209Z` 的
+> `EMBEDDING_PROVIDER_AUTH`（根因，HTTP 401）/ `VECTOR_INDEX_EMPTY`
+> （downstream 症状，带 `caused_by`）/ `RERANKER_PROVIDER_AUTH`
+> （**`blocking: false`**，只影响 `hybrid_rerank`）。这套"根因 vs downstream
+> 症状 vs 非阻塞"的分层口径今天仍然适用——只是当前 blocker 已经换成数据集缺陷。
 
 ### 9.4 失败分析框架（应当输出什么）
 

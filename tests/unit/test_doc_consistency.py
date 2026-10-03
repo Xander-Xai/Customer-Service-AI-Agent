@@ -1628,10 +1628,41 @@ def test_real_repo_latest_committed_preflight_matches_current_docs():
     report = json.loads((REAL_ROOT / rel).read_text(encoding="utf-8"))
     # The artifact's own timestamp is what the guard ordered by.
     assert report["run_id"] == run_id
-    assert report["timestamp"].startswith("2026-10-02T19:42:09")
+    assert report["timestamp"].startswith("2026-10-03T21:24:39")
+    # A green preflight must not be reported as the formal evaluation: the
+    # artifact itself says so, and the docs must keep metrics NOT_VERIFIED.
+    assert report["status"] == "OK"
+    assert report["primary_blocker"] is None
+    assert report["blockers"] == []
     current_state = (REAL_ROOT / "docs/reference/current-state.md").read_text(encoding="utf-8")
     assert f"rag-649/{run_id}/report.json" in current_state
     assert report["notes"][0] == "formal evaluation not run; no metrics generated"
+    # The resolved auth blocker must not linger as the current reason, and the
+    # dataset defect that actually blocks the run must be stated instead.
+    assert "INVALID_GOLD_LABELS" in current_state
+    assert "NOT_VERIFIED" in current_state
+
+
+def test_real_repo_docs_state_gold_label_blocker_not_auth_as_current():
+    """The current blocker is the benchmark labels, not provider auth.
+
+    Provider authentication was resolved (a placeholder credential was the root
+    cause); the formal run is still blocked because expected_doc_ids are random
+    same-category picks. Every doc naming the latest preflight must say so and
+    must not quote a 649-query metric.
+    """
+    latest_id, _ = audit.latest_committed_preflight(root=REAL_ROOT)
+    current_state = (REAL_ROOT / "docs/reference/current-state.md").read_text(encoding="utf-8")
+    assert latest_id in current_state
+    for doc in (
+        "docs/reference/rag-evaluation.md",
+        "docs/interview/rag-deep-dive.md",
+        "docs/evaluation/production-evidence.md",
+    ):
+        text = (REAL_ROOT / doc).read_text(encoding="utf-8")
+        assert latest_id in text, doc
+        assert "INVALID_GOLD_LABELS" in text or "random.sample" in text, doc
+        assert "p=0.63" in text or "p=0.6282" in text, doc
 
 
 # ----------------------------------------------------------- Guard AB
@@ -1764,13 +1795,24 @@ def test_reranker_guard_fails_open_without_committed_preflight(tmp_repo: Path):
 
 
 def test_real_repo_reranker_blocker_is_non_blocking_and_doc_says_so():
-    """Pins both halves against the actual checkout: the artifact really does
-    record blocking=false, and the guarded doc really does say so."""
-    semantics = audit.latest_blocker_semantics(root=REAL_ROOT)
-    assert semantics is not None
-    entry = semantics["RERANKER_PROVIDER_AUTH"]
+    """Pins both halves against the actual checkout.
+
+    The latest committed preflight is now green (``status: OK``,
+    ``blockers: []``) because provider auth was resolved, so the latest artifact
+    has no reranker blocker to flatten. The semantic rule is still worth pinning,
+    so it is asserted against the historical artifact that actually records that
+    blocker, plus the new invariant that a blocker-free latest preflight leaves
+    the guard nothing to mis-flatten.
+    """
+    latest_semantics = audit.latest_blocker_semantics(root=REAL_ROOT)
+    assert latest_semantics == {}  # green preflight: no blockers to misread
+
+    historical = REAL_ROOT / "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json"
+    report = json.loads(historical.read_text(encoding="utf-8"))
+    entry = {b["code"]: b for b in report["blockers"]}["RERANKER_PROVIDER_AUTH"]
     assert entry["blocking"] is False
     assert entry["blocks_experiments"] == ["hybrid_rerank"]
+
     doc = (REAL_ROOT / "docs/interview/rag-deep-dive.md").read_text(encoding="utf-8")
     assert "`blocking: false`" in doc
     assert "工程债" in doc  # runtime silent-fallback debt retained
