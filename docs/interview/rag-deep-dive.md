@@ -4,8 +4,11 @@
 > provider 认证返回 HTTP 401（`{"code":30014,"message":"Token is invalid."}`），
 > 因此 **Recall@K / MRR / NDCG / reranker uplift 全部 `NOT_MEASURED`**。
 > 本文件**不包含任何指标数字**。任何声称本项目"RAG 指标是 XX%"的说法都没有 artifact
-> 支撑。见 Issue #7 与
-> `artifacts/evaluation/rag-649/provider-auth-blocked-*.json`。
+> 支撑。见 Issue #7 与最新已提交的 preflight evidence
+> `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
+> （`rag-eval-evidence/v2`，`status: BLOCKED`，
+> `primary_blocker: EMBEDDING_PROVIDER_AUTH`；blocker 字段口径的 canonical 定义见
+> [rag-evaluation.md](../reference/rag-evaluation.md) §3.3.1）。
 >
 > 交叉引用：[source-map.md](source-map.md)、
 > [rag-evaluation.md](../reference/rag-evaluation.md)（评测口径的 canonical 定义）。
@@ -153,14 +156,31 @@ Cross-encoder 把 query 和 doc 拼在一起过一遍模型，能捕捉细粒度
 **实现**：`rag/reranker.py::ApiReranker.rerank`，模型 `BAAI/bge-reranker-v2-m3`。
 
 **关键设计 —— 静默回退（已知缺陷）**：`rag/reranker.py` 的 `ApiReranker.rerank` 在调用失败时**静默回退**到不 rerank（`except Exception: return results[:top_k]`）。
-这一点在 preflight 里被显式标为 `probe: silent_fallback` + `http_status: 401`，
-并列为 blocker（`RERANKER_PROVIDER_AUTH`）。
+最新 v2 preflight 能**检测到**这一行为：`probe: silent_fallback` + `http_status: 401`，
+对应 blocker 条目 `RERANKER_PROVIDER_AUTH`。
 
 **这是一个已知缺陷，面试时要主动说**。静默回退意味着"reranker 没生效"时检索
 **看起来正常**（返回结果、不报错），但精度悄悄下降。
 
-preflight 已经把它列为 **blocker** 而不是 warning（`RERANKER_PROVIDER_AUTH`，
-`probe: silent_fallback`），就是为了防止这种静默降级被当成"评测通过"。
+**但要看清 preflight 的字段口径 —— `blocking: false`**。在最新 committed preflight
+（`preflight-20261002T194209Z`，`rag-eval-evidence/v2`）里，`RERANKER_PROVIDER_AUTH`
+是 **non-blocking**（`blocking: false`，`blocks_experiments: ["hybrid_rerank"]`）。两个
+结论要同时成立，缺一不可：
+
+- **运行时缺陷仍然成立**：preflight 能观测到静默回退，这本身就是工程债；
+- **preflight 证据语义**：`blocking: false` 意味着它**不是**整个 preflight 的
+  primary/global blocker，**不阻塞** `vector_only` / `bm25_only` / `hybrid_no_rerank`。
+
+`blocking: false` **不能**读成"reranker 没问题"或"reranker 评测已验证"。它只表示
+这个失败不阻塞其它实验；它确实使 **`hybrid_rerank` 无法证明执行了真实 rerank**，
+因此 `hybrid_rerank` **不能**作为有效的 rerank evaluation 结果 —— 探针没确认真的
+rerank 了，指标也就无从归因。
+
+因此正确说法不是"preflight 把它列为 blocker 而不是 warning"（那是 v1 之前的口径
+遗留），而是：**preflight 用 `blocking: false` + `blocks_experiments: ["hybrid_rerank"]`
+精确表达"这是一个非全局阻塞、但使 hybrid_rerank 结果无效的失败"**，正是为了防止这种
+静默降级被当成"评测通过"。
+
 但**运行时本身仍然静默回退** —— preflight 只在评测路径上拦截，线上检索路径没有这道闸。
 正确的修法是让降级**可观测且 fail-loud**（至少打 error 并在 `.meta` 标记），
 本轮未做，记为工程债。
@@ -247,9 +267,14 @@ preflight 已经把它列为 **blocker** 而不是 warning（`RERANKER_PROVIDER_
 无法归因 —— 数字好坏可能来自 BM25、也可能来自 rerank。ablation 才能回答
 "哪个组件贡献了什么"。
 
-**当前状态：BLOCKED。** preflight 判定：
-`primary_blocker: EMBEDDING_PROVIDER_AUTH`（HTTP 401），
-连带 `VECTOR_INDEX_EMPTY`（下游），`RERANKER_PROVIDER_AUTH`（HTTP 401，静默回退）。
+**当前状态：BLOCKED**，但主因不是 reranker。preflight 判定
+（`preflight-20261002T194209Z`，`rag-eval-evidence/v2`）：
+`primary_blocker: EMBEDDING_PROVIDER_AUTH`（HTTP 401，`blocks_corpus_import: true`，
+阻塞 `vector_only` / `hybrid_no_rerank` / `hybrid_rerank`）；
+`VECTOR_INDEX_EMPTY` 是 **downstream 症状**（`caused_by: EMBEDDING_PROVIDER_AUTH`，
+因 BM25 索引由 Qdrant 重建，连 `bm25_only` 也被阻塞）；
+`RERANKER_PROVIDER_AUTH`（HTTP 401，`probe: silent_fallback`）是
+**`blocking: false`**，只影响 `hybrid_rerank` 的有效性，不是全局 blocker。
 
 ### 9.4 失败分析框架（应当输出什么）
 
@@ -309,7 +334,7 @@ hard negative mining（用当前模型找出高分误召，再针对它们训练
 | BM25 与 Qdrant 生命周期耦合 | Qdrant 空 → BM25 也不可用 | 有意设计（避免索引不一致），但增加了故障耦合 |
 | 确定性 point ID 不自动清理 | 语料变更后留旧点 | 需要显式迁移路径 |
 | 量化/延迟基线 | 无生产延迟 artifact | **NOT_MEASURED** |
-| reranker 静默回退 | 降级不报错，精度悄悄下降 | preflight 已把它列为 blocker；运行时仍是静默回退 |
+| reranker 静默回退 | 降级不报错，精度悄悄下降 | 运行时仍是静默回退（工程债）；preflight 以 `RERANKER_PROVIDER_AUTH` / `blocking: false` / `probe: silent_fallback` 检出，并使 `hybrid_rerank` 结果无效 |
 
 ---
 

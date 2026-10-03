@@ -1877,6 +1877,116 @@ def check_rag_preflight_pointer_drift(docs: list[Path], errors: list[str], root:
             )
 
 
+# ---------------------------------------------------------------------------
+# Guard AB: interview docs must not upgrade a non-blocking RAG blocker into a
+# global one.
+#
+# Truth source: the ``blockers[]`` entries of the latest committed preflight
+# (same discovery as Guard AA). The verdict is read from the artifact — this
+# guard never hardcodes which reranker blockers are blocking, so a future
+# artifact that legitimately promotes one silences the rule instead of forcing
+# a doc edit.
+# ---------------------------------------------------------------------------
+
+#: Blocker code whose reported scope the interview docs are held to.
+RERANKER_BLOCKER_CODE = "RERANKER_PROVIDER_AUTH"
+#: Docs whose CURRENT claims about that code are guarded.
+RERANKER_SEMANTICS_DOCS: frozenset[str] = frozenset({"docs/interview/rag-deep-dive.md"})
+#: How many lines either side of a hit still count as the same claim.
+_SEMANTICS_WINDOW = 2
+#: Wording that promotes the code to a global blocker, or asserts it is a
+#: *blocking* blocker at all. Two distinct wrong claims, because the artifact
+#: refutes both: (a) "this is what blocks the preflight", (b) "preflight treats
+#: this as a blocker rather than a warning".
+_BLOCKER_GLOBAL_CLAIM_RE = re.compile(
+    r"primary\s+blocker|global\s+blocker|blocking\s*=\s*true|"
+    r"blocks?\s+(?:the\s+)?(?:entire|whole|all)\s+"
+    r"(?:preflight|experiment|experiments)|"
+    r"列为\s*\**\s*blocker|当作\s*\**\s*blocker|视为\s*\**\s*blocker|"
+    r"而不是\s*warning|而非\s*warning|"
+    r"as\s+a\s+(?:\*\*)?blocker(?:\*\*)?\s+rather\s+than|"
+    r"整个|全局|所有实验|全部实验|整体阻塞|全局阻塞|阻塞所有|主要原因",
+    re.IGNORECASE,
+)
+#: Markers that make the surrounding sentence a negation or a historical note.
+#: ``(?<!而)不是`` is load-bearing: plain ``不是`` is a substring of ``而不是``,
+#: which is itself a wrong-claim marker, so without the lookbehind the guard
+#: would negate its own finding.
+_BLOCKER_CLAIM_NEGATION_RE = re.compile(
+    r"(?<!而)不是|并非|而非|不能|不得|不等于|之前|原先|旧|历史|遗留|错误|不要|"
+    r"\bnot\b|\bnever\b|\bno longer\b|rather than|previous|legacy|historical|must not",
+    re.IGNORECASE,
+)
+
+
+def latest_blocker_semantics(root: Path = ROOT) -> dict[str, dict] | None:
+    """``{code: blocker_entry}`` from the latest committed preflight.
+
+    Returns ``None`` when there is no committed preflight or the artifact has no
+    structured ``blockers`` list, so the guard fails open instead of inventing
+    semantics.
+    """
+    latest = latest_committed_preflight(root)
+    if latest is None:
+        return None
+    path = root / latest[1]
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+    blockers = data.get("blockers")
+    if not isinstance(blockers, list):
+        return None
+    out: dict[str, dict] = {}
+    for entry in blockers:
+        if isinstance(entry, dict) and isinstance(entry.get("code"), str):
+            out[entry["code"]] = entry
+    return out
+
+
+def check_reranker_blocker_semantics(errors: list[str], root: Path = ROOT) -> None:
+    """Guard AB: a non-blocking reranker blocker must not be written as global.
+
+    Derived rule: read ``blocking`` from the latest committed preflight. If the
+    artifact marks the code non-blocking, a guarded doc may not describe it as
+    the primary/global blocker or as blocking every experiment. The runtime
+    debt itself (silent fallback) stays legitimate and unguarded — only the
+    evidence-scope claim is constrained.
+    """
+    semantics = latest_blocker_semantics(root)
+    if not semantics:
+        return
+    entry = semantics.get(RERANKER_BLOCKER_CODE)
+    if entry is None or entry.get("blocking") is not False:
+        return  # artifact does not constrain this code, or it is blocking
+    scope = entry.get("blocks_experiments")
+    scope_text = ", ".join(scope) if isinstance(scope, list) and scope else "(none recorded)"
+    for rel_str in sorted(RERANKER_SEMANTICS_DOCS):
+        path = root / rel_str
+        if not path.exists():
+            continue
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for line_no, line in enumerate(lines, 1):
+            if RERANKER_BLOCKER_CODE not in line:
+                continue
+            lo = max(0, line_no - 1 - _SEMANTICS_WINDOW)
+            hi = min(len(lines), line_no + _SEMANTICS_WINDOW)
+            window = "\n".join(lines[lo:hi])
+            if not _BLOCKER_GLOBAL_CLAIM_RE.search(window):
+                continue
+            if _BLOCKER_CLAIM_NEGATION_RE.search(window):
+                continue
+            errors.append(
+                f"reranker blocker semantics drift in {rel_str}:{line_no} — "
+                f"{RERANKER_BLOCKER_CODE} is recorded as blocking=false with "
+                f"blocks_experiments={scope_text} in the latest committed preflight, "
+                f"so it must not be described as the primary/global blocker or as "
+                f"blocking every experiment. Keep both facts: the runtime "
+                f"silent-fallback defect is real, and this failure only invalidates "
+                f"{scope_text} as a rerank evaluation"
+            )
+
+
 def check_docs_index_coverage(errors: list[str], root: Path = ROOT) -> None:
     """Rule W: the docs index must expose every current ADR/design/runbook for
     a shipped capability, otherwise a CURRENT doc is effectively unreachable."""
@@ -2184,6 +2294,8 @@ def main() -> int:
     check_semantic_tracing_drift(docs, errors)
     # RAG preflight evidence-pointer drift guard.
     check_rag_preflight_pointer_drift(docs, errors)
+    # RAG blocker-scope semantics guard (reads the latest committed preflight).
+    check_reranker_blocker_semantics(errors)
     check_docs_index_coverage(errors)
     check_api_reference_surface(errors)
     check_multi_worker_deployment_truth(docs, errors)
@@ -2212,6 +2324,7 @@ def main() -> int:
         f"negative-existence claims, stale embedding-fallback semantics, "
         f"latency absolutes, production framing, env references, "
         f"runtime future-claims, semantic-tracing drift, rag preflight pointer drift, "
+        "rag reranker blocker semantics, "
         "docs-index coverage, "
         "API-reference surface, "
         f"multi-worker deployment truth, root-level snapshot hygiene, "
