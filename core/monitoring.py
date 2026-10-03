@@ -330,9 +330,16 @@ try:
     mcp_tool_error_total = _counter(
         "mcp_tool_error_total", "MCP tool errors by reason", ["server", "tool", "reason"]
     )
+    # label 名必须与 tools/mcp_adapter.py::_observe 的调用处**逐字一致**。
+    # 声明与观测不一致时，真实 prometheus_client 的 ``labels()`` 会抛
+    # ``ValueError: No label names were set when constructing histogram:...``；
+    # 该异常被指标降级路径 ``except Exception: pass`` 吞掉，于是直方图**静默零样本**
+    # （计数器也一样）。声明侧少了 label 不会有任何报错，只会丢数据。
+    # 契约由 tests/unit/test_mcp_metrics_contract.py 锁定（真实 client 断言样本产生）。
     mcp_tool_duration_seconds = _histogram(
         "mcp_tool_duration_seconds",
         "MCP tool invocation latency",
+        ["server", "tool"],
         buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
     )
     mcp_tool_register_total = _counter(
