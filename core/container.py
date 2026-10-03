@@ -131,6 +131,9 @@ class ServiceContainer:
         # v6.1: 容器级单例 Embedding 模型
         self.embedding_model: Any = None
         self.tool_registry: ToolRegistryProtocol | None = None
+        # MCP 外部工具适配器（默认关闭；MCP_ENABLED=true 且 MCP_SERVERS 合法时非空）。
+        # 由 ``_close_mcp_tools`` 在 shutdown 时释放其 stdio 子进程 / SSE 会话。
+        self.mcp_adapters: list[Any] = []
 
         # v5.1: Prompt 版本管理器
         self.prompt_manager: Any = None
@@ -601,6 +604,84 @@ class ServiceContainer:
             self.tool_registry = create_erp_tools(self._get_erp_authz())
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
 
+        # MCP 工具叠加进**同一个** registry（native 工具不受影响，默认关闭）。
+        await self._init_mcp_tools()
+
+    async def _init_mcp_tools(self):
+        """把 MCP server 暴露的工具注册进已有的 ``tool_registry``（默认关闭）。
+
+        必须在 ``_init_rag_and_tools`` 之后调用：MCP 工具与 native 工具共用一个
+        ``ToolRegistry``，且**绝不覆盖**同名 native 工具（``register_mcp_tools``
+        遇到冲突是跳过 + 计 ``skipped_collision``）。
+
+        失败策略由 ``MCP_FAIL_CLOSED`` 决定：
+
+        - ``true``（生产建议）：抛出，阻止服务启动。外部工具是显式声明的能力，
+          配错了却静默跑成 native-only，会让「以为已生效」的运维假设与实际不符。
+        - ``false``（开发默认）：降级为 native-only + 告警，不影响可用性。
+
+        幂等：``mcp_adapters`` 非空说明已初始化过，重复调用直接返回。
+        """
+        if self.mcp_adapters or self.tool_registry is None:
+            return
+
+        from core.config import (
+            MCP_DEFAULT_TIMEOUT_SECONDS,
+            MCP_ENABLED,
+            MCP_FAIL_CLOSED,
+            MCP_MAX_PAYLOAD_BYTES,
+            MCP_SERVERS,
+            ConfigurationError,
+        )
+
+        if not MCP_ENABLED:
+            return
+
+        from tools.mcp_adapter import (
+            build_mcp_adapters,
+            load_mcp_server_configs,
+            register_mcp_tools,
+        )
+
+        configs = load_mcp_server_configs(
+            MCP_SERVERS,
+            default_timeout=MCP_DEFAULT_TIMEOUT_SECONDS,
+            default_max_payload=MCP_MAX_PAYLOAD_BYTES,
+        )
+        if not configs:
+            msg = "MCP_ENABLED=true 但 MCP_SERVERS 未解析出任何可用 server"
+            if MCP_FAIL_CLOSED:
+                raise ConfigurationError(msg)
+            logger.warning("%s；MCP 工具不可用，native 工具不受影响", msg)
+            return
+
+        for adapter in build_mcp_adapters(configs):
+            try:
+                registered = await register_mcp_tools(self.tool_registry, adapter)
+            except Exception as e:
+                # 该 server 的连接/发现失败：先释放它已经拉起的子进程或会话，
+                # 否则 stdio 子进程会泄漏成孤儿进程。
+                with contextlib.suppress(Exception):
+                    await adapter.close()
+                msg = f"MCP server '{adapter.config.name}' 注册失败: {type(e).__name__}: {e}"
+                if MCP_FAIL_CLOSED:
+                    raise ConfigurationError(msg) from e
+                logger.warning("%s；降级为 native-only", msg)
+                continue
+            logger.info(
+                "MCP server %s 注册 %d 个工具", adapter.config.name, len(registered)
+            )
+            self.mcp_adapters.append(adapter)
+
+    async def _close_mcp_tools(self):
+        """关闭所有 MCP adapter 持有的会话 / stdio 子进程（shutdown 路径）。"""
+        adapters, self.mcp_adapters = self.mcp_adapters, []
+        for adapter in adapters:
+            # CancelledError 是 BaseException：suppress(Exception) 抓不到它，
+            # 而 shutdown 路径必须保证能把所有 MCP 会话都走完。
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await adapter.close()
+
     async def _init_cache(self):
         """v6.1: 初始化三级缓存，注入外部依赖"""
         if self.cache is not None:
@@ -918,6 +999,9 @@ class ServiceContainer:
 
         # 1.5. 关闭 LangGraph checkpoint 后端（PostgreSQL 连接池）
         await self._close_checkpointer()
+
+        # 1.6. 关闭 MCP adapter（MCP 默认关闭时是空循环）
+        await self._close_mcp_tools()
 
         # 2. 关闭 ERP 适配器
         if self.erp and hasattr(self.erp, "close"):

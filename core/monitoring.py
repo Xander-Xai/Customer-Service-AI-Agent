@@ -318,6 +318,28 @@ try:
         "Human approval decisions recorded",
         ["decision"],
     )
+    # MCP 外部工具接入（默认关闭；MCP_ENABLED=true 才产生时序）。
+    #
+    # label 基数纪律：``tool`` 只取 **allowlist 内**的工具名，``server`` 只取
+    # allowlist 里显式声明的 server 名。两者都是**配置决定**的有界集合，所以可作
+    # label。被拒绝的远端工具名（不在 allowlist）一律打成 ``tool="*"``，绝不把
+    # 远端提供的字符串变成 label —— 否则 server 一暴露新工具就能无界扩张时序数。
+    mcp_tool_call_total = _counter(
+        "mcp_tool_call_total", "MCP tool invocations by outcome", ["server", "tool", "status"]
+    )
+    mcp_tool_error_total = _counter(
+        "mcp_tool_error_total", "MCP tool errors by reason", ["server", "tool", "reason"]
+    )
+    mcp_tool_duration_seconds = _histogram(
+        "mcp_tool_duration_seconds",
+        "MCP tool invocation latency",
+        buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+    )
+    mcp_tool_register_total = _counter(
+        "mcp_tool_register_total",
+        "MCP tool registration outcomes (registered / skipped_not_low_risk / skipped_collision)",
+        ["server", "outcome"],
+    )
     agent_approval_pending = _gauge(
         "agent_approval_pending", "Applications awaiting human decision"
     )
@@ -421,6 +443,10 @@ except ImportError:
     agent_approval_wait_seconds = _NoopMetric()
     agent_approval_expired_total = _NoopMetric()
     agent_approval_execution_total = _NoopMetric()
+    mcp_tool_call_total = _NoopMetric()
+    mcp_tool_error_total = _NoopMetric()
+    mcp_tool_duration_seconds = _NoopMetric()
+    mcp_tool_register_total = _NoopMetric()
     PROMETHEUS_BUSINESS_ENABLED = False
 
 
