@@ -240,9 +240,24 @@ python3 scripts/audit_doc_consistency.py
     （`api/app.py::_pending_steps`）同语义。此前 worker 崩溃后是"从头重跑"。
   - thread lease **执行期间续租**（`runtime/executor.py::_heartbeat_loop` 同时续 DB
     ownership lease 与 Redis lock TTL，`agent_thread_lease_renewed_total` /
-    `agent_worker_heartbeat` 观测）。仍**无** fencing token：pause 超过 TTL 的旧
-    worker 不会被强制中止，其后续 `mark_succeeded` 会被 `from_statuses={RUNNING}`
-    条件更新挡下。
+    `agent_worker_heartbeat` 观测）。
+  - **worker-owned 状态迁移的 owner CAS**：worker 提交 AgentRun 状态
+    （`mark_succeeded` / `mark_failed` / `mark_retrying` / `mark_waiting_approval` /
+    RUNNING 来源的 `mark_dead_letter`）走 `repository.transition_owned()`，
+    `run_id + status + worker_id + lease 未过期` 在**同一条 UPDATE** 里判定；
+    `heartbeat()` 是原子 owner CAS（`renew_lease_owned`），RUNNING 接管是原子
+    谓词（`takeover_running`），两个竞争者只有一个能接管。因此 **ownership 丢失后
+    旧 worker 无法再提交状态**，也**不能靠迟到的续租给自己续命**（严格 lease
+    expiry）。失去所有权抛 `RunOwnershipLost`，executor 读到当前状态即退出：
+    不记失败、不重试、不进 DLQ、不消耗 attempt。外部路径（`cancel_run()`、
+    DLQ 重放 / reconciler / 管理 API）**不**要求匹配 worker。
+    证据：`tests/unit/test_agent_run_runtime.py` + 真实 PostgreSQL 下的
+    `tests/integration/runtime/test_worker_ownership_cas.py`。
+  - 仍**没有** fencing token，且**没有**强制中止：pause 超过 TTL 的旧 worker
+    **不会被强制 abort**，其协程可能继续跑完；它的**外部节点副作用**也不受
+    owner CAS 保护（仍依赖 side-effect ledger 的幂等）。也就是说本层解决的是
+    「stale worker 不能提交 AgentRun 状态」，**不是**完整的 stale-worker fencing，
+    更不是 exactly-once（投递仍是 at-least-once）。
   - **Run 事件流（新增）**：worker 写 Redis Stream `agent:run:{run_id}:events`
     （`runtime/events.py`），API 通过 `GET /api/runs/{run_id}/events` 以 SSE 转发，
     支持 `Last-Event-ID` 断点续读。事件负载走**字段白名单**，query/用户标识/凭据

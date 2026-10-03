@@ -234,9 +234,12 @@
 > 含糊地说"有 TTL 所以很安全"。
 >
 > **加分回答**：说清已做的缓解（执行期间 lease 续租 + 续租失败有计数器 +
-> 启动强制 TTL > 任务时限 + 余量）；说清残余风险（GC/宿主机卡顿 pause 超过 TTL 时
-> 旧 worker 与新 owner 可能同时写，终态会被条件更新挡下但**节点副作用**仍需幂等）；
-> 并知道严格解法是 fencing token 或 DB 版本号。
+> 启动强制 TTL > 任务时限 + 余量）；说清 **worker-owned 状态迁移已做 DB owner CAS**
+> （`run_id + status + worker_id + lease 未过期` 同一条 UPDATE；`heartbeat` 也是原子
+> owner CAS，RUNNING 接管是原子谓词）——所以 ownership 丢失后旧 worker **提交不了**
+> AgentRun 状态，也不能靠迟到续租给自己续命；然后说清**残余风险**（GC/宿主机卡顿
+> pause 超过 TTL 时旧 worker **不会被强制中止**，协程可能继续跑完；它的**节点副作用**
+> 仍需幂等）；并知道严格解法是 fencing token 或 DB 版本号。
 
 **R5 【必问】** Redis 挂了 / PostgreSQL 挂了分别会怎样？
 
