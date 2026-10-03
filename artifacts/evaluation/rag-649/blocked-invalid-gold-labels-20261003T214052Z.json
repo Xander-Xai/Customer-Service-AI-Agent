@@ -1,0 +1,127 @@
+{
+  "schema": "rag-649-invalid-gold-labels-blocked/v1",
+  "generated_at": "2026-10-03T21:40:52.034631+00:00",
+  "git_sha": "56b2c4ef9f32f7586174cc6256d1f3391dd019de",
+  "working_tree_dirty": true,
+  "working_tree_changed_files": [
+    "rag/api_embedding.py",
+    "scripts/rag_gold_label_blocker.py",
+    "tests/unit/test_api_embedding_event_loop_partition.py"
+  ],
+  "formal_649_query_evaluation": "BLOCKED",
+  "primary_blocker": "INVALID_GOLD_LABELS",
+  "blocker_class": "DATASET_DEFECT",
+  "distinct_from": "PROVIDER_AUTHENTICATION (that blocker is RESOLVED this round)",
+  "summary": "Provider auth, Qdrant corpus, BM25 index and reranker are all verified green. The formal 649-query run was still NOT executed, because the benchmark's expected_doc_ids are random same-category documents rather than relevance judgements. Any Hit@K / MRR / NDCG / Recall computed against them would be arithmetically valid and semantically meaningless.",
+  "gate_status_this_round": {
+    "provider_authentication": "OK",
+    "provider_auth_evidence": {
+      "endpoint": "https://api.siliconflow.cn/v1",
+      "embeddings_http_status": 200,
+      "chat_completions_http_status": 200,
+      "rerank_http_status": 200,
+      "credentials_source": ".env.dev (copied to .env by `make env-dev`); the prior active .env was a byte-identical copy of .env.test and held only sk-placeholder-* values that the provider rejected with HTTP 401 code 30014 'Token is invalid.'"
+    },
+    "corpus_import": "OK",
+    "qdrant_vector_index": "OK",
+    "bm25_index": "OK",
+    "reranker": "OK",
+    "preflight_status": "OK",
+    "preflight_blockers": [],
+    "preflight_artifact": "artifacts/evaluation/rag-649/preflight-20261003T212439Z",
+    "latest_import_manifest": "artifacts/evaluation/rag-649/import_manifest_import-20261003T212017Z.json"
+  },
+  "dataset": {
+    "benchmark_path": "tests/eval/rag_benchmark.json",
+    "benchmark_sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+    "benchmark_version": "1.0",
+    "benchmark_created_at": "2026-06-24",
+    "query_count": 649,
+    "corpus_path": "data/knowledge_base/knowledge_base_5000.jsonl",
+    "corpus_sha256": "a81ea7f3347b45b3adefe474790fabd0b2277eada05327422134d3ca0737502d",
+    "corpus_docs": 5000,
+    "golden_path": "tests/eval/golden/expected_doc_ids.json",
+    "golden_sha256": "516e468830ab85277c96707606ac8bea29f894e11932fbf31b5d2746eacac4a8",
+    "golden_identical_to_benchmark_expected_doc_ids": "649/649",
+    "gold_doc_ids_present": 609,
+    "gold_doc_ids_absent": 40
+  },
+  "root_cause": {
+    "generator_script": "scripts/regenerate_benchmark_ids.py",
+    "generator_sha256": "821aa37bfa084b47511cbe4f457755a2f043afb09471e29d35d4018a0e8773d6",
+    "mechanism": "scripts/regenerate_benchmark_ids.py assigns gold labels with `random.seed(42)` + `q['expected_doc_ids'] = random.sample(pool, min(3, len(pool)))`, where pool is every document of the query's category-mapped KB category. The purpose is doc-ID alignment, not relevance labelling.",
+    "category_pool_sizes": {
+      "成分知识": 1500,
+      "产品介绍": 925,
+      "售后政策": 865,
+      "使用方法": 885,
+      "投诉处理": 805,
+      "行业法规": 20
+    },
+    "gold_is_semantically_random": true,
+    "no_alternative_relevance_gold_exists": "tests/eval/golden/expected_doc_ids.json is byte-identical in content to the benchmark's expected_doc_ids; there is no relevance-annotated gold in the repo"
+  },
+  "quantitative_proof": {
+    "method": "Embedding-similarity independence test with the evaluation's own embedding model (BAAI/bge-large-zh-v1.5, dim 1024). Cosine(query, doc) compared between each query's own gold documents and randomly drawn same-category documents.",
+    "sample_queries": 120,
+    "cos_query_gold": {
+      "mean": 0.3732,
+      "sd": 0.097,
+      "n": 323
+    },
+    "cos_query_random_same_category": {
+      "mean": 0.3696,
+      "sd": 0.0915,
+      "n": 333
+    },
+    "difference": 0.0036,
+    "welch_t": 0.485,
+    "p_value": 0.6282,
+    "interpretation": "Gold documents are statistically indistinguishable from random same-category documents (p=0.63). The labels carry no query-relevance signal.",
+    "retrieval_sanity_check_label_free": {
+      "method": "Same embedding model, 40 random queries, Qdrant vector search restricted to the imported corpus hash. Measures whether the retriever itself is healthy, without relying on the defective gold labels.",
+      "n_queries": 40,
+      "cos_query_top1_retrieved": 0.6265,
+      "cos_query_top10_mean": 0.603,
+      "cos_query_random_document": 0.3093,
+      "interpretation": "Retrieval roughly doubles query-document similarity over random (0.63 vs 0.31), so the retriever is working. Its achieved similarity (0.6265) far exceeds the gold labels' similarity (0.3732) - the labels, not the retriever, are the defect."
+    }
+  },
+  "why_the_649_run_would_be_wrong": [
+    "Each query's gold is 3 documents drawn from a pool of 865-1500 same-category documents, so a semantically correct retriever is expected to score near zero.",
+    "The only way to raise Hit@K against this gold is to abandon semantic retrieval and return arbitrary same-category documents, i.e. degrade the system to fit the artefact. That is explicitly out of scope.",
+    "Published percentages would be indistinguishable from measuring random agreement and would misrepresent retrieval quality in docs, resumes and interviews.",
+    "Reported latency, stage timings and ablation deltas would be real but attached to meaningless quality numbers, making the whole artifact misleading."
+  ],
+  "observed_smoke_signal": {
+    "artifact": "artifacts/evaluation/rag-649/rag649-20261003T212455Z/report.json",
+    "subset_run": true,
+    "queries": 16,
+    "note": "Documented smoke run (make rag-eval-649-smoke) returned 0.0 for every metric in all four ablation configs with 0 exceptions, 16/16 MISS_ALL per config. Smoke is explicitly not formal evidence and was used only to detect this defect. Its numbers are NOT reproduced as RAG quality metrics anywhere."
+  },
+  "metrics_produced": null,
+  "evidence_semantics": "NOT_MEASURED / NOT_VERIFIED for RAG retrieval quality. No 649-query Hit@K / MRR / NDCG / Recall / Precision figures are produced, quoted or estimated in this round.",
+  "retrieval_algorithm_changes": "NONE. No change was made to the retrieval algorithm, ranking, fusion, query rewrite, embedding model, reranker, top_k or any scoring parameter in response to the test set.",
+  "code_changes_this_round": [
+    {
+      "path": "rag/api_embedding.py",
+      "kind": "bugfix (transport layer, not retrieval)",
+      "change": "Partition the module-level httpx.AsyncClient singleton by owning event loop. The pool is bound to its creating loop, so reuse across short-lived loops (repeated asyncio.run() inside asyncio.to_thread worker threads) raised RuntimeError: Event loop is closed on every call after the first, which made scripts/import_eval_corpus.py fail at batch 2/80 and blocked the corpus import.",
+      "retrieval_semantics_affected": false
+    },
+    {
+      "path": "tests/unit/test_api_embedding_event_loop_partition.py",
+      "kind": "regression test",
+      "change": "5 tests covering loop-partitioned client reuse, recreation and reset.",
+      "retrieval_semantics_affected": false
+    }
+  ],
+  "failure_queries_retained": "Yes. No query, benchmark entry, gold label or corpus document was removed, edited or excluded. All 649 queries and all 1250 unique gold doc ids remain exactly as committed (benchmark sha256 unchanged).",
+  "blocked_by": null,
+  "next_step_for_humans": [
+    "Build a relevance-judged gold set (human labels or LLM-judge with human spot-check) for the 649 queries, keyed to the corpus sha256 a81ea7f3347b45b3adefe474790fabd0b2277eada05327422134d3ca0737502d.",
+    "Keep the 40 queries whose gold docs are absent from the corpus, and record them as an explicit excluded/undeterminable population rather than scoring them as misses.",
+    "Re-run unchanged: make rag-eval-649-preflight && make rag-eval-649. The corpus (5000 docs, BM25 READY), provider auth and reranker are already verified, so the formal run needs no infrastructure work.",
+    "Sanity gate for the new gold: cos(query, gold) must be materially above cos(query, random same-category doc) before any Hit@K is published."
+  ]
+}

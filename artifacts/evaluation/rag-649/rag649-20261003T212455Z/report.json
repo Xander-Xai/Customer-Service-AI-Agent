@@ -1,0 +1,2644 @@
+{
+  "schema_version": "rag-eval-evidence/v2",
+  "run_id": "rag649-20261003T212455Z",
+  "timestamp": "2026-10-03T21:27:42.498059+00:00",
+  "status": "SUBSET_SMOKE",
+  "git_sha": "56b2c4ef9f32f7586174cc6256d1f3391dd019de+dirty",
+  "benchmark": {
+    "path": "tests/eval/rag_benchmark.json",
+    "sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+    "declared_queries": 649,
+    "actual_queries": 649,
+    "executed_queries": 16,
+    "metadata_version": "1.0",
+    "created_at": "2026-06-24"
+  },
+  "environment": {
+    "python": "3.10.12",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35",
+    "vector_db_mode": "qdrant_only",
+    "qdrant": {
+      "host": "localhost",
+      "port": 6333,
+      "collections": {
+        "product_knowledge": 1466,
+        "faq": 902,
+        "tech_support": 1827,
+        "complaint_knowledge": 805
+      },
+      "total_points": 5000
+    },
+    "embedding_model": "BAAI/bge-large-zh-v1.5",
+    "embedding_dim": 1024,
+    "reranker_model": "BAAI/bge-reranker-v2-m3",
+    "reranker_available": true,
+    "hybrid_search_enabled": true
+  },
+  "config": {
+    "vector_db_mode": "qdrant_only",
+    "hybrid_search_enabled": true,
+    "hybrid_vector_top_k": 8,
+    "hybrid_bm25_top_k": 8,
+    "hybrid_rrf_k": 60,
+    "rag_n_results": 3,
+    "rag_query_rewriting": false,
+    "embedding_model": "BAAI/bge-large-zh-v1.5",
+    "embedding_dim": 1024,
+    "reranker_model": "BAAI/bge-reranker-v2-m3"
+  },
+  "preflight": {
+    "qdrant": {
+      "reachable": true,
+      "versions": {
+        "client": "1.18.0",
+        "server": "1.12.0"
+      },
+      "collections": {
+        "product_knowledge": 1466,
+        "faq": 902,
+        "tech_support": 1827,
+        "complaint_knowledge": 805
+      },
+      "total_points": 5000
+    },
+    "embedding": {
+      "configured": true,
+      "probe": "ok",
+      "dim": 1024,
+      "model": "BAAI/bge-large-zh-v1.5"
+    },
+    "bm25_rebuild": {
+      "executed": true,
+      "readiness": "BM25Readiness.READY",
+      "document_count": 5000
+    },
+    "reranker": {
+      "configured": true,
+      "model": "BAAI/bge-reranker-v2-m3",
+      "applied": true,
+      "degraded": false,
+      "reason": "",
+      "provider_called": true,
+      "http_status": 200,
+      "probe": "ok"
+    },
+    "status": "OK",
+    "primary_blocker": null,
+    "blockers": []
+  },
+  "evaluation_protocol": {
+    "top_k": 8,
+    "ks": [
+      1,
+      3,
+      5,
+      8
+    ],
+    "warmup_per_experiment": 8,
+    "cache_policy": "no application-level retrieval cache involved; embedding/reranker HTTP keepalive warmed by warmup queries",
+    "denominator": "primary all_queries view is end-to-end: failed (exception/timeout/gold-not-indexed) requests enter the population with zero-valued metrics; diagnostic metrics/category views average over successful queries (n_success); latency only over completed requests",
+    "relevance": "binary (any of expected_doc_ids in top-k)",
+    "mrr_truncation": "MRR computed on top-8 retrieved list"
+  },
+  "evaluation_populations": {
+    "definitions": {
+      "all_queries": "View A — end-to-end：全部查询进入分母；gold 未进入索引或检索失败（GOLD_NOT_INDEXED / TIMEOUT / PROVIDER_ERROR）仍按 0 分计入。衡量 corpus coverage + indexing + retrieval algorithm 的系统级结果（主口径）。",
+      "retrieval_eligible": "View B — retrieval eligible：至少 1 个 gold document 已进入 corpus/index 的查询（数量运行时动态计算）。用于分析 retriever 在「至少存在可命中文档」情况下的表现。",
+      "full_gold_covered": "View C — full-gold-covered：全部 gold documents 都存在于当前 corpus/index 的查询（数量运行时动态计算）。适合 Recall@K / NDCG，避免 gold 缺失直接压低算法指标。"
+    },
+    "primary_view": "all_queries",
+    "counts": {
+      "all_queries": 16,
+      "retrieval_eligible": 16,
+      "full_gold_covered": 16
+    },
+    "per_experiment": {
+      "vector_only": {
+        "all_queries": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1460.33,
+            "p50_ms": 1447.36,
+            "p90_ms": 1508.42,
+            "p95_ms": 1543.09,
+            "p99_ms": 1578.37
+          }
+        },
+        "retrieval_eligible": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1460.33,
+            "p50_ms": 1447.36,
+            "p90_ms": 1508.42,
+            "p95_ms": 1543.09,
+            "p99_ms": 1578.37
+          }
+        },
+        "full_gold_covered": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1460.33,
+            "p50_ms": 1447.36,
+            "p90_ms": 1508.42,
+            "p95_ms": 1543.09,
+            "p99_ms": 1578.37
+          }
+        }
+      },
+      "bm25_only": {
+        "all_queries": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 17.56,
+            "p50_ms": 16.19,
+            "p90_ms": 24.59,
+            "p95_ms": 28.65,
+            "p99_ms": 34.62
+          }
+        },
+        "retrieval_eligible": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 17.56,
+            "p50_ms": 16.19,
+            "p90_ms": 24.59,
+            "p95_ms": 28.65,
+            "p99_ms": 34.62
+          }
+        },
+        "full_gold_covered": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 17.56,
+            "p50_ms": 16.19,
+            "p90_ms": 24.59,
+            "p95_ms": 28.65,
+            "p99_ms": 34.62
+          }
+        }
+      },
+      "hybrid_no_rerank": {
+        "all_queries": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1455.15,
+            "p50_ms": 1443.94,
+            "p90_ms": 1532.43,
+            "p95_ms": 1547.58,
+            "p99_ms": 1569.08
+          }
+        },
+        "retrieval_eligible": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1455.15,
+            "p50_ms": 1443.94,
+            "p90_ms": 1532.43,
+            "p95_ms": 1547.58,
+            "p99_ms": 1569.08
+          }
+        },
+        "full_gold_covered": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 1455.15,
+            "p50_ms": 1443.94,
+            "p90_ms": 1532.43,
+            "p95_ms": 1547.58,
+            "p99_ms": 1569.08
+          }
+        }
+      },
+      "hybrid_rerank": {
+        "all_queries": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 3749.75,
+            "p50_ms": 3760.35,
+            "p90_ms": 3925.32,
+            "p95_ms": 3980.71,
+            "p99_ms": 4065.09
+          }
+        },
+        "retrieval_eligible": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 3749.75,
+            "p50_ms": 3760.35,
+            "p90_ms": 3925.32,
+            "p95_ms": 3980.71,
+            "p99_ms": 4065.09
+          }
+        },
+        "full_gold_covered": {
+          "query_count": 16,
+          "metrics": {
+            "mrr": 0.0,
+            "hit@1": 0.0,
+            "recall@1": 0.0,
+            "precision@1": 0.0,
+            "ndcg@1": 0.0,
+            "hit@3": 0.0,
+            "recall@3": 0.0,
+            "precision@3": 0.0,
+            "ndcg@3": 0.0,
+            "hit@5": 0.0,
+            "recall@5": 0.0,
+            "precision@5": 0.0,
+            "ndcg@5": 0.0,
+            "hit@8": 0.0,
+            "recall@8": 0.0,
+            "precision@8": 0.0,
+            "ndcg@8": 0.0
+          },
+          "latency": {
+            "n": 16,
+            "mean_ms": 3749.75,
+            "p50_ms": 3760.35,
+            "p90_ms": 3925.32,
+            "p95_ms": 3980.71,
+            "p99_ms": 4065.09
+          }
+        }
+      }
+    }
+  },
+  "metrics": {
+    "vector_only": {
+      "mrr": 0.0,
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@8": 0.0,
+      "recall@8": 0.0,
+      "precision@8": 0.0,
+      "ndcg@8": 0.0
+    },
+    "bm25_only": {
+      "mrr": 0.0,
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@8": 0.0,
+      "recall@8": 0.0,
+      "precision@8": 0.0,
+      "ndcg@8": 0.0
+    },
+    "hybrid_no_rerank": {
+      "mrr": 0.0,
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@8": 0.0,
+      "recall@8": 0.0,
+      "precision@8": 0.0,
+      "ndcg@8": 0.0
+    },
+    "hybrid_rerank": {
+      "mrr": 0.0,
+      "hit@1": 0.0,
+      "recall@1": 0.0,
+      "precision@1": 0.0,
+      "ndcg@1": 0.0,
+      "hit@3": 0.0,
+      "recall@3": 0.0,
+      "precision@3": 0.0,
+      "ndcg@3": 0.0,
+      "hit@5": 0.0,
+      "recall@5": 0.0,
+      "precision@5": 0.0,
+      "ndcg@5": 0.0,
+      "hit@8": 0.0,
+      "recall@8": 0.0,
+      "precision@8": 0.0,
+      "ndcg@8": 0.0
+    }
+  },
+  "latency": {
+    "vector_only": {
+      "n": 16,
+      "mean_ms": 1460.33,
+      "p50_ms": 1447.36,
+      "p90_ms": 1508.42,
+      "p95_ms": 1543.09,
+      "p99_ms": 1578.37
+    },
+    "bm25_only": {
+      "n": 16,
+      "mean_ms": 17.56,
+      "p50_ms": 16.19,
+      "p90_ms": 24.59,
+      "p95_ms": 28.65,
+      "p99_ms": 34.62
+    },
+    "hybrid_no_rerank": {
+      "n": 16,
+      "mean_ms": 1455.15,
+      "p50_ms": 1443.94,
+      "p90_ms": 1532.43,
+      "p95_ms": 1547.58,
+      "p99_ms": 1569.08
+    },
+    "hybrid_rerank": {
+      "n": 16,
+      "mean_ms": 3749.75,
+      "p50_ms": 3760.35,
+      "p90_ms": 3925.32,
+      "p95_ms": 3980.71,
+      "p99_ms": 4065.09
+    }
+  },
+  "stage_latency": {
+    "vector_only": {
+      "VECTOR": {
+        "n": 16,
+        "mean_ms": 1459.62,
+        "p50_ms": 1446.7,
+        "p90_ms": 1507.85,
+        "p95_ms": 1542.67,
+        "p99_ms": 1577.83
+      },
+      "BM25": {
+        "n": 16,
+        "mean_ms": 0.0,
+        "p50_ms": 0.0,
+        "p90_ms": 0.0,
+        "p95_ms": 0.0,
+        "p99_ms": 0.0
+      },
+      "FUSION_RRF": {
+        "n": 16,
+        "mean_ms": 0.06,
+        "p50_ms": 0.04,
+        "p90_ms": 0.1,
+        "p95_ms": 0.1,
+        "p99_ms": 0.12
+      },
+      "RERANK": {
+        "n": 16,
+        "mean_ms": 0.0,
+        "p50_ms": 0.0,
+        "p90_ms": 0.01,
+        "p95_ms": 0.01,
+        "p99_ms": 0.01
+      }
+    },
+    "bm25_only": {
+      "VECTOR": {
+        "n": 16,
+        "mean_ms": 0.01,
+        "p50_ms": 0.01,
+        "p90_ms": 0.02,
+        "p95_ms": 0.02,
+        "p99_ms": 0.02
+      },
+      "BM25": {
+        "n": 16,
+        "mean_ms": 16.49,
+        "p50_ms": 15.26,
+        "p90_ms": 23.13,
+        "p95_ms": 27.11,
+        "p99_ms": 33.03
+      },
+      "FUSION_RRF": {
+        "n": 16,
+        "mean_ms": 0.01,
+        "p50_ms": 0.01,
+        "p90_ms": 0.02,
+        "p95_ms": 0.02,
+        "p99_ms": 0.02
+      },
+      "RERANK": {
+        "n": 16,
+        "mean_ms": 0.01,
+        "p50_ms": 0.01,
+        "p90_ms": 0.01,
+        "p95_ms": 0.03,
+        "p99_ms": 0.08
+      }
+    },
+    "hybrid_no_rerank": {
+      "VECTOR": {
+        "n": 16,
+        "mean_ms": 1441.43,
+        "p50_ms": 1431.35,
+        "p90_ms": 1520.69,
+        "p95_ms": 1537.58,
+        "p99_ms": 1557.43
+      },
+      "BM25": {
+        "n": 16,
+        "mean_ms": 12.82,
+        "p50_ms": 11.58,
+        "p90_ms": 15.71,
+        "p95_ms": 19.45,
+        "p99_ms": 26.31
+      },
+      "FUSION_RRF": {
+        "n": 16,
+        "mean_ms": 0.25,
+        "p50_ms": 0.2,
+        "p90_ms": 0.41,
+        "p95_ms": 0.42,
+        "p99_ms": 0.42
+      },
+      "RERANK": {
+        "n": 16,
+        "mean_ms": 0.01,
+        "p50_ms": 0.01,
+        "p90_ms": 0.01,
+        "p95_ms": 0.01,
+        "p99_ms": 0.01
+      }
+    },
+    "hybrid_rerank": {
+      "VECTOR": {
+        "n": 16,
+        "mean_ms": 1443.73,
+        "p50_ms": 1427.2,
+        "p90_ms": 1511.05,
+        "p95_ms": 1536.99,
+        "p99_ms": 1578.95
+      },
+      "BM25": {
+        "n": 16,
+        "mean_ms": 12.03,
+        "p50_ms": 11.25,
+        "p90_ms": 13.97,
+        "p95_ms": 17.2,
+        "p99_ms": 24.04
+      },
+      "FUSION_RRF": {
+        "n": 16,
+        "mean_ms": 0.24,
+        "p50_ms": 0.19,
+        "p90_ms": 0.42,
+        "p95_ms": 0.47,
+        "p99_ms": 0.49
+      },
+      "RERANK": {
+        "n": 16,
+        "mean_ms": 2293.05,
+        "p50_ms": 2306.27,
+        "p90_ms": 2519.31,
+        "p95_ms": 2553.35,
+        "p99_ms": 2564.12
+      }
+    }
+  },
+  "category_metrics": {
+    "vector_only": {
+      "成分知识": {
+        "query_count": 16,
+        "metrics": {
+          "mrr": 0.0,
+          "hit@1": 0.0,
+          "recall@1": 0.0,
+          "precision@1": 0.0,
+          "ndcg@1": 0.0,
+          "hit@3": 0.0,
+          "recall@3": 0.0,
+          "precision@3": 0.0,
+          "ndcg@3": 0.0,
+          "hit@5": 0.0,
+          "recall@5": 0.0,
+          "precision@5": 0.0,
+          "ndcg@5": 0.0,
+          "hit@8": 0.0,
+          "recall@8": 0.0,
+          "precision@8": 0.0,
+          "ndcg@8": 0.0
+        },
+        "latency": {
+          "n": 16,
+          "mean_ms": 1460.33,
+          "p50_ms": 1447.36,
+          "p90_ms": 1508.42,
+          "p95_ms": 1543.09,
+          "p99_ms": 1578.37
+        }
+      }
+    },
+    "bm25_only": {
+      "成分知识": {
+        "query_count": 16,
+        "metrics": {
+          "mrr": 0.0,
+          "hit@1": 0.0,
+          "recall@1": 0.0,
+          "precision@1": 0.0,
+          "ndcg@1": 0.0,
+          "hit@3": 0.0,
+          "recall@3": 0.0,
+          "precision@3": 0.0,
+          "ndcg@3": 0.0,
+          "hit@5": 0.0,
+          "recall@5": 0.0,
+          "precision@5": 0.0,
+          "ndcg@5": 0.0,
+          "hit@8": 0.0,
+          "recall@8": 0.0,
+          "precision@8": 0.0,
+          "ndcg@8": 0.0
+        },
+        "latency": {
+          "n": 16,
+          "mean_ms": 17.56,
+          "p50_ms": 16.19,
+          "p90_ms": 24.59,
+          "p95_ms": 28.65,
+          "p99_ms": 34.62
+        }
+      }
+    },
+    "hybrid_no_rerank": {
+      "成分知识": {
+        "query_count": 16,
+        "metrics": {
+          "mrr": 0.0,
+          "hit@1": 0.0,
+          "recall@1": 0.0,
+          "precision@1": 0.0,
+          "ndcg@1": 0.0,
+          "hit@3": 0.0,
+          "recall@3": 0.0,
+          "precision@3": 0.0,
+          "ndcg@3": 0.0,
+          "hit@5": 0.0,
+          "recall@5": 0.0,
+          "precision@5": 0.0,
+          "ndcg@5": 0.0,
+          "hit@8": 0.0,
+          "recall@8": 0.0,
+          "precision@8": 0.0,
+          "ndcg@8": 0.0
+        },
+        "latency": {
+          "n": 16,
+          "mean_ms": 1455.15,
+          "p50_ms": 1443.94,
+          "p90_ms": 1532.43,
+          "p95_ms": 1547.58,
+          "p99_ms": 1569.08
+        }
+      }
+    },
+    "hybrid_rerank": {
+      "成分知识": {
+        "query_count": 16,
+        "metrics": {
+          "mrr": 0.0,
+          "hit@1": 0.0,
+          "recall@1": 0.0,
+          "precision@1": 0.0,
+          "ndcg@1": 0.0,
+          "hit@3": 0.0,
+          "recall@3": 0.0,
+          "precision@3": 0.0,
+          "ndcg@3": 0.0,
+          "hit@5": 0.0,
+          "recall@5": 0.0,
+          "precision@5": 0.0,
+          "ndcg@5": 0.0,
+          "hit@8": 0.0,
+          "recall@8": 0.0,
+          "precision@8": 0.0,
+          "ndcg@8": 0.0
+        },
+        "latency": {
+          "n": 16,
+          "mean_ms": 3749.75,
+          "p50_ms": 3760.35,
+          "p90_ms": 3925.32,
+          "p95_ms": 3980.71,
+          "p99_ms": 4065.09
+        }
+      }
+    }
+  },
+  "ablation": {
+    "hybrid_vs_vector": {
+      "hit@1": 0.0,
+      "hit@3": 0.0,
+      "hit@5": 0.0,
+      "hit@8": 0.0,
+      "mrr": 0.0,
+      "ndcg@1": 0.0,
+      "ndcg@3": 0.0,
+      "ndcg@5": 0.0,
+      "ndcg@8": 0.0,
+      "precision@1": 0.0,
+      "precision@3": 0.0,
+      "precision@5": 0.0,
+      "precision@8": 0.0,
+      "recall@1": 0.0,
+      "recall@3": 0.0,
+      "recall@5": 0.0,
+      "recall@8": 0.0
+    },
+    "hybrid_vs_bm25": {
+      "hit@1": 0.0,
+      "hit@3": 0.0,
+      "hit@5": 0.0,
+      "hit@8": 0.0,
+      "mrr": 0.0,
+      "ndcg@1": 0.0,
+      "ndcg@3": 0.0,
+      "ndcg@5": 0.0,
+      "ndcg@8": 0.0,
+      "precision@1": 0.0,
+      "precision@3": 0.0,
+      "precision@5": 0.0,
+      "precision@8": 0.0,
+      "recall@1": 0.0,
+      "recall@3": 0.0,
+      "recall@5": 0.0,
+      "recall@8": 0.0
+    },
+    "reranker_uplift": {
+      "metrics_delta": {
+        "hit@1": 0.0,
+        "hit@3": 0.0,
+        "hit@5": 0.0,
+        "hit@8": 0.0,
+        "mrr": 0.0,
+        "ndcg@1": 0.0,
+        "ndcg@3": 0.0,
+        "ndcg@5": 0.0,
+        "ndcg@8": 0.0,
+        "precision@1": 0.0,
+        "precision@3": 0.0,
+        "precision@5": 0.0,
+        "precision@8": 0.0,
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0,
+        "recall@8": 0.0
+      },
+      "latency_p95_delta_ms": 2433.13,
+      "improved_queries": 0,
+      "degraded_queries": 0,
+      "unchanged_queries": 16,
+      "tags": {
+        "RERANK_IMPROVED": [],
+        "RERANK_DEGRADED": []
+      },
+      "improved_query_ids_sample": [],
+      "degraded_query_ids_sample": []
+    }
+  },
+  "run_summary": {
+    "vector_only": {
+      "n_total": 16,
+      "n_success": 16,
+      "n_failed": 16,
+      "n_degraded": 16,
+      "failure_counts": {
+        "MISS_ALL": 16
+      },
+      "wall_seconds": 23.4
+    },
+    "bm25_only": {
+      "n_total": 16,
+      "n_success": 16,
+      "n_failed": 16,
+      "n_degraded": 16,
+      "failure_counts": {
+        "MISS_ALL": 16
+      },
+      "wall_seconds": 0.3
+    },
+    "hybrid_no_rerank": {
+      "n_total": 16,
+      "n_success": 16,
+      "n_failed": 16,
+      "n_degraded": 0,
+      "failure_counts": {
+        "MISS_ALL": 16
+      },
+      "wall_seconds": 23.3
+    },
+    "hybrid_rerank": {
+      "n_total": 16,
+      "n_success": 16,
+      "n_failed": 16,
+      "n_degraded": 0,
+      "failure_counts": {
+        "MISS_ALL": 16
+      },
+      "wall_seconds": 60.0
+    }
+  },
+  "failure_counts": {
+    "vector_only": {
+      "MISS_ALL": 16
+    },
+    "bm25_only": {
+      "MISS_ALL": 16
+    },
+    "hybrid_no_rerank": {
+      "MISS_ALL": 16
+    },
+    "hybrid_rerank": {
+      "MISS_ALL": 16
+    }
+  },
+  "failures_top": {
+    "vector_only": [
+      {
+        "query_id": "bench_0000",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001310",
+          "derm_000229",
+          "derm_000052"
+        ],
+        "retrieved_ids": [
+          "scene_00074",
+          "scene_00063",
+          "derm_000011",
+          "faq_00533",
+          "scene_00062",
+          "faq_00230",
+          "scene_00066",
+          "faq_00573"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1416.21,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0001",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000564",
+          "derm_000502",
+          "derm_000458"
+        ],
+        "retrieved_ids": [
+          "derm_000917",
+          "derm_000919",
+          "derm_000114",
+          "derm_000131",
+          "derm_000093",
+          "derm_000094",
+          "derm_000101",
+          "derm_000116"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1432.89,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0002",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000286",
+          "derm_000210",
+          "derm_001386"
+        ],
+        "retrieved_ids": [
+          "derm_000086",
+          "derm_000082",
+          "derm_000080",
+          "scene_00183",
+          "scene_00109",
+          "scene_00005",
+          "scene_00284",
+          "scene_00144"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1466.95,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0003",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001117",
+          "derm_000179",
+          "derm_001210"
+        ],
+        "retrieved_ids": [
+          "scene_00010",
+          "derm_000501",
+          "scene_00063",
+          "scene_00011",
+          "scene_00103",
+          "scene_00107",
+          "scene_00161",
+          "faq_00527"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1474.8,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0004",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000865",
+          "derm_000066",
+          "derm_000062"
+        ],
+        "retrieved_ids": [
+          "faq_00216",
+          "scene_00100",
+          "scene_00050",
+          "scene_00108",
+          "scene_00283",
+          "derm_000374",
+          "scene_00179",
+          "scene_00145"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1423.95,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0005",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000192",
+          "derm_000448",
+          "derm_000477"
+        ],
+        "retrieved_ids": [
+          "faq_00376",
+          "derm_000381",
+          "faq_00240",
+          "scene_00287",
+          "scene_00273",
+          "faq_00441",
+          "derm_000384",
+          "scene_00266"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1476.02,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0006",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001035",
+          "derm_001233",
+          "derm_000055"
+        ],
+        "retrieved_ids": [
+          "derm_000511",
+          "derm_000509",
+          "derm_000534",
+          "scene_00298",
+          "derm_000811",
+          "scene_00115",
+          "derm_000806",
+          "scene_00117"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1444.57,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0007",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001150",
+          "derm_000408",
+          "derm_001467"
+        ],
+        "retrieved_ids": [
+          "faq_00217",
+          "faq_00115",
+          "derm_000673",
+          "scene_00034",
+          "scene_00033",
+          "faq_00384",
+          "faq_00515",
+          "derm_000674"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1395.0,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0008",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001331",
+          "derm_001437",
+          "derm_001117"
+        ],
+        "retrieved_ids": [
+          "derm_001457",
+          "derm_001200",
+          "derm_001458",
+          "scene_00009",
+          "scene_00110",
+          "scene_00074",
+          "derm_001203",
+          "faq_00432"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1450.15,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0009",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000860",
+          "derm_000452",
+          "derm_000920"
+        ],
+        "retrieved_ids": [
+          "derm_000710",
+          "derm_000715",
+          "derm_000708",
+          "derm_001489",
+          "derm_001488",
+          "faq_00602",
+          "derm_000725",
+          "derm_001480"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1444.15,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0010",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001207",
+          "derm_000570",
+          "derm_000014"
+        ],
+        "retrieved_ids": [
+          "faq_00264",
+          "derm_000704",
+          "derm_000698",
+          "derm_001363",
+          "faq_00074",
+          "derm_000701",
+          "faq_00230",
+          "derm_001358"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1587.19,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0011",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000327",
+          "derm_001430",
+          "derm_000866"
+        ],
+        "retrieved_ids": [
+          "derm_000826",
+          "faq_00473",
+          "derm_000827",
+          "derm_000830",
+          "derm_000828",
+          "derm_000829",
+          "scene_00163",
+          "faq_00104"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1528.39,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0012",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000697",
+          "derm_000570",
+          "derm_000319"
+        ],
+        "retrieved_ids": [
+          "faq_00076",
+          "derm_000865",
+          "derm_000867",
+          "scene_00027",
+          "faq_00267",
+          "scene_00092",
+          "faq_00238",
+          "scene_00206"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1457.42,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0013",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000441",
+          "derm_000690",
+          "derm_000210"
+        ],
+        "retrieved_ids": [
+          "derm_000071",
+          "derm_000077",
+          "scene_00036",
+          "faq_00606",
+          "scene_00068",
+          "scene_00293",
+          "faq_00011",
+          "scene_00051"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1488.45,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0014",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000190",
+          "derm_000779",
+          "derm_000199"
+        ],
+        "retrieved_ids": [
+          "scene_00103",
+          "scene_00091",
+          "scene_00095",
+          "scene_00093",
+          "scene_00094",
+          "scene_00105",
+          "derm_001033",
+          "derm_001042"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1443.52,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0015",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000736",
+          "derm_000705",
+          "derm_001237"
+        ],
+        "retrieved_ids": [
+          "derm_001043",
+          "derm_000357",
+          "scene_00159",
+          "derm_001042",
+          "scene_00091",
+          "scene_00103",
+          "derm_001039",
+          "scene_00022"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1435.6,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:bm25_not_ready",
+          "BM25_MISS"
+        ]
+      }
+    ],
+    "bm25_only": [
+      {
+        "query_id": "bench_0000",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001310",
+          "derm_000229",
+          "derm_000052"
+        ],
+        "retrieved_ids": [
+          "faq_01692",
+          "faq_00446",
+          "derm_000948",
+          "faq_01582",
+          "faq_01799",
+          "faq_01673",
+          "faq_01721",
+          "faq_01633"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 23.02,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0001",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000564",
+          "derm_000502",
+          "derm_000458"
+        ],
+        "retrieved_ids": [
+          "faq_01758",
+          "derm_000129",
+          "faq_01271",
+          "faq_01525",
+          "faq_01716",
+          "faq_01348",
+          "faq_01307",
+          "faq_01360"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 16.83,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0002",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000286",
+          "derm_000210",
+          "derm_001386"
+        ],
+        "retrieved_ids": [
+          "derm_000079",
+          "faq_01341",
+          "derm_000084",
+          "derm_000083",
+          "derm_000085",
+          "faq_01496",
+          "scene_00201",
+          "faq_00477"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 18.82,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0003",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001117",
+          "derm_000179",
+          "derm_001210"
+        ],
+        "retrieved_ids": [
+          "faq_01581",
+          "faq_01864",
+          "faq_01437",
+          "derm_000503",
+          "faq_00374",
+          "derm_000497",
+          "faq_01771",
+          "faq_01271"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 20.9,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0004",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000865",
+          "derm_000066",
+          "derm_000062"
+        ],
+        "retrieved_ids": [
+          "faq_01567",
+          "faq_00216",
+          "derm_000365",
+          "derm_000366",
+          "faq_01118",
+          "faq_00944",
+          "derm_000370",
+          "faq_00149"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 15.98,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0005",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000192",
+          "derm_000448",
+          "derm_000477"
+        ],
+        "retrieved_ids": [
+          "faq_01843",
+          "faq_01839",
+          "faq_01326",
+          "faq_01464",
+          "faq_01381",
+          "faq_01304",
+          "faq_01837",
+          "faq_01487"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 10.4,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0006",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001035",
+          "derm_001233",
+          "derm_000055"
+        ],
+        "retrieved_ids": [
+          "derm_000508",
+          "faq_01318",
+          "faq_01388",
+          "derm_000511",
+          "derm_000510",
+          "derm_000509",
+          "derm_000517",
+          "derm_000516"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 13.81,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0007",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001150",
+          "derm_000408",
+          "derm_001467"
+        ],
+        "retrieved_ids": [
+          "faq_01360",
+          "faq_01321",
+          "faq_01586",
+          "faq_01300",
+          "faq_01417",
+          "faq_01486",
+          "faq_01847",
+          "faq_01654"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 15.35,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0008",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001331",
+          "derm_001437",
+          "derm_001117"
+        ],
+        "retrieved_ids": [
+          "faq_01825",
+          "faq_00454",
+          "faq_01793",
+          "faq_00455",
+          "faq_00015",
+          "faq_01080",
+          "faq_01158",
+          "faq_00868"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 13.12,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0009",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000860",
+          "derm_000452",
+          "derm_000920"
+        ],
+        "retrieved_ids": [
+          "faq_01525",
+          "faq_01817",
+          "faq_01835",
+          "faq_01752",
+          "derm_000711",
+          "derm_000705",
+          "faq_01388",
+          "derm_000714"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 16.65,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0010",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001207",
+          "derm_000570",
+          "derm_000014"
+        ],
+        "retrieved_ids": [
+          "derm_001362",
+          "derm_001360",
+          "derm_001359",
+          "faq_00095",
+          "derm_001356",
+          "derm_000702",
+          "derm_000699",
+          "faq_01700"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 14.95,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0011",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000327",
+          "derm_001430",
+          "derm_000866"
+        ],
+        "retrieved_ids": [
+          "faq_01874",
+          "derm_000814",
+          "derm_000758",
+          "faq_01283",
+          "faq_01453",
+          "faq_01499",
+          "faq_01685",
+          "faq_01363"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 9.5,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0012",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000697",
+          "derm_000570",
+          "derm_000319"
+        ],
+        "retrieved_ids": [
+          "faq_01806",
+          "faq_01671",
+          "faq_00076",
+          "faq_01619",
+          "scene_00425",
+          "derm_000861",
+          "derm_000860",
+          "faq_00267"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 13.03,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0013",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000441",
+          "derm_000690",
+          "derm_000210"
+        ],
+        "retrieved_ids": [
+          "faq_01634",
+          "faq_01261",
+          "faq_00614",
+          "faq_00011",
+          "faq_01080",
+          "faq_01158",
+          "faq_00868",
+          "faq_00714"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 16.4,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0014",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000190",
+          "derm_000779",
+          "derm_000199"
+        ],
+        "retrieved_ids": [
+          "faq_01418",
+          "faq_01817",
+          "faq_01685",
+          "faq_01752",
+          "faq_01257",
+          "faq_01793",
+          "faq_01296",
+          "faq_01785"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 36.11,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      },
+      {
+        "query_id": "bench_0015",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000736",
+          "derm_000705",
+          "derm_001237"
+        ],
+        "retrieved_ids": [
+          "derm_001035",
+          "faq_01710",
+          "faq_01508",
+          "faq_01813",
+          "faq_01796",
+          "faq_01738",
+          "faq_01676",
+          "faq_01482"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 26.16,
+        "diagnostics": [
+          "CHANNEL_DEGRADED:embedding_unavailable",
+          "VECTOR_MISS"
+        ]
+      }
+    ],
+    "hybrid_no_rerank": [
+      {
+        "query_id": "bench_0000",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001310",
+          "derm_000229",
+          "derm_000052"
+        ],
+        "retrieved_ids": [
+          "derm_000009",
+          "derm_000948",
+          "derm_000001",
+          "scene_00074",
+          "faq_01692",
+          "scene_00063",
+          "faq_00446",
+          "derm_000011"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1526.25,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0001",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000564",
+          "derm_000502",
+          "derm_000458"
+        ],
+        "retrieved_ids": [
+          "derm_000129",
+          "derm_000093",
+          "faq_01758",
+          "derm_000126",
+          "derm_000102",
+          "derm_000917",
+          "derm_000919",
+          "derm_000114"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1434.92,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0002",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000286",
+          "derm_000210",
+          "derm_001386"
+        ],
+        "retrieved_ids": [
+          "derm_000086",
+          "derm_000080",
+          "derm_000082",
+          "scene_00201",
+          "faq_00477",
+          "faq_01341",
+          "derm_000079",
+          "derm_000084"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1424.05,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0003",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001117",
+          "derm_000179",
+          "derm_001210"
+        ],
+        "retrieved_ids": [
+          "derm_000501",
+          "scene_00103",
+          "faq_01581",
+          "faq_01864",
+          "faq_01437",
+          "derm_000497",
+          "derm_000332",
+          "scene_00010"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1506.71,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0004",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000865",
+          "derm_000066",
+          "derm_000062"
+        ],
+        "retrieved_ids": [
+          "faq_00216",
+          "faq_01118",
+          "faq_00149",
+          "faq_00944",
+          "derm_000365",
+          "faq_01567",
+          "faq_00015",
+          "derm_000366"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1390.44,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0005",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000192",
+          "derm_000448",
+          "derm_000477"
+        ],
+        "retrieved_ids": [
+          "faq_01801",
+          "faq_00376",
+          "derm_000381",
+          "faq_00240",
+          "scene_00287",
+          "scene_00273",
+          "faq_00441",
+          "derm_000384"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1538.62,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0006",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001035",
+          "derm_001233",
+          "derm_000055"
+        ],
+        "retrieved_ids": [
+          "derm_000517",
+          "derm_000514",
+          "derm_000512",
+          "derm_000511",
+          "derm_000508",
+          "derm_000516",
+          "faq_01318",
+          "derm_000534"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1377.64,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0007",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001150",
+          "derm_000408",
+          "derm_001467"
+        ],
+        "retrieved_ids": [
+          "faq_01286",
+          "faq_01486",
+          "faq_01586",
+          "faq_01360",
+          "faq_00217",
+          "faq_00115",
+          "derm_000673",
+          "scene_00034"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1403.47,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0008",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001331",
+          "derm_001437",
+          "derm_001117"
+        ],
+        "retrieved_ids": [
+          "faq_00896",
+          "derm_001457",
+          "faq_01825",
+          "derm_001200",
+          "faq_00454",
+          "derm_001458",
+          "faq_01793",
+          "scene_00009"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1444.79,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0009",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000860",
+          "derm_000452",
+          "derm_000920"
+        ],
+        "retrieved_ids": [
+          "derm_000705",
+          "derm_000715",
+          "faq_01525",
+          "faq_01835",
+          "derm_000714",
+          "derm_000710",
+          "faq_01817",
+          "derm_000708"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1463.7,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0010",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001207",
+          "derm_000570",
+          "derm_000014"
+        ],
+        "retrieved_ids": [
+          "derm_001359",
+          "faq_01495",
+          "derm_000698",
+          "derm_001354",
+          "derm_001362",
+          "derm_001356",
+          "derm_000702",
+          "derm_000699"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1443.09,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0011",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000327",
+          "derm_001430",
+          "derm_000866"
+        ],
+        "retrieved_ids": [
+          "faq_01617",
+          "faq_01453",
+          "derm_000758",
+          "faq_00104",
+          "faq_00074",
+          "faq_00535",
+          "faq_01874",
+          "faq_01499"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1415.53,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0012",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000697",
+          "derm_000570",
+          "derm_000319"
+        ],
+        "retrieved_ids": [
+          "faq_00076",
+          "derm_000867",
+          "faq_00267",
+          "scene_00027",
+          "faq_00238",
+          "derm_000948",
+          "faq_01671",
+          "faq_01806"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1574.46,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0013",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000441",
+          "derm_000690",
+          "derm_000210"
+        ],
+        "retrieved_ids": [
+          "faq_01128",
+          "faq_00011",
+          "faq_00614",
+          "faq_01261",
+          "derm_000071",
+          "faq_01634",
+          "derm_000077",
+          "scene_00036"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1410.12,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0014",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000190",
+          "derm_000779",
+          "derm_000199"
+        ],
+        "retrieved_ids": [
+          "scene_00103",
+          "faq_01418",
+          "scene_00091",
+          "faq_01817",
+          "scene_00095",
+          "faq_01685",
+          "scene_00093",
+          "faq_01752"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1459.64,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0015",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000736",
+          "derm_000705",
+          "derm_001237"
+        ],
+        "retrieved_ids": [
+          "derm_001038",
+          "faq_01738",
+          "faq_01482",
+          "derm_001035",
+          "faq_00598",
+          "derm_001048",
+          "faq_01813",
+          "faq_01710"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 1469.02,
+        "diagnostics": []
+      }
+    ],
+    "hybrid_rerank": [
+      {
+        "query_id": "bench_0000",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001310",
+          "derm_000229",
+          "derm_000052"
+        ],
+        "retrieved_ids": [
+          "derm_000011",
+          "scene_00015",
+          "derm_000001",
+          "scene_00074",
+          "scene_00239",
+          "scene_00066",
+          "derm_000006",
+          "scene_00063"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3794.73,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0001",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000564",
+          "derm_000502",
+          "derm_000458"
+        ],
+        "retrieved_ids": [
+          "derm_000917",
+          "derm_000918",
+          "derm_000924",
+          "derm_000914",
+          "derm_000093",
+          "derm_000114",
+          "derm_000923",
+          "faq_01758"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3784.8,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0002",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000286",
+          "derm_000210",
+          "derm_001386"
+        ],
+        "retrieved_ids": [
+          "derm_000079",
+          "scene_00227",
+          "faq_01341",
+          "scene_00109",
+          "scene_00183",
+          "scene_00201",
+          "scene_00249",
+          "derm_000078"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3493.69,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0003",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001117",
+          "derm_000179",
+          "derm_001210"
+        ],
+        "retrieved_ids": [
+          "derm_000332",
+          "derm_000335",
+          "derm_000334",
+          "derm_000338",
+          "derm_000339",
+          "derm_000333",
+          "derm_000496",
+          "derm_000501"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3653.24,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0004",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000865",
+          "derm_000066",
+          "derm_000062"
+        ],
+        "retrieved_ids": [
+          "derm_000370",
+          "derm_000365",
+          "derm_000371",
+          "derm_000366",
+          "scene_00050",
+          "derm_000368",
+          "scene_00080",
+          "scene_00229"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3584.3,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0005",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000192",
+          "derm_000448",
+          "derm_000477"
+        ],
+        "retrieved_ids": [
+          "derm_000378",
+          "derm_000375",
+          "derm_000380",
+          "derm_000382",
+          "derm_000381",
+          "derm_000377",
+          "scene_00287",
+          "scene_00338"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3905.1,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0006",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001035",
+          "derm_001233",
+          "derm_000055"
+        ],
+        "retrieved_ids": [
+          "derm_000508",
+          "derm_000511",
+          "derm_000517",
+          "derm_000808",
+          "derm_000806",
+          "derm_000811",
+          "faq_01348",
+          "derm_000814"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3735.9,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0007",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001150",
+          "derm_000408",
+          "derm_001467"
+        ],
+        "retrieved_ids": [
+          "faq_01360",
+          "derm_000674",
+          "derm_000673",
+          "faq_01704",
+          "faq_01586",
+          "faq_00384",
+          "faq_00217",
+          "scene_00329"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3659.58,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0008",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001331",
+          "derm_001437",
+          "derm_001117"
+        ],
+        "retrieved_ids": [
+          "faq_00432",
+          "derm_000928",
+          "derm_000067",
+          "derm_000636",
+          "derm_001181",
+          "scene_00299",
+          "scene_00074",
+          "scene_00958"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3821.17,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0009",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000860",
+          "derm_000452",
+          "derm_000920"
+        ],
+        "retrieved_ids": [
+          "derm_000715",
+          "derm_000708",
+          "derm_000705",
+          "derm_000710",
+          "derm_000714",
+          "derm_001489",
+          "derm_001494",
+          "derm_001491"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3631.58,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0010",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_001207",
+          "derm_000570",
+          "derm_000014"
+        ],
+        "retrieved_ids": [
+          "derm_001359",
+          "derm_000698",
+          "derm_001356",
+          "derm_000703",
+          "derm_001362",
+          "derm_001354",
+          "derm_000701",
+          "derm_000694"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3643.12,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0011",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000327",
+          "derm_001430",
+          "derm_000866"
+        ],
+        "retrieved_ids": [
+          "derm_000836",
+          "derm_000830",
+          "derm_000827",
+          "derm_000832",
+          "derm_000828",
+          "derm_000826",
+          "derm_000833",
+          "derm_000834"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3831.38,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0012",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000697",
+          "derm_000570",
+          "derm_000319"
+        ],
+        "retrieved_ids": [
+          "derm_000864",
+          "derm_000867",
+          "derm_000862",
+          "derm_000865",
+          "faq_00076",
+          "derm_000861",
+          "derm_000860",
+          "scene_00027"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3631.46,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0013",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000441",
+          "derm_000690",
+          "derm_000210"
+        ],
+        "retrieved_ids": [
+          "derm_000071",
+          "derm_000076",
+          "scene_00051",
+          "scene_00189",
+          "scene_00014",
+          "scene_00068",
+          "scene_00036",
+          "scene_00293"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3945.55,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0014",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000190",
+          "derm_000779",
+          "derm_000199"
+        ],
+        "retrieved_ids": [
+          "scene_00370",
+          "scene_00367",
+          "scene_00369",
+          "scene_00362",
+          "scene_00365",
+          "scene_00986",
+          "scene_00361",
+          "scene_00363"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 4086.18,
+        "diagnostics": []
+      },
+      {
+        "query_id": "bench_0015",
+        "category": "成分知识",
+        "expected_ids": [
+          "derm_000736",
+          "derm_000705",
+          "derm_001237"
+        ],
+        "retrieved_ids": [
+          "derm_001037",
+          "derm_001044",
+          "derm_001038",
+          "derm_001042",
+          "derm_000357",
+          "derm_001041",
+          "derm_001035",
+          "derm_001036"
+        ],
+        "rank_of_gold": 0,
+        "failure_type": "MISS_ALL",
+        "exception_type": null,
+        "wall_ms": 3794.29,
+        "diagnostics": []
+      }
+    ]
+  },
+  "notes": [
+    "warmup queries are discarded from formal statistics",
+    "ablation overrides are instance/request-level inside this process; production defaults (HYBRID_SEARCH_ENABLED etc.) are untouched",
+    "primary metric view is evaluation_populations.all_queries (end-to-end); retrieval_eligible / full_gold_covered are diagnostic views and must always be reported alongside, never as a standalone replacement",
+    "population counts are computed at runtime from the indexed corpus; no hardcoded denominators",
+    "raw_results.json is a local artifact; its sha256 is recorded below"
+  ],
+  "raw_results_sha256": "886a6f52c2682c7e762aa217b4686c04abbd4c25b3650186debc9d4d93a6db61",
+  "subset_run": true
+}
