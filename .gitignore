@@ -49,6 +49,7 @@ pytest-counts.json
 *.db-shm
 *.db-wal
 artifacts/evidence/
+artifacts/mcp/
 *.sqlite
 *.sqlite3
 chat_sessions/
