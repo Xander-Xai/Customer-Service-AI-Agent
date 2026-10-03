@@ -1,0 +1,75 @@
+{
+  "schema_version": "rag-eval-evidence/v2",
+  "run_id": "preflight-20261003T212439Z",
+  "timestamp": "2026-10-03T21:24:39.724670+00:00",
+  "status": "OK",
+  "primary_blocker": null,
+  "blockers": [],
+  "git_sha": "56b2c4ef9f32f7586174cc6256d1f3391dd019de+dirty",
+  "benchmark": {
+    "sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+    "declared_queries": 649,
+    "executed_queries": 649
+  },
+  "environment": {
+    "python": "3.10.12",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.35"
+  },
+  "config": {
+    "vector_db_mode": "qdrant_only",
+    "hybrid_search_enabled": true,
+    "hybrid_vector_top_k": 8,
+    "hybrid_bm25_top_k": 8,
+    "hybrid_rrf_k": 60,
+    "rag_n_results": 3,
+    "rag_query_rewriting": false,
+    "embedding_model": "BAAI/bge-large-zh-v1.5",
+    "embedding_dim": 1024,
+    "reranker_model": "BAAI/bge-reranker-v2-m3"
+  },
+  "preflight": {
+    "qdrant": {
+      "reachable": true,
+      "versions": {
+        "client": "1.18.0",
+        "server": "1.12.0"
+      },
+      "collections": {
+        "product_knowledge": 1466,
+        "faq": 902,
+        "tech_support": 1827,
+        "complaint_knowledge": 805
+      },
+      "total_points": 5000
+    },
+    "embedding": {
+      "configured": true,
+      "probe": "ok",
+      "dim": 1024,
+      "model": "BAAI/bge-large-zh-v1.5"
+    },
+    "bm25_rebuild": {
+      "executed": true,
+      "readiness": "BM25Readiness.READY",
+      "document_count": 5000
+    },
+    "reranker": {
+      "configured": true,
+      "model": "BAAI/bge-reranker-v2-m3",
+      "applied": true,
+      "degraded": false,
+      "reason": "",
+      "provider_called": true,
+      "http_status": 200,
+      "probe": "ok"
+    },
+    "status": "OK",
+    "primary_blocker": null,
+    "blockers": []
+  },
+  "notes": [
+    "formal evaluation not run; no metrics generated",
+    "credential material is never recorded; only availability/probe outcome and provider HTTP status codes",
+    "blocker semantics v2: primary_blocker is the root cause; downstream symptoms (e.g. VECTOR_INDEX_EMPTY) carry caused_by links to it"
+  ]
+}
