@@ -124,13 +124,26 @@ def _stop_worker(proc: subprocess.Popen) -> None:
 
 
 def _wait_for(predicate, timeout: float):
+    """轮询直到 predicate 给出 truthy 结果；超时返回 ``None``。
+
+    超时**不**返回最后一次求值。这一点不是风格问题：
+
+    - 旧实现 ``return predicate()`` 会把终态判定 predicate 的 ``False`` 当成
+      「拿到结果了」。调用方的 ``assert final is not None`` 因此通过，接着
+      ``final[0]`` 抛 ``TypeError: 'bool' object is not subscriptable``——
+      「run 没进终态」这个本来可诊断的失败被替换成一个看不懂的崩溃。
+    - 而且 deadline 已经过了还要再查一次库/Redis，是超时之后的额外 I/O。
+
+    truthy 的真实 payload（tuple/row/对象）原样返回，调用方依赖它而不是一个
+    ``True``。
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
         value = predicate()
         if value:
             return value
         time.sleep(0.3)
-    return predicate()
+    return None
 
 
 @pytest.mark.timeout(300)
@@ -212,12 +225,15 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
         worker_b = _start_worker(env, "/tmp/csai-idem-worker-b.log")
         started.append(worker_b)
 
-        final = _wait_for(
-            lambda: (r := status()) is not None
-            and r[0] in ("SUCCEEDED", "FAILED", "DEAD_LETTER")
-            and r,
-            150,
-        )
+        # 返回 **None** 而不是 False：``_wait_for`` 超时后返回 None，若 predicate
+        # 给的是 False，"没进终态"就会被当成"拿到了结果"。
+        def _terminal():
+            r = status()
+            if r is not None and r[0] in ("SUCCEEDED", "FAILED", "DEAD_LETTER"):
+                return r
+            return None
+
+        final = _wait_for(_terminal, 150)
         assert final is not None, f"run 未进入终态: {status()}"
         assert final[0] == "SUCCEEDED", f"未恢复成功: {final}"
         assert final[1] >= 2, f"应发生重投重做，实际 attempt={final[1]}"
