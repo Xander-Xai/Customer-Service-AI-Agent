@@ -20,6 +20,7 @@
 | 部署、切换、运维排障 | → [operations/](#operationsoperations) |
 | 发布前/部署前逐项检查 | → [checklists/](#checklistschecklists) |
 | provider/生产/Runtime 证据边界 | → [evaluation/](#evaluationevaluation)、[reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) |
+| 面试 Evidence Pack（90 秒介绍 + 一张架构图 + 3 个 engineering problem + 5 分钟 demo + 证据映射 + 边界 + 追问） | → **[interview/interview-ready.md](interview/interview-ready.md)** |
 | 面试介绍、深入问答、题集 | → [design/interview-intro.md](design/interview-intro.md)、[design/interview-deep-dive.md](design/interview-deep-dive.md)、[interview-questions-final.md](interview-questions-final.md) |
 | 整改规格、完成报告（历史） | → [audit/](#auditaudit) |
 | 历史设计与实施计划（2026-06） | → [superpowers/](#superpowerssuperpowers) |
@@ -108,6 +109,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 - 项目总览 → [../README.md](../README.md)
 - 架构设计 → [design/architecture-design.md](design/architecture-design.md)
 - 编码规范 → [standards/conventions.md](standards/conventions.md)
+- **面试 Evidence Pack（一页带走：90 秒介绍 / 一张架构图 / 3 个 engineering problem / 5 分钟 demo / CI+artifact 映射 / 未完成边界 / 追问）** → [interview/interview-ready.md](interview/interview-ready.md)
 - 项目介绍 → [design/interview-intro.md](design/interview-intro.md)
 - 深入 Q&A → [design/interview-deep-dive.md](design/interview-deep-dive.md)
 - 面试题集 → [interview-questions-final.md](interview-questions-final.md)
