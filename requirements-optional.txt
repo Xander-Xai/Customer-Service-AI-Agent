@@ -6,6 +6,10 @@ python-docx>=1.0.0  # Word 文档解析（DocumentProcessor）
 
 # 仅 MCP 外部工具适配（`tools/mcp_adapter.py`）需要：官方 `mcp` SDK，延迟 import。
 # `MCP_ENABLED` 默认 false，不开这个依赖时 MCP 工具一个都不注册，核心功能不受影响。
+# 应用运行时依赖策略不变（optional）；但 CI 的 blocking lane 会显式安装它，因为
+# MCP 端到端契约测试（`tests/integration/test_mcp_contract_e2e.py`）的 client 侧
+# 就是这个官方 SDK —— 缺了它整条契约会被 importorskip 跳过并让 CI 假绿。
+# 两处约束必须保持一致，由 `tests/unit/test_ci_contract.py` 守卫。
 mcp>=2.0.0  # MCP（Model Context Protocol）外部工具传输层
 
 # 仅 `scripts/migrate_chroma_to_qdrant.py` 需要：v6.0 已迁移到 Qdrant，该脚本是

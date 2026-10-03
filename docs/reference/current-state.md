@@ -83,6 +83,12 @@ npm test
 
 # 文档一致性审计
 python3 scripts/audit_doc_consistency.py
+
+# MCP 工具适配契约（本地 fake MCP server 真实子进程；不依赖外部公开服务）
+make test-mcp
+
+# MCP 端到端契约 evidence artifact（schema mcp-contract-evidence/v1）
+make mcp-verify
 ```
 
 ## 稳定的架构事实
@@ -129,11 +135,18 @@ python3 scripts/audit_doc_consistency.py
     两道防线）；RBAC 是**请求级**而非 per-tool，不能声称"MCP 工具经过了 RBAC"；
     响应侧结果大小当前**不设上限**（只限请求 payload 字节），属已知缺口；
     官方 `mcp` SDK 是 `requirements-optional.txt` 里的**可选**依赖，延迟 import。
-  - **Evidence**：`IMPLEMENTED`，仅**纯函数契约**经
-    `tests/unit/test_mcp_adapter.py` 运行验证。跨进程 / 传输 / 策略 / 时序的
-    **端到端契约取证当前为 `NOT_VERIFIED`**，在它落地并跑出真实结果前不得声称
-    MCP 端到端可用。设计取舍详见
-    [docs/interview/failure-and-tradeoffs.md](../interview/failure-and-tradeoffs.md) §7。
+  - **Evidence**：`IMPLEMENTED`。端到端契约（`registry → adapter → 本地 fake
+    server → result → policy/telemetry`）由
+    `tests/integration/test_mcp_contract_e2e.py` + `tests/integration/fake_mcp_server.py`
+    取证，命令 `make test-mcp`。每一段都是真的：真实 `ToolRegistry`、真实 adapter、
+    **官方 `mcp` SDK** 作 client、**真实子进程 + stdin/stdout 管道**。
+    **不依赖任何外部公开 MCP 服务**，因此离线可复现。
+    覆盖 5 类行为：safe read / high-risk side effect / timeout / oversized /
+    failing，另加 allowlist、风险只向上收敛、`annotations` 不可信、config
+    fail-closed、telemetry 契约。
+    仍是 `NOT_VERIFIED`：**真实第三方 MCP server**（公共 MCP 生态）、生产网络与
+    鉴权、多副本、以及写操作 MCP 工具。fake server 是本地确定性对端，
+    它验证的是**本仓适配器的契约**，不等于"接了任意第三方 server 也成立"。
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。
