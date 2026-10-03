@@ -16,7 +16,11 @@
 2. **tool allowlist**：``allowed_tools`` 为空 = 该 server 不允许任何工具；
 3. **transport 白名单**：仅 ``stdio`` / ``sse``；
 4. **命名空间化**：MCP 工具名为 ``mcp__{server}__{tool}``，与 native 工具不冲突；
-5. **schema 归一化**：非法 ``inputSchema`` 抛错而不是静默猜测；
+5. **schema 归一化 + 子集校验**：非法 ``inputSchema`` 抛错而不是静默猜测；
+   归一化之后还要**逐层递归**校验嵌套结构，且只接受本仓库 Function Calling
+   描述实际使用的 JSON Schema **子集**（``SUPPORTED_SCHEMA_KEYWORDS``）；
+   子集之外的关键字与畸形嵌套一律 **fail closed**（见
+   ``normalize_input_schema`` 的说明）；
 6. **timeout / payload limit**：per-server 超时 + 调用 payload 字节上限；
 7. **风险等级默认 HIGH**：``risk_level`` 缺失 / 非法一律按 ``RiskLevel.HIGH``
    （最保守）处理，绝不因配置笔误而放行，且**只向上收敛**。只有显式声明
@@ -97,6 +101,49 @@ _SERVER_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 #: 字段"不存在"哨兵（与"存在但为 None"区分）。
 _MISSING = object()
+
+# ===== inputSchema 支持的 JSON Schema 子集 =====
+
+#: 归一化之后**继续接受并逐层校验**的关键字白名单。
+#:
+#: 这不是完整 JSON Schema，而是本仓库 Function Calling 工具描述**实际用到**的全部
+#: 词汇（见 ``tools/erp_tools.py`` / ``tools/hitl_staging_tools.py``：``type`` /
+#: ``properties`` / ``required`` / ``description``，加上 MCP 生态普遍需要的
+#: ``items``）。
+#:
+#: 白名单之外的一切（``enum`` / ``oneOf`` / ``$ref`` / ``patternProperties`` /
+#: ``format`` / ``additionalProperties`` ...）一律 **fail closed** 拒绝。理由不是
+#: "我们不实现完整 JSON Schema"，而是：这些关键字**没有任何本地逻辑会去解释**，
+#: 放行等于把一段从未被校验过的语义原样塞进 provider 请求 —— 与本模块"任何不确定
+#: 都拒绝"的基本立场相反。
+#:
+#: 为什么不用 ``jsonschema`` 库的 meta-schema 校验：它按完整 JSON Schema 校验，
+#: 会**接受**上面这些关键字，方向正好相反；而且仓库并未声明该依赖（它只在
+#: ``requirements-lock.txt`` 里作为传递依赖出现）。
+SUPPORTED_SCHEMA_KEYWORDS = frozenset({"type", "description", "properties", "required", "items"})
+
+#: ``type`` 允许的取值。
+#:
+#: 含 ``null``：真实 MCP server 常用它表达"该参数可为显式 null"，Function Calling
+#: provider 同样接受。``object`` / ``array`` 作为子 schema 类型时，其
+#: ``properties`` / ``items`` 的结构合法性由递归校验负责。
+SUPPORTED_PRIMITIVE_TYPES = frozenset(
+    {"object", "array", "string", "number", "integer", "boolean", "null"}
+)
+
+#: 嵌套深度上限。
+#:
+#: 递归校验面对的是**不受信任的远端输入**：没有上限时，一个刻意嵌套极深的 schema
+#: 会把校验本身变成崩溃点（``RecursionError``）与 CPU DoS 面。真实工具描述的深度
+#: 在个位数，12 足够宽松，同时把递归成本钉死。
+MAX_SCHEMA_DEPTH = 12
+
+#: 单个 ``inputSchema`` 内可访问的子 schema 节点数上限。
+#:
+#: 深度上限管不住"宽"：一个扁平但有十万个 ``properties`` 的 schema 深度只有 1。
+#: 而 ``max_payload_bytes`` 只约束**调用** payload，不约束 ``list_tools`` 返回的
+#: 描述符 —— 发现阶段没有任何天然体积上限，所以这里必须自带预算。
+MAX_SCHEMA_NODES = 512
 #: MCP SDK 字段别名：1.x camelCase（wire 层）→ 2.x snake_case（Python 模型）。
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "name": ("name",),
@@ -238,13 +285,129 @@ def qualified_tool_name(server: str, tool: str, *, max_len: int = FC_NAME_MAX_LE
     return f"{safe[: max_len - 9]}_{digest}"
 
 
+def _validate_type(declared: Any, *, path: str) -> None:
+    """校验 ``type``：单个受支持的类型名，或非空的受支持类型名数组。
+
+    数组形式（``["string", "null"]``）在 MCP 生态里很常见（表达"可为 null"），
+    结构上只是多一个元素循环，因此支持它不构成"实现 JSON Schema engine"；
+    但元素仍必须逐一落在 :data:`SUPPORTED_PRIMITIVE_TYPES` 内。
+    """
+    if isinstance(declared, list):
+        if not declared:
+            raise MCPInvalidSchemaError(f"{path}.type 是空数组")
+        names: list[Any] = list(declared)
+    else:
+        names = [declared]
+    for name in names:
+        # bool 是 int 的子类，但这里比的是字符串集合，True 不会误命中；
+        # 保留显式 isinstance 是为了让"类型名必须是字符串"这条意图可读。
+        if not isinstance(name, str) or name not in SUPPORTED_PRIMITIVE_TYPES:
+            raise MCPInvalidSchemaError(
+                f"{path}.type 非法: {name!r}（支持: {sorted(SUPPORTED_PRIMITIVE_TYPES)}）"
+            )
+
+
+def _validate_required(node: dict[str, Any], *, path: str) -> None:
+    """校验 ``required``：必须是**元素唯一、且都能在同级 ``properties`` 里找到**的字符串数组。
+
+    "元素能在 ``properties`` 里找到"这条是这里唯一带语义判断的检查，值得单独说：
+    ``required`` 引用一个不存在的字段名时，这个 schema 要么永远无法被满足
+    （对 LLM 而言等于"这个工具怎么调都不对"），要么被 provider 直接拒收。
+    两种结局都不是"归一化后的可用工具"，所以按畸形处理而不是原样放行。
+    """
+    required = node["required"]
+    if not isinstance(required, list):
+        raise MCPInvalidSchemaError(f"{path}.required 不是 array: {type(required).__name__}")
+    props = node.get("properties")
+    known: set[str] = set(props) if isinstance(props, dict) else set()
+    seen: set[str] = set()
+    for entry in required:
+        if not isinstance(entry, str) or not entry:
+            raise MCPInvalidSchemaError(f"{path}.required 元素非法: {entry!r}")
+        if entry in seen:
+            raise MCPInvalidSchemaError(f"{path}.required 元素重复: {entry!r}")
+        if entry not in known:
+            raise MCPInvalidSchemaError(
+                f"{path}.required 引用了同级 properties 中不存在的字段: {entry!r}"
+            )
+        seen.add(entry)
+
+
+def _validate_input_schema_subset(schema: dict[str, Any]) -> None:
+    """递归校验 ``inputSchema`` 是否落在 :data:`SUPPORTED_SCHEMA_KEYWORDS` 子集内。
+
+    为什么必须在**注册进 ToolRegistry 之前**做：``ToolDefinition.parameters`` 会被
+    ``ToolRegistry.get_openai_tools()`` **原样**塞进 LLM 请求的
+    ``tools[].function.parameters``，中间没有任何一层会再校验它。于是一个 nested
+    畸形 schema 的后果不是"那个工具不好用"，而是 **provider 拒收整条请求** ——
+    所有 native 工具一起陪葬。所以畸形必须在本地、在注册之前拦住。
+
+    遍历用闭包持有 ``remaining`` 预算：递归里逐层传一个计数器会让每个辅助函数的
+    签名都被预算污染，而"深度 / 节点数"这两个上限本来就只属于这一次遍历。
+    """
+    remaining = MAX_SCHEMA_NODES
+
+    def walk(node: Any, path: str, depth: int) -> None:
+        nonlocal remaining
+
+        if depth > MAX_SCHEMA_DEPTH:
+            raise MCPInvalidSchemaError(f"{path} 嵌套深度超过上限 {MAX_SCHEMA_DEPTH}")
+        remaining -= 1
+        if remaining < 0:
+            raise MCPInvalidSchemaError(f"inputSchema 子 schema 节点数超过上限 {MAX_SCHEMA_NODES}")
+
+        if not isinstance(node, dict):
+            raise MCPInvalidSchemaError(f"{path} 不是 JSON object: {type(node).__name__}")
+
+        unknown = sorted(set(node) - SUPPORTED_SCHEMA_KEYWORDS)
+        if unknown:
+            raise MCPInvalidSchemaError(
+                f"{path} 含子集之外的关键字 {unknown}（支持: {sorted(SUPPORTED_SCHEMA_KEYWORDS)}）"
+            )
+
+        if "type" in node:
+            _validate_type(node["type"], path=path)
+        if "description" in node and not isinstance(node["description"], str):
+            raise MCPInvalidSchemaError(f"{path}.description 不是 string")
+        if "required" in node:
+            _validate_required(node, path=path)
+
+        props = node.get("properties", _MISSING)
+        if props is not _MISSING:
+            if not isinstance(props, dict):
+                raise MCPInvalidSchemaError(f"{path}.properties 不是 object")
+            for name, sub in props.items():
+                if not isinstance(name, str) or not name:
+                    raise MCPInvalidSchemaError(f"{path}.properties 键非法: {name!r}")
+                walk(sub, f"{path}.properties.{name}", depth + 1)
+
+        items = node.get("items", _MISSING)
+        if items is not _MISSING:
+            walk(items, f"{path}.items", depth + 1)
+
+    walk(schema, "inputSchema", 0)
+
+
 def normalize_input_schema(raw: Any) -> dict[str, Any]:
-    """把 MCP ``inputSchema`` 归一化为 JSON Schema object。
+    """把 MCP ``inputSchema`` 归一化为 **受支持子集内**的 JSON Schema object。
+
+    顶层归一化（宽松）：
 
     - ``None`` → 最小可用的空 object schema；
     - 缺 ``type`` 补 ``object``，缺 ``properties`` 补 ``{}``；
     - 非 object 的 ``type`` / 非 dict 的 ``properties`` / 非 dict 的 schema
       全部 **fail closed** 抛 ``MCPInvalidSchemaError``（不静默猜测）。
+
+    随后**逐层递归**校验嵌套结构（:func:`_validate_input_schema_subset`）。这一步
+    不宽松，因为 provider 对 ``tools[].function.parameters`` 的校验是**全有或全无**的：
+    任何一层的畸形都会让整条请求被拒，而不是只让那个工具失效。因此"顶层看着正常"
+    不足以构成放行理由 —— 典型的漏网形态是
+    ``{"properties": {"x": "invalid"}}``（子 schema 不是 object）与
+    ``{"required": "x"}``（``required`` 不是 array）。
+
+    本函数是远端 ``inputSchema`` 进入 ``ToolDefinition.parameters`` 的**唯一**通道
+    （``discover_tools`` → ``register_mcp_tools``），所以把 fail closed 放在这里，
+    结构上就不存在绕过路径。
     """
     if raw is None:
         return {"type": "object", "properties": {}}
@@ -260,6 +423,7 @@ def normalize_input_schema(raw: Any) -> dict[str, Any]:
         schema["properties"] = {}
     elif not isinstance(props, dict):
         raise MCPInvalidSchemaError("inputSchema.properties 不是 object")
+    _validate_input_schema_subset(schema)
     return schema
 
 
@@ -1023,6 +1187,10 @@ __all__ = [
     "FC_NAME_MAX_LEN",
     "MCP_NAME_PREFIX",
     "DEFAULT_RISK_LEVEL",
+    "MAX_SCHEMA_DEPTH",
+    "MAX_SCHEMA_NODES",
+    "SUPPORTED_PRIMITIVE_TYPES",
+    "SUPPORTED_SCHEMA_KEYWORDS",
     "RiskLevel",
     "SOURCE_MCP",
     "SOURCE_NATIVE",

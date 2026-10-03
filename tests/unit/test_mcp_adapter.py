@@ -26,13 +26,20 @@ from core.hitl.risk import RiskLevel
 from tools.mcp_adapter import (
     DEFAULT_RISK_LEVEL,
     FC_NAME_MAX_LEN,
+    MAX_SCHEMA_DEPTH,
+    MAX_SCHEMA_NODES,
     MCP_NAME_PREFIX,
+    SUPPORTED_PRIMITIVE_TYPES,
+    SUPPORTED_SCHEMA_KEYWORDS,
     MCPConfigurationError,
     MCPInvalidSchemaError,
+    MCPServerConfig,
+    MCPToolAdapter,
     build_mcp_adapters,
     load_mcp_server_configs,
     normalize_input_schema,
     qualified_tool_name,
+    register_mcp_tools,
 )
 from tools.tool_registry import SOURCE_MCP, SOURCE_NATIVE, ToolRegistry
 
@@ -101,6 +108,360 @@ class TestNormalizeInputSchema:
     def test_non_dict_properties_fails_closed(self):
         with pytest.raises(MCPInvalidSchemaError):
             normalize_input_schema({"type": "object", "properties": ["a"]})
+
+
+# ---------------------------------------------------------------------------
+# nested inputSchema 递归校验（PR #42）
+#
+# 修复前的缺口：`normalize_input_schema` 只看**顶层**的 object/properties，
+# 于是 nested 畸形 schema 会原样放行，最终经 `ToolRegistry.get_openai_tools()`
+# 进入 LLM 请求的 `tools[].function.parameters`。provider 对该字段的校验是
+# **全有或全无**的 —— 一处畸形拒收整条请求，所有 native 工具一起陪葬。
+# 下面每个用例都锁住"畸形绝不进注册表"。
+# ---------------------------------------------------------------------------
+
+
+class TestNestedSchemaFailsClosed:
+    def test_property_subschema_that_is_not_an_object_fails_closed(self):
+        # 任务书里的原始 case：顶层完全合法，只有子 schema 是裸字符串。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"type": "object", "properties": {"x": "invalid"}})
+
+    @pytest.mark.parametrize("bad", [42, True, None, [], "invalid", 3.5])
+    def test_every_non_object_subschema_fails_closed(self, bad):
+        # 注意 None / [] 与"缺失"不是一回事：显式给出畸形值必须拒绝，
+        # 而不是像顶层 properties 那样被补成默认值。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"type": "object", "properties": {"x": bad}})
+
+    def test_nested_object_subschema_is_validated_recursively(self):
+        # 畸形藏在第二层：只看一层的话 `outer` 是个合法 object 就放行了。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(
+                {
+                    "type": "object",
+                    "properties": {"outer": {"type": "object", "properties": {"inner": 42}}},
+                }
+            )
+
+    def test_nested_properties_that_is_not_an_object_fails_closed(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"o": {"type": "object", "properties": ["a"]}}})
+
+    def test_nested_properties_explicit_null_fails_closed(self):
+        # 顶层 `properties: null` 会被补成 {}（宽松归一化），但**嵌套**的
+        # `properties: null` 没有任何合法解释，必须拒绝。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"o": {"type": "object", "properties": None}}})
+
+    def test_malformation_is_caught_at_arbitrary_depth(self):
+        # 递归的意义：校验必须一路走到叶子，而不是"逐层各看一层"。
+        node: dict = {"type": "object", "properties": {"c": "invalid"}}
+        for _ in range(4):
+            node = {"type": "object", "properties": {"n": node}}
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(node)
+
+    def test_valid_deeply_nested_schema_is_accepted(self):
+        # 反向对照：合法的深层结构不能被误杀，否则真实工具会被静默丢掉。
+        node: dict = {"type": "string", "description": "leaf"}
+        for _ in range(4):
+            node = {"type": "object", "properties": {"n": node}, "required": ["n"]}
+        assert normalize_input_schema(node)["type"] == "object"
+
+
+class TestArrayItemsValidation:
+    def test_items_that_is_not_an_object_fails_closed(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"xs": {"type": "array", "items": "invalid"}}})
+
+    def test_items_subschema_is_validated_recursively(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(
+                {"properties": {"xs": {"type": "array", "items": {"type": "not-a-type"}}}}
+            )
+
+    def test_items_may_itself_be_an_array_of_objects(self):
+        out = normalize_input_schema(
+            {
+                "properties": {
+                    "rows": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"a": {"type": "string"}}},
+                    }
+                },
+                "required": ["rows"],
+            }
+        )
+        assert out["properties"]["rows"]["items"]["type"] == "object"
+
+    def test_array_without_items_is_accepted(self):
+        # `{"type": "array"}` 是合法 JSON Schema（items 不受限），不是畸形。
+        assert normalize_input_schema({"properties": {"xs": {"type": "array"}}})["properties"]
+
+    def test_malformed_items_inside_a_nested_array_fails_closed(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(
+                {
+                    "properties": {
+                        "groups": {
+                            "type": "array",
+                            "items": {"type": "array", "items": "invalid"},
+                        }
+                    }
+                }
+            )
+
+
+class TestRequiredValidation:
+    @pytest.mark.parametrize("bad", ["a", 1, True, None, {"a": True}])
+    def test_required_must_be_an_array(self, bad):
+        # 任务书点名的第二个 case。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"a": {"type": "string"}}, "required": bad})
+
+    @pytest.mark.parametrize("bad", [["missing"], ["a", "a"], [1], [""], [None], [["a"]]])
+    def test_malformed_required_entries_fail_closed(self, bad):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"a": {"type": "string"}}, "required": bad})
+
+    def test_required_referring_to_unknown_field_fails_closed(self):
+        # 引用不存在的字段名 → schema 永远无法被满足（或被 provider 拒收），
+        # 两种结局都不是"可用的归一化工具"。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(
+                {"properties": {"a": {"type": "string"}}, "required": ["a", "ghost"]}
+            )
+
+    def test_nested_required_is_validated_against_its_own_properties(self):
+        # `required` 必须对着**同级** properties 解析：内层的 ghost 不能
+        # 因为外层有同名字段就被放行。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(
+                {
+                    "properties": {
+                        "ghost": {"type": "string"},
+                        "o": {"type": "object", "required": ["ghost"]},
+                    }
+                }
+            )
+
+    def test_valid_required_is_preserved(self):
+        out = normalize_input_schema(
+            {
+                "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+                "required": ["a"],
+            }
+        )
+        assert out["required"] == ["a"]
+
+
+class TestPrimitiveTypeValidation:
+    @pytest.mark.parametrize("t", ["string", "number", "integer", "boolean", "null"])
+    def test_supported_primitives_are_preserved(self, t):
+        assert (
+            normalize_input_schema({"properties": {"x": {"type": t}}})["properties"]["x"]["type"]
+            == t
+        )
+
+    @pytest.mark.parametrize(
+        "bad", ["str", "String", "object ", "", "any", 1, True, None, [], {}, "dict"]
+    )
+    def test_unsupported_types_fail_closed(self, bad):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"x": {"type": bad}}})
+
+    def test_type_union_is_supported(self):
+        # `["string", "null"]` 在 MCP 生态里很常见（"可为 null"），
+        # 支持它只是多一个元素循环，不构成实现 JSON Schema engine。
+        out = normalize_input_schema({"properties": {"x": {"type": ["string", "null"]}}})
+        assert out["properties"]["x"]["type"] == ["string", "null"]
+
+    def test_empty_type_union_fails_closed(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"x": {"type": []}}})
+
+    def test_type_union_with_unsupported_member_fails_closed(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"x": {"type": ["string", "any"]}}})
+
+
+class TestSupportedSchemaSubsetIsClosed:
+    def test_whitelist_is_exactly_the_documented_subset(self):
+        # 显式钉住子集边界：往白名单里加关键字必须是**有意识的**决定，
+        # 而不是"顺手让某个 server 的 schema 通过"。
+        assert sorted(SUPPORTED_SCHEMA_KEYWORDS) == [
+            "description",
+            "items",
+            "properties",
+            "required",
+            "type",
+        ]
+
+    def test_supported_types_are_exactly_the_documented_set(self):
+        assert sorted(SUPPORTED_PRIMITIVE_TYPES) == [
+            "array",
+            "boolean",
+            "integer",
+            "null",
+            "number",
+            "object",
+            "string",
+        ]
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            "enum",
+            "const",
+            "oneOf",
+            "anyOf",
+            "allOf",
+            "not",
+            "$ref",
+            "$defs",
+            "definitions",
+            "patternProperties",
+            "additionalProperties",
+            "format",
+            "default",
+            "minimum",
+            "maximum",
+            "minLength",
+            "pattern",
+            "nullable",
+            "title",
+            "examples",
+        ],
+    )
+    def test_keywords_outside_the_subset_fail_closed(self, kw):
+        # 这些关键字**没有任何本地逻辑会去解释**。放行等于把一段从未被校验过
+        # 的语义原样塞进 provider 请求 —— 与本模块 fail closed 的立场相反。
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"x": {"type": "string", kw: "v"}}})
+
+    @pytest.mark.parametrize("kw", ["enum", "$ref", "additionalProperties"])
+    def test_unsupported_keyword_fails_closed_even_at_top_level(self, kw):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"type": "object", kw: "v"})
+
+    def test_description_must_be_a_string(self):
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": {"x": {"description": 42}}})
+
+
+class TestSchemaValidationBounds:
+    """递归校验面对的是不受信任的远端输入，本身必须有界。"""
+
+    def test_nesting_deeper_than_the_limit_fails_closed(self):
+        node: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH + 2):
+            node = {"type": "object", "properties": {"n": node}}
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema(node)
+
+    def test_nesting_within_the_limit_is_accepted(self):
+        node: dict = {"type": "string"}
+        for _ in range(MAX_SCHEMA_DEPTH - 3):
+            node = {"type": "object", "properties": {"n": node}}
+        assert normalize_input_schema(node)["type"] == "object"
+
+    def test_too_many_properties_fail_closed(self):
+        # 深度上限管不住"宽"：十万个扁平 properties 深度只有 1。
+        # 而 max_payload_bytes 只约束调用 payload，不约束 list_tools 的描述符。
+        props = {f"p{i}": {"type": "string"} for i in range(MAX_SCHEMA_NODES + 10)}
+        with pytest.raises(MCPInvalidSchemaError):
+            normalize_input_schema({"properties": props})
+
+    def test_wide_but_within_budget_is_accepted(self):
+        props = {f"p{i}": {"type": "string"} for i in range(50)}
+        assert len(normalize_input_schema({"properties": props})["properties"]) == 50
+
+
+# ---------------------------------------------------------------------------
+# Fail closed 发生在 tool registration **之前**
+# ---------------------------------------------------------------------------
+
+
+class _FakeMcpClient:
+    """最小 MCP client：只实现 ``MCPClientProtocol`` 要求的三个方法。"""
+
+    def __init__(self, tools: list[dict]):
+        self._tools = tools
+
+    async def list_tools(self) -> list[dict]:
+        return self._tools
+
+    async def call_tool(self, name: str, arguments: dict) -> dict:
+        return {"content": [{"text": "ok"}]}
+
+    async def close(self) -> None:
+        return None
+
+
+class TestMalformedSchemaNeverReachesRegistration:
+    def _adapter(self, tools: list[dict]) -> MCPToolAdapter:
+        config = MCPServerConfig(
+            name="cat", allowed_tools=("good", "bad"), risk_level=RiskLevel.LOW
+        )
+        return MCPToolAdapter(config, client=_FakeMcpClient(tools))
+
+    async def test_nested_malformed_tool_is_skipped_and_good_one_still_registers(self):
+        adapter = self._adapter(
+            [
+                {
+                    "name": "good",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {"q": {"type": "string"}},
+                        "required": ["q"],
+                    },
+                },
+                # 顶层合法、nested 畸形：修复前会被注册进 FC payload。
+                {"name": "bad", "inputSchema": {"type": "object", "properties": {"x": "invalid"}}},
+            ]
+        )
+        registry = ToolRegistry()
+        assert await register_mcp_tools(registry, adapter) == ["mcp__cat__good"]
+
+        # 真正的断言在这里：畸形工具**没有**出现在 provider 会看到的 payload 里。
+        payload = registry.get_openai_tools()
+        assert [t["function"]["name"] for t in payload] == ["mcp__cat__good"]
+
+    async def test_required_not_an_array_tool_never_reaches_the_payload(self):
+        adapter = self._adapter(
+            [
+                {
+                    "name": "bad",
+                    "inputSchema": {"properties": {"q": {"type": "string"}}, "required": "q"},
+                }
+            ]
+        )
+        registry = ToolRegistry()
+        assert await register_mcp_tools(registry, adapter) == []
+        assert registry.get_openai_tools() == []
+
+    async def test_valid_nested_schema_reaches_the_payload_verbatim(self):
+        schema = {
+            "type": "object",
+            "properties": {
+                "filter": {
+                    "type": "object",
+                    "properties": {
+                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "limit": {"type": "integer", "description": "上限"},
+                    },
+                    "required": ["tags"],
+                }
+            },
+            "required": ["filter"],
+        }
+        adapter = self._adapter([{"name": "good", "inputSchema": schema}])
+        registry = ToolRegistry()
+        assert await register_mcp_tools(registry, adapter) == ["mcp__cat__good"]
+        params = registry.get_openai_tools()[0]["function"]["parameters"]
+        assert params["properties"]["filter"]["properties"]["tags"]["items"] == {"type": "string"}
+        assert params["required"] == ["filter"]
 
 
 # ---------------------------------------------------------------------------
