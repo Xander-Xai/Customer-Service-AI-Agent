@@ -10,6 +10,7 @@ v6.3 优化：
 - 保留同步 encode() 兼容旧调用方（内部用 run_in_executor 桥接）
 """
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -21,29 +22,40 @@ logger = get_logger("rag.api_embedding")
 
 # 模块级异步客户端单例（懒初始化，连接池复用）
 _async_client: httpx.AsyncClient | None = None
+_async_client_loop: asyncio.AbstractEventLoop | None = None
 
 
 async def _get_async_client() -> httpx.AsyncClient:
-    """获取或创建异步 HTTP 客户端单例（连接池复用，避免每次请求建连）"""
-    global _async_client
-    if _async_client is None or _async_client.is_closed:
-        _async_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=3.0),
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=5,
-                keepalive_expiry=60.0,
-            ),
-        )
+    """获取或创建异步 HTTP 客户端单例（连接池复用，避免每次请求建连）。
+
+    httpx.AsyncClient 的连接池绑定到创建它的事件循环。跨事件循环复用
+    （例如 worker 线程里多次 ``asyncio.run()``）会在第二次调用时抛
+    ``RuntimeError: Event loop is closed``，因此单例按事件循环分区：
+    归属循环不再是当前运行循环时，丢弃旧客户端并重建。
+    """
+    global _async_client, _async_client_loop
+    running = asyncio.get_running_loop()
+    if _async_client is not None and _async_client_loop is running and not _async_client.is_closed:
+        return _async_client
+    _async_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, connect=3.0),
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=5,
+            keepalive_expiry=60.0,
+        ),
+    )
+    _async_client_loop = running
     return _async_client
 
 
 async def close_async_client() -> None:
     """关闭异步客户端（应用关闭时调用）"""
-    global _async_client
+    global _async_client, _async_client_loop
     if _async_client and not _async_client.is_closed:
         await _async_client.aclose()
     _async_client = None
+    _async_client_loop = None
 
 
 class ApiEmbedding:
@@ -67,9 +79,7 @@ class ApiEmbedding:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        logger.info(
-            f"API Embedding 客户端初始化: {model} @ {base_url} (timeout={timeout}s)"
-        )
+        logger.info(f"API Embedding 客户端初始化: {model} @ {base_url} (timeout={timeout}s)")
 
     @property
     def model(self) -> str:
@@ -110,19 +120,14 @@ class ApiEmbedding:
             logger.error(f"Embedding API 超时 ({self._timeout}s): {self._model}")
             raise
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}"
-            )
+            logger.error(f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}")
             raise
         except Exception as e:
             logger.error(f"Embedding API 调用失败: {e}")
             raise
 
         # 按 index 排序提取 embedding
-        embeddings = [
-            item["embedding"]
-            for item in sorted(data["data"], key=lambda x: x["index"])
-        ]
+        embeddings = [item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])]
 
         result = np.array(embeddings, dtype=np.float32)
         if single:
@@ -134,8 +139,6 @@ class ApiEmbedding:
 
         对于已有 async 上下文的调用方，推荐使用 aencode() 避免线程池开销。
         """
-        import asyncio
-
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -174,18 +177,13 @@ class ApiEmbedding:
             logger.error(f"Embedding API 超时 ({self._timeout}s): {self._model}")
             raise
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}"
-            )
+            logger.error(f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}")
             raise
         except Exception as e:
             logger.error(f"Embedding API 调用失败: {e}")
             raise
 
-        embeddings = [
-            item["embedding"]
-            for item in sorted(data["data"], key=lambda x: x["index"])
-        ]
+        embeddings = [item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])]
 
         result = np.array(embeddings, dtype=np.float32)
         if single:
