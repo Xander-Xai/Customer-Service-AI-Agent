@@ -1,0 +1,96 @@
+{
+  "schema_version": "otel-collector-evidence/v1",
+  "status": "VERIFIED_LOCAL",
+  "generated_at": "2026-10-03T04:00:20.598032+00:00",
+  "git": {
+    "git_sha": "ddc050e032cce90cbdafccf22832f49899e3a8c6",
+    "dirty": false,
+    "git_available": true
+  },
+  "collector": {
+    "distribution": "opentelemetry-collector",
+    "image": "otel/opentelemetry-collector:0.162.0",
+    "version": "0.162.0",
+    "otlp_protocol": "grpc",
+    "endpoint": "http://127.0.0.1:4317",
+    "exporters": [
+      "debug"
+    ],
+    "pipelines": [
+      "traces"
+    ],
+    "readiness": "zpages servicez HTTP endpoint polled to healthy"
+  },
+  "application": {
+    "service_name": "csai-otel-smoke",
+    "opentelemetry_enabled": "true",
+    "otel_enabled": "true",
+    "otlp_endpoint_env": "http://127.0.0.1:4317",
+    "setup_tracing_returned": true,
+    "force_flush": {
+      "setup_tracing": true,
+      "opentelemetry_enabled": "true",
+      "otel_enabled": "true",
+      "otel_exporter_otlp_endpoint": "http://127.0.0.1:4317",
+      "force_flush_success": true,
+      "shutdown_ok": true
+    },
+    "uses_core_tracing_setup": true,
+    "uses_core_telemetry_span": true,
+    "fake_exporter_used": false
+  },
+  "expected_spans": [
+    "csai.agent.execute",
+    "csai.agent.execute.resume",
+    "csai.rag.retrieve",
+    "csai.llm.chat_completion",
+    "csai.tool.execute"
+  ],
+  "observed_spans": [
+    "csai.agent.execute",
+    "csai.agent.execute.resume",
+    "csai.rag.retrieve",
+    "csai.llm.chat_completion",
+    "csai.tool.execute"
+  ],
+  "missing_spans": [],
+  "expected_whitelist_attrs": [
+    "csai.run_id",
+    "csai.rag.scene",
+    "csai.model_name",
+    "csai.tool_name"
+  ],
+  "observed_whitelist_attrs": [
+    "csai.model_name",
+    "csai.rag.scene",
+    "csai.run_id",
+    "csai.tool_name"
+  ],
+  "privacy_canary": "SYNTHETIC_SECRET_SHOULD_NOT_APPEAR",
+  "privacy_canary_present": false,
+  "filtered_probe_keys": [
+    "csai.raw_prompt",
+    "csai.user_text",
+    "csai.tool_arguments",
+    "csai.api_key",
+    "csai.customer_password",
+    "csai.session_secret"
+  ],
+  "checks": {
+    "collector_received_all_expected_spans": true,
+    "service_name_matches": true,
+    "privacy_canary_absent": true,
+    "whitelist_attrs_present": true,
+    "force_flush_succeeded": true,
+    "shutdown_completed": true,
+    "clean_tree": true
+  },
+  "scope": {
+    "proves": "core.telemetry semantic spans -> OTel SDK -> OTLPSpanExporter -> network -> live otel collector received them",
+    "does_not_prove": [
+      "production business call sites (covered by tests/unit/test_telemetry.py)",
+      "persistent or queryable trace backend (collector has only a debug exporter)",
+      "production trace propagation"
+    ]
+  }
+}
