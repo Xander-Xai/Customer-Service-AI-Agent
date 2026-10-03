@@ -35,22 +35,35 @@
 - Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
   `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
 - **最新已提交的 preflight evidence**：
-  `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
-  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
-  `status: BLOCKED`）。blocker 语义按 v2 结构化记录，**必须分开表述**：
-  - `primary_blocker: EMBEDDING_PROVIDER_AUTH`（embedding 探针 HTTP 401，
-    `blocks_corpus_import: true`）是**根因**；
-  - `VECTOR_INDEX_EMPTY`（评测集合 0 points）是 **downstream 症状**，
-    `caused_by: EMBEDDING_PROVIDER_AUTH`；因 BM25 索引由 Qdrant 重建，
-    连 `bm25_only` 也被它阻塞；
-  - `RERANKER_PROVIDER_AUTH`（reranker 探针 HTTP 401，`silent_fallback`）是
-    **`blocking: false`**，只阻塞 `hybrid_rerank`，**不得**据此声称其它实验
-    也被 reranker 阻塞。
-  该 artifact 自述 `formal evaluation not run; no metrics generated`——
-  `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
-  **不是** 649-query 正式评测完成，正式指标仍为 `NOT_VERIFIED`。
-  上一版 artifact（`preflight-20260929T191128Z`，v1 schema，顶层
-  `status: BLOCKED_VECTOR_INDEX`）作为历史记录原样保留，不回填。
+  `artifacts/evaluation/rag-649/preflight-20261003T212439Z/report.json`
+  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-03T21:24:39Z`，
+  `status: OK`，`primary_blocker: null`，`blockers: []`）。四个 gate 全绿：
+  Qdrant 四个集合共 **5000** points、embedding 探针 OK（dim 1024）、
+  BM25 `READY`（5000 docs）、reranker 探针 HTTP 200。
+  **provider 认证阻塞已解除**：此前 `BLOCKED` 的根因是活动 `.env` 只含
+  `sk-placeholder-*`（provider 401 / code 30014），换用真实凭据后
+  embeddings / chat / rerank 三通道均 200。
+- **正式 649 全量评测仍未执行，`NOT_VERIFIED`；`primary_blocker` 已从
+  `EMBEDDING_PROVIDER_AUTH` 换成 `INVALID_GOLD_LABELS`（数据集缺陷，非基础设施）**：
+  `tests/eval/rag_benchmark.json` 的 `expected_doc_ids`
+  由 `scripts/regenerate_benchmark_ids.py` 用
+  `random.seed(42)` + `random.sample(pool, 3)` 生成，`pool` 是该 query
+  类别映射下的**全部**文档（865–1500 篇）——它对齐 doc ID，不做相关性标注。
+  用评测自身 embedding 模型检验：`cos(query, gold)=0.3732` vs
+  `cos(query, 随机同类文档)=0.3696`（差 +0.0036，Welch **p=0.63**，
+  统计上不可区分）；同时 label-free 的检索健康检查显示
+  `cos(query, top-1 检索结果)=0.6265` vs `cos(query, 随机文档)=0.3093`。
+  即**检索链路正常，坏的是标签**；正确检索器在此 gold 上必然≈0 分。
+  证据：`artifacts/evaluation/rag-649/blocked-invalid-gold-labels-20261003T214052Z.json`
+  （`metrics_produced: null`）。benchmark 校验和未变，649 条 query 与
+  1250 个 gold id 全部保留，未剔除任何坏 case。
+- 历史 artifact 原样保留、不回填、不改写：
+  - `preflight-20261002T194209Z`（v2，`status: BLOCKED`，
+    `primary_blocker: EMBEDDING_PROVIDER_AUTH`；`VECTOR_INDEX_EMPTY` 为
+    downstream 症状带 `caused_by`；`RERANKER_PROVIDER_AUTH` 是
+    `blocking: false`、只阻塞 `hybrid_rerank`）——**认证阻塞的历史记录**；
+  - `preflight-20260929T191128Z`（v1 schema，顶层
+    `status: BLOCKED_VECTOR_INDEX`）。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、
   blocker 语义与评测状态：[docs/reference/rag-evaluation.md](rag-evaluation.md)。
   canonical 命令链：`make rag-eval-import` → `make rag-eval-649-preflight` →
@@ -110,6 +123,30 @@ python3 scripts/audit_doc_consistency.py
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
+- **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
+  它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
+  系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，
+  同名时跳过、绝不覆盖 native。
+  - 安全立场：MCP **不构成新的安全边界**。外部 server 是不可信输入，风险等级
+    **沿用** `core.hitl.risk.RiskLevel`（low/medium/high），不另立词汇表。
+  - `MCP_SERVERS` 是 JSON 数组 allowlist（空 = 不允许任何 server）；
+    `allowed_tools` 为空同样等于不允许任何工具。
+  - **read-only-first**：只有显式 `risk_level: "low"` 的 server 的工具才注册。
+    缺失 / 非法（含历史词汇 `read` / `write`）**只向上**收敛到 `HIGH`，
+    绝不 fail-open。`medium` / `high` 一律不注册。
+  - **不采信 server 自述的 `annotations`** 来决定风险等级。
+  - 命名空间 `mcp__{server}__{tool}`；server 名禁止含 `__`；超长名截断补 sha256。
+  - 启动期结构校验：`core/config.py::validate_mcp_settings`（fail closed）。
+    `MCP_FAIL_CLOSED=true` 时初始化失败阻止启动，而不是静默降级为 native-only。
+  - **边界（不得越界宣称）**：写操作 MCP 工具**未接入**（缺幂等 ledger + 人工审批
+    两道防线）；RBAC 是**请求级**而非 per-tool，不能声称"MCP 工具经过了 RBAC"；
+    响应侧结果大小当前**不设上限**（只限请求 payload 字节），属已知缺口；
+    官方 `mcp` SDK 是 `requirements-optional.txt` 里的**可选**依赖，延迟 import。
+  - **Evidence**：`IMPLEMENTED`，仅**纯函数契约**经
+    `tests/unit/test_mcp_adapter.py` 运行验证。跨进程 / 传输 / 策略 / 时序的
+    **端到端契约取证当前为 `NOT_VERIFIED`**，在它落地并跑出真实结果前不得声称
+    MCP 端到端可用。设计取舍详见
+    [docs/interview/failure-and-tradeoffs.md](../interview/failure-and-tradeoffs.md) §7。
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。
