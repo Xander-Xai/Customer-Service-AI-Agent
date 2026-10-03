@@ -22,7 +22,8 @@ reranker 实例被并发请求共享时，
 ``call A -> rerank() -> 上下文切换 -> call B 改写 last_error_status ->
 call A 读 last_error_status`` 会把 B 的失败算到 A 头上。所以 runtime 的
 applied/degraded 必须来自本次调用的返回值，不能靠事后反查实例状态。
-``last_error_status`` 仅保留给 preflight/评测 gate 诊断，不再参与 runtime 判定。
+``last_error_status`` 已无仓库内消费者（runtime 与 preflight 都用
+``RerankOutcome``），仅向后兼容保留。
 
 降级策略不变（不是 fail-closed）
 --------------------------------
@@ -123,8 +124,10 @@ class ApiReranker:
         else:
             self._available = True
             logger.info(f"API Reranker 初始化: {self._model} @ {self._base_url}")
-        # 最近一次 API 失败的 HTTP 状态码（仅供 preflight/评测 gate 诊断，
-        # 不含任何凭据材料；成功时不更新）
+        # DEPRECATED / 无消费者：最近一次失败的 HTTP 状态码。仓库内已无任何
+        # reader（runtime 与 preflight 都改用 per-call `RerankOutcome`）。仅为
+        # 向后兼容保留，且**不得**再用于判定某一次调用：它是实例级共享可变
+        # 状态，并发下会张冠李戴。新的代码请读 `RerankOutcome.http_status`。
         self.last_error_status: int | None = None
 
     @property

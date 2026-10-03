@@ -513,7 +513,7 @@ if _RE_INJECTION_DISCLOSURE.search(text):
 ### reranker 静默 fallback 为什么危险？怎么证明它真的生效了？
 
 - `ApiReranker` 失败时回退原顺序是**可用性兜底**；但如果不区分"重排成功"与"回退"，hybrid_rerank 实验可能测的只是原始排序——重排从实现变成了幻觉
-- 证据：preflight 探针直接调用真实 rerank API；**silent_fallback 会被识别并计为探针失败**，不产出假阳性
+- 证据：preflight 探针直接调用真实 rerank API，并消费与 runtime 相同的 `RerankOutcome`；`applied=false` 一律计为探针 `degraded` 并带 bounded `reason`（含 HTTP 200 但响应不可用的 `invalid_response`），不产出假阳性
 - 正式评测里对比 hybrid_rerank 与 hybrid_no_rerank：如果前者与后者完全一致（逐 query improved/degraded 全为 0），本身就说明重排没生效——双保险
 
 ### provenance / benchmark SHA / git SHA 怎么用？
