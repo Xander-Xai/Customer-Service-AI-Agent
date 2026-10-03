@@ -29,17 +29,25 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 
 ### 2.1 核心指标
 
+评测 harness（`scripts/evaluate_rag.py`）当前产出的 metric family 就是下面这五个
+（`python3 scripts/project_facts.py` 的 `evaluation_metric_names` 可核对，
+multi-K：K = 1 / 3 / 5 / 8）：
+
 | 指标 | 含义 | 计算方式 | 面试怎么说 |
 |------|------|---------|-----------|
-| **Hit Rate@K** | Top-K 结果中是否包含正确答案 | 命中数 / 总查询数 | "X% 的问题能在前 K 条结果中找到答案" |
+| **Hit@K** | Top-K 结果中是否包含正确答案 | 命中数 / 总查询数 | "X% 的问题能在前 K 条结果中找到答案" |
 | **Precision@K** | Top-K 结果中有多少是相关的 | 相关文档数 / K | "平均每次检索有 Y 条是真正相关的" |
 | **Recall@K** | 正确答案是否被检索到 | 命中数 / 总相关文档数 | "Z% 的正确答案不会被遗漏" |
-| **MRR** | 第一个正确结果排在第几位 | 平均(1/排名) | "用户通常在第 N 条结果就能看到答案" |
-| **平均距离** | 检索结果与查询的向量距离 | 距离越小越相关 | "语义相似度在合理范围内" |
+| **NDCG@K** | 考虑排序位置的归一化折损累积增益 | DCG@K / IDCG@K | "正确答案排得越靠前，权重越高" |
+| **MRR@K** | 第一个正确结果排在第几位 | 平均(1/排名) | "用户通常在第 N 条结果就能看到答案" |
+
+> 「平均距离」这类向量距离**不是**当前 harness 的指标——2026-06 的历史报告曾用它
+> 做辅助诊断（当时的 ChromaDB L2 距离口径），当前 Qdrant 用 Cosine 距离且不作为
+> 对外指标。引用它时必须标注为历史口径。
 
 ### 2.2 历史基线数据（ChromaDB + all-MiniLM-L6-v2，仅用于对比）
 
-本项目有 3 个知识集合，建议按类别分别评估：
+2026-06 的历史报告只覆盖 3 个知识集合，按类别分别评估：
 
 | Collection | 历史文档数（2026-06 报告） | 评估重点 |
 |-----------|--------|---------|
@@ -47,8 +55,10 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 | faq | 30 | 常见问题的快速命中率 |
 | tech_support | 20 | 技术问题的专业性匹配 |
 
-> 当前 collection 文档数以 `python3 scripts/evaluate_rag.py` / `/api/knowledge/stats`
-> 的当前输出为准；上表为 2026-06 历史报告快照。
+> 当前 collection 构成以 `data/seed/*.json` 与 `/api/knowledge/stats` 的当前输出
+> 为准：`product_knowledge` / `faq` / `tech_support` / `complaint_knowledge`
+> / `image_knowledge`（可选，CLIP）。上表为 2026-06 历史报告快照，**不是当前
+> 集合清单**。
 
 ---
 
@@ -264,21 +274,31 @@ artifact 使用上述结构化语义。
 
 当面试官问"怎么改进 RAG"时，展示你对进阶技术的理解：
 
-### 4.1 短期改进（成本低）
+### 4.1 已落地（不要再当"改进方向"讲）
 
-| 改进项 | 方案 | 预期提升 |
+这几项**已经在当前实现里**，讲成 future work 会与代码矛盾：
+
+| 改进项 | 落地形态 | 代码位置 |
+|--------|---------|---------|
+| **中文 Embedding 模型** | `BAAI/bge-large-zh-v1.5`（1024 维），HTTP API 计算 | `rag/api_embedding.py`、`core/config.py` |
+| **Hybrid Search（向量 + BM25）** | 双通道并行检索 + RRF(k=60) 融合 | `rag/qdrant_knowledge_base.py`、`rag/bm25_lifecycle.py` |
+| **Rerank** | `ApiReranker`（`BAAI/bge-reranker-v2-m3`）；API 不可用时回退原排序（可用性兜底，非静默） | `rag/reranker.py` |
+| **Collection 级过滤 / 多集合检索** | 按 Agent 分配 collection，`query_multiple` 并行检索 + 去重 | `rag/qdrant_knowledge_base.py` |
+| **检索契约** | 各阶段结果结构化校验，显式降级路径 | `rag/retrieval_contract.py` |
+| **RAG 评测链** | 4-config ablation + multi-K + 三套 population + failure taxonomy + provenance | `scripts/evaluate_rag.py` |
+
+> Query 改写（`RAG_QUERY_REWRITING`，`rag/query_rewriter.py`）也已实现，但
+> `.env.example` 默认 `false`；`data/seed/*` 之外的正式语料与基准索引化仍是
+> 受控导入流程的一部分（见 §3.1）。
+
+### 4.2 尚未实现（真正的改进方向）
+
+| 改进项 | 方案 | 预期收益 |
 |--------|------|---------|
-| **中文 Embedding 模型** | 已完成（历史改进记录：all-MiniLM-L6-v2 → bge-large-zh-v1.5，2026-06） | 已落地 |
-| **Query 改写** | 用 LLM 将口语化查询改写为标准检索语句 | 长查询命中率提升 |
-| **结果重排序（Rerank）** | 检索 Top-10 后用 Cross-Encoder 重排序取 Top-3 | Precision@3 提升 |
-
-### 4.2 中期改进（效果显著）
-
-| 改进项 | 方案 | 预期提升 |
-|--------|------|---------|
-| **Hybrid Search** | 向量检索 + BM25 关键词检索，加权融合 | 覆盖语义和精确匹配 |
-| **文档分块（Chunking）** | 长文档按段落/语义切分，提高检索粒度 | 长文档命中率提升 |
-| **Metadata 过滤** | 检索前先用 intent 过滤 collection，减少干扰 | Precision 提升 |
+| **文档分块（Chunking）策略** | 长文档按段落/语义切分，提高检索粒度 | 长文档命中率 |
+| **Hard Negative 训练集** | 把人工客服标记的误检案例回流，微调重排器 | 重排净贡献 |
+| **多向量表示** | 同一文档生成 dense + lexical 两套表示再融合 | 专有名词召回 |
+| **分母口径治理自动化** | 三套 population 已实现；把 corpus 覆盖率纳入 preflight 硬 gate | 减少 GOLD_NOT_INDEXED 噪声 |
 
 ### 4.3 已有的降级策略
 
@@ -296,11 +316,11 @@ artifact 使用上述结构化语义。
 
 > "评估集是 `tests/eval/rag_benchmark.json`，当前为 649 条测试查询（数量以
 > metadata 为准，2026-06-24 生成），覆盖成分知识、产品推荐、使用指导、售后、
-> 投诉五大类及难中易三级难度。评估指标用 Hit Rate@K、Recall、Precision 和 MRR。
-> 当前检索链路：查询改写 → 向量（Qdrant，bge-large-zh-v1.5）+ BM25 双通道 →
-> RRF(k=60) 融合 → bge-reranker-v2-m3 重排。历史报告（2026-06，30 条查询集）
-> 显示 Hit Rate@3 = 80.0%、MRR = 0.778；当前 649 条基准上的当前值需要用
-> `scripts/evaluate_rag.py` 重跑生成 artifact 后引用。"
+> 投诉五大类及难中易三级难度。评估指标用 Hit@K、Recall@K、Precision@K、
+> NDCG@K 和 MRR@K（multi-K：K=1/3/5/8）。当前检索链路：查询改写 → 向量（Qdrant，
+> bge-large-zh-v1.5）+ BM25 双通道 → RRF(k=60) 融合 → bge-reranker-v2-m3 重排。
+> 历史报告（2026-06，30 条查询集）显示 Hit Rate@3 = 80.0%、MRR = 0.778；当前
+> 649 条基准上的当前值需要用 `scripts/evaluate_rag.py` 重跑生成 artifact 后引用。"
 
 ### Q: "Hit Rate 不够高怎么办？"
 

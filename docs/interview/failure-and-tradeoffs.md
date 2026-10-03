@@ -12,7 +12,7 @@
 
 面试里最有说服力的不是"我做对了什么"，而是"我知道自己错在哪、以及改了什么机制"。
 
-### 10.1 flaky test 掩盖了测试前提的缺陷（并差点让我做出错误结论）
+### 0.1 flaky test 掩盖了测试前提的缺陷（并差点让我做出错误结论）
 
 **现象**：`test_worker_crash_resumes_from_postgres_checkpoint` 记录为
 "7 次 suite 跑挂 1 次"，根因不明。
@@ -176,7 +176,7 @@ checkpoint 说"从哪继续"，AgentRun 说"算第几次、要不要重试、用
 worker 切换）。
 
 **这条代价本轮真的付了**：那个 flaky test 的根因就是"把 checkpoint 存在当成了
-checkpoint 已提交"—— 混淆了两者。见 §10.1。
+checkpoint 已提交"—— 混淆了两者。见 §0.1。
 
 **Evidence**：CI VERIFIED（`test_cross_process_checkpoint.py` 验证 checkpoint 跨进程存活；
 `test_worker_checkpoint_recovery.py` 验证两者配合）。
@@ -264,8 +264,8 @@ checkpoint 已提交"—— 混淆了两者。见 §10.1。
 
 **Evidence**：`NOT_IMPLEMENTED`（有意推迟）。旧代码仅作为参考存档。
 
-**Future extension**：如果要做，从 `feat/mcp-tool-adapter-v2` 基于最新 `main` 重写，
-只提取"工具适配层"的思路，**不复用**旧 runtime / HITL 实现。
+**Future extension**：如果要做，从当前 `main` 重新起一条分支实现"工具适配层"，
+只借鉴适配思路，**不复用**旧 runtime / HITL 实现。
 且 MCP 工具必须默认视为高风险（走 §8 的两道防线）。
 
 ---
@@ -283,13 +283,18 @@ checkpoint 已提交"—— 混淆了两者。见 §10.1。
 | 项 | 状态 | 缺什么 |
 |---|---|---|
 | 生产环境整体行为 | NOT_VERIFIED | 生产集群 |
-| 真实 ERP 写操作 | NOT_MEASURED | 真实 ERP 接口（当前 Mock） |
-| 649-query RAG 指标 | NOT_MEASURED | provider 认证（HTTP 401，本轮已复测确认） |
+| 真实 ERP 写操作 | NOT_VERIFIED | 真实 ERP 接口（当前 Mock；副作用验证走确定性 staging 工具） |
+| 649-query RAG 正式指标 | NOT_VERIFIED | provider 认证（HTTP 401，本轮已复测确认） |
 | 生产延迟 P50/P95/P99 | NOT_MEASURED | 生产负载 artifact |
 | 缓存命中率与收益 | NOT_MEASURED | 真实部署观测 |
 | 多副本长期稳定性 | NOT_VERIFIED | 长跑压测 |
 | Queue backlog 行为 | NOT_VERIFIED | 背压压测 |
 | K8s 弹性伸缩 | NOT_VERIFIED | 未进入主线 |
+
+> 术语口径：`NOT_VERIFIED` = 该命题当前**没有**支持它的 artifact；
+> `NOT_MEASURED` = 该量纲的**数值**未采集到。两者的完整 canonical 清单见
+> [docs/evaluation/production-evidence.md](../evaluation/production-evidence.md)，
+> 不要在本文档另立一套口径。
 
 **替代的是什么**：**CI VERIFIED + 可复现的 artifact**。
 每个声称"已验证"的能力都有对应命令和产出文件。这是本项目在没有生产环境时
@@ -311,23 +316,33 @@ checkpoint 已提交"—— 混淆了两者。见 §10.1。
 1. **全仓 lint/mypy 清理会产生巨大的 diff**，与本轮目标（可信度、可解释性）
    无关。100 个文件的格式改动会淹没真正的变更，review 成本极高，
    也让"这次改了什么"变得不可读。
-2. **mypy 全仓清理可能需要改类型标注甚至改逻辑**。179 个错误里有一部分
+2. **mypy 全仓清理可能需要改类型标注甚至改逻辑**。历史错误里有一部分
    反映真实的设计问题（比如 `ERPProtocol | None` 的 union-attr 意味着
    某处可能在 ERP 未初始化时调用）。把它们改成"类型通过"而不是"行为正确"，
    是**用类型系统掩盖 bug**。
-3. **历史债本身不阻塞本轮功能**。`mypy core/telemetry.py` 等 changed files 是 clean 的。
+3. **历史债本身不阻塞本轮功能**。本轮改动的文件是 clean 的。
 
 **当前状态（必须诚实报告，不粉饰）**：
 
-- **repo-wide Ruff: NOT clean**（历史 findings，未在本轮清理）；
-- **repo-wide mypy: NOT clean**（本轮实测 ~149 errors；
-  CLAUDE.md 中记录的历史数字是 179，本轮因新增代码的 `Any` 标注略有下降，
-  但**仍然是 NOT clean**）；
+- **repo-wide Ruff: NOT clean**（历史 findings，未清理）；
+- **repo-wide mypy: NOT clean**（存在历史类型错误）；
 - **changed files: ruff clean + mypy clean**。
 
-**本轮的实际影响**：新增的 `Any` 标注（`llm/client.py` 的 `payload: dict[str, Any]`、
-`ToolDefinition` 的 `tool_calls: list[Any] | None`）顺手消掉了几个**既有** mypy 错误。
-这是副作用，不是目标 —— 目标是"不新增错误"。
+> **本文档刻意不写错误条数。** 全仓 `ruff` / `mypy` 的 finding 数会随每一次
+> 提交漂移，且没有任何自动生成机制把它同步回文档；写死一个数字只会变成
+> 下一次 review 要纠正的假事实。要现场取数就跑命令，结论以输出为准：
+>
+> ```bash
+> make lint                                    # repo-wide ruff
+> mypy . --ignore-missing-imports              # repo-wide mypy
+> mypy <changed-paths> --ignore-missing-imports  # 本次改动范围
+> ```
+>
+> 唯一的**稳定**事实是上面三行定性结论（clean / not clean），不是任何计数。
+
+**本轮的实际影响**：新增的 `Any` 标注（`llm/client.py` 的
+`CustomResponse.tool_calls: list[Any] | None` 与 `payload: dict[str, Any]`）顺手消掉了
+几个**既有** mypy 错误。这是副作用，不是目标 —— 目标是"不新增错误"。
 
 **Future extension**：单独开一个 PR 分批清理，按模块分组，每个 PR 都保持测试绿。
 优先修 `union-attr` 类（它们可能是真 bug），优先修 `return-value` 类。
@@ -384,7 +399,11 @@ checkpoint 已提交"—— 混淆了两者。见 §10.1。
 > 也没有换个模型假装可比 —— 换了就与历史实验不可比。
 >
 > 第二个是**快路径的 HITL 边界只靠约定没有强制**：如果快路径触发了高风险工具，
-> 理论上没有 run 状态承载审批。正确的修法是在工具层检查 durable run 上下文，
-> 不在就拒绝高风险副作用。这个缺口我定位清楚了，只是本轮没改。
+> 理论上没有 run 状态承载审批。代码上就是这个缺口 ——
+> `core/hitl/gate.py::should_propose_approval` 在 `get_current_run_id()` 为空时
+> 返回 `False`（快路径无 durable checkpoint，拦了也无法挂起/恢复），于是
+> `tools/tool_registry.py` 直接执行 handler：既没有审批记录，也没有 ledger key。
+> 正确的修法是在工具执行入口检查 durable run 上下文，不在就拒绝高风险副作用。
+> 这个缺口我定位清楚了，但**当前 `main` 尚未修**——说"已修"就是伪造证据。
 
 这个回答同时展示了：知道边界、区分证据等级、不粉饰、并且知道怎么修。

@@ -10,9 +10,17 @@
 > - Tool Result Context Engineering：确定性压缩、Top-K/budget、历史 compaction、专用 compressor、可选 offload/recovery、可选 semantic summary、scope-safe exact reuse。
 > - RAG：rewrite/filter → vector + BM25 → retrieval contract → RRF 融合 → rerank → context；BM25 lifecycle 与确定性 Qdrant point ID/迁移见 `rag/`。
 > - Provider authentication、provider token/billing、生产延迟均属 `NOT_VERIFIED` / `NOT_MEASURED`，除非链接当前带 provenance 的 artifact。
+> - **Tracing 证据分四层，不得混说**：应用语义 span（`core/telemetry.py`）= IMPLEMENTED / LOCALLY VERIFIED；
+>   真实 OTLP Collector 传输链路（`make otel-collector-smoke`）= LOCALLY VERIFIED；
+>   **持久化 / 可查询 trace 后端（Jaeger / Langfuse / Tempo 等）= `NOT_VERIFIED`**
+>   （被验证的 Collector 只有 `debug` exporter：不存储、无 retention、无查询 UI、无 dashboard）；
+>   生产 trace 传播 / 真实流量 = `NOT_VERIFIED`。`OPENTELEMETRY_ENABLED` / `OTEL_ENABLED`
+>   在 `.env.example` 中仍默认 `false`。详见
+>   [当前事实入口](docs/reference/current-state.md) 与
+>   [生产证据边界](docs/evaluation/production-evidence.md)。
 > - 统一多模态入口 `/api/chat/multimodal` 支持自动文件类型路由。
 > - **真实上线结论**：当前不能直接宣称"已完成上线验收"；请先逐项执行 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)。
-> - **依赖服务**：生产部署仍需 PostgreSQL + Redis + Qdrant，且必须提供真实密钥与域名配置。
+> - **依赖服务**：生产部署需 PostgreSQL（业务 + checkpoint）+ Redis（session / cache / broker / 锁 / 事件流）+ Qdrant，外加独立的 Celery worker 进程，且必须提供真实密钥与域名配置。
 >
 > 历史版本（v5.0–v6.3）逐条变更记录见 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)；README 不再展开逐版本历史。
 
@@ -492,7 +500,7 @@ Failure Model、Mermaid 架构图）、
 - A/B 测试 prompt 变体分配（SHA-256 确定性分流）+ Prompt 版本管理（DB 持久化 + 60s TTL 缓存）
 - SSE 真流式输出（检测 `stream_callback` 自动切换）
 - 指数退避重试（仅瞬态错误：`ConnectionError`/`TimeoutError`/`OSError`）
-- 对话历史 `<untrusted-data>` 标签隔离（防 prompt 注入）+ 输出层注入泄露正则检测（12 条）
+- 对话历史「不可信数据」边界标记隔离（`[不可信数据 - …]`，防 prompt 注入）+ 输出层注入泄露正则检测（12 条）
 - 协议化依赖注入（`core/protocols.py`：LLMProtocol、ERPProtocol、KnowledgeBaseProtocol 等）
 - 多模态 Vision LLM 自动选择（`_get_effective_llm` 根据 state.has_multimodal 切换）
 - Token 配额检查（`token_quota.py`：每日/每月用户级 Token 限额 + Redis 持久化 + 内存回退）
@@ -660,7 +668,7 @@ Thought（推理当前需要什么信息）
 | **CSRF** | 双重 Cookie 提交模式（`csrf_token` cookie + `X-CSRF-Token` header），`hmac.compare_digest` 比较 |
 | **限流** | 通用 60 req/min/IP + 登录 5次/5min + 注册 3次/h + Redis 滑动窗口优先，内存回退 |
 | **输入验证** | Pydantic 请求模型 + `MAX_QUERY_LENGTH=2000` + 控制字符 + HTML 标签净化（HTML 实体解码防绕过） |
-| **注入防护** | ERP 白名单消毒 + 对话历史 `<untrusted-data>` 隔离 + 输出层系统提示泄露检测 |
+| **注入防护** | ERP 白名单消毒 + 对话历史「不可信数据」边界标记隔离 + 输出层系统提示泄露检测 |
 | **错误脱敏** | 工具执行错误返回通用消息，详细异常仅写服务端日志 |
 | **安全头** | HSTS / CSP（`script-src` 用 nonce、无 `unsafe-inline`；`style-src` 仍为 `'self' 'unsafe-inline'`）/ X-Frame-Options / X-Content-Type-Options / Referrer-Policy / Permissions-Policy |
 | **会话安全** | UUID 格式校验 + HMAC 会话令牌签名（可绑定客户端指纹）+ 用户级会话所有权隔离 |
@@ -684,8 +692,16 @@ Thought（推理当前需要什么信息）
 
 - Python 3.10+
 - Docker & Docker Compose（生产必填）
-- Redis 7（生产必填，用于 Session / Cache / JWT 黑名单持久化）
-- PostgreSQL 15（生产推荐，开发可使用 SQLite）
+- Redis 7（生产必填：Session / Cache / JWT 黑名单 / Celery broker / per-thread 锁 / Run 事件流）
+- PostgreSQL 15（生产必填：AgentRun 真相源 **+** LangGraph checkpoint 后端
+  `LANGGRAPH_CHECKPOINT_BACKEND=postgres`；开发可使用 SQLite）
+- Qdrant（生产必填：向量库 + L2 语义缓存）
+- Celery worker 进程（生产必填：异步 Run 路径要求 `AGENT_EXECUTION_MODE=queued`
+  / `AGENT_RUN_DISPATCH=celery`，`inline` 仅开发/测试；Compose 中为独立 `worker` service）
+
+> 凭据类配置（`JWT_SECRET` ≥32 字符 / `SESSION_TOKEN_SECRET` / `API_KEY` /
+> embedding 与 reranker 的 provider key）在生产缺失时**启动即失败**，不是 warning。
+> 完整清单见 [生产准备度检查清单](docs/checklists/production-readiness-checklist.md)。
 
 ### 前端技术选型说明
 
@@ -845,7 +861,7 @@ make env-check   # 查看当前环境配置摘要
 
 ## 📡 API 参考
 
-| 类别 | 端点数 | 说明 |
+| 类别 | OpenAPI 操作数 | 说明 |
 |------|--------|------|
 | 聊天 | 9 | REST + SSE 流式 + 多模态图片 + 图片流式 + 语音 + 文件上传 + 统一多模态入口 + TTS + TTS 声音列表 |
 | 会话 | 6 | 列表 / 详情 / 删除 / Checkpoint / 历史 / 消息 |
@@ -858,16 +874,19 @@ make env-check   # 查看当前环境配置摘要
 | 异步 Run | 5 | 创建 / 查询 / 取消 / 事件流（SSE）/ DLQ 列表 |
 | 人工审批 | 4 | 待审批队列 / 按 run 查询 / 审批详情 / 决策（approve·edit·reject） |
 | 前端 | 5 | 聊天页 / 登录页 / 管理后台 / Widget / 主题预览 |
-| WebSocket | 1 | 实时双向聊天 `/ws/chat` |
+| WebSocket | 1 | 实时双向聊天 `/ws/chat`（**不在** OpenAPI 内） |
 
-**合计：`docs/openapi.json` 快照由 `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成；
-HTTP 路径数 / 操作数**不在此手写**（会随端点增删漂移），以
-`python3 scripts/project_facts.py` 的 `openapi_path_count` 与
-`make openapi-check` 的输出为准；`docs/reference/current-state.md` 记录生成出的当前值，
-`docs/reference/api-reference.md` 携带机器可校验的 `<!-- openapi-surface: ... -->`
-锚点。另有 1 个 WebSocket `/ws/chat`（不在 OpenAPI 内）。
-这些数字由生成工具产生并由 `make openapi-check` +
-`python3 scripts/audit_doc_consistency.py` 校验，**不要手工修改**。**
+> 上表是**按功能分组的 OpenAPI operation 快照**（一个 path 可有多个 operation，
+> 例如 `/api/sessions/{session_id}` 同时有 GET 与 DELETE），用于快速定位功能面；
+> 它**不是**路径数，也没有自动生成机制，因此**不要**把它当作权威口径或直接引用。
+> 权威 HTTP 路径数 / 操作数：`docs/openapi.json` 快照由
+> `python3 scripts/generate_openapi.py` 从 `app.openapi()` 生成，
+> 以 `python3 scripts/project_facts.py` 的 `openapi_path_count` 与
+> `make openapi-check` 的输出为准；`docs/reference/current-state.md` 记录生成出的
+> 当前值，`docs/reference/api-reference.md` 携带机器可校验的
+> `<!-- openapi-surface: ... -->` 锚点。这些数字由生成工具产生并由
+> `make openapi-check` + `python3 scripts/audit_doc_consistency.py` 校验，
+> **不要手工修改**。
 
 > 完整 API 文档：Swagger UI http://localhost:8000/docs · 详细端点列表：[docs/reference/api-reference.md](docs/reference/api-reference.md)
 
@@ -902,7 +921,7 @@ customer-service-ai-agent/
 ├── deploy/compose/    # Docker Compose 变体（base / prod / override / canary / scale / monitoring）
 ├── tests/             # 测试套件（pytest unit/integration/e2e/stress + eval 资产；数量以 pytest --collect-only -q 为准）
 ├── docs/              # 文档（active/archive/decisions + ADR）
-├── alembic/           # 数据库迁移脚本（3 个版本）
+├── alembic/           # 数据库迁移脚本（按 `ls alembic/versions/` 为准；含分布式 runtime / 工具幂等 / 人工审批）
 ├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
 ├── monitoring/        # Prometheus + Grafana + Alertmanager + Loki
 ├── loki/              # 日志聚合配置（Loki + Promtail）
