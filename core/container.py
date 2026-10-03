@@ -720,13 +720,19 @@ class ServiceContainer:
         成功，回滚函数本身不返回任何「成功」信号。
         """
         # 1. 先撤工具：让 registry 不再暴露指向即将关闭的 adapter 的 handler。
-        for name in tool_names:
-            try:
-                self.tool_registry.unregister(name)
-            except Exception as e:
-                logger.warning(
-                    "MCP 初始化回滚：注销工具 %s 失败: %s", name, type(e).__name__
-                )
+        #    走到这里必然已有工具注册成功，所以 registry 非 None（调用方
+        #    ``_initialize_mcp`` 开头已判过）；仍显式收窄，因为 ``tool_registry`` 的
+        #    声明类型是 Optional，回滚又是 best-effort 路径，不该依赖调用方的前置
+        #    条件来保证不抛 AttributeError。
+        registry = self.tool_registry
+        if registry is not None:
+            for name in tool_names:
+                try:
+                    registry.unregister(name)
+                except Exception as e:
+                    logger.warning(
+                        "MCP 初始化回滚：注销工具 %s 失败: %s", name, type(e).__name__
+                    )
         if tool_names:
             logger.warning(
                 "MCP 初始化回滚：已注销本轮新增的 %d 个工具 %s", len(tool_names), tool_names
