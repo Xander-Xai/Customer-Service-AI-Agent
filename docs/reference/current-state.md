@@ -34,10 +34,23 @@
 - Metric family：Hit@K、Recall@K、Precision@K、NDCG@K、MRR@K（multi-K：1/3/5/8）。
 - Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
   `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
-- 当前已提交的 preflight evidence（
-  `artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，v1 schema，
-  原样保留）显示 provider authentication blocker：embedding 与 reranker 探针 401，
-  语料导入与正式评测随之阻塞。
+- **最新已提交的 preflight evidence**：
+  `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
+  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
+  `status: BLOCKED`）。blocker 语义按 v2 结构化记录，**必须分开表述**：
+  - `primary_blocker: EMBEDDING_PROVIDER_AUTH`（embedding 探针 HTTP 401，
+    `blocks_corpus_import: true`）是**根因**；
+  - `VECTOR_INDEX_EMPTY`（评测集合 0 points）是 **downstream 症状**，
+    `caused_by: EMBEDDING_PROVIDER_AUTH`；因 BM25 索引由 Qdrant 重建，
+    连 `bm25_only` 也被它阻塞；
+  - `RERANKER_PROVIDER_AUTH`（reranker 探针 HTTP 401，`silent_fallback`）是
+    **`blocking: false`**，只阻塞 `hybrid_rerank`，**不得**据此声称其它实验
+    也被 reranker 阻塞。
+  该 artifact 自述 `formal evaluation not run; no metrics generated`——
+  `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
+  **不是** 649-query 正式评测完成，正式指标仍为 `NOT_VERIFIED`。
+  上一版 artifact（`preflight-20260929T191128Z`，v1 schema，顶层
+  `status: BLOCKED_VECTOR_INDEX`）作为历史记录原样保留，不回填。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、
   blocker 语义与评测状态：[docs/reference/rag-evaluation.md](rag-evaluation.md)。
   canonical 命令链：`make rag-eval-import` → `make rag-eval-649-preflight` →
