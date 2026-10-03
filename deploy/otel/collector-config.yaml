@@ -1,0 +1,40 @@
+# OpenTelemetry Collector — traces-only pipeline for the local OTLP smoke.
+#
+# Scope is deliberately narrow: prove that the repository's existing semantic
+# spans survive the real SDK exporter + network + a real Collector. This file
+# therefore has exactly one pipeline (traces) and one exporter (debug).
+#
+# What this does NOT provide, and must never be described as providing:
+#   - no persistent / queryable trace storage (no Jaeger, Langfuse, Tempo)
+#   - no metrics or logs pipeline
+#   - no dashboard, retention or alerting
+#   - no production deployment
+#
+# The debug exporter prints received spans to the collector's own stdout, which
+# is what the smoke verifier inspects. Readiness uses the zpages servicez
+# extension, not a sleep.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+extensions:
+  # Deterministic readiness only. `servicez` answers on a real HTTP endpoint the
+  # smoke verifier polls, so "collector is up" is an observed fact rather than a
+  # sleep-based assumption.
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
