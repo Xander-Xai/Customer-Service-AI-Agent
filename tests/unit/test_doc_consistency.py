@@ -1318,6 +1318,136 @@ def test_historical_audit_claim_is_excluded_from_guard_v(tmp_repo: Path):
     assert [p.relative_to(tmp_repo) for p in docs] == [Path("docs/design/live.md")]
 
 
+# ------------------------------------------------------------- Guard Z
+
+
+def _make_semantic_tracing_wired(root: Path) -> None:
+    """Emit one span literal per production call site.
+
+    Mirrors SEMANTIC_TRACING_CALL_SITES so the guard's truth source is exercised
+    as code (span literals in call sites), not as a hardcoded verdict. Deleting
+    a call site must turn the guard off — which is the intended fail-open
+    direction, and the reason these tests pin the mapping.
+    """
+    write(root, "runtime/executor.py", 'x = span("csai.agent.execute")\n')
+    write(root, "rag/qdrant_knowledge_base.py", 'x = span("csai.rag.retrieve")\n')
+    write(root, "llm/client.py", 'x = span("csai.llm.chat_completion")\n')
+    write(root, "tools/tool_registry.py", 'x = span("csai.tool.execute")\n')
+
+
+def test_wired_semantic_tracing_called_not_implemented_is_detected(tmp_repo: Path):
+    """The exact drift PR #33 left behind: spans wired in code, CURRENT doc says
+    ``TODO — not implemented``. This is the regression the guard exists for."""
+    _make_semantic_tracing_wired(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "| **Distributed tracing / LLM tracing** | **`TODO` — not implemented** | "
+        "OpenTelemetry wiring exists as a configurable seam but is not enabled |\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert any("semantic-tracing drift" in e for e in errors)
+
+
+def test_chinese_missing_marker_for_tracing_is_detected(tmp_repo: Path):
+    """Guard must not key on one English sentence — the phrasing is not the point."""
+    _make_semantic_tracing_wired(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "| 分布式追踪 / LLM 追踪 | **TODO — 未实现** | 仅有可选接线点 |\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert any("semantic-tracing drift" in e for e in errors)
+
+
+def test_semantic_tracing_derives_from_code_not_a_fixed_verdict(tmp_repo: Path):
+    """Same sentence, no spans in code -> no error. Proves the guard reads the
+    call sites instead of hardcoding that tracing exists."""
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "| **Distributed tracing / LLM tracing** | **`TODO` — not implemented** |\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+    assert audit.wired_semantic_span_names(root=tmp_repo) == frozenset()
+
+
+def test_three_level_evidence_split_passes(tmp_repo: Path):
+    """The intended replacement wording: one IMPLEMENTED claim plus two
+    NOT_VERIFIED claims. All three live on the same lines as tracing nouns."""
+    _make_semantic_tracing_wired(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "| Application-level semantic tracing | IMPLEMENTED / LOCALLY VERIFIED | "
+        "`core/telemetry.py` + unit tests |\n"
+        "| Live OTLP collector / trace backend | NOT_VERIFIED | no exporter run |\n"
+        "| Production trace propagation | NOT_VERIFIED | no production artifact |\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_remaining_live_backend_work_is_not_treated_as_drift(tmp_repo: Path):
+    """The honest remaining backlog (validate against a live collector) names
+    tracing and OTLP but claims nothing missing, so it must stay allowed."""
+    _make_semantic_tracing_wired(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "- [ ] Validate semantic spans against a live OTLP collector / trace backend\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_missing_marker_without_tracing_noun_is_not_flagged(tmp_repo: Path):
+    """Scoping: an unrelated TODO must not be attributed to tracing."""
+    _make_semantic_tracing_wired(tmp_repo)
+    doc = write(
+        tmp_repo,
+        "docs/evaluation/production-evidence.md",
+        "| Fencing token for the per-thread lock | TODO — not implemented | no forced abort |\n",
+    )
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_real_repo_has_semantic_tracing_spans_wired():
+    """Pins the truth source against the actual checkout: the span names the
+    documentation claims exist really are emitted by the production call sites."""
+    names = audit.wired_semantic_span_names(root=REAL_ROOT)
+    assert {
+        "csai.agent.execute",
+        "csai.agent.execute.resume",
+        "csai.rag.retrieve",
+        "csai.llm.chat_completion",
+        "csai.tool.execute",
+    } <= names
+
+
+def test_historical_tracing_claim_is_excluded_from_guard_z(tmp_repo: Path):
+    _make_semantic_tracing_wired(tmp_repo)
+    write(
+        tmp_repo,
+        "docs/reports/audit/2026-01-01-snapshot.md",
+        "> HISTORICAL AUDIT SNAPSHOT\n> 当时分布式追踪未实现。\n",
+    )
+    write(tmp_repo, "docs/evaluation/live.md", "干净的当前文档。\n")
+    docs = audit.discover_docs(root=tmp_repo)
+    errors: list[str] = []
+    audit.check_semantic_tracing_drift(docs, errors, root=tmp_repo)
+    assert errors == []
+
+
 # ------------------------------------------------------------- Guard W
 
 

@@ -100,6 +100,24 @@ python3 scripts/audit_doc_consistency.py
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。
+- **应用语义 tracing**（`core/telemetry.py` + 基础设施 `core/tracing.py`）同样是独立
+  机制，与 Session Memory / LangGraph Checkpoint / Response Cache / Tool Result Store
+  都不是同一个概念。span 语义已接线且本地验证：
+  `csai.agent.execute` / `csai.agent.execute.resume`（`runtime/executor.py`）、
+  `csai.rag.retrieve` + `rag.stage.*` event（`rag/qdrant_knowledge_base.py`）、
+  `csai.llm.chat_completion`（`llm/client.py`）、`csai.tool.execute`
+  （`tools/tool_registry.py`）；属性白名单 + 敏感词过滤，任何 OTel 失败都降级为
+  no-op 且不改变业务语义。**三个层级必须分开表述**：
+  - 应用语义 tracing：**IMPLEMENTED / LOCALLY VERIFIED**（`tests/unit/test_telemetry.py`）；
+  - 真实 OTLP collector / trace 后端（Collector / Langfuse / Jaeger 等）：
+    `NOT_VERIFIED`（`OPENTELEMETRY_ENABLED` / `OTEL_ENABLED` 在 `.env.example`
+    中默认 `false`，无 exporter 可达性运行与 span 捕获 artifact）；
+  - 生产 trace 传播 / 真实流量：`NOT_VERIFIED`——不得写成 "production-ready
+    tracing" / "生产已验证的可观测性"。
+  两个边界随声明一起传播：审批前后两段**不承诺**是同一个 span（用 `run_id` /
+  `approval_id` 关联）；属性是白名单而非采样（raw prompt、用户原文、召回文档、
+  工具参数、PII、凭据一律不进 trace）。详见
+  [docs/evaluation/production-evidence.md](../evaluation/production-evidence.md)。
 
 ## 分布式 Agent Runtime（异步 Run + Celery Worker）
 
