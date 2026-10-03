@@ -1632,6 +1632,116 @@ def check_runtime_future_claims(docs: list[Path], errors: list[str], root: Path 
                     )
 
 
+# ---------------------------------------------------------------------------
+# Guard Z: application-level semantic tracing must not be described as missing.
+#
+# Truth source: the span names actually passed to the telemetry helper at the
+# production call sites. Nothing here encodes a verdict — if the call sites stop
+# emitting spans, the guard goes quiet instead of demanding a doc rewrite.
+# ---------------------------------------------------------------------------
+
+#: Production call sites, i.e. the places that would emit a semantic span.
+SEMANTIC_TRACING_CALL_SITES: tuple[str, ...] = (
+    "runtime/executor.py",
+    "rag/qdrant_knowledge_base.py",
+    "llm/client.py",
+    "tools/tool_registry.py",
+)
+_SPAN_CALL_RE = re.compile(r"span\(")
+_SPAN_NAME_LITERAL_RE = re.compile(r'"(csai\.[A-Za-z0-9_.]+)"')
+#: A span name is a literal in the *name* position of the call; attribute keys
+#: come after ``attributes=`` and are not span names.
+_SPAN_ARG_WINDOW = 240
+
+#: The capability noun. Deliberately noun-based rather than sentence-based: the
+#: guard must fire for any phrasing of "tracing is missing", not one fixed line.
+TRACING_CAPABILITY_RE = re.compile(
+    r"distributed\s+tracing|semantic\s+tracing|LLM\s+tracing|"
+    r"应用语义|语义\s*span|语义\s*trace|"
+    r"tracing|分布式追踪|链路追踪|追踪链路|"
+    r"OpenTelemetry|\bOTel\b|OTEL_ENABLED|OPENTELEMETRY_ENABLED",
+    re.IGNORECASE,
+)
+
+#: A "this capability is absent" marker on the same line as the tracing noun.
+TRACING_MISSING_RE = re.compile(
+    r"\bTODO\b|not\s+implemented|not\s+enabled|never\s+implemented|"
+    r"未实现|尚未实现|没有实现|无实现|待实现|完全缺失",
+    re.IGNORECASE,
+)
+
+#: Honest-status vocabulary. A line carrying any of these is stating a real
+#: evidence state, so a bare ``not implemented`` elsewhere on it is not a
+#: capability claim — e.g. "implemented / locally verified, live backend
+#: NOT_VERIFIED", or a historical snapshot line.
+#:
+#: Deliberately case-sensitive for the ASCII status vocabulary. Case-insensitive
+#: matching makes ``not implemented`` contain ``IMPLEMENTED``, which silently
+#: exempts exactly the line this guard exists to catch. The repository writes
+#: evidence states in uppercase (``NOT_VERIFIED``, ``IMPLEMENTED``); Chinese
+#: tokens have no case to lose.
+TRACING_STATUS_RE = re.compile(
+    r"IMPLEMENTED|LOCALLY VERIFIED|CI VERIFIED|VERIFIED|NOT_MEASURED|"
+    r"已实现|已落地|已具备|已启用|已接线|"
+    r"历史|快照|当时|审计时|Historical|historical|Snapshot|snapshot|"
+    r"不得|不能|勿|Never claim|never claim|尚无|无 artifact",
+)
+
+
+def wired_semantic_span_names(root: Path = ROOT) -> frozenset[str]:
+    """Span names the production call sites actually emit, read from code.
+
+    Deliberately derived: a marker file merely existing is not evidence that
+    spans are wired, so the span literals in the call-site sources are what
+    turns this guard on.
+    """
+    names: set[str] = set()
+    for rel in SEMANTIC_TRACING_CALL_SITES:
+        path = root / rel
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for match in _SPAN_CALL_RE.finditer(text):
+            window = text[match.end() : match.end() + _SPAN_ARG_WINDOW]
+            cut = window.find("attributes=")
+            if cut != -1:
+                window = window[:cut]
+            names.update(_SPAN_NAME_LITERAL_RE.findall(window))
+    return frozenset(names)
+
+
+def check_semantic_tracing_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard Z: wired semantic spans must never be documented as not implemented.
+
+    The three evidence levels are separate claims and only the first one is
+    code-backed: semantic spans are IMPLEMENTED/LOCALLY VERIFIED, a live OTLP
+    backend is NOT_VERIFIED, and production propagation is NOT_VERIFIED. This
+    guard protects the first claim; it must never be used to promote the other
+    two.
+    """
+    wired = wired_semantic_span_names(root)
+    if not wired:
+        return
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not TRACING_CAPABILITY_RE.search(line):
+                continue
+            if not TRACING_MISSING_RE.search(line):
+                continue
+            if TRACING_STATUS_RE.search(line):
+                continue
+            errors.append(
+                f"semantic-tracing drift in {rel}:{line_no} — spans "
+                f"{', '.join(sorted(wired))} are wired in "
+                f"{', '.join(SEMANTIC_TRACING_CALL_SITES)}, so application-level "
+                f"semantic tracing is IMPLEMENTED / LOCALLY VERIFIED and must not be "
+                f"described as TODO / not implemented. Separate the levels explicitly: "
+                f"semantic tracing IMPLEMENTED, live OTLP collector NOT_VERIFIED, "
+                f"production propagation NOT_VERIFIED"
+            )
+
+
 def check_docs_index_coverage(errors: list[str], root: Path = ROOT) -> None:
     """Rule W: the docs index must expose every current ADR/design/runbook for
     a shipped capability, otherwise a CURRENT doc is effectively unreachable."""
@@ -1935,6 +2045,8 @@ def main() -> int:
     check_no_v64_claim(docs, errors)
     # Distributed Agent Runtime semantic-drift guards (v4).
     check_runtime_future_claims(docs, errors)
+    # Application-level semantic tracing drift guard.
+    check_semantic_tracing_drift(docs, errors)
     check_docs_index_coverage(errors)
     check_api_reference_surface(errors)
     check_multi_worker_deployment_truth(docs, errors)
@@ -1962,7 +2074,8 @@ def main() -> int:
         f"make targets (all active docs), tracked-ignored hygiene, "
         f"negative-existence claims, stale embedding-fallback semantics, "
         f"latency absolutes, production framing, env references, "
-        f"runtime future-claims, docs-index coverage, API-reference surface, "
+        f"runtime future-claims, semantic-tracing drift, docs-index coverage, "
+        "API-reference surface, "
         f"multi-worker deployment truth, root-level snapshot hygiene, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
