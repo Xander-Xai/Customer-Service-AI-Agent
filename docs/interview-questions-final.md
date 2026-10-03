@@ -170,7 +170,7 @@
 > - all_queries / retrieval_eligible / full_gold_covered 为什么都要？→ 系统级端到端 vs retriever 能力 vs 算法纯净口径；引用必须注明 population
 > - GOLD_NOT_INDEXED 怎么记账？→ 主口径计 0 + 逐查询标记，不静默丢弃
 > - provider 401 为什么 fail closed？凭据失效时"继续跑"会产出无意义指标并可能被静默降级掩盖
-> - reranker silent fallback 为什么危险？preflight 探针识别 silent_fallback = 不产出假阳性；两实验结果完全一致本身就是重排未生效的证据
+> - reranker 降级为什么必须显式？运行时保留可用性兜底（回退原排序），但 preflight 探针与 runtime 共用同一个 `RerankOutcome`：探针读 `applied/degraded/reason/http_status`（HTTP 200 但响应不可用也算 `invalid_response`），不产出假阳性；两实验结果完全一致本身就是重排未生效的证据
 > - 数字的 provenance：artifact 带 git SHA + benchmark sha256，基准变了历史数不能直接比
 
 **Q6 （备选）** A/B 测试 prompt 变体分配怎么做的？SHA-256 确定性分流怎么保证同一个用户永远看到同一个变体？变体效果怎么对比？

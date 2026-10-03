@@ -164,7 +164,8 @@ Cross-encoder 把 query 和 doc 拼在一起过一遍模型，能捕捉细粒度
 `provider_called`），`reason` 是有界枚举（`unavailable` / `timeout` /
 `http_error` / `provider_error` / `invalid_response`）。关键在于 outcome 来自
 **本次调用的返回值**，而不是实例上的 `last_error_status` —— 后者是共享可变状态，
-并发请求下会把 B 的失败算到 A 头上（`last_error_status` 只保留给 preflight 诊断）。
+并发请求下会把 B 的失败算到 A 头上。它现在**仓库内已无消费者**：runtime 与
+preflight 探针都只用 `RerankOutcome`（该字段仅为向后兼容保留）。
 
 因此"真的重排过"和"只是回退了"现在可以被区分：
 
