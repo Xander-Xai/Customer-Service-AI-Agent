@@ -181,8 +181,35 @@ This is the current evidence contract, not a claim that production has been vali
 | **Realtime fast path (`/api/chat`) under HITL** | **Not covered by design** | The fast path has no run context, so `core/hitl/gate.py` does not gate it and no approval record is produced. Never describe `/api/chat` as HITL-protected |
 | **Proactive approval notification** (webhook / IM push to reviewers) | **`TODO` — not implemented** | Approvals are discoverable only via `GET /api/approvals?status=PENDING`; an unattended approval silently expires at TTL |
 | **Approval SLA / human-efficiency** | **`NOT_MEASURED`** | `agent_approval_wait_seconds` has no production distribution |
-| **Distributed tracing / LLM tracing** | **`TODO` — not implemented** | OpenTelemetry wiring exists as a configurable seam but is not enabled; no trace-propagation evidence exists |
+| **Application-level semantic tracing** (agent / RAG / LLM / tool spans) | **IMPLEMENTED / LOCALLY VERIFIED** — `core/telemetry.py` + `tests/unit/test_telemetry.py` | Proves the span contract only (whitelisted attributes, degrade-to-no-op, exceptions never swallowed). **Not** a trace-backend claim |
+| **Live OTLP collector / trace backend** (Collector, Langfuse, Jaeger, …) | **`NOT_VERIFIED`** | No exporter-reachability run, no span-capture artifact. `OPENTELEMETRY_ENABLED` / `OTEL_ENABLED` ship `false` in `.env.example` |
+| **Production trace propagation / real traffic** | **`NOT_VERIFIED`** | Never write "production-ready tracing" / "production verified tracing" / "end-to-end production observability" — no such artifact exists |
 | FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
+
+### What the semantic tracing claim may and may not cover
+
+Wired at these call sites (span names read from code, not from this document):
+
+| Span | Call site |
+|---|---|
+| `csai.agent.execute` / `csai.agent.execute.resume` | `runtime/executor.py` (one span per execution attempt) |
+| `csai.rag.retrieve` + `rag.stage.*` events | `rag/qdrant_knowledge_base.py` |
+| `csai.llm.chat_completion` | `llm/client.py` (one span per logical call, retries included) |
+| `csai.tool.execute` | `tools/tool_registry.py` |
+
+Two boundaries travel with the claim:
+
+- **Resume correlation is not one span.** A run may sit in `WAITING_APPROVAL` until its
+  TTL and the decision arrives in a different HTTP request, so the pre-pause and
+  post-resume segments are separate traces correlated by `run_id` / `approval_id`
+  (see the `core/telemetry.py` module docstring).
+- **Attributes are a whitelist, not a sample.** Raw prompts, user text, retrieved
+  documents, tool arguments, PII and credentials never reach a trace
+  (`ALLOWED_ATTRIBUTES` + `FORBIDDEN_SUBSTRINGS`, pinned by unit tests).
+
+Remaining tracing work is the evidence layer, not the span layer: validate the spans
+against a live OTLP collector, capture provenance-bearing trace evidence, and validate
+propagation under real deployment traffic.
 
 Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,
 `python3 scripts/benchmark_tool_result_cache_reuse.py`, and deterministic
