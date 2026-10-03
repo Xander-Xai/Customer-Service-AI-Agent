@@ -1,0 +1,8 @@
+{
+  "setup_tracing": true,
+  "opentelemetry_enabled": "true",
+  "otel_enabled": "true",
+  "otel_exporter_otlp_endpoint": "http://127.0.0.1:4317",
+  "force_flush_success": true,
+  "shutdown_ok": true
+}

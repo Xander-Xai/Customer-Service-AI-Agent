@@ -120,13 +120,23 @@ python3 scripts/audit_doc_consistency.py
   `csai.rag.retrieve` + `rag.stage.*` event（`rag/qdrant_knowledge_base.py`）、
   `csai.llm.chat_completion`（`llm/client.py`）、`csai.tool.execute`
   （`tools/tool_registry.py`）；属性白名单 + 敏感词过滤，任何 OTel 失败都降级为
-  no-op 且不改变业务语义。**三个层级必须分开表述**：
+  no-op 且不改变业务语义。**四个层级必须分开表述**：
   - 应用语义 tracing：**IMPLEMENTED / LOCALLY VERIFIED**（`tests/unit/test_telemetry.py`）；
-  - 真实 OTLP collector / trace 后端（Collector / Langfuse / Jaeger 等）：
-    `NOT_VERIFIED`（`OPENTELEMETRY_ENABLED` / `OTEL_ENABLED` 在 `.env.example`
-    中默认 `false`，无 exporter 可达性运行与 span 捕获 artifact）；
+  - 真实 OTLP Collector 传输链路（SDK → `OTLPSpanExporter` → 网络 → 真实
+    Collector）：**LOCALLY VERIFIED**（`make otel-collector-smoke`，真实
+    `otel/opentelemetry-collector:0.162.0`，OTLP gRPC；证据
+    `artifacts/observability/otel-collector-20261003T040014Z/report.json`，
+    schema `otel-collector-evidence/v1`，`status: VERIFIED_LOCAL`，5 个 semantic span
+    全部到达 Collector）；
+  - 持久化 / 可查询 trace 后端（Jaeger / Langfuse / Tempo 等）：`NOT_VERIFIED`
+    ——被验证的 Collector 只有 `debug` exporter，不存储、无 retention、无查询 UI、
+    无 dashboard。「Collector 收到了 trace」**不等于**「有 trace 后端」；
   - 生产 trace 传播 / 真实流量：`NOT_VERIFIED`——不得写成 "production-ready
-    tracing" / "生产已验证的可观测性"。
+    tracing" / "生产已验证的可观测性"。`OPENTELEMETRY_ENABLED` / `OTEL_ENABLED`
+    在 `.env.example` 中仍默认 `false`。
+  Collector 那一腿**不覆盖**真实 Agent → RAG → LLM → tool 全链路：smoke 直接用
+  `core.telemetry.span` 发 span，避免为此拉起真实 LLM / Qdrant / ERP / Celery；
+  call-site 接线由 `tests/unit/test_telemetry.py` 单独覆盖。
   两个边界随声明一起传播：审批前后两段**不承诺**是同一个 span（用 `run_id` /
   `approval_id` 关联）；属性是白名单而非采样（raw prompt、用户原文、召回文档、
   工具参数、PII、凭据一律不进 trace）。详见

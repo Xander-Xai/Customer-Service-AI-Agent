@@ -182,8 +182,9 @@ This is the current evidence contract, not a claim that production has been vali
 | **Proactive approval notification** (webhook / IM push to reviewers) | **`TODO` — not implemented** | Approvals are discoverable only via `GET /api/approvals?status=PENDING`; an unattended approval silently expires at TTL |
 | **Approval SLA / human-efficiency** | **`NOT_MEASURED`** | `agent_approval_wait_seconds` has no production distribution |
 | **Application-level semantic tracing** (agent / RAG / LLM / tool spans) | **IMPLEMENTED / LOCALLY VERIFIED** — `core/telemetry.py` + `tests/unit/test_telemetry.py` | Proves the span contract only (whitelisted attributes, degrade-to-no-op, exceptions never swallowed). **Not** a trace-backend claim |
-| **Live OTLP collector / trace backend** (Collector, Langfuse, Jaeger, …) | **`NOT_VERIFIED`** | No exporter-reachability run, no span-capture artifact. `OPENTELEMETRY_ENABLED` / `OTEL_ENABLED` ship `false` in `.env.example` |
-| **Production trace propagation / real traffic** | **`NOT_VERIFIED`** | Never write "production-ready tracing" / "production verified tracing" / "end-to-end production observability" — no such artifact exists |
+| **Live OTLP collector transport** (SDK → `OTLPSpanExporter` → network → real Collector) | **Level 2 — `LOCALLY VERIFIED`** via `make otel-collector-smoke` against real `otel/opentelemetry-collector:0.162.0` over OTLP gRPC; evidence `artifacts/observability/otel-collector-20261003T040014Z/report.json` (schema `otel-collector-evidence/v1`, `status: VERIFIED_LOCAL`, tested code `ddc050e0…`, clean tree) | All 5 semantic spans (`csai.agent.execute`, `csai.agent.execute.resume`, `csai.rag.retrieve`, `csai.llm.chat_completion`, `csai.tool.execute`) were observed in the Collector's own output; `service.name` matched; synthetic privacy canary absent. Proves exporter + network + Collector **only** — the smoke emits the spans through `core.telemetry.span` rather than a real Agent/RAG/LLM/tool workflow |
+| **Persistent / queryable trace backend** (Jaeger, Langfuse, Tempo, …) | **`NOT_VERIFIED`** | The verified Collector has a single `debug` exporter: nothing is stored, no retention, no query UI, no dashboard, no alerting. "The Collector received the trace" is **not** "a trace backend exists" |
+| **Production trace propagation / real traffic** | **`NOT_VERIFIED`** | Never write "production-ready tracing" / "production verified tracing" / "end-to-end production observability" — no such artifact exists. `OPENTELEMETRY_ENABLED` / `OTEL_ENABLED` still ship `false` in `.env.example` |
 | FCR, human efficiency, real QPS | `NOT_MEASURED` unless an issue-level artifact exists | Remove from current factual claims |
 
 ### What the semantic tracing claim may and may not cover
@@ -207,9 +208,22 @@ Two boundaries travel with the claim:
   documents, tool arguments, PII and credentials never reach a trace
   (`ALLOWED_ATTRIBUTES` + `FORBIDDEN_SUBSTRINGS`, pinned by unit tests).
 
-Remaining tracing work is the evidence layer, not the span layer: validate the spans
-against a live OTLP collector, capture provenance-bearing trace evidence, and validate
-propagation under real deployment traffic.
+Remaining tracing work is the evidence layer above the span layer: a persistent/queryable
+backend, and propagation under real deployment traffic. The live-collector transport leg
+is done (`make otel-collector-smoke`); what it does **not** cover is a real
+Agent → RAG → LLM → tool workflow, because the smoke emits the spans directly through
+`core.telemetry.span` to avoid dragging in a real LLM, Qdrant, ERP and Celery run.
+Call-site wiring is covered separately by `tests/unit/test_telemetry.py`.
+
+Reproduce the collector leg with:
+
+```bash
+make otel-collector-smoke   # starts the traces-only Collector, waits for its
+                            # zpages servicez readiness endpoint, emits the spans,
+                            # force-flushes via the SDK lifecycle, asserts the
+                            # Collector received them, writes the evidence report,
+                            # then removes only the container it started
+```
 
 Safe local entry points include `python3 scripts/benchmark_tool_result_context.py`,
 `python3 scripts/benchmark_tool_result_cache_reuse.py`, and deterministic
