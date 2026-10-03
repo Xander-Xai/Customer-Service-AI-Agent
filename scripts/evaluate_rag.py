@@ -408,14 +408,97 @@ def http_status_from_exception(exc: BaseException | None, max_depth: int = 5) ->
     return None
 
 
+def probe_reranker(*, rerank_probe: bool = True) -> dict[str, Any]:
+    """Probe the reranker and report **this call's** structured facts.
+
+    Consumes the same per-call typed outcome the runtime uses
+    (``ApiReranker.rerank_with_outcome`` → ``RerankOutcome``), so
+    ``applied`` / ``degraded`` / ``reason`` / ``http_status`` /
+    ``provider_called`` are direct facts rather than an inference.
+
+    Two things this deliberately does **not** do:
+
+    - infer success from the returned list's shape (``"rerank_score" in r``).
+      That re-creates a second truth model next to ``RerankOutcome.applied``.
+    - read the instance's shared ``last_error_status`` to attribute this call.
+      It is mutable per-instance state, so the evaluation contract and the
+      production runtime must not disagree about where truth comes from.
+
+    Probe vocabulary is ``ok`` / ``degraded`` / ``failed`` / ``None``.
+    ``silent_fallback`` was the pre-v2 label for runtime behaviour that is now
+    explicit and structured; the specific cause lives in ``reason``.
+    """
+    gate: dict[str, Any] = {}
+    try:
+        from rag.reranker import create_reranker
+
+        rr = create_reranker()
+        gate["configured"] = rr.available
+        gate["model"] = rr._model
+        if rr.available and rerank_probe:
+            outcome = rr.rerank_with_outcome(
+                "透明质酸功效",
+                [
+                    {"id": "a", "content": "透明质酸保湿"},
+                    {"id": "b", "content": "防晒指数"},
+                ],
+                top_k=2,
+            )
+            applied = bool(outcome.applied)
+            degraded = bool(outcome.degraded)
+            gate["applied"] = applied
+            gate["degraded"] = degraded
+            gate["reason"] = outcome.reason_value
+            gate["provider_called"] = bool(outcome.provider_called)
+            gate["http_status"] = outcome.http_status
+            gate["probe"] = "ok" if (applied and not degraded) else "degraded"
+            if not (applied and not degraded):
+                # detail carries only the bounded reason enum. Never an
+                # exception message, provider response body, query or documents.
+                gate["detail"] = (
+                    f"reranker 探针未确认真实 rerank：reason={outcome.reason_value}"
+                    f"（仅阻塞 hybrid_rerank）"
+                )
+    except Exception as e:  # noqa: BLE001 - gate 必须记录失败而不是中断
+        gate.update(
+            {
+                "configured": False,
+                "probe": "failed",
+                "http_status": http_status_from_exception(e),
+                "error": type(e).__name__,
+            }
+        )
+    return gate
+
+
+def _reranker_verdict_is_ok(
+    *,
+    reranker_applied: bool | None,
+    reranker_degraded: bool | None,
+    reranker_probe: str | None,
+) -> bool:
+    """Did a real rerank happen? Typed facts win; the probe string is a fallback.
+
+    Keeping this in one place stops a third truth model from creeping in: the
+    gate verdict and the blocker verdict must agree on what "ok" means.
+    """
+    if reranker_applied is not None:
+        return bool(reranker_applied) and not bool(reranker_degraded)
+    return reranker_probe == "ok"
+
+
 def derive_blockers(
     *,
     embedding_configured: bool,
     embedding_probe: str | None,
     embedding_http_status: int | None,
     reranker_configured: bool = True,
-    reranker_probe: str | None,
-    reranker_http_status: int | None,
+    reranker_probe: str | None = None,
+    reranker_http_status: int | None = None,
+    reranker_applied: bool | None = None,
+    reranker_degraded: bool | None = None,
+    reranker_reason: str | None = None,
+    reranker_provider_called: bool | None = None,
     qdrant_total_points: int,
     requested_experiments: tuple[str, ...] | list[str],
 ) -> dict[str, Any]:
@@ -430,6 +513,11 @@ def derive_blockers(
     - 索引为空 + embedding 健康 → VECTOR_INDEX_EMPTY 本身是根因（待导入）
     - reranker 失败只阻塞 hybrid_rerank；不得据此阻塞
       vector_only / bm25_only / hybrid_no_rerank
+
+    reranker verdict **优先取自 typed per-call facts**
+    （``reranker_applied`` / ``reranker_degraded`` / ``reranker_reason``），
+    与 runtime 使用同一个 ``RerankOutcome`` 契约。``reranker_probe`` 仅作为
+    旧调用方与纯函数测试的兼容入口；typed facts 缺失时才回退到它。
 
     返回 {"status", "primary_blocker", "blockers"}；字段全部机器可读。
     """
@@ -489,8 +577,8 @@ def derive_blockers(
 
     if rerank_needed and (not reranker_configured or reranker_probe is None):
         # Unconfigured / unprobed must never be read as healthy: hybrid_rerank
-        # would then run through ApiReranker's silent fallback and be counted as
-        # a real rerank ablation. Blocks hybrid_rerank only.
+        # would then run without a proven rerank and be counted as a real rerank
+        # ablation. Blocks hybrid_rerank only.
         blockers.append({
             "code": "RERANKER_PROVIDER_UNAVAILABLE",
             "stage": "reranker",
@@ -502,8 +590,16 @@ def derive_blockers(
                 "不得把 probe=None 当作健康；仅阻塞 hybrid_rerank"
             ),
         })
-    elif rerank_needed and reranker_probe != "ok":
+    elif rerank_needed and not _reranker_verdict_is_ok(
+        reranker_applied=reranker_applied,
+        reranker_degraded=reranker_degraded,
+        reranker_probe=reranker_probe,
+    ):
+        # Typed facts are canonical when present: `applied` comes from the
+        # per-call outcome, never inferred from the returned list's shape and
+        # never from shared mutable state.
         reranker_auth = reranker_http_status in PROVIDER_AUTH_HTTP_STATUSES
+        reason = reranker_reason or "provider_error"
         blockers.append({
             "code": "RERANKER_PROVIDER_AUTH" if reranker_auth else "RERANKER_PROVIDER_DEGRADED",
             "stage": "reranker",
@@ -511,9 +607,11 @@ def derive_blockers(
             "blocking": False,
             "blocks_experiments": ["hybrid_rerank"],
             "http_status": reranker_http_status,
+            # detail 只带 bounded reason / 状态码；不含 exception message、
+            # provider 响应体、query 或 documents。
             "detail": (
-                "reranker 探针未确认真实 rerank（silent_fallback 或 API 失败）；"
-                "仅阻塞 hybrid_rerank，其余实验照常运行"
+                f"reranker 探针未确认真实 rerank：reason={reason}"
+                f"（仅阻塞 hybrid_rerank，其余实验照常运行）"
             ),
         })
 
@@ -607,40 +705,8 @@ def preflight(
             "document_count": meta.document_count if meta else 0,
         }
 
-    # 4. Reranker 探针（必须验证 rerank 真实发生：ApiReranker 在 API 失败时
-    # 静默回退到原始顺序，仅凭「有返回值」会得到假阳性）
-    reranker_gate: dict[str, Any] = {}
-    try:
-        from rag.reranker import create_reranker
-
-        rr = create_reranker()
-        reranker_gate["configured"] = rr.available
-        reranker_gate["model"] = rr._model
-        if rr.available and rerank_probe:
-            probed = rr.rerank(
-                "透明质酸功效",
-                [
-                    {"id": "a", "content": "透明质酸保湿"},
-                    {"id": "b", "content": "防晒指数"},
-                ],
-                top_k=2,
-            )
-            real_rerank = any("rerank_score" in r for r in probed)
-            reranker_gate["probe"] = "ok" if real_rerank else "silent_fallback"
-            reranker_gate["http_status"] = getattr(rr, "last_error_status", None)
-            if not real_rerank:
-                reranker_gate["detail"] = (
-                    "rerank API 调用失败或未附加 rerank_score（ApiReranker 静默回退）"
-                )
-    except Exception as e:  # noqa: BLE001 - gate 必须记录失败而不是中断
-        reranker_gate.update(
-            {
-                "configured": False,
-                "probe": "failed",
-                "http_status": http_status_from_exception(e),
-                "error": type(e).__name__,
-            }
-        )
+        # 4. Reranker 探针（consumes the same typed per-call outcome as runtime）
+    reranker_gate = probe_reranker(rerank_probe=rerank_probe)
     gates["reranker"] = reranker_gate
 
     # 5. 复合判定（primary cause != downstream symptom；机器可读 blockers）
@@ -652,6 +718,12 @@ def preflight(
         reranker_configured=gates["reranker"].get("configured", False),
         reranker_probe=gates["reranker"].get("probe"),
         reranker_http_status=gates["reranker"].get("http_status"),
+        # typed per-call facts：blocker verdict 优先取自这里，而不是从
+        # probe 字符串间接推断。
+        reranker_applied=gates["reranker"].get("applied"),
+        reranker_degraded=gates["reranker"].get("degraded"),
+        reranker_reason=gates["reranker"].get("reason"),
+        reranker_provider_called=gates["reranker"].get("provider_called"),
         qdrant_total_points=gates["qdrant"]["total_points"],
         requested_experiments=(
             tuple(requested_experiments)
