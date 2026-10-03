@@ -190,19 +190,28 @@ artifact 使用上述结构化语义。
 > `scripts/project_facts.py --check` 与 `scripts/audit_doc_consistency.py`
 > 会将文档行与推导状态比对，双向漂移都算 FAIL。
 >
-> 2026-09-30 的评测尝试在 preflight gate 被阻塞
-> （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，
-> v1 schema，原样保留不回填）：
-> - embedding provider 认证失败（401，探针失败）→ 语料导入与向量通道无法进行；
-> - reranker provider 同样 401（`ApiReranker` 静默回退被探针识别为
->   `silent_fallback`，不产出假阳性）；
-> - 本地 Qdrant 集合为空（导入依赖 embedding，随之阻塞）。
+> **最新已提交的 preflight evidence**：
+> `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
+> （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
+> `status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`）。该 artifact
+> 直接使用 §3.3.1 的结构化 blocker 语义，三个 blocker **必须分开表述**：
 >
-> blocker 语义（按 v2 口径复盘该 v1 artifact）：primary blocker =
-> `EMBEDDING_PROVIDER_AUTH`（根因）；`RERANKER_PROVIDER_AUTH` 同级独立阻塞
-> hybrid_rerank；`VECTOR_INDEX_EMPTY`（empty index）为 downstream 症状
-> （caused_by 指向根因）——v1 顶层 status 命名为 `BLOCKED_VECTOR_INDEX`
-> 只是采用了 downstream 症状，与根因结论不矛盾。
+> | blocker code | stage | blocking | 影响范围 |
+> |---|---|---|---|
+> | `EMBEDDING_PROVIDER_AUTH` | embedding | `true` | 根因；`blocks_corpus_import: true`，阻塞 `vector_only` / `hybrid_no_rerank` / `hybrid_rerank`（HTTP 401） |
+> | `VECTOR_INDEX_EMPTY` | qdrant | `true` | downstream 症状，`caused_by: EMBEDDING_PROVIDER_AUTH`；集合 0 points，且 BM25 索引由 Qdrant 重建，故 `bm25_only` 也被阻塞 |
+> | `RERANKER_PROVIDER_AUTH` | reranker | **`false`** | 只阻塞 `hybrid_rerank`，**不得**据此声称其余实验也被 reranker 阻塞（HTTP 401，`silent_fallback`） |
+>
+> 该 artifact 的 notes 明写 `formal evaluation not run; no metrics generated`。
+> `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
+> **不等于** 649-query 正式评测已完成；正式指标仍为 `NOT_VERIFIED`。
+>
+> 历史尝试（保留不改）：2026-09-30 的评测尝试在 preflight gate 被阻塞
+> （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，
+> v1 schema，顶层 `status: BLOCKED_VECTOR_INDEX`，原样保留不回填）。按 v2 口径
+> 复盘该 v1 artifact：primary blocker = `EMBEDDING_PROVIDER_AUTH`（根因）；
+> `RERANKER_PROVIDER_AUTH` 同级独立阻塞 hybrid_rerank；`VECTOR_INDEX_EMPTY`
+> 为 downstream 症状——v1 顶层 status 采用 downstream 症状命名，与根因结论不矛盾。
 >
 > 语料与基准的 gold 覆盖率审计（导入 manifest：
 > `artifacts/evaluation/rag-649/import_manifest_import-20260929T190455Z.json`）：

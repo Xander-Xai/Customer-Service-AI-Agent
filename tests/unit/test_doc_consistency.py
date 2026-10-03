@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -1446,6 +1448,190 @@ def test_historical_tracing_claim_is_excluded_from_guard_z(tmp_repo: Path):
     errors: list[str] = []
     audit.check_semantic_tracing_drift(docs, errors, root=tmp_repo)
     assert errors == []
+
+
+# ----------------------------------------------------------- Guard AA
+
+
+def _write_preflight(root: Path, run_id: str, timestamp: str, status: str = "BLOCKED") -> Path:
+    rel = f"artifacts/evaluation/rag-649/{run_id}/report.json"
+    write(
+        root,
+        rel,
+        json.dumps({"schema_version": "rag-eval-evidence/v2", "run_id": run_id,
+                    "timestamp": timestamp, "status": status,
+                    "primary_blocker": "EMBEDDING_PROVIDER_AUTH"}),
+    )
+    return root / rel
+
+
+def _git_add(root: Path, *rels: str) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "add", *rels], cwd=root, check=True, capture_output=True)
+
+
+def test_latest_committed_preflight_prefers_newest_artifact(tmp_repo: Path):
+    """Ordering must come from the artifact's own timestamp, not mtime or a
+    hardcoded id: an older-mtime but newer-timestamp artifact still wins."""
+    old = _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    new = _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    # Make mtime disagree with the recorded timestamp on purpose.
+    os.utime(old, (2_000_000_000, 2_000_000_000))
+    os.utime(new, (1_000_000_000, 1_000_000_000))
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    run_id, rel = audit.latest_committed_preflight(root=tmp_repo)
+    assert run_id == "preflight-20261002T194209Z"
+    assert rel.endswith("preflight-20261002T194209Z/report.json")
+
+
+def test_untracked_preflight_is_not_repository_evidence(tmp_repo: Path):
+    """A local run nobody committed must never be promoted to 'latest'."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261101T000000Z", "2026-11-01T00:00:00+00:00")
+    _git_add(tmp_repo, "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json")
+    run_id, _rel = audit.latest_committed_preflight(root=tmp_repo)
+    assert run_id == "preflight-20260929T191128Z"
+
+
+def test_current_doc_pointing_at_latest_preflight_passes(tmp_repo: Path):
+    """Positive case: the CURRENT doc names the newest committed artifact."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "最新已提交的 preflight evidence："
+        "`artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`"
+        "（v2 schema）。\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_current_doc_claiming_older_preflight_as_latest_is_detected(tmp_repo: Path):
+    """Negative case: a newer artifact is committed but the CURRENT doc still
+    calls the older one the latest evidence. This is the drift class."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "Current committed preflight evidence: "
+        "`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json` "
+        "shows the provider auth blocker.\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert any("rag preflight pointer drift" in e for e in errors)
+
+
+def test_historical_preflight_reference_is_preserved(tmp_repo: Path):
+    """Historical case: an older artifact explicitly framed as history is
+    legitimate and must not be rewritten or flagged."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "历史尝试（保留不改）：evidence artifact "
+        "`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，"
+        "v1 schema，原样保留不回填。\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_wrapped_claim_with_path_on_next_line_is_detected(tmp_repo: Path):
+    """Markdown wraps long artifact paths. A claim on line N naming an older
+    artifact on line N+1 is still drift — the guard must not be defeated by a
+    line break."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "当前已提交的 preflight evidence（\n"
+        "  `artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`）\n"
+        "显示 provider authentication blocker。\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert any("rag preflight pointer drift" in e for e in errors)
+
+
+def test_preflight_guard_ignores_non_claim_mentions(tmp_repo: Path):
+    """Scoping: describing an artifact without claiming it is current/latest is
+    not drift (e.g. a schema-semantics aside)."""
+    _write_preflight(tmp_repo, "preflight-20260929T191128Z", "2026-09-29T19:11:28+00:00")
+    _write_preflight(tmp_repo, "preflight-20261002T194209Z", "2026-10-02T19:42:09+00:00")
+    _git_add(
+        tmp_repo,
+        "artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json",
+        "artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/rag-evaluation.md",
+        "历史 v1 artifact（`schema_version: rag-eval-evidence/v1`，如 "
+        "`preflight-20260929T191128Z`）使用单层 status 字符串。\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_preflight_guard_is_silent_without_committed_artifacts(tmp_repo: Path):
+    """Fail-open: with nothing committed there is no pointer to be wrong about."""
+    doc = write(
+        tmp_repo,
+        "docs/reference/current-state.md",
+        "Current committed preflight evidence: "
+        "`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`.\n",
+    )
+    errors: list[str] = []
+    audit.check_rag_preflight_pointer_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+    assert audit.latest_committed_preflight(root=tmp_repo) is None
+
+
+def test_real_repo_latest_committed_preflight_matches_current_docs():
+    """Pins the truth source against the actual checkout."""
+    latest = audit.latest_committed_preflight(root=REAL_ROOT)
+    assert latest is not None
+    run_id, rel = latest
+    report = json.loads((REAL_ROOT / rel).read_text(encoding="utf-8"))
+    # The artifact's own timestamp is what the guard ordered by.
+    assert report["run_id"] == run_id
+    assert report["timestamp"].startswith("2026-10-02T19:42:09")
+    current_state = (REAL_ROOT / "docs/reference/current-state.md").read_text(encoding="utf-8")
+    assert f"rag-649/{run_id}/report.json" in current_state
+    assert report["notes"][0] == "formal evaluation not run; no metrics generated"
 
 
 # ------------------------------------------------------------- Guard W
