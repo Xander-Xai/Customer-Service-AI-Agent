@@ -42,7 +42,7 @@ from .events import (
     RunEventPublisher,
 )
 from .retry import compute_backoff
-from .run_service import RunNotFound, RunService
+from .run_service import RunNotFound, RunOwnershipLost, RunService
 from .statuses import TERMINAL_STATUSES, InvalidRunTransition, RunStatus
 
 logger = get_logger("runtime.executor")
@@ -103,12 +103,17 @@ def _build_resume_command(run_id: str) -> Any:
     return Command(resume=decision)
 
 
-async def _park_for_approval(svc: RunService, run_id: str, result: Any) -> str:
+async def _park_for_approval(
+    svc: RunService, run_id: str, result: Any, *, expected_worker_id: str | None = None
+) -> str:
     """RUNNING -> WAITING_APPROVAL：图挂起等人工决策。
 
     刻意**不算成功也不算失败**：既不 ``mark_succeeded``（副作用还没发生）也不进
     ``_handle_failure``（这不是失败，不该消耗 retry / 进 DLQ）。WAITING_APPROVAL
     是非终态，审批 API 决策后会重新 dispatch 该 run。
+
+    ownership 丢失时同样只是读回当前状态：旧 worker 没有资格把新 owner 的 run
+    挂起，也**不**因此把自己记成失败。
     """
     interrupt_payload = None
     if isinstance(result, dict):
@@ -117,7 +122,17 @@ async def _park_for_approval(svc: RunService, run_id: str, result: Any) -> str:
             first = items[0]
             interrupt_payload = getattr(first, "value", None)
     try:
-        svc.mark_waiting_approval(run_id)
+        svc.mark_waiting_approval(run_id, expected_worker_id=expected_worker_id)
+    except RunOwnershipLost as lost:
+        logger.warning(
+            "挂起审批时 ownership 已丢失，放弃提交 run_id=%s expected_worker=%s "
+            "current_status=%s",
+            run_id,
+            lost.expected_worker_id,
+            lost.current_status,
+        )
+        latest = svc.get_run(run_id)
+        return str(latest["status"]) if latest else "MISSING"
     except InvalidRunTransition:
         latest = svc.get_run(run_id)
         return str(latest["status"]) if latest else "MISSING"
@@ -460,8 +475,24 @@ async def execute_run(
                         if _approval_id:
                             trace_ctx.set_attribute("csai.approval_id", _approval_id)
                         trace_ctx.set_attribute("csai.risk_level", "high")
-                    return await _park_for_approval(svc, run_id, result)
-                svc.mark_succeeded(run_id, result)
+                    return await _park_for_approval(
+                        svc, run_id, result, expected_worker_id=owner
+                    )
+                try:
+                    svc.mark_succeeded(run_id, result, expected_worker_id=owner)
+                except RunOwnershipLost as lost:
+                    # 已被接管：这次执行的结果不再有权提交。读回当前状态退出，
+                    # 绝不 mark_failed —— ownership 丢失不是业务失败。
+                    logger.warning(
+                        "提交成功时 ownership 已丢失，放弃提交 run_id=%s "
+                        "expected_worker=%s current_status=%s current_worker=%s",
+                        run_id,
+                        lost.expected_worker_id,
+                        lost.current_status,
+                        lost.current_worker_id,
+                    )
+                    latest = svc.get_run(run_id)
+                    return str(latest["status"]) if latest else "MISSING"
                 with contextlib.suppress(Exception):
                     trace_ctx.set_attribute("csai.run_status", RunStatus.SUCCEEDED.value)
                     trace_ctx.set_attribute(
@@ -512,13 +543,18 @@ async def execute_run(
         with contextlib.suppress(Exception):
             latest = svc.get_run(run_id)
             if latest is not None and latest["status"] == RunStatus.RUNNING.value:
-                svc.mark_failed(
-                    run_id,
-                    error_code=type(e).__name__,
-                    error_message=safe_error_message(e),
-                    error_type="permanent",
-                )
-                metrics.record_worker_task("failed")
+                try:
+                    svc.mark_failed(
+                        run_id,
+                        error_code=type(e).__name__,
+                        error_message=safe_error_message(e),
+                        error_type="permanent",
+                        expected_worker_id=owner,
+                    )
+                    metrics.record_worker_task("failed")
+                except RunOwnershipLost as lost:
+                    # 已被接管：不能把新 owner 的 run 写成 FAILED，也不记失败。
+                    return await _abandon_on_ownership_lost(svc, run_id, lost, owner)
             elif latest is not None and latest["status"] in (
                 RunStatus.RETRYING.value,
                 RunStatus.QUEUED.value,
@@ -532,6 +568,30 @@ async def execute_run(
                 metrics.record_retry_publication_failure()
                 raise
         return RunStatus.FAILED.value
+
+
+async def _abandon_on_ownership_lost(
+    svc: RunService, run_id: str, lost: RunOwnershipLost, owner: str | None
+) -> str:
+    """失去所有权后的唯一动作：读回当前状态并退出。
+
+    刻意**不**做任何状态写入：不 mark_failed、不 mark_retrying、不进 DLQ、
+    不发布重试消息、不消耗 attempt。另一个 worker 已经拥有执行权，把
+    「我不是 owner 了」记成业务失败会污染它正在跑的 run。
+
+    只记录 bounded warning：run_id / expected_worker_id / current_status /
+    current_worker_id。**不含** query、result、tool args 或任何用户数据。
+    """
+    logger.warning(
+        "ownership 已丢失，放弃本次状态提交（不记失败、不重试、不进 DLQ）"
+        " run_id=%s expected_worker=%s current_status=%s current_worker=%s",
+        run_id,
+        lost.expected_worker_id,
+        lost.current_status,
+        lost.current_worker_id,
+    )
+    latest = svc.get_run(run_id)
+    return str(latest["status"]) if latest else "MISSING"
 
 
 async def _handle_failure(
@@ -556,13 +616,19 @@ async def _handle_failure(
     max_attempts = int(run["max_attempts"])
 
     if not is_retryable(error_type):
-        with contextlib.suppress(InvalidRunTransition):
+        try:
             svc.mark_failed(
                 run_id,
                 error_code=error_code,
                 error_message=error_message,
                 error_type=error_type,
+                expected_worker_id=worker_id,
             )
+        except RunOwnershipLost as lost:
+            # 已被接管：旧 worker 无权把新 owner 的 run 写成 FAILED。
+            return await _abandon_on_ownership_lost(svc, run_id, lost, worker_id)
+        except InvalidRunTransition:
+            pass
         with contextlib.suppress(Exception):
             await _publish(
                 EVENT_FAILED,
@@ -580,14 +646,19 @@ async def _handle_failure(
         return RunStatus.FAILED.value
 
     if attempt >= max_attempts:
-        with contextlib.suppress(InvalidRunTransition):
+        try:
             svc.mark_dead_letter(
                 run_id,
                 error_code=error_code,
                 error_message=error_message,
                 error_type=error_type,
                 worker_id=worker_id,
+                expected_worker_id=worker_id,
             )
+        except RunOwnershipLost as lost:
+            return await _abandon_on_ownership_lost(svc, run_id, lost, worker_id)
+        except InvalidRunTransition:
+            pass
         with contextlib.suppress(Exception):
             await _publish(
                 EVENT_FAILED,
@@ -624,7 +695,12 @@ async def _handle_failure(
             error_type=error_type,
             error_code=error_code,
             error_message=error_message,
+            expected_worker_id=worker_id,
         )
+    except RunOwnershipLost as lost:
+        # 关键：ownership 丢失**不**发布重试消息。否则新 owner 正在执行，
+        # 旧 worker 又投一条 retry，会凭空多出一次执行与一次 attempt 消耗。
+        return await _abandon_on_ownership_lost(svc, run_id, lost, worker_id)
     except InvalidRunTransition:
         latest = svc.get_run(run_id)
         return latest["status"] if latest else RunStatus.FAILED.value

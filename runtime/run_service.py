@@ -35,6 +35,44 @@ class RunNotFound(LookupError):
     """指定 run_id 不存在。"""
 
 
+class RunOwnershipLost(RuntimeError):
+    """worker 已不再拥有该 run：提交被 owner CAS 拒绝。
+
+    必须与 :class:`InvalidRunTransition` 区分。两者都是「写不进去」，但含义
+    完全不同：
+
+    - ``InvalidRunTransition``：状态机不接受这次迁移（例如 run 已 SUCCEEDED）。
+    - ``RunOwnershipLost``：状态还是 RUNNING，但 ``worker_id`` 已经不是我了，
+      或者我的 lease 已经过期。**这不是业务失败**。
+
+    混淆两者会导致严重后果：一个失去所有权的 worker 会把「我不是 owner 了」
+    当成 permanent error 去 ``mark_failed``，从而覆盖新 owner 正在跑的 run。
+    所以这里刻意带 ``current_status``，让调用方能区分「状态不对」与
+    「owner 不对」。
+
+    只携带安全字段：run_id / 期望的 owner / 当前状态 / 当前 owner。不含 query、
+    result、tool args 或任何用户数据。
+    """
+
+    def __init__(
+        self,
+        run_id: str,
+        *,
+        expected_worker_id: str | None,
+        current_status: str | None = None,
+        current_worker_id: str | None = None,
+    ):
+        self.run_id = run_id
+        self.expected_worker_id = expected_worker_id
+        self.current_status = current_status
+        self.current_worker_id = current_worker_id
+        super().__init__(
+            f"run 所有权已丢失: run={run_id} "
+            f"expected_worker={expected_worker_id} "
+            f"current_status={current_status} current_worker={current_worker_id}"
+        )
+
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -163,6 +201,44 @@ class RunService:
             raise InvalidRunTransition(run_id, current["status"], target.value)
         return updated
 
+    def _transition_owned(
+        self,
+        run_id: str,
+        target: RunStatus,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        expected_worker_id: str,
+        require_live_lease: bool = True,
+        **fields: Any,
+    ) -> dict[str, Any]:
+        """worker-owned 提交：status + owner (+ 存活 lease) 同一条 UPDATE 判定。
+
+        写不进去时区分三种原因：run 不存在 / 状态机不接受 / ownership 丢失。
+        第三种抛 :class:`RunOwnershipLost` 而不是 ``InvalidRunTransition``，
+        因为它不是业务失败。
+        """
+        updated = self.repo.transition_owned(
+            run_id,
+            from_statuses=from_statuses,
+            to_status=target,
+            expected_worker_id=expected_worker_id,
+            require_live_lease=require_live_lease,
+            **fields,
+        )
+        if updated is not None:
+            return updated
+        current = self.repo.get(run_id)
+        if current is None:
+            raise RunNotFound(run_id)
+        if current["status"] not in {s.value for s in from_statuses}:
+            raise InvalidRunTransition(run_id, current["status"], target.value)
+        raise RunOwnershipLost(
+            run_id,
+            expected_worker_id=expected_worker_id,
+            current_status=current["status"],
+            current_worker_id=current.get("worker_id"),
+        )
+
     def mark_running(
         self,
         run_id: str,
@@ -177,6 +253,10 @@ class RunService:
         返回 None 表示「不应执行」：当前 RUNNING 且被其他 worker 的有效 lease
         持有（重复投递）。RUNNING 但 lease 过期/归属自己 -> 接管并递增 attempt。
         终态 -> InvalidRunTransition。
+
+        RUNNING -> RUNNING 的接管是**单条 UPDATE 谓词**（见
+        ``repository.takeover_running``），不是「先 SELECT 看到过期、再按 status
+        更新」：后者允许两个竞争者读到同一份过期快照后都成功接管。
         """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
@@ -186,20 +266,17 @@ class RunService:
         if cur == RunStatus.RUNNING:
             if worker_id is None or lease_seconds is None:
                 return run
-            lease = _ensure_aware(run.get("lease_expires_at"))
-            owner = run.get("worker_id")
-            if lease is not None and lease > now and owner not in (None, worker_id):
-                return None  # 其他 worker 持有有效 lease，重复投递不重复执行
-            return self._transition(
+            taken = self.repo.takeover_running(
                 run_id,
-                RunStatus.RUNNING,
-                from_statuses={RunStatus.RUNNING},
                 worker_id=worker_id,
                 task_id=task_id,
-                attempt=next_attempt,
-                lease_expires_at=now + timedelta(seconds=lease_seconds),
-                heartbeat_at=now,
+                lease_seconds=lease_seconds,
+                now=now,
             )
+            if taken is not None:
+                return taken
+            # 谓词不成立：要么别人持有有效 lease（重复投递），要么并发竞争输了。
+            return None
 
         ensure_transition(cur, RunStatus.RUNNING, run_id)
         fields: dict[str, Any] = {
@@ -215,29 +292,60 @@ class RunService:
         return self._transition(run_id, RunStatus.RUNNING, from_statuses={cur}, **fields)
 
     def heartbeat(self, run_id: str, *, worker_id: str, lease_seconds: float) -> bool:
-        """续租（仅当前 owner 生效）。返回是否成功。"""
-        run = self.repo.get(run_id)
-        if run is None or run["status"] != RunStatus.RUNNING.value:
-            return False
-        if run.get("worker_id") not in (None, worker_id):
-            return False
-        now = _utcnow()
-        updated = self.repo.transition(
-            run_id,
-            from_statuses={RunStatus.RUNNING},
-            to_status=RunStatus.RUNNING,
-            lease_expires_at=now + timedelta(seconds=lease_seconds),
-            heartbeat_at=now,
-        )
-        return updated is not None
+        """续租（仅当前 owner 且 lease 仍存活时生效）。返回是否成功。
 
-    def mark_succeeded(self, run_id: str, result: dict[str, Any] | None) -> dict[str, Any]:
-        run = self.require_run(run_id)
-        ensure_transition(parse_status(run["status"]), RunStatus.SUCCEEDED, run_id)
-        return self._transition(
+        原子 owner CAS：``id + status=RUNNING + worker_id + lease_expires_at > now``
+        在同一条 UPDATE 里判定。旧实现是 ``get() -> Python 判 owner -> transition()``，
+        那是 TOCTOU：读到自己的 owner 之后、写入之前，别人可能已经接管。
+
+        两个后果都被这条谓词挡住：
+          - 已被接管的 stale worker 续租失败，且不会改动新 owner 的任何字段；
+          - **已过期但尚未被接管**的 owner 续租同样失败 —— 否则它能靠一次迟到的
+            续租给自己续命，lease 就没有严格 expiry 语义了。
+        """
+        return self.repo.renew_lease_owned(
+            run_id,
+            expected_worker_id=worker_id,
+            lease_seconds=lease_seconds,
+        )
+
+    def mark_succeeded(
+        self,
+        run_id: str,
+        result: dict[str, Any] | None,
+        *,
+        expected_worker_id: str | None = None,
+    ) -> dict[str, Any]:
+        """RUNNING -> SUCCEEDED。
+
+        ``expected_worker_id`` 由 worker 执行路径**必须**传入：只有仍然是当前
+        owner 且 lease 存活时才允许提交，失去所有权抛 :class:`RunOwnershipLost`
+        且不改动数据库。否则一个已被接管的旧 worker 迟到的成功会覆盖新 owner。
+
+        传 ``None`` 表示「非 worker 提交的外部/管理写入」，保持原有只判 status
+        的语义（测试与后台路径使用）。
+        """
+        if expected_worker_id is None:
+            run = self.require_run(run_id)
+            ensure_transition(parse_status(run["status"]), RunStatus.SUCCEEDED, run_id)
+            return self._transition(
+                run_id,
+                RunStatus.SUCCEEDED,
+                from_statuses={RunStatus.RUNNING},
+                result=result or {},
+                error_code=None,
+                error_message=None,
+                error_type=None,
+                last_error=None,
+                next_retry_at=None,
+                lease_expires_at=None,
+                finished_at=_utcnow(),
+            )
+        return self._transition_owned(
             run_id,
             RunStatus.SUCCEEDED,
             from_statuses={RunStatus.RUNNING},
+            expected_worker_id=expected_worker_id,
             result=result or {},
             error_code=None,
             error_message=None,
@@ -255,14 +363,32 @@ class RunService:
         error_code: str,
         error_message: str,
         error_type: str = "permanent",
+        expected_worker_id: str | None = None,
     ) -> dict[str, Any]:
-        """Permanent error -> FAILED（终态，不重试）。"""
-        run = self.require_run(run_id)
-        ensure_transition(parse_status(run["status"]), RunStatus.FAILED, run_id)
-        return self._transition(
+        """Permanent error -> FAILED（终态，不重试）。
+
+        worker 执行路径必须传 ``expected_worker_id``：stale worker 不能把新
+        owner 正在跑的 RUNNING 改成 FAILED。
+        """
+        if expected_worker_id is None:
+            run = self.require_run(run_id)
+            ensure_transition(parse_status(run["status"]), RunStatus.FAILED, run_id)
+            return self._transition(
+                run_id,
+                RunStatus.FAILED,
+                from_statuses={RunStatus.RUNNING},
+                error_code=error_code,
+                error_message=error_message[:2000],
+                error_type=error_type,
+                last_error=error_message[:2000],
+                lease_expires_at=None,
+                finished_at=_utcnow(),
+            )
+        return self._transition_owned(
             run_id,
             RunStatus.FAILED,
             from_statuses={RunStatus.RUNNING},
+            expected_worker_id=expected_worker_id,
             error_code=error_code,
             error_message=error_message[:2000],
             error_type=error_type,
@@ -279,15 +405,33 @@ class RunService:
         error_type: str = "transient",
         error_code: str = "",
         error_message: str = "",
+        expected_worker_id: str | None = None,
     ) -> dict[str, Any]:
-        """Transient error -> RETRYING，写 next_retry_at（退避后重新投递）。"""
-        run = self.require_run(run_id)
-        ensure_transition(parse_status(run["status"]), RunStatus.RETRYING, run_id)
+        """Transient error -> RETRYING，写 next_retry_at（退避后重新投递）。
+
+        worker 执行路径必须传 ``expected_worker_id``：否则 stale worker 可以在
+        新 owner 执行期间把 RUNNING 改成 RETRYING，并让上层发布一个不该存在的
+        重试消息。
+        """
         now = _utcnow()
-        return self._transition(
+        if expected_worker_id is None:
+            run = self.require_run(run_id)
+            ensure_transition(parse_status(run["status"]), RunStatus.RETRYING, run_id)
+            return self._transition(
+                run_id,
+                RunStatus.RETRYING,
+                from_statuses={RunStatus.RUNNING},
+                next_retry_at=now + timedelta(seconds=max(0.0, delay_seconds)),
+                error_type=error_type,
+                error_code=error_code or None,
+                last_error=error_message[:2000] or None,
+                lease_expires_at=None,
+            )
+        return self._transition_owned(
             run_id,
             RunStatus.RETRYING,
             from_statuses={RunStatus.RUNNING},
+            expected_worker_id=expected_worker_id,
             next_retry_at=now + timedelta(seconds=max(0.0, delay_seconds)),
             error_type=error_type,
             error_code=error_code or None,
@@ -303,30 +447,57 @@ class RunService:
         error_message: str,
         error_type: str = "transient",
         worker_id: str | None = None,
+        expected_worker_id: str | None = None,
     ) -> dict[str, Any]:
-        """retry 用尽 -> DEAD_LETTER（终态）+ 持久 DLQ 记录。"""
+        """retry 用尽 -> DEAD_LETTER（终态）+ 持久 DLQ 记录。
+
+        按来源区分 ownership（刻意不一刀切）：
+
+        - **RUNNING 来源**：这是 worker 执行路径提交的结果，必须 owner CAS。
+          传 ``expected_worker_id`` 生效；stale worker 不能把新 owner 的 run
+          推入 DLQ。
+        - **RETRYING / QUEUED 来源**：DLQ 重放、reconciler、管理员/API 路径
+          （例如 ``POST /api/runs`` 的 dispatch 失败），它们不是 worker ownership
+          commit，**不**要求 worker_id 匹配。若一并 owner-gate 会直接打断运维
+          闭环。
+        """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
+        owner_gated = cur == RunStatus.RUNNING and expected_worker_id is not None
         if cur in (RunStatus.RUNNING, RunStatus.RETRYING, RunStatus.QUEUED):
-            updated = self.repo.transition(
-                run_id,
-                from_statuses={cur},
-                to_status=RunStatus.DEAD_LETTER,
-                error_code=error_code,
-                error_message=error_message[:2000],
-                error_type=error_type,
-                last_error=error_message[:2000],
-                lease_expires_at=None,
-                finished_at=_utcnow(),
-            )
-            if updated is None:
-                latest = self.repo.get(run_id)
-                if latest is None:
-                    raise RunNotFound(run_id)
-                if latest["status"] == RunStatus.DEAD_LETTER.value:
-                    updated = latest
-                else:
-                    raise InvalidRunTransition(run_id, latest["status"], "DEAD_LETTER")
+            fields = {
+                "error_code": error_code,
+                "error_message": error_message[:2000],
+                "error_type": error_type,
+                "last_error": error_message[:2000],
+                "lease_expires_at": None,
+                "finished_at": _utcnow(),
+            }
+            if owner_gated:
+                updated = self._transition_owned(
+                    run_id,
+                    RunStatus.DEAD_LETTER,
+                    from_statuses={RunStatus.RUNNING},
+                    expected_worker_id=expected_worker_id,
+                    **fields,
+                )
+            else:
+                updated = self.repo.transition(
+                    run_id,
+                    from_statuses={cur},
+                    to_status=RunStatus.DEAD_LETTER,
+                    **fields,
+                )
+                if updated is None:
+                    latest = self.repo.get(run_id)
+                    if latest is None:
+                        raise RunNotFound(run_id)
+                    if latest["status"] == RunStatus.DEAD_LETTER.value:
+                        updated = latest
+                    else:
+                        raise InvalidRunTransition(
+                            run_id, latest["status"], "DEAD_LETTER"
+                        )
         elif cur == RunStatus.DEAD_LETTER:
             updated = run
         else:
@@ -422,27 +593,45 @@ class RunService:
             queued_at=_utcnow(),
         )
 
-    def mark_waiting_approval(self, run_id: str) -> dict[str, Any]:
+    def mark_waiting_approval(
+        self, run_id: str, *, expected_worker_id: str | None = None
+    ) -> dict[str, Any]:
         """RUNNING -> WAITING_APPROVAL：高风险副作用已挂起等人工决策。
 
         幂等：已在 WAITING_APPROVAL 直接返回；在终态或 QUEUED/RETRYING 时不改写
         （抛 ``InvalidRunTransition`` 由调用方收敛）。
 
-        刻意**清空 lease**：图已挂起、没有 worker 在执行，留着过期 lease 只会
-        让「谁有权接管」的判断失真；清空后恢复路径可以干净地重新领取。
+        刻意**清空 lease 与 worker_id**：图已挂起、没有 worker 在执行，留着过期
+        lease 只会让「谁有权接管」的判断失真；清空后恢复路径可以干净地重新领取。
+        也因此 approval 恢复（``mark_resumed_running``）由第一个 worker 通过
+        status CAS 领取新 ownership，**不**要求匹配审批前的 worker。
+
+        worker 执行路径必须传 ``expected_worker_id``：失去所有权的旧 worker 不能
+        把新 owner 的 run 挂起等审批。
         """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
         if cur == RunStatus.WAITING_APPROVAL:
             return run
         ensure_transition(cur, RunStatus.WAITING_APPROVAL, run_id)
-        return self._transition(
+        fields: dict[str, Any] = {
+            "lease_expires_at": None,
+            "next_retry_at": None,
+            "worker_id": None,
+        }
+        if expected_worker_id is None:
+            return self._transition(
+                run_id,
+                RunStatus.WAITING_APPROVAL,
+                from_statuses={cur},
+                **fields,
+            )
+        return self._transition_owned(
             run_id,
             RunStatus.WAITING_APPROVAL,
-            from_statuses={cur},
-            lease_expires_at=None,
-            next_retry_at=None,
-            worker_id=None,
+            from_statuses={RunStatus.RUNNING},
+            expected_worker_id=expected_worker_id,
+            **fields,
         )
 
     def mark_resumed_running(

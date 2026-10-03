@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, or_, select, update
@@ -200,6 +200,162 @@ class AgentRunRepository:
                 update(AgentRun)
                 .where(AgentRun.id == run_id, AgentRun.status.in_(allowed))
                 .values(**values)
+            )
+            session.commit()
+            if result.rowcount == 0:
+                return None
+        finally:
+            session.close()
+        return self.get(run_id)
+
+    def transition_owned(
+        self,
+        run_id: str,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        to_status: RunStatus,
+        expected_worker_id: str,
+        require_live_lease: bool = True,
+        now: datetime | None = None,
+        **fields: Any,
+    ) -> dict[str, Any] | None:
+        """原子「owner 条件」迁移：status + worker_id (+ 存活 lease) 同一条 UPDATE。
+
+        这是 worker-owned 写入的唯一正确原语。三类 predicate 都在
+        ``UPDATE ... WHERE`` 内部：
+
+        - ``id = run_id``
+        - ``status IN from_statuses``
+        - ``worker_id = expected_worker_id``
+        - （可选但默认开启）``lease_expires_at > now``
+
+        为什么必须在同一条 SQL 里
+        ------------------------
+        ``SELECT -> Python 判断 -> UPDATE`` 是 TOCTOU：SELECT 之后上下文切换、
+        另一个 worker 接管，UPDATE 仍然会写进去。ownership predicate 出现在
+        UPDATE 的 WHERE 里，判定与写入才是一个原子动作。
+
+        为什么 lease 也要判
+        ------------------
+        ``worker_id`` 相同**不足以**证明 ownership 还在：worker 被 SIGSTOP /
+        GC 停顿到 lease 过期之后，``worker_id`` 仍是它自己，但所有权已经过期。
+        只比 ``worker_id`` 会让一个已过期但尚未被接管的 worker 用一次迟到的
+        成功写入「证明」自己有效。lease 是 ownership 的一部分，不是装饰字段。
+
+        刻意与 :meth:`transition` 分开而不是加可选参数：``None`` 无法同时表达
+        「不检查 owner」和「要求 worker_id IS NULL」，那种二义性会让漏传参数
+        静默退化成无保护写入。
+
+        返回更新后的 run；条件不满足返回 ``None``。
+        """
+        allowed = [s.value for s in from_statuses]
+        values: dict[str, Any] = {"status": to_status.value, "updated_at": _utcnow()}
+        values.update(fields)
+        predicates = [
+            AgentRun.id == run_id,
+            AgentRun.status.in_(allowed),
+            AgentRun.worker_id == expected_worker_id,
+        ]
+        if require_live_lease:
+            predicates.append(
+                AgentRun.lease_expires_at.isnot(None)
+                & (AgentRun.lease_expires_at > (now or _utcnow()))
+            )
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun).where(*predicates).values(**values)
+            )
+            session.commit()
+            if result.rowcount == 0:
+                return None
+        finally:
+            session.close()
+        return self.get(run_id)
+
+    def renew_lease_owned(
+        self,
+        run_id: str,
+        *,
+        expected_worker_id: str,
+        lease_seconds: float,
+        now: datetime | None = None,
+    ) -> bool:
+        """原子续租：``id + status=RUNNING + worker_id + lease 未过期`` 同一条 UPDATE。
+
+        过期 owner 不能靠「晚到的一次续租」给自己续命——严格 lease expiry 语义。
+        返回是否真的续上了（rowcount == 1）。
+        """
+        now = now or _utcnow()
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.RUNNING.value,
+                    AgentRun.worker_id == expected_worker_id,
+                    AgentRun.lease_expires_at.isnot(None),
+                    AgentRun.lease_expires_at > now,
+                )
+                .values(
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    heartbeat_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
+
+    def takeover_running(
+        self,
+        run_id: str,
+        *,
+        worker_id: str,
+        task_id: str | None,
+        lease_seconds: float,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """原子 RUNNING takeover：只有「当前 owner 已失效」时才接管。
+
+        谓词：``status = RUNNING AND (worker_id = :new OR worker_id IS NULL
+        OR lease_expires_at IS NULL OR lease_expires_at <= :now)``。
+
+        这一点很关键：旧实现先 SELECT 看到「lease 过期」，再用一个只判
+        ``status = RUNNING`` 的 UPDATE 写入。两个竞争者 B 和 C 可以读到同一份
+        「A 已过期」的快照，然后**都**成功接管。谓词放进同一条 UPDATE 后，
+        B 成功写入即把 ``worker_id`` 改成 B、lease 变成未来时刻，于是 C 的谓词
+        立刻不再成立，只有一个人能接管。``attempt`` 在 SQL 内 ``+ 1``，不依赖
+        之前的快照。
+
+        返回更新后的 run；未取得所有权返回 ``None``。
+        """
+        now = now or _utcnow()
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.RUNNING.value,
+                    or_(
+                        AgentRun.worker_id == worker_id,
+                        AgentRun.worker_id.is_(None),
+                        AgentRun.lease_expires_at.is_(None),
+                        AgentRun.lease_expires_at <= now,
+                    ),
+                )
+                .values(
+                    status=RunStatus.RUNNING.value,
+                    worker_id=worker_id,
+                    task_id=task_id,
+                    attempt=AgentRun.attempt + 1,
+                    lease_expires_at=now + timedelta(seconds=lease_seconds),
+                    heartbeat_at=now,
+                    updated_at=now,
+                )
             )
             session.commit()
             if result.rowcount == 0:
