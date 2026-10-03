@@ -286,3 +286,20 @@ use-qdrant:
 .PHONY: qdrant-health
 qdrant-health:
 	curl -s http://localhost:6333/healthz | python3 -m json.tool
+
+# ===== Observability: live OTLP Collector =====
+# 只证明「已有 semantic span → SDK → OTLPSpanExporter → 网络 → 真实 Collector」。
+# 不证明生产 trace 传播，也不证明存在持久化/可查询 trace 后端
+# （Collector 只有 debug exporter，不存储）。
+otel-collector-smoke: ## 真跑一次 OTLP Collector：启动→健康就绪→发 span→flush→校验→出证据→关闭
+	@echo "🔭 OTLP Collector smoke（真实 otel/opentelemetry-collector，traces only）..."
+	@python3 scripts/otel_collector_smoke.py
+	@echo "✅ otel-collector-smoke PASS（evidence: artifacts/observability/otel-collector-*/report.json）"
+
+.PHONY: otel-collector-up
+otel-collector-up: ## 仅启动 traces-only Collector（后台常驻）
+	docker compose -f deploy/compose/docker-compose.otel.yml up -d otel-collector
+
+.PHONY: otel-collector-down
+otel-collector-down: ## 关闭本项目的 Collector（不影响其它容器）
+	docker rm -f customer-service-otel-collector 2>/dev/null || true

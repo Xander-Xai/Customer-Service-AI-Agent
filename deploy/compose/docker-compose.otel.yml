@@ -1,0 +1,51 @@
+# Docker Compose for the OpenTelemetry Collector — traces only.
+#
+# 用法: docker compose -f deploy/compose/docker-compose.otel.yml up -d
+# 或:   make otel-collector-up / make otel-collector-down
+#
+# Kept as its own per-concern file (like canary / monitoring / scale) rather
+# than folded into docker-compose.monitoring.yml, because that file cannot be
+# resolved standalone (promtail references the base file's `app-logs` volume).
+#
+# SCOPE — traces only, and deliberately so:
+#   - one pipeline (traces), one exporter (debug -> collector stdout)
+#   - NO persistent or queryable trace backend (no Jaeger / Langfuse / Tempo)
+#   - NO metrics or logs pipeline, NO dashboard, retention or alerting
+#   - NOT a production deployment
+#
+# Do not describe this service as "a trace backend". Its only role is to prove
+# that the repository's existing semantic spans survive the real SDK exporter,
+# a real network hop, and a real Collector process.
+
+version: '3.8'
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector:0.162.0
+    container_name: customer-service-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ../otel/collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # Host ports are overridable so the smoke never has to touch a port that
+      # is already taken by another local service.
+      - "${OTEL_COLLECTOR_GRPC_PORT:-4317}:4317"
+      - "${OTEL_COLLECTOR_HTTP_PORT:-4318}:4318"
+      # zpages is exposed so readiness can be checked with a real HTTP request
+      # from the host. See the note below on why there is no `healthcheck`.
+      - "${OTEL_COLLECTOR_ZPAGES_PORT:-55679}:55679"
+    restart: unless-stopped
+    # NOTE: deliberately no `healthcheck` stanza. The official
+    # otel/opentelemetry-collector image is distroless and has no /bin/sh, so a
+    # CMD-SHELL probe can never succeed — declaring one would leave the container
+    # permanently `unhealthy` and teach operators to ignore the status. Readiness
+    # is instead asserted against the Collector's own zpages `servicez` HTTP
+    # endpoint (200 = "Everything is ready"), which `scripts/otel_collector_smoke.py`
+    # polls from the host. That is a real readiness signal rather than a sleep.
+    networks:
+      - cs-otel
+
+networks:
+  cs-otel:
+    name: cs-otel
+    driver: bridge
