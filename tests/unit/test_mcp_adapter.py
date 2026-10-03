@@ -17,7 +17,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import logging
 
 import pytest
 
@@ -518,6 +520,31 @@ def _servers(**overrides):
     return json.dumps([item])
 
 
+@contextlib.contextmanager
+def _capture_mcp_warnings():
+    """直接挂在 ``tools.mcp`` logger 上收集 WARNING 记录。
+
+    ``core.logger.get_logger`` 统一设置 ``propagate=False``（避免日志重复输出到
+    root），因此 pytest 的 ``caplog``（挂在 root handler 上）看不到这些记录 ——
+    与 ``test_erp_authorization.py`` / ``test_cache_cross_user_isolation.py``
+    同因同解。
+    """
+    records: list[logging.LogRecord] = []
+
+    class _Handler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Handler()
+    handler.setLevel(logging.WARNING)
+    target = logging.getLogger("tools.mcp")
+    target.addHandler(handler)
+    try:
+        yield records
+    finally:
+        target.removeHandler(handler)
+
+
 class TestLoadMcpServerConfigs:
     def test_valid_allowlist_is_parsed(self):
         cfg = load_mcp_server_configs(_servers())
@@ -608,6 +635,141 @@ class TestBuildMcpAdapters:
     def test_enabled_server_yields_one_adapter(self):
         cfg = load_mcp_server_configs(_servers(enabled=True))
         assert len(build_mcp_adapters(cfg)) == 1
+
+
+# ---------------------------------------------------------------------------
+# ``enabled`` 类型安全：只接受 JSON boolean，绝不真值转换
+# ---------------------------------------------------------------------------
+
+
+class TestEnabledIsStrictlyBoolean:
+    @pytest.mark.parametrize("flag", [True, False])
+    def test_json_boolean_is_honoured(self, flag):
+        cfg = load_mcp_server_configs(_servers(enabled=flag))
+        assert cfg[0].enabled is flag
+        # 反向断言：禁用的条目留在 configs 里（可观测），只是不建 adapter。
+        assert len(build_mcp_adapters(cfg)) == (1 if flag else 0)
+
+    def test_omitted_enabled_keeps_existing_default(self):
+        # 全局开关是另一个旋钮（MCP_ENABLED）；allowlist 内省略 enabled 仍是启用。
+        cfg = load_mcp_server_configs(_servers())
+        assert cfg[0].enabled is True
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            pytest.param("false", id="str-false"),
+            pytest.param("true", id="str-true"),
+            pytest.param("False", id="str-False-cap"),
+            pytest.param("no", id="str-no"),
+            pytest.param("", id="str-empty"),
+            pytest.param("  ", id="str-blank"),
+            pytest.param(1, id="int-1"),
+            pytest.param(0, id="int-0"),
+            pytest.param(-1, id="int-negative"),
+            pytest.param(1.0, id="float-1.0"),
+            pytest.param(None, id="null"),
+            pytest.param([], id="empty-list"),
+            pytest.param([False], id="list-false"),
+            pytest.param(["false"], id="list-str-false"),
+            pytest.param({}, id="empty-dict"),
+            pytest.param({"enabled": False}, id="dict-nested"),
+        ],
+    )
+    def test_non_boolean_enabled_is_never_coerced(self, bad):
+        # 关键安全性质：``bool(value)`` 是真值判断而非类型判断，
+        # ``bool("false") is True``——沿用它会让"想关掉"变成"启用"。
+        # 非 boolean 一律 fail closed，整条记录被跳过（不再进入 configs）。
+        cfg = load_mcp_server_configs(_servers(enabled=bad))
+        assert cfg == []
+        assert build_mcp_adapters(cfg) == []
+
+    @pytest.mark.parametrize(
+        "truthy_but_invalid",
+        [
+            pytest.param("false", id="str-false"),
+            pytest.param(1, id="int-1"),
+            pytest.param([], id="empty-list"),
+            pytest.param({}, id="empty-dict"),
+        ],
+    )
+    def test_truthy_non_boolean_does_not_enable(self, truthy_but_invalid):
+        # 上一条的反向断言：这些值在真值语义下全是 True。若实现回退到
+        # ``bool(...)``，这里会得到 enabled=True + 1 个 adapter。
+        cfg = load_mcp_server_configs(_servers(enabled=truthy_but_invalid))
+        assert all(c.enabled is not True for c in cfg)
+
+    def test_invalid_enabled_skips_only_the_offending_entry(self):
+        # 单条笔误不该让整个 allowlist 失效（既有契约：跳过 + 记日志）。
+        raw = json.dumps(
+            [
+                {"name": "broken", "transport": "stdio", "command": "x", "enabled": "false"},
+                {"name": "healthy", "transport": "stdio", "command": "x", "risk_level": "low"},
+            ]
+        )
+        cfg = load_mcp_server_configs(raw)
+        assert [c.name for c in cfg] == ["healthy"]
+        assert len(build_mcp_adapters(cfg)) == 1
+
+    def test_warning_identifies_the_offending_server(self):
+        # 错误信息必须能定位到 server：只有 server 名能对上 MCP_SERVERS
+        # 里那条出问题的记录，运维才知道该改哪一行。
+        raw = json.dumps(
+            [{"name": "billing-prod", "transport": "stdio", "command": "x", "enabled": "false"}]
+        )
+        with _capture_mcp_warnings() as records:
+            assert load_mcp_server_configs(raw) == []
+        messages = "\n".join(r.getMessage() for r in records)
+        assert "billing-prod" in messages
+        assert "enabled" in messages
+
+    @pytest.mark.parametrize(
+        ("bad", "type_name"),
+        [
+            pytest.param("false", "str", id="str-false"),
+            pytest.param(1, "int", id="int-1"),
+            pytest.param(None, "NoneType", id="null"),
+            pytest.param([], "list", id="empty-list"),
+            pytest.param({}, "dict", id="empty-dict"),
+        ],
+    )
+    def test_warning_reports_value_and_python_type(self, bad, type_name):
+        # 排障需要看到"写进去的是什么、解析成了什么类型"，而不只是"不合法"。
+        raw = json.dumps([{"name": "srv", "transport": "stdio", "command": "x", "enabled": bad}])
+        with _capture_mcp_warnings() as records:
+            load_mcp_server_configs(raw)
+        messages = "\n".join(r.getMessage() for r in records)
+        assert "srv" in messages
+        assert type_name in messages
+
+    def test_valid_enabled_emits_no_enabled_warning(self):
+        # 反向断言：合法 boolean 不该产生噪音告警。
+        with _capture_mcp_warnings() as records:
+            load_mcp_server_configs(_servers(enabled=True))
+            load_mcp_server_configs(_servers(enabled=False))
+        assert [r for r in records if "enabled" in r.getMessage()] == []
+
+    def test_other_fields_are_not_touched_by_the_enabled_check(self):
+        # enabled 的严格化不得改变其他字段的解析语义。
+        cfg = load_mcp_server_configs(
+            _servers(
+                enabled=True,
+                transport="sse",
+                url="https://example.invalid/mcp",
+                args=["--x"],
+                allowed_tools=["a", "b"],
+                timeout_seconds=9.5,
+                max_payload_bytes=2048,
+                risk_level="medium",
+            )
+        )[0]
+        assert cfg.transport == "sse"
+        assert cfg.url == "https://example.invalid/mcp"
+        assert cfg.args == ("--x",)
+        assert cfg.allowed_tools == ("a", "b")
+        assert cfg.timeout_seconds == 9.5
+        assert cfg.max_payload_bytes == 2048
+        assert cfg.risk_level is RiskLevel.MEDIUM
 
 
 # ---------------------------------------------------------------------------

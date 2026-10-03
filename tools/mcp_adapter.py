@@ -13,6 +13,9 @@
 安全策略一律 **fail closed**（任何不确定都拒绝，而不是猜测）：
 
 1. **server allowlist**：只连接 ``MCP_SERVERS`` 中显式声明的 server；
+1b. **``enabled`` 只认 JSON boolean**：`"false"`` / `0` / `null` / `[]` / `{}` 一律
+   不做真值转换，整条跳过。``bool("false") is True``，若沿用真值语义，运维想
+   *关掉* 一个 server 的那次拼写错误会把它 *打开*；
 2. **tool allowlist**：``allowed_tools`` 为空 = 该 server 不允许任何工具；
 3. **transport 白名单**：仅 ``stdio`` / ``sse``；
 4. **命名空间化**：MCP 工具名为 ``mcp__{server}__{tool}``，与 native 工具不冲突；
@@ -144,6 +147,22 @@ MAX_SCHEMA_DEPTH = 12
 #: 而 ``max_payload_bytes`` 只约束**调用** payload，不约束 ``list_tools`` 返回的
 #: 描述符 —— 发现阶段没有任何天然体积上限，所以这里必须自带预算。
 MAX_SCHEMA_NODES = 512
+
+#: ``enabled`` 的 JSON 契约：**只接受 JSON boolean**（``true`` / ``false``）。
+#:
+#: 不复用 Python 真值语义，因为 ``bool(value)`` 是真值判断而不是类型判断：
+#: ``bool("false")`` / ``bool([])`` / ``bool({"a": 1})`` / ``bool(1)`` 全是
+#: ``True``。运维按 YAML/环境变量的肌肉记忆写 ``"enabled": "false"`` 想关掉
+#: server，解析结果却是**启用**——``enabled`` 恰恰是整个配置里唯一一个语义就是
+#: "关掉它"的字段，却在最常见的拼写错误下被打开。JSON 的 ``true`` / ``false``
+#: 本来就会解析成 Python ``bool``，因此任何非 ``bool`` 都意味着**类型写错了**，
+#: 而不是"另一种真值表示"。
+#:
+#: 不做字符串归一化（``"true"`` → ``True``）：那等于替运维猜意图，配置解析器
+#: 一旦开始"猜"，就无法区分"故意"和"笔误"，而这里的失败方向是不可逆的连接行为。
+#: 保守方向只有一个——不启用。
+_ENABLED_MISSING = object()
+
 #: MCP SDK 字段别名：1.x camelCase（wire 层）→ 2.x snake_case（Python 模型）。
 _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     "name": ("name",),
@@ -221,6 +240,12 @@ class MCPServerConfig:
     timeout_seconds: float = 15.0
     max_payload_bytes: int = 32768
     enabled: bool = True
+    """是否启用该 server（只有 JSON boolean ``true`` / ``false`` 合法）。
+
+    JSON 解析由 ``load_mcp_server_configs`` 严格把关：string / number / null /
+    list / dict 一律不算 boolean，整条记录被跳过（fail closed），绝不隐式转换
+    ——``bool("false") is True`` 会让"想关掉"变成"启用"。详见 ``_ENABLED_MISSING``。
+    """
     risk_level: RiskLevel = DEFAULT_RISK_LEVEL
     """该 server 全部工具的本地风险等级，**默认 HIGH**（未配置即最保守）。
 
@@ -483,6 +508,44 @@ def _coerce_risk_level(raw: Any, *, server: str = "") -> RiskLevel:
         return DEFAULT_RISK_LEVEL
 
 
+def _coerce_enabled_flag(item: dict[str, Any], *, name: str) -> Any:
+    """读取 ``enabled``，只接受 JSON boolean；类型非法时返回 ``_ENABLED_MISSING``。
+
+    返回值三态（而不是 bool / raise）：**存在且合法** → ``True`` / ``False``；
+    **键不存在** → 沿用既有默认（``True``，即"进了 allowlist 就是启用的"，
+    全局开关是另一个旋钮 ``MCP_ENABLED``，此处不改）；**存在但不是
+    boolean** → ``_ENABLED_MISSING``，由调用方跳过整条。
+
+    为什么非法时"跳过"而不是"收敛到 False"：两者都让 server 不被连接
+    （净效果一致），但保留条目会造出一个**无法与运维主动禁用区分**的状态——
+    排障时看到 ``enabled=False`` 却找不到任何告警线索，而配置里明明写着一个
+    类型错误的字段。跳过让告警成为该次故障的唯一、且不会被误读的解释。
+
+    为什么不用异常 / 整体 reject：``load_mcp_server_configs`` 对单条非法记录的
+    既定契约就是"跳过 + 记日志"（``transport`` / 数值字段同此，见
+    ``core.config.validate_mcp_settings`` 的说明），一条 server 的笔误不该让
+    整个 allowlist 一起失效。可观测性由 container 兜底：若所有条目都被跳过，
+    ``MCP_FAIL_CLOSED=true``（生产）会以 ``ConfigurationError`` 拒绝启动，
+    不会"配错了却静默跑成 native-only"。
+    """
+    if "enabled" not in item:
+        return True
+    raw = item["enabled"]
+    # bool 必须在 int 之前判断：``isinstance(True, int)`` 为 True。
+    if isinstance(raw, bool):
+        return raw
+    logger.warning(
+        "MCP server %s 的 enabled 非法（%r，%s）——只接受 JSON boolean "
+        'true / false；字符串 "false"、数字 0/1、null、数组、对象都不接受'
+        '（真值语义会把 "false" 判成启用）。该 server 已按 fail closed 跳过，'
+        "不会被连接。",
+        name,
+        raw,
+        type(raw).__name__,
+    )
+    return _ENABLED_MISSING
+
+
 def load_mcp_server_configs(
     raw: str,
     *,
@@ -517,6 +580,12 @@ def load_mcp_server_configs(
                 "MCP server 名称非法（仅 [A-Za-z0-9_-]、不含 __、不以分隔符开头），跳过: %s", name
             )
             continue
+        # enabled 先于 transport / 数值校验：它决定这条记录**是否成立**
+        # （名字与合法性是"准入"，transport 与超时是"怎么连"）。一个类型写错的
+        # enabled 会让后面的连接细节失去意义，先报它对排障更直接。
+        enabled = _coerce_enabled_flag(item, name=name)
+        if enabled is _ENABLED_MISSING:
+            continue
         transport = str(item.get("transport", "stdio")).strip().lower()
         if transport not in _SUPPORTED_TRANSPORTS:
             logger.warning("MCP server %s transport 不支持: %s", name, transport)
@@ -545,7 +614,7 @@ def load_mcp_server_configs(
                 allowed_tools=tuple(str(t) for t in item.get("allowed_tools", []) or []),
                 timeout_seconds=timeout,
                 max_payload_bytes=max_payload,
-                enabled=bool(item.get("enabled", True)),
+                enabled=enabled,
                 risk_level=risk_level,
             )
         )
