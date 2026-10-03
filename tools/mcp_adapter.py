@@ -837,11 +837,15 @@ class MCPToolAdapter:
                 )
                 continue
             description = _read_field(raw, "description")
+            # ``_MISSING`` 是"字段不存在"的哨兵，不是描述文本：漏判会让内部哨兵
+            # 的 repr（含内存地址）直接进 Function Calling 上下文。
+            if description is _MISSING or not description:
+                description = ""
             specs.append(
                 MCPToolSpec(
                     name=qualified_tool_name(self.config.name, mcp_name),
                     mcp_name=mcp_name,
-                    description=str(description) if description else "",
+                    description=str(description),
                     input_schema=schema,
                     risk_level=self.config.risk_level,
                     timeout=self.config.timeout_seconds,
@@ -1012,6 +1016,11 @@ class MCPToolAdapter:
 
     @staticmethod
     def _extract_text(content: Any) -> str:
+        # ``content`` 字段完全缺失时 ``_read_field`` 返回 ``_MISSING``，而哨兵是
+        # truthy 的：直接 ``content or []`` 会去迭代一个 ``object()``，抛
+        # TypeError，把"结果畸形"降级成与工具失败无关的通用异常。
+        if content is _MISSING or content is None:
+            return ""
         parts: list[str] = []
         for item in content or []:
             text = _read_field(item, "text")
