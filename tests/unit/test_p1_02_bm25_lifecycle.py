@@ -191,6 +191,18 @@ class _FakeQdrant:
 # ---------------------------------------------------------------------------
 
 
+class _WorkingReranker:
+    """Typed reranker double that always reports a real rerank."""
+
+    def rerank_with_outcome(self, query, results, top_k=3):
+        from rag.reranker import RerankOutcome, RerankReason
+
+        return RerankOutcome(
+            results=results[:top_k], applied=True, degraded=False,
+            reason=RerankReason.OK, provider_called=True,
+        )
+
+
 def _make_kb(client=None, embed_fn="auto", *, hybrid=True):
     """Build a QdrantKnowledgeBase backed by a fake/mock Qdrant client.
 
@@ -361,8 +373,18 @@ class TestHybridTruthfulness:
     @pytest.mark.asyncio
     async def test_bm25_ready_reports_normal_hybrid(self):
         """Positive case: after rebuild, BM25 READY + embedding up → normal
-        hybrid, lexical_channel_used=True, not degraded."""
+        hybrid, lexical_channel_used=True, not degraded.
+
+        The reranker is stubbed as *working* on purpose. `.env.test` supplies a
+        placeholder `RERANKER_API_KEY`, so a real `ApiReranker` would be
+        "available", attempt a live provider call, fail, and — correctly, since
+        the degradation contract is now truthful — mark the whole retrieval
+        degraded. That would make this BM25/vector truthfulness test depend on
+        provider reachability. Stubbing makes the "everything healthy" premise
+        it actually asserts explicit, and keeps the unit test off the network.
+        """
         kb, client = _make_kb()
+        kb._reranker = _WorkingReranker()
         _put(client, "product_knowledge", "pr_000", "烟酰胺精华美白控油")
         _put(client, "product_knowledge", "pr_001", "视黄醇抗衰面霜夜间使用")
         kb.rebuild_bm25_from_qdrant(["product_knowledge"])
@@ -371,6 +393,9 @@ class TestHybridTruthfulness:
         meta = getattr(result, "meta", {})
         assert meta.get("retrieval_degraded") is False
         assert meta.get("lexical_channel_used") is True
+        # The reranker really ran, so the new contract fields say so too.
+        assert meta.get("rerank_applied") is True
+        assert meta.get("rerank_degraded") is False
 
 
 # ---------------------------------------------------------------------------
