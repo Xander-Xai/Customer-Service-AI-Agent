@@ -858,6 +858,92 @@ def test_discovery_excludes_historical_banner(tmp_repo: Path):
     assert Path("docs/audit/old.md") not in rels
 
 
+# --------------------------------- banner self-declaration vs. mention (#66)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "> **HISTORICAL AUDIT SNAPSHOT**",
+        "> **HISTORICAL AUDIT SNAPSHOT / SUPERSEDED**",
+        "> **HISTORICAL AUDIT SNAPSHOT (2026-06-17)**",
+        "> **HISTORICAL AUDIT SNAPSHOT** — records the alignment executed on 2026-10-01.",
+        "> **HISTORICAL AUDIT SNAPSHOT — 2026-10-02.** 本文件是**时点审计结果**。",
+        "> HISTORICAL AUDIT SNAPSHOT",
+        ">historical audit snapshot",
+        "> **HISTORICAL AUDIT SNAPSHOT (2026-06-03, v3.3 worktree)**",
+    ],
+)
+def test_self_declaring_banner_is_recognized(body: str):
+    """Every real banner shape must stay excluded — the #66 fix narrows the
+    match to a self-declaration, never to a mere mention."""
+    assert audit.has_historical_banner(f"# Title\n\n{body}\n")
+    assert audit.has_historical_banner(f"{body}\n\n正文。\n")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # CLAUDE.md's own shape: prose naming the convention inside a list item.
+        "- `docs/reports/plans/**` 是 HISTORICAL AUDIT SNAPSHOT，不是永久 Current Truth。\n",
+        # A directive note whose blockquote *mentions* rather than declares.
+        "> 注：docs/reports/plans/** 下的报告是 HISTORICAL AUDIT SNAPSHOT。\n\n正文。\n",
+        # docs/README.md's shape: the marker inside a heading.
+        "# Docs\n\n#### `reports/plans/` — 均为 HISTORICAL AUDIT SNAPSHOT\n",
+        # Quoting the banner text as an inline code sample is not a declaration.
+        "# Guide\n\n> 写法是 `HISTORICAL AUDIT SNAPSHOT` 加粗。\n",
+    ],
+)
+def test_mention_of_marker_is_not_a_banner(text: str):
+    assert not audit.has_historical_banner(text)
+
+
+def test_discovery_keeps_docs_that_only_mention_the_convention(tmp_repo: Path):
+    write(
+        tmp_repo,
+        "docs/reference/convention.md",
+        "# 约定\n\n- 报告是 HISTORICAL AUDIT SNAPSHOT，不是永久 Current Truth。\n",
+    )
+    write(tmp_repo, "docs/design/live.md", "# Live\n\n正文。\n")
+    rels = {p.relative_to(tmp_repo) for p in audit.discover_docs(root=tmp_repo)}
+    assert rels == {Path("docs/design/live.md"), Path("docs/reference/convention.md")}
+
+
+def test_discovery_includes_claude_md():
+    """#66 acceptance: CLAUDE.md documents the banner convention, which must not
+    classify CLAUDE.md itself as a historical snapshot."""
+    docs = audit.discover_docs(REAL_ROOT)
+    assert REAL_ROOT / "CLAUDE.md" in docs
+
+
+def test_real_bannered_snapshots_are_still_excluded():
+    """#66 acceptance: tightening the banner match must not let a single real
+    snapshot into the active scan. Derived from the files on disk (canonical
+    banner form at line 3) rather than a hardcoded list, so adding a snapshot
+    keeps the assertion honest."""
+    active = {p.resolve() for p in audit.discover_docs(REAL_ROOT)}
+    bannered = [
+        p
+        for p in sorted((REAL_ROOT / "docs").rglob("*.md"))
+        if p.is_file()
+        and len(p.read_text(encoding="utf-8", errors="replace").splitlines()) > 2
+        and audit.HISTORICAL_BANNER_RE.match(
+            p.read_text(encoding="utf-8", errors="replace").splitlines()[2].strip()
+        )
+    ]
+    assert bannered, "fixture repo must contain bannered snapshots"
+    leaked = sorted(p.relative_to(REAL_ROOT).as_posix() for p in bannered if p.resolve() in active)
+    assert leaked == []
+
+
+def test_claude_md_is_actually_scanned():
+    """Belt-and-braces: CLAUDE.md being in discover_docs() must mean its claims
+    are evaluated — a guard that lists the file but ignores it would repeat #66."""
+    text = (REAL_ROOT / "CLAUDE.md").read_text(encoding="utf-8")
+    assert audit.HISTORICAL_MARKER in text, "fixture must still mention the convention"
+    assert not audit.has_historical_banner(text)
+
+
 def test_discovery_excludes_archive_and_milestone_dirs(tmp_repo: Path):
     write(tmp_repo, "docs/archive/old.md", "ChromaDB stale")
     write(tmp_repo, "docs/reports/milestone/old.md", "1400+ tests")
@@ -1208,6 +1294,69 @@ def test_negated_v64_statement_passes(tmp_repo: Path):
     doc = write(tmp_repo, "README.md", "当前 `6.3`；未声明 v6.4 release。\n")
     errors: list[str] = []
     audit.check_no_v64_claim([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # CLAUDE.md:5 verbatim — the version is inline code, so the literal text
+        # is "no `v6.4`" and adjacency across the version token is impossible.
+        "- Runtime version: `6.3` (`core/config.py`); no `v6.4` release is declared.",
+        "no `v6.4` release has been published",
+        "v6.4 release does not exist",
+        "`v6.4` release was never released",
+        "不存在 v6.4 版本",
+    ],
+)
+def test_backticked_version_negation_passes(tmp_repo: Path, line: str):
+    """#80: a correct negation is not a version claim, even when Markdown inline
+    code hides the negation from the matcher."""
+    doc = write(tmp_repo, "README.md", line + "\n")
+    errors: list[str] = []
+    audit.check_no_v64_claim([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Runtime version: v6.4",
+        "当前版本已升级到 v6.4",
+        "The system targets version 6.4 across all agents.",
+    ],
+)
+def test_v64_claim_is_still_detected_after_negation_fix(tmp_repo: Path, line: str):
+    """The #80 fix must not weaken the claim rule — it only fixed the negation
+    side, so an invented release is still an error."""
+    doc = write(tmp_repo, "README.md", line + "\n")
+    errors: list[str] = []
+    audit.check_no_v64_claim([doc], errors, root=tmp_repo)
+    assert any("v6.4" in e for e in errors)
+
+
+def test_distant_negation_cannot_launder_a_claim(tmp_repo: Path):
+    """A disclaimer no longer excuses a version claim that is not attached to
+    it: the negation must sit near the claim it negates, so the guard keeps
+    failing toward reporting."""
+    line = (
+        "no v6.4 release has been published anywhere in this repository, and we "
+        "now recommend v6.4 as the stable line for every deployment"
+    )
+    doc = write(tmp_repo, "README.md", line + "\n")
+    errors: list[str] = []
+    audit.check_no_v64_claim([doc], errors, root=tmp_repo)
+    assert any("v6.4" in e for e in errors)
+
+
+def test_real_claude_md_version_negation_is_not_an_error():
+    """Real-repo invariant (#80): CLAUDE.md:5 documents that no v6.4 release
+    exists. Reading that as a v6.4 claim is a false positive on a correct
+    current-truth statement."""
+    docs = [p for p in audit.discover_docs(REAL_ROOT) if p.name == "CLAUDE.md"]
+    assert docs, "CLAUDE.md must be part of the active scan for this guard to mean anything"
+    errors: list[str] = []
+    audit.check_no_v64_claim(docs, errors, root=REAL_ROOT)
     assert errors == []
 
 

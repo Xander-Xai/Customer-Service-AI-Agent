@@ -160,8 +160,9 @@ make db-downgrade # 回滚迁移
   Lua 原子 compare-and-delete；同一 thread 串行、不同 thread 并发。
   API 执行边界（`api/app.py::_run_graph`）与 worker 共用同一 key namespace。
 - **AgentRun canonical state**：数据库 `agent_runs` 表是业务状态**唯一真相源**，
-  状态机 `PENDING → QUEUED → RUNNING → SUCCEEDED | FAILED | RETRYING → RUNNING
-  | DEAD_LETTER`，任意未终态可 `→ CANCELLED`（`runtime/statuses.py`）。
+  状态机 `PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING →
+  SUCCEEDED | FAILED | RETRYING → RUNNING | DEAD_LETTER`，任意未终态可
+  `→ CANCELLED`（`runtime/statuses.py`）。
   Celery result backend **不是**真相源（`task_ignore_result=True`）。
 - **四个 ID/概念严格区分**：`thread_id`（对话级 == `session_id` == LangGraph
   thread）/ `run_id`（`agent_runs.id`，单轮执行）/ `task_id`（Celery task id）/

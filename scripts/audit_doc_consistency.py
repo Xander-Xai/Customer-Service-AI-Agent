@@ -106,6 +106,21 @@ EXCLUDE_FILES = {
     Path("docs/reports/resume-description.md"),  # has its own evidence-freeze header
 }
 HISTORICAL_MARKER = "HISTORICAL AUDIT SNAPSHOT"
+# A banner is a document *declaring itself* historical, so it must be a
+# blockquote line in the preamble (canonical form: line 3, right under the H1)
+# that OPENS with the marker — optional emphasis and any trailing qualifier
+# (`/ SUPERSEDED`, `(2026-06-17)`, `— 2026-10-02.`) are allowed.
+#
+# A bare substring test over the first 2000 characters cannot tell a
+# self-declaration from prose that merely *names* the concept: CLAUDE.md
+# explains that `docs/reports/plans/**` reports are historical snapshots, and
+# that sentence silently excluded the whole file from the active scan. Naming
+# the concept is not the same as declaring the document historical.
+HISTORICAL_BANNER_RE = re.compile(
+    r"^>+[ \t]*(?:\[![A-Za-z]+\][ \t]*)?(?:\*\*|__|\*|_)?[ \t]*"
+    r"HISTORICAL\s+AUDIT\s+SNAPSHOT",
+    re.IGNORECASE,
+)
 
 ACTIVE_EXTRA = [
     Path("README.md"),
@@ -283,7 +298,23 @@ def is_historical_dir(rel: Path) -> bool:
 
 
 def has_historical_banner(text: str) -> bool:
-    return HISTORICAL_MARKER in text[:2000]
+    """True only when the document declares *itself* historical.
+
+    The banner must be a blockquote line inside the preamble — the leading run
+    of blank / heading / blockquote lines, i.e. everything before the body. A
+    mention of the marker in body prose describes the concept (CLAUDE.md naming
+    what `docs/reports/plans/**` is; docs/README.md describing a directory) and
+    must never exclude an otherwise-current document from the active scan.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not stripped.startswith(">"):
+            break
+        if HISTORICAL_BANNER_RE.match(stripped):
+            return True
+    return False
 
 
 def is_decision_doc(rel: Path) -> bool:
@@ -1386,11 +1417,25 @@ def check_approval_surface_present(errors: list[str], root: Path = ROOT) -> None
 # `v6.4`/`6.4` claim in an active doc (outside historical context) would be a
 # release that was never made.
 V64_CLAIM_RE = re.compile(r"\bv6\.4\b|\bversion\s*[:=]?\s*6\.4\b", re.IGNORECASE)
-# Explicit "no v6.4 release" statements are the desired documentation, not a claim.
+# Explicit "no v6.4 release" statements are the desired documentation, not a
+# claim. The shapes below are matched against a *de-backticked* copy of the line
+# (see `v64_claim_is_negated`): a document writes the version as inline code, so
+# the literal text is ``no `v6.4` release`` and any regex demanding adjacency
+# across the version token cannot see the negation.
 V64_NEGATION_RE = re.compile(
-    r"未声明|不再声明|不声明|不创建|不发布|no\s+v6\.4|not\s+(?:a\s+)?release",
+    r"未声明|不再声明|不声明|不创建|不发布|不存在|未发布|尚未发布|已下架|"
+    r"no\s+v6\.4|not\s+(?:a\s+)?release|"
+    # "no <v6.4> release is declared / released / published"
+    r"no\s+[\"']?v?6\.4[\"']?\s+release\s+(?:is\s+|has\s+been\s+)?"
+    r"(?:declared|released|published)|"
+    # "<v6.4> release does not exist / was never released"
+    r"v?6\.4\s+release\s+(?:does\s+not\s+exist|was\s+never\s+(?:made|released))",
     re.IGNORECASE,
 )
+# A negation only excuses the version claim it is grammatically attached to.
+# Without this bound, one "no v6.4 release" anywhere on a line would excuse a
+# real "v6.4" claim on the same line — the guard must fail toward reporting.
+V64_NEGATION_WINDOW_CHARS = 48
 
 
 def check_lifecycle_vocabulary(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
@@ -1407,6 +1452,28 @@ def check_lifecycle_vocabulary(docs: list[Path], errors: list[str], root: Path =
                 )
 
 
+def v64_claim_is_negated(line: str) -> bool:
+    """True when every `v6.4` mention on `line` is grammatically negated.
+
+    Two things the naive line-wide test got wrong (#80):
+
+    - Markdown inline code hides the negation. ``no `v6.4` release is declared``
+      puts a backtick between `no ` and the version, so `no\\s+v6\\.4` cannot
+      match. Matching a de-backticked copy fixes it without loosening the claim
+      rule itself.
+    - A negation was allowed to excuse the whole line, so one disclaimer could
+      launder a genuine claim in the same sentence. The negation must now sit
+      within `V64_NEGATION_WINDOW_CHARS` of the claim it negates.
+    """
+    unquoted = line.replace("`", "")
+    for match in V64_CLAIM_RE.finditer(line):
+        lo = max(0, match.start() - V64_NEGATION_WINDOW_CHARS)
+        hi = match.end() + V64_NEGATION_WINDOW_CHARS
+        if not V64_NEGATION_RE.search(line[lo:hi]) and not V64_NEGATION_RE.search(unquoted[lo:hi]):
+            return False
+    return True
+
+
 def check_no_v64_claim(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
     """Rule: no `v6.4` product-version claim (no such release exists)."""
     for path in docs:
@@ -1414,7 +1481,7 @@ def check_no_v64_claim(docs: list[Path], errors: list[str], root: Path = ROOT) -
         for line_no, line in enumerate(text_lines(path), 1):
             if not V64_CLAIM_RE.search(line):
                 continue
-            if HISTORICAL_CONTEXT.search(line) or V64_NEGATION_RE.search(line):
+            if HISTORICAL_CONTEXT.search(line) or v64_claim_is_negated(line):
                 continue
             errors.append(
                 f"accidental product-version claim `v6.4` in {rel}:{line_no} — the "
@@ -2151,7 +2218,9 @@ def check_no_root_level_audit_snapshots(errors: list[str], root: Path = ROOT) ->
             f"root-level markdown {name} escapes the doc guards (only README.md / "
             f"CLAUDE.md are scanned at the root) and can compete with "
             f"docs/reference/current-state.md — move it to docs/reports/audit/ "
-            f"with a 'HISTORICAL AUDIT SNAPSHOT' banner, or list it in ACTIVE_EXTRA"
+            f"with a self-declaring banner line "
+            f"('> **HISTORICAL AUDIT SNAPSHOT**' as a blockquote in the preamble), "
+            f"or list it in ACTIVE_EXTRA"
         )
 
 
