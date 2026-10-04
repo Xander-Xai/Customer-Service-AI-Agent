@@ -375,12 +375,12 @@ class TestHybridTruthfulness:
         """Positive case: after rebuild, BM25 READY + embedding up → normal
         hybrid, lexical_channel_used=True, not degraded.
 
-        The reranker is stubbed as *working* on purpose. `.env.test` supplies a
-        placeholder `RERANKER_API_KEY`, so a real `ApiReranker` would be
-        "available", attempt a live provider call, fail, and — correctly, since
-        the degradation contract is now truthful — mark the whole retrieval
-        degraded. That would make this BM25/vector truthfulness test depend on
-        provider reachability. Stubbing makes the "everything healthy" premise
+        The reranker is stubbed as *working* on purpose. `.env.test` leaves
+        `RERANKER_API_KEY` empty (issue #52), so a real `ApiReranker` reports
+        `available=False` and — correctly, since the degradation contract is now
+        truthful — marks the whole retrieval degraded without calling any
+        provider. That would make this BM25/vector truthfulness test depend on
+        reranker configuration. Stubbing makes the "everything healthy" premise
         it actually asserts explicit, and keeps the unit test off the network.
         """
         kb, client = _make_kb()

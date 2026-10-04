@@ -666,10 +666,16 @@ class TestCosmeticsKnowledgeBase:
         assert not (kb._clip_enabled and kb._clip_embed_fn is not None)
 
     def test_create_embedding_function(self):
-        """_create_embedding_function 创建 API embedding（Mock 避免真实调用）"""
+        """_create_embedding_function 在 ``EMBEDDING_PROVIDER=api`` 下创建 API embedding
+
+        provider 显式钉成 ``api``：``.env.test`` 走 ``offline``（issue #52，默认
+        lane 零出网），而这条用例断言的正是 **api 分支**——provider 由工厂选择，
+        不钉住的话它测的就不是自己声称的那条路径了。
+        """
         from unittest.mock import MagicMock, patch
 
         with (
+            patch("core.config.EMBEDDING_PROVIDER", "api"),
             patch("core.config.EMBEDDING_API_KEY", "sk-test-key"),
             patch("rag.api_embedding.ApiEmbedding") as mock_api_cls,
         ):

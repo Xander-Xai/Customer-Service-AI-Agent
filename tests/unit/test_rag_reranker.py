@@ -175,12 +175,23 @@ def _http_error(status: int) -> httpx.HTTPStatusError:
 
 
 class TestRerankOutcomeContract:
-    def test_rerank_still_returns_a_plain_list(self):
-        """Backward compatibility: old callers get a list, not an outcome."""
+    def test_rerank_still_returns_a_plain_list(self, monkeypatch):
+        """Backward compatibility: old callers get a list, not an outcome.
+
+        传输层必须打桩：``ApiReranker(api_key="k")`` 会认为 provider 可用，
+        不打桩就会真的向 ``RERANKER_BASE_URL`` 发一次请求 —— 违背本类的
+        "never touch the network" 契约，也让断言结果依赖第三方可达性
+        （issue #52：默认 lane 零出网）。
+        """
         rr = ApiReranker(api_key="k")
+        monkeypatch.setattr(httpx, "post", lambda *a, **k: _resp(
+            {"results": [{"index": 0, "relevance_score": 0.1},
+                         {"index": 1, "relevance_score": 0.9},
+                         {"index": 2, "relevance_score": 0.5}]}))
         out = rr.rerank("q", _candidates(), top_k=2)
         assert isinstance(out, list)
         assert len(out) == 2
+        assert [r["content"] for r in out] == ["doc-1", "doc-2"]
 
     def test_outcome_is_frozen(self):
         outcome = RerankOutcome(results=[], applied=False, degraded=True,

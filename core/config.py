@@ -283,6 +283,23 @@ RAG_QUERY_REWRITING = (
 )  # v5.2: LLM 改写查询
 
 # ===== v6.2: Embedding & Reranker API 配置（替代本地 sentence-transformers）=====
+#: Which embedding implementation the RAG layer talks to.
+#:
+#: ``api``     — real HTTP embedding provider (:class:`rag.api_embedding.ApiEmbedding`).
+#:               The only production-legal value.
+#: ``offline`` — :class:`rag.offline_embedding.OfflineEmbedding`: a deterministic,
+#:               in-process, network-free embedder. Exists so an explicitly
+#:               offline lane (``.env.test`` / ``make test``) can exercise the
+#:               full retrieval + app-lifespan path with **no** provider egress
+#:               and reproducible vectors.
+#:
+#: Why a knob and not a silent fallback: ``offline`` is an *operator choice*, not
+#: a degradation path. P0-05 forbids fabricating a vector when a provider fails,
+#: and this must never become that loophole — hence the production guard in
+#: :func:`validate_embedding_provider` (fail closed, refuse to boot).
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "api").strip().lower()
+EMBEDDING_PROVIDERS = ("api", "offline")
+
 EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://api.siliconflow.cn/v1")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "BAAI/bge-large-zh-v1.5")
 EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
@@ -769,6 +786,33 @@ def validate_mcp_settings(
     return errors
 
 
+def validate_embedding_provider(
+    provider: str = EMBEDDING_PROVIDER,
+    *,
+    dev_mode: bool = False,
+) -> list[str]:
+    """校验 ``EMBEDDING_PROVIDER``（纯函数，无 IO），返回错误信息列表（空 = 通过）。
+
+    规则：
+      - 只接受 ``api`` / ``offline``；未知值直接拒绝（不静默回退到 ``api``，
+        否则打错的配置会悄悄变成一次真实 provider 调用）；
+      - ``offline`` 是确定性占位 embedder，**生产非法**：它不表达任何语义相似度，
+        只为离线 lane 提供可复现向量。生产误配时拒绝启动，而不是让线上 RAG
+        静默退化成哈希向量。
+    """
+    if provider not in EMBEDDING_PROVIDERS:
+        return [
+            f"EMBEDDING_PROVIDER 非法: {provider!r}；"
+            f"合法值 {'/'.join(EMBEDDING_PROVIDERS)}"
+        ]
+    if provider == "offline" and not dev_mode:
+        return [
+            "EMBEDDING_PROVIDER=offline is a deterministic test-lane embedder and "
+            "carries no semantic meaning — it must not serve production retrieval"
+        ]
+    return []
+
+
 #: MCP server 允许显式声明的风险等级。**与 ``core.hitl.risk.RiskLevel`` 同源**，
 #: 这里只做字面量校验，不另立词汇表。
 MCP_RISK_LEVELS = ("low", "medium", "high")
@@ -893,6 +937,10 @@ def validate_required_config():
             max_payload_bytes=MCP_MAX_PAYLOAD_BYTES,
         )
     )
+
+    # Embedding provider：未知值 / 生产用 offline 都直接拒绝启动（fail closed）。
+    # 离线 lane（DEV_MODE=true）允许 offline；生产只能走真实 provider。
+    errors.extend(validate_embedding_provider(EMBEDDING_PROVIDER, dev_mode=_DEV_MODE))
 
     # P0-2 / P0-6: 生产 session + dispatch + gunicorn 多 worker + lock TTL（纯函数）
     errors.extend(

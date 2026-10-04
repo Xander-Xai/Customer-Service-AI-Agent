@@ -511,18 +511,27 @@ class ServiceContainer:
                 seed_tech_support,
             )
 
-            # v6.2: 加载容器级单例 Embedding 模型（API 调用）
+            # v6.2: 加载容器级单例 Embedding 模型（EMBEDDING_PROVIDER 决定 api/offline）
             if self.embedding_model is None:
                 try:
-                    from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
-                    from rag.api_embedding import ApiEmbedding
+                    from core.config import (
+                        EMBEDDING_API_KEY,
+                        EMBEDDING_BASE_URL,
+                        EMBEDDING_MODEL,
+                        EMBEDDING_PROVIDER,
+                    )
+                    from rag.embedding_factory import create_embedding_model
 
-                    self.embedding_model = ApiEmbedding(
+                    self.embedding_model = create_embedding_model(
+                        EMBEDDING_PROVIDER,
                         api_key=EMBEDDING_API_KEY,
                         model=EMBEDDING_MODEL,
                         base_url=EMBEDDING_BASE_URL,
                     )
-                    logger.info(f"容器级 Embedding 模型加载完成 ({EMBEDDING_MODEL})")
+                    logger.info(
+                        f"容器级 Embedding 模型加载完成 "
+                        f"(provider={EMBEDDING_PROVIDER}, model={EMBEDDING_MODEL})"
+                    )
                 except Exception as e:
                     logger.warning(f"Embedding API 加载失败: {e}")
                     self.embedding_model = None

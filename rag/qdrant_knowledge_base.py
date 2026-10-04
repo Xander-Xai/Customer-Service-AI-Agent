@@ -200,31 +200,53 @@ class QdrantKnowledgeBase:
 
     @staticmethod
     def _create_embedding_function():
-        """创建 API 嵌入客户端（替代本地 SentenceTransformer）"""
+        """创建 embedder（``EMBEDDING_PROVIDER``: api=真实 provider / offline=确定性无网络）"""
+        from core.config import (
+            EMBEDDING_API_KEY,
+            EMBEDDING_BASE_URL,
+            EMBEDDING_MODEL,
+            EMBEDDING_PROVIDER,
+            validate_embedding_provider,
+        )
+
+        # Provider 选择本身出错（未知值）是**配置错误**，不能落进下面的
+        # 「embedding 不可用 → 关闭向量通道」兜底：否则打错的 EMBEDDING_PROVIDER
+        # 会静默变成一次向量通道关闭，而不是一次响亮的启动失败。
+        config_problems = validate_embedding_provider(EMBEDDING_PROVIDER, dev_mode=True)
+        if config_problems:
+            QdrantKnowledgeBase._embed_fn_name = "invalid-provider"
+            raise ValueError(config_problems[0])
+
+        if EMBEDDING_PROVIDER == "api" and not EMBEDDING_API_KEY:
+            logger.warning(
+                "EMBEDDING_API_KEY 未配置，embedding 不可用（向量通道将被禁用，"
+                "不生成随机向量）"
+            )
+            return None
+
         try:
-            from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
+            from rag.embedding_factory import create_embedding_model
 
-            if not EMBEDDING_API_KEY:
-                logger.warning(
-                    "EMBEDDING_API_KEY 未配置，embedding 不可用（向量通道将被禁用，"
-                    "不生成随机向量）"
-                )
-                return None
-
-            from rag.api_embedding import ApiEmbedding
-
-            model = ApiEmbedding(
+            model = create_embedding_model(
+                EMBEDDING_PROVIDER,
                 api_key=EMBEDDING_API_KEY,
                 model=EMBEDDING_MODEL,
                 base_url=EMBEDDING_BASE_URL,
             )
-            QdrantKnowledgeBase._embed_fn_name = EMBEDDING_MODEL.split("/")[-1]
-            logger.info(f"API Embedding 客户端创建成功: {EMBEDDING_MODEL}")
+            QdrantKnowledgeBase._embed_fn_name = (
+                EMBEDDING_MODEL.split("/")[-1]
+                if EMBEDDING_PROVIDER == "api"
+                else getattr(model, "model", "offline")
+            )
+            logger.info(
+                f"Embedding 客户端创建成功: provider={EMBEDDING_PROVIDER} "
+                f"model={EMBEDDING_MODEL}"
+            )
             return model
         except Exception as e:
             QdrantKnowledgeBase._embed_fn_name = "default(unavailable)"
             logger.warning(
-                f"API Embedding 创建失败: {e}（embedding 不可用，向量通道将被禁用，"
+                f"Embedding 创建失败: {e}（embedding 不可用，向量通道将被禁用，"
                 "不生成随机向量）"
             )
             return None

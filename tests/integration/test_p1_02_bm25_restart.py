@@ -97,11 +97,11 @@ def _make_kb(path: str):
 class _WorkingReranker:
     """Typed reranker double that reports a real rerank.
 
-    `.env.test` provides a placeholder `RERANKER_API_KEY`, so a real
-    `ApiReranker` counts as available, attempts a live provider call and fails.
-    Under the reranker degradation contract that correctly marks the retrieval
-    degraded, which would make BM25/dense restart assertions depend on provider
-    reachability. Stubbing keeps this integration test about index persistence.
+    `.env.test` leaves `RERANKER_API_KEY` empty (issue #52), so a real
+    `ApiReranker` reports `available=False` and degrades the retrieval without
+    calling any provider. That would make BM25/dense restart assertions depend
+    on reranker configuration. Stubbing keeps this integration test about index
+    persistence.
     """
 
     def rerank_with_outcome(self, query, results, top_k=3):
