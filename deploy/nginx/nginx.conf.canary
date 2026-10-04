@@ -1,21 +1,37 @@
-# ===== 基础反向代理配置（base production stack）=====
+# ===== 灰度（canary）反向代理配置 =====
 #
-# 由 nginx 镜像的 Dockerfile COPY 到 /etc/nginx/conf.d/default.conf，
-# 因此本文件的顶层上下文是 **http**（主 nginx.conf 的 `include conf.d/*.conf`
-# 位于 http{} 内）。这一点决定了两件事：
-#   - upstream / map 必须写在**本文件的顶层**（http 级），不能放进 server{}；
-#   - 本文件里不要出现 `user` / `events` / `http` 这些主配置才有的指令。
+# 只在 canary stack 生效：`docker compose -f docker-compose.yml \
+#   -f docker-compose.prod.yml -f docker-compose.canary.yml` 会把本文件挂载到
+# /etc/nginx/conf.d/default.conf，**替换**镜像里 base 的那份。
+# base stack（make prod）不会挂载本文件，因此看不到 canary_backend ——
+# 那正是 #59 要保证的：base 环境里不存在名为 canary 的 service，
+# 引用它会让 nginx 以 "host not found in upstream" 拒绝启动。
 #
-# 灰度（canary）**不在本文件**：base stack（`make prod`，即 base + prod）
-# 没有 canary service，引用它会让 nginx 直接启动失败。带 cookie 的流量分割
-# 放在 nginx.conf.canary，只有 docker-compose.canary.yml 会挂载它。
+# 挂载目标必须是 /etc/nginx/conf.d/default.conf（镜像里 server 配置所在处），
+# 不是 /etc/nginx/nginx.conf（那是主配置，含 user/events/http，挂一个
+# 只有 server{} 的文件进去会让 nginx 报 "server directive is not allowed here"）。
 #
-# 静态资源（/assets/ /static/ /styles/）**不由 nginx 提供**，见文末说明。
+# 顶层上下文是 **http**，所以 upstream / map 必须写在 server{} 之外。
 
 # 稳定后端：ip_hash 保证同一客户端 IP 的 WebSocket 会话粘性
 upstream stable_backend {
     ip_hash;
     server app:8000;
+}
+
+# 灰度后端：canary 服务由 docker-compose.canary.yml 定义，
+# 与 stable 共用 cs-network，故可用服务名解析。
+upstream canary_backend {
+    ip_hash;
+    server canary:8000;
+}
+
+# 灰度发布：基于 cookie 的流量分割。
+# 带 canary_token=canary 的客户端 → 灰度后端；其余 → 稳定后端。
+# 说明：这里**没有**"随机 10%"分支——未带 cookie 的一律走 stable。
+map $cookie_canary_token $app_backend {
+    "canary" canary_backend;
+    default  stable_backend;
 }
 
 server {
@@ -58,10 +74,9 @@ server {
     # 最大上传大小（用于 feedback 等 POST 请求）
     client_max_body_size 1m;
 
-    # ===== 主应用路由 =====
-    # base stack 只有 app 这一个后端，因此没有 map 变量，直接指向 stable_backend。
+    # ===== 主应用路由（cookie 灰度分割）=====
     location / {
-        proxy_pass http://stable_backend;
+        proxy_pass http://$app_backend;
 
         proxy_http_version 1.1;
 
@@ -75,6 +90,9 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 
+        # 灰度标识头（传递给后端）
+        proxy_set_header X-Canary-Version $cookie_canary_token;
+
         # 超时配置（WebSocket 长连接需要更长超时）
         proxy_connect_timeout 10s;
         proxy_send_timeout 300s;
@@ -82,14 +100,13 @@ server {
     }
 
     # ===== 健康检查（不走认证，直接到 stable）=====
+    # 刻意不走灰度后端：稳定后端不可用时应如实反映，而不是被灰度掩盖。
     location = /api/health {
         proxy_pass http://stable_backend/api/health;
         access_log off;
     }
 
     # ===== 灰度状态端点 =====
-    # base stack 未部署 canary，这里必须如实报告 disabled，而不是谎称 enabled
-    # —— 谎报会让"灰度已生效"这一结论在 base 环境里也成立，那是错的。
     location = /api/canary {
         # 仅允许内网访问
         allow 10.0.0.0/8;
@@ -99,21 +116,10 @@ server {
         deny all;
 
         default_type application/json;
-        return 200 '{"canary": "disabled", "reason": "base stack has no canary service"}';
+        return 200 '{"canary": "enabled", "cookie": "$cookie_canary_token"}';
     }
 }
 
-# ===== 关于静态资源 =====
-#
-# 本文件**不再**为 /assets/ 与 /static/ 配置 alias。这两个路径由 app 自己提供：
-# api/app.py::create_app 挂载了 /static、/styles、/assets 三个 StaticFiles，
-# 且响应头与原先 alias 里的完全一致
-# （Cache-Control: public, max-age=31536000, immutable + X-Content-Type-Options: nosniff，
-# 见 api/app.py::_make_cached_static）。
-#
-# 原先的 alias 指向 /home/app/web/static/...，而该路径在 nginx 容器里不存在，
-# 在 app 镜像里也不存在（镜像是 WORKDIR /app，只有 /home/appuser），
-# 因此那两个 location 恒定 404。nginx 也不适合做这件事：Vite 产物
-# （web/static/dist/assets）是构建产物、未提交进仓库，
-# Dockerfile 无法 COPY 一个干净克隆里不存在的路径。
-# 请求现在落到上面的 location /，由 app 提供。
+# 静态资源同样不由 nginx 提供：base 的 nginx.conf 里已说明原因
+# （alias 目标路径不存在、Vite 产物是未提交的构建产物），
+# 请求落到 location / 由 app 提供。

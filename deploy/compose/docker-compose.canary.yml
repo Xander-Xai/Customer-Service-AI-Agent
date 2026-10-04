@@ -79,9 +79,17 @@ services:
       - cs-network
 
   # ===== Nginx 配置更新（灰度流量分割）=====
+  # 挂载目标必须是 /etc/nginx/conf.d/default.conf —— 镜像的 Dockerfile 把配置
+  # COPY 到这里，主 nginx.conf 的 `include /etc/nginx/conf.d/*.conf` 位于 http{}
+  # 内，所以这是 server 配置所在处。
+  #
+  # 原先挂到 /etc/nginx/nginx.conf（主配置，含 user/events/http），后果有两个：
+  # 挂进去的只有 server{}，nginx 报 "server directive is not allowed here" 而起不来；
+  # 而镜像自带的 conf.d/default.conf（base 配置）仍然生效 —— 也就是说灰度配置
+  # 从来没有被真正使用过。
   nginx:
     volumes:
-      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/nginx.conf.canary:/etc/nginx/conf.d/default.conf:ro
       - ../nginx/ssl:/etc/nginx/ssl:ro
 
 volumes:
