@@ -35,6 +35,46 @@
 
 ---
 
+## 🔌 端口语义（先读这一节）
+
+生产栈里**只有一部分服务对宿主机发布端口**。把容器端口当成宿主机地址去 `curl`，
+在下面这些服务上永远连不上——这不是环境故障，是拓扑事实。
+
+| 服务 | 宿主机端口 | 容器内地址 | 说明 |
+|------|-----------|-----------|------|
+| `nginx` | `80` / `443`（`${NGINX_HTTP_PORT}` / `${NGINX_HTTPS_PORT}`） | — | **唯一**的应用入口。TLS 终止、安全响应头、canary 流量分割都在这里；`http://` 一律 301 跳 `https://` |
+| `grafana` | `3000` | — | 指标看板入口（`GRAFANA_PASSWORD`） |
+| `alertmanager` | `9093` | — | 告警路由 |
+| `loki` | `3100` | — | 日志查询（`make monitoring-up` / `make prod`） |
+| `app` | **不发布**（仅 `expose: 8000`） | `http://localhost:8000` | 只能从 Compose network 内访问 |
+| `worker` | 不发布 | — | 无 HTTP 端点 |
+| `prometheus` | **不发布**（仅 `expose: 9090`） | `http://localhost:9090` | HTTP API 无鉴权，刻意不对外 |
+| `postgres` / `redis` / `qdrant` | **不发布** | 见各自小节 | 同样只走容器网络 |
+
+> 为什么不发布 `app:8000`：绕开 nginx 直连应用会同时丢掉 TLS 终止、安全响应头
+> （HSTS / CSP / nosniff）和 canary 流量分割。**不要**为了图方便在生产加
+> `ports: 8000:8000`——那等于把这三层一起关掉。
+
+因此本文后续所有诊断命令分两类：
+
+```bash
+# 已发布到宿主机：直接 curl（务必分清端口属于哪个服务）
+curl -I http://localhost/                                  # nginx，唯一应用入口；http 会 301 到 https
+curl -s http://localhost:3000/api/health | jq .           # 这是 **Grafana** 的健康，不是 app 的
+
+# app 未发布端口：即使它提供 /api/health，也只能在 Compose network 内执行
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app curl -s http://localhost:8000/api/health | jq .
+
+# Prometheus：该镜像内只有 promtool / wget，没有 curl
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec prometheus promtool query instant http://localhost:9090 'cache_hit_rate'
+```
+
+端口与路径的机器可校验契约：`tests/unit/test_compose_deploy_topology.py`。
+
+---
+
 ## 🔍 故障排查（v6.0 复审）
 
 ### 常见问题速查表
@@ -106,7 +146,9 @@ curl -s -H "Authorization: Bearer $OPENAI_API_KEY" \
      | jq '.data[].id' | head -10
 
 # 3. 检查熔断器状态
-curl http://localhost:8000/api/circuit-breaker | jq .
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/circuit-breaker | jq .
 # 预期输出: {"state": "closed", ...}
 # 如果 state=open，说明LLM服务不可用
 
@@ -115,7 +157,9 @@ docker logs customer-service-app --tail 100 | grep -i "error\|timeout"
 
 # 5. 测试LLM连通性（使用项目自身的LLM客户端，或通用curl）
 # 方式A: 通过项目健康端点
-curl -s http://localhost:8000/api/health | jq '.llm'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health | jq '.llm'
 
 # 方式B: 通用curl（适配所有OpenAI兼容API，包括SiliconFlow/DeepSeek/OpenAI）
 curl -s -X POST ${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}/chat/completions \
@@ -146,7 +190,9 @@ echo "HTTP_TIMEOUT=60" >> .env.prod
 docker compose restart app
 
 # 方案C: 预热高频缓存（长期）
-python3 scripts/warm_cache.py http://localhost:8000
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  python3 scripts/warm_cache.py http://localhost:8000
 
 # 方案D: 联系API提供商提升配额
 # OpenAI: https://platform.openai.com/account/limits
@@ -170,11 +216,14 @@ python3 scripts/warm_cache.py http://localhost:8000
 
 ```bash
 # 1. 检查缓存统计
-curl http://localhost:8000/api/cache/stats | jq .
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/cache/stats | jq .
 # 关注: hit_rate, l1_size, l2_size
 
 # 2. 查看缓存命中详情
-curl http://localhost:9090/api/v1/query?query=cache_hit_rate | jq .
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec prometheus promtool query instant http://localhost:9090 'cache_hit_rate'
 
 # 3. 分析查询多样性
 # 当前通过 Prometheus / Grafana 查询 cache_hit_rate 与请求指标；
@@ -196,7 +245,9 @@ grep CACHE_TTL .env.prod
 echo "CACHE_TTL=3600" >> .env.prod
 
 # 方案B: 启用缓存预热
-python3 scripts/warm_cache.py http://localhost:8000
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  python3 scripts/warm_cache.py http://localhost:8000
 
 # 方案C: 优化L2语义匹配阈值
 echo "CACHE_SEMANTIC_THRESHOLD_SHORT=0.7" >> .env.prod  # 降低阈值
@@ -396,10 +447,13 @@ echo "SESSION_STORAGE_BACKEND=redis" >> .env.prod
 
 ```bash
 # 1. 检查告警历史
-curl http://localhost:8000/api/alerts?limit=50 | jq '.alerts[] | {severity, timestamp}'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s 'http://localhost:8000/api/alerts?limit=50' | jq '.alerts[] | {severity, timestamp}'
 
 # 2. 分析告警类型分布
-curl http://localhost:9090/api/v1/query?query=rate(csai_errors_total[5m]) | jq .
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec prometheus promtool query instant http://localhost:9090 'rate(csai_errors_total[5m])'
 
 # 3. 检查抑制窗口配置
 # 抑制窗口当前硬编码在 alerts/notifier.py（默认 300 秒 / 5 分钟）；
@@ -444,7 +498,9 @@ echo "SLA_ALERT_COOLDOWN=600" >> .env.prod  # 10分钟冷却（默认 300）
 
 ```bash
 # 1. 检查SLA违约详情
-curl http://localhost:8000/api/metrics | jq '.metrics.sla'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/metrics | jq '.metrics.sla'
 
 # 2. 分析各阶段耗时
 # Graph节点 -> Agent执行 -> LLM调用 -> 后处理
@@ -494,7 +550,9 @@ ls -lh web/dist/
 # 确认文件存在且大小合理
 
 # 2. 检查CSP头配置
-curl -I http://localhost:8000/ | grep Content-Security-Policy
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -sI http://localhost:8000/ | grep Content-Security-Policy
 
 # 3. 浏览器Console检查
 # F12 -> Console -> 查看错误信息
@@ -554,7 +612,9 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
   exec qdrant curl -fsS http://localhost:6333/collections/product_knowledge | jq '.result'
 
 # 4. 检查健康端点
-curl -s http://localhost:8000/api/health | jq '.components.qdrant'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health | jq '.components.qdrant'
 ```
 
 **解决方案**:
@@ -588,10 +648,14 @@ docker exec customer-service-qdrant df -h /qdrant/storage
 
 ```
 # API 健康端点
-curl http://localhost:8000/api/health
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health
 
 # 详细状态（需要认证）
-curl -H "X-API-Key: YOUR_API_KEY" http://localhost:8000/api/health?detail=true
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s -H "X-API-Key: YOUR_API_KEY" 'http://localhost:8000/api/health?detail=true'
 ```
 
 ### 日志管理
@@ -751,7 +815,9 @@ curl -H "Authorization: Bearer $OPENAI_API_KEY" \
      https://api.siliconflow.cn/v1/models
 
 # 查看熔断器状态
-curl http://localhost:8000/api/health | jq '.circuit_breaker'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health | jq '.circuit_breaker'
 ```
 
 #### 3. 高延迟问题
@@ -764,7 +830,9 @@ docker stats
 grep "response_time" logs/app.log | awk '{print $NF}' | sort -n | tail
 
 # 检查缓存命中率
-curl http://localhost:8000/api/metrics | grep cache_hit_rate
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/metrics | grep cache_hit_rate
 
 # 临时解决方案：增加 worker 数量
 export GUNICORN_WORKERS=4
@@ -806,7 +874,9 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
   exec qdrant curl -fsS http://localhost:6333/collections | jq '.result.collections[] | {name, vectors_count}'
 
 # 或通过项目健康端点
-curl -s http://localhost:8000/api/health | jq '.components.qdrant'
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health | jq '.components.qdrant'
 
 # 检查具体集合详情
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
@@ -835,7 +905,9 @@ make prod-build
 make prod
 
 # 4. 验证恢复
-curl http://localhost:8000/api/health
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health
 ```
 
 #### 数据损坏恢复
@@ -953,7 +1025,9 @@ vim .env.prod
 docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --no-deps app
 
 # 4. 验证服务正常
-curl http://localhost:8000/api/health
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health
 
 # 5. 通知所有客户端更新 API Key
 ```
@@ -1088,7 +1162,9 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 # 7. 验证功能
 # 当前仓库无 scripts/smoke_test.sh（历史写法已移除）；用健康检查与
 # docs/checklists/quick-launch-checklist.md 的验证命令代替：
-curl -s http://localhost:8000/api/health | jq .
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health | jq .
 
 # 8. 如有问题，回滚
 git checkout PREVIOUS_TAG
@@ -1115,7 +1191,7 @@ make prod
 
 - [项目 README](../../README.md)
 - [生产准备度检查清单](../checklists/production-readiness-checklist.md)
-- [API 文档](http://localhost:8000/docs)
+- [API 文档](../reference/api-reference.md)（生产经 nginx HTTPS 入口的 `/docs`）
 - [架构设计文档](../design/architecture-design.md)
 
 ---

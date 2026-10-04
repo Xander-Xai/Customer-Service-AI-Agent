@@ -807,7 +807,7 @@ cp .env.prod .env
 make prod
 
 # 方式二：Docker Compose 直接启动
-docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --build
 
 # 方式三：开发环境（热重载）
 make dev
@@ -824,13 +824,46 @@ make test
 
 ### 验证
 
+> **端口语义**：可达地址取决于部署形态，两套不能混用。
+>
+> | 形态 | 应用入口 | 依据 |
+> |------|---------|------|
+> | 开发（`make dev` / `make dev-docker`） | `http://localhost:8000` | dev override（`docker-compose.override.yml`）发布 `${APP_PORT:-8000}:8000` |
+> | 生产（`make prod`） | `https://<域名>`（`${NGINX_HTTPS_PORT:-443}`） | 生产栈中**唯一**发布应用端口的服务是 nginx；`app` 只有 `expose: 8000`，不对宿主机发布 |
+>
+> 为什么不发布 8000：绕开 nginx 直连应用会同时丢掉 TLS 终止、安全响应头
+> （HSTS / CSP / nosniff）和 canary 流量分割。Prometheus 同理只有 `expose: 9090`，
+> **任何** compose 形态都不发布到宿主机——它的 HTTP API 无鉴权；指标看板看 Grafana（`:3000`），
+> PromQL 查询从容器网络内发起。
+
+**开发环境（`make dev` / `make dev-docker`）**
+
 | 地址 | 说明 |
 |------|------|
 | http://localhost:8000 | 前端界面（暗色主题，含对话 + 监控仪表盘） |
 | http://localhost:8000/docs | FastAPI 自动生成的 API 文档（Swagger UI） |
 | `curl http://localhost:8000/api/health` | 健康检查（DB / Redis / LLM / Qdrant / 熔断器 / LangGraph checkpoint 状态） |
 | http://localhost:3000 | Grafana 仪表盘（admin / `<GRAFANA_PASSWORD>`） |
-| http://localhost:9090 | Prometheus UI |
+
+**生产环境（`make prod`）**
+
+| 地址 | 说明 |
+|------|------|
+| `https://<域名>` | 应用入口：前端 + API + WebSocket；TLS 终止与全部安全响应头都在 nginx |
+| `http://<域名>`（`${NGINX_HTTP_PORT:-80}`） | 301 跳转到 HTTPS（见 `deploy/nginx/nginx.conf`） |
+| http://localhost:3000 | Grafana 仪表盘（admin / `<GRAFANA_PASSWORD>`） |
+| http://localhost:9093 | Alertmanager |
+| http://localhost:3100 | Loki（`make prod` / `make monitoring-up`） |
+| `docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml exec app curl http://localhost:8000/api/health` | 应用自身健康检查（`app` 不发布到宿主机，只能在容器内访问） |
+| `docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml exec prometheus promtool query instant http://localhost:9090 'cache_hit_rate'` | Prometheus 查询（`prometheus` 不发布到宿主机；该镜像内只有 `promtool` / `wget`，没有 `curl`） |
+
+> ⚠️ HTTPS 入口要求 `deploy/nginx/ssl/{cert.pem,key.pem}`。该目录由运维自备，
+> `.gitignore` 已忽略，仓库不提供证书。证书缺失时 nginx 无法启动——这一项单独跟踪，
+> 不在上面的验证清单内。
+>
+> 端口与路径的机器可校验契约见
+> `tests/unit/test_compose_deploy_topology.py`（构建上下文可解析、bind mount 来源可解析、
+> 本 README / CI / 生产运维手册三处端口语义一致）。
 
 ### 环境切换
 
@@ -899,13 +932,15 @@ customer-service-ai-agent/
 │   ├── src/           # 34 JS 模块（聊天/API/Auth/工具/管理后台/测试）
 │   ├── styles/        # 14 CSS 文件（变量/布局/组件/5 种主题/无障碍/管理/响应式/动画/登录）
 │   └── *.html         # 5 页面（聊天/登录/管理/Widget/主题预览）
-├── deploy/compose/    # Docker Compose 变体（base / prod / override / canary / scale / monitoring）
+├── deploy/            # 部署资产根目录（Compose 变体 + 反代 + 日志/链路配置）
+│   ├── compose/       # Docker Compose 变体（base / prod / override / canary / scale / monitoring / otel）
+│   ├── nginx/         # Nginx 反向代理（Dockerfile + nginx.conf：TLS + WebSocket + canary 流量分割）
+│   ├── loki/          # 日志聚合配置（loki-config.yaml + promtail-config.yaml）
+│   └── otel/          # OpenTelemetry Collector 配置（traces only）
+├── monitoring/        # Prometheus + Grafana + Alertmanager 配置
 ├── tests/             # 测试套件（pytest unit/integration/e2e/stress + eval 资产；数量以 pytest --collect-only -q 为准）
 ├── docs/              # 文档（active/archive/decisions + ADR）
-├── alembic/           # 数据库迁移脚本（3 个版本）
-├── nginx/             # Nginx 反向代理（TLS + WebSocket + canary）
-├── monitoring/        # Prometheus + Grafana + Alertmanager + Loki
-├── loki/              # 日志聚合配置（Loki + Promtail）
+├── alembic/           # 数据库迁移脚本（7 个版本）
 └── scripts/           # 运维脚本（部署/备份/RAG 评估/密钥生成）
 ```
 

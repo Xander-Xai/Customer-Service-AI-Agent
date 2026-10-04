@@ -3,13 +3,22 @@ version: '3.8'
 services:
   # ===== Nginx 反向代理（v3.9）=====
   nginx:
-    build: ../../nginx
+    # 构建上下文 = deploy/nginx/（含 Dockerfile + nginx.conf）。
+    # 路径锚点是**本文件所在目录** deploy/compose/，因此 `..` 即 deploy/。
+    # 原值 `../../nginx` 解析到 <repo>/nginx —— 该目录不存在（真实位置是
+    # deploy/nginx/），`docker compose build` 因此以
+    # "unable to prepare context" 直接中止，make prod / 方式一 / 方式二 /
+    # 生产运维手册 全部在第一步就被硬阻断（issue #48）。
+    build: ../nginx
     container_name: customer-service-nginx
+    # nginx 是生产栈**唯一**的应用入口：TLS、安全响应头、灰度流量分割都在这里。
+    # app 只 expose 不 publish（见 app 服务），绕开 nginx 直连 8000 会同时丢掉
+    # 这三层能力，所以 8000 不是生产可达地址。
     ports:
       - "${NGINX_HTTP_PORT:-80}:80"
       - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
-      - ../../deploy/nginx/ssl:/etc/nginx/ssl:ro
+      - ../nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       - app
     restart: unless-stopped

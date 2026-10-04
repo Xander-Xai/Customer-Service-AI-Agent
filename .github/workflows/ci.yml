@@ -401,14 +401,27 @@ jobs:
             git pull origin main
             cp .env.prod .env
             # compose 文件在 deploy/compose/ 下，仓库根没有 docker-compose.yml
-            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml pull
-            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --build
-            # 等待健康检查
-            sleep 10
-            curl -sf http://localhost:8000/api/health || exit 1
+            DC="docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml"
+            $DC pull
+            $DC up -d --build
+            # 健康检查走**容器内**地址：生产栈里 app 只有 expose: 8000，不对宿主机
+            # 发布（唯一发布应用端口的是 nginx 的 80/443），所以宿主机 curl :8000
+            # 永远连不上 —— 旧写法在拓扑修正后是一条必然失败的探针。
+            # 用有界轮询替代固定 sleep：每 2s 探一次真实信号，最多 60 次（120s 上限），
+            # 不新增任何 sleep，也不放宽任何断言。
+            ok=0
+            for i in $(seq 1 60); do
+              if $DC exec -T app curl -sf http://localhost:8000/api/health >/dev/null; then ok=1; break; fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::app 在 120s 内未通过 /api/health（容器内探针）"
+              $DC logs --tail 100 app
+              exit 1
+            fi
             # 分布式 Runtime 门禁：worker 必须真的起来，否则异步 Run 会永久停在 QUEUED。
             # 这里只做最低限度的存活/连通性确认；正确性由 runtime-e2e / runtime-chaos 证明。
-            docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml ps worker
-            curl -sf 'http://localhost:8000/api/runs/dead' -H "X-API-Key: $API_KEY" >/dev/null \
+            $DC ps worker
+            $DC exec -T app curl -sf 'http://localhost:8000/api/runs/dead' -H "X-API-Key: $API_KEY" >/dev/null \
               || echo "::warning::DLQ 端点不可达（可能缺少 API_KEY 或未启动 worker）"
             echo "✅ 部署完成"
