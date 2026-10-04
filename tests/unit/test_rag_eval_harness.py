@@ -483,7 +483,7 @@ def test_report_schema_shape() -> None:
         "full_gold_covered",
     ):
         assert key in row
-    assert ev.REPORT_SCHEMA_VERSION == "rag-eval-evidence/v2"
+    assert ev.REPORT_SCHEMA_VERSION == "rag-eval-evidence/v3"
 
 
 # ---------------------------------------------------------------- overrides

@@ -66,12 +66,16 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from eval_contract import (  # noqa: E402
+    CHANNELS,
     DEFAULT_KS,
     EXPERIMENT_SPECS,
     POPULATION_DEFINITIONS,
     POPULATION_VIEWS,
     REPORT_SCHEMA_VERSION,
+    VERDICT_VALID,
+    required_channels,
 )
+from rag_evidence_validity import assess_evidence_validity  # noqa: E402
 
 DEFAULT_BENCHMARK = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "artifacts" / "evaluation" / "rag-649"
@@ -854,6 +858,10 @@ async def run_experiment(
                     "degraded_reason": degraded_reason,
                     "vector_channel_used": bool(meta.get("vector_channel_used")),
                     "lexical_channel_used": bool(meta.get("lexical_channel_used")),
+                    # execution facts per stage (status + candidate_out). Kept in
+                    # the row so channel availability can be recomputed from the
+                    # artifact without re-running the retrieval pipeline.
+                    "channel_stages": stage_detail,
                     **population_flags(expected, corpus_ids),
                     **metrics,
                 }
@@ -947,6 +955,7 @@ async def run_experiment(
             "n_total": len(queries),
             "n_success": len(rows),
             "n_failed": len(failures),
+            "n_error": channel_error_count,
             "n_degraded": degraded_count,
             "wall_seconds": round(elapsed, 1),
             "warmup": {"count": warmup_n, "query_ids": warmup_ids, "results_discarded": True},
@@ -984,6 +993,89 @@ def _count_by(rows: list[dict[str, Any]], key: str) -> dict[str, int]:
     for r in rows:
         out[str(r[key])] = out.get(str(r[key]), 0) + 1
     return out
+
+
+# ---------------------------------------------------------------------------
+# Evidence validity observations（issue #45）
+# ---------------------------------------------------------------------------
+#
+# 只记录「跑了什么」，绝不记录「跑得怎么样」：指标大小不是 validity 的输入
+# （合法的差模型也必须能产出 VERIFIED）。因此这里采集的是通道执行事实、
+# 请求错误计数与语料覆盖计数。
+
+#: retrieval result.meta 的通道使用标记 -> 通道
+_CHANNEL_META_USED_KEY = {"vector": "vector_channel_used", "bm25": "lexical_channel_used"}
+#: 通道 -> retrieval trace 的 stage 名
+_CHANNEL_STAGE_NAME = {"vector": "VECTOR", "bm25": "BM25", "rerank": "RERANK"}
+_STAGE_EXECUTED = "executed"
+
+
+def collect_channel_observations(
+    rows: list[dict[str, Any]], required: tuple[str, ...]
+) -> dict[str, Any]:
+    """单个 ablation leg 的通道执行事实（每个通道都记录，含未 required 的）。
+
+    ``required`` 来自 ``eval_contract.required_channels``（由该 leg 的 override
+    推导），leg 无法自行声明更弱的要求。rerank 没有 meta 标记，以 RERANK stage
+    是否 ``executed`` 作为「真的生效」的事实来源（而不是从返回条数推断）。
+    """
+    out: dict[str, Any] = {}
+    for channel in CHANNELS:
+        used_key = _CHANNEL_META_USED_KEY.get(channel)
+        stage_name = _CHANNEL_STAGE_NAME[channel]
+        used_count = 0
+        executed_count = 0
+        candidate_total = 0
+        for row in rows:
+            if used_key is not None and bool(row.get(used_key)):
+                used_count += 1
+            stage_fact = (row.get("channel_stages") or {}).get(stage_name)
+            if not isinstance(stage_fact, dict):
+                continue
+            if str(stage_fact.get("status") or "") == _STAGE_EXECUTED:
+                executed_count += 1
+                if used_key is None:
+                    used_count += 1
+            candidates = stage_fact.get("candidate_out")
+            if isinstance(candidates, int) and not isinstance(candidates, bool):
+                candidate_total += max(candidates, 0)
+        out[channel] = {
+            "required": channel in required,
+            "used_count": used_count,
+            "executed_count": executed_count,
+            "candidate_total": candidate_total,
+        }
+    return out
+
+
+def collect_evidence_validity_observations(
+    results: dict[str, dict[str, Any]],
+    *,
+    subset_run: bool,
+    declared_queries: int,
+    executed_queries: int,
+    population_counts: dict[str, int],
+    preflight_status: str,
+) -> dict[str, Any]:
+    """汇总 validity predicate 的输入（可被 artifact 逐字复核）。"""
+    return {
+        "subset_run": subset_run,
+        "declared_queries": declared_queries,
+        "executed_queries": executed_queries,
+        "preflight_status": preflight_status,
+        "population_counts": dict(population_counts),
+        "experiments": {
+            name: {
+                "n_total": res["n_total"],
+                "n_success": res["n_success"],
+                "n_error": res["n_error"],
+                "n_degraded": res["n_degraded"],
+                "failure_counts": dict(res["failure_counts"]),
+                "channels": collect_channel_observations(res["rows"], required_channels(name)),
+            }
+            for name, res in results.items()
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1140,24 @@ def ablation_analysis(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # 主流程
 # ---------------------------------------------------------------------------
+
+
+def derive_run_status(
+    *, full_run: bool, subset_run: bool, reranker_ok: bool, validity: dict[str, Any]
+) -> str:
+    """Run status label (issue #45)。
+
+    VERIFIED_FULL 只在「全部 declared query 跑完」**且**「evidence validity 判定为
+    VALID」**且** reranker gate 健康时产生。任一条件缺失都不自证：诊断 artifact
+    仍然产出，状态降级为 NOT_VERIFIED / SUBSET_SMOKE / PARTIAL。
+    """
+    if full_run and validity["verdict"] == VERDICT_VALID:
+        return "VERIFIED_FULL" if reranker_ok else "VERIFIED_FULL_NO_RERANK"
+    if full_run:
+        return "NOT_VERIFIED"
+    if subset_run:
+        return "SUBSET_SMOKE"
+    return "PARTIAL"
 
 
 async def evaluate(args: argparse.Namespace) -> int:
@@ -1152,11 +1262,26 @@ async def evaluate(args: argparse.Namespace) -> int:
     full_run = (not subset_run) and all(
         results[name]["n_success"] == len(benchmark["queries"]) for name in results
     )
-    status = (
-        "VERIFIED_FULL" if full_run and reranker_ok
-        else "VERIFIED_FULL_NO_RERANK" if full_run
-        else "SUBSET_SMOKE" if subset_run
-        else "PARTIAL"
+    # Evidence validity（issue #45）：VERIFIED_FULL 只在「evidence 本身有效」时
+    # 产生。100% degraded / GOLD_NOT_INDEXED 占绝大多数 / required channel 不可用 /
+    # corpus coverage 不足 —— 任一命中都不得自证为正式证据，但诊断 artifact 照常产出。
+    pop_counts = population_counts(queries, corpus_ids)
+    validity = assess_evidence_validity(
+        collect_evidence_validity_observations(
+            results,
+            subset_run=subset_run,
+            declared_queries=meta["total_queries"],
+            executed_queries=len(queries),
+            population_counts=pop_counts,
+            preflight_status=gates["status"],
+        )
+    )
+    evidence_valid = validity["verdict"] == VERDICT_VALID
+    status = derive_run_status(
+        full_run=full_run,
+        subset_run=subset_run,
+        reranker_ok=reranker_ok,
+        validity=validity,
     )
 
     report = {
@@ -1211,7 +1336,7 @@ async def evaluate(args: argparse.Namespace) -> int:
         "evaluation_populations": {
             "definitions": POPULATION_DEFINITIONS,
             "primary_view": "all_queries",
-            "counts": population_counts(queries, corpus_ids),
+            "counts": pop_counts,
             "per_experiment": {
                 name: res["population_metrics"] for name, res in results.items()
             },
@@ -1226,6 +1351,7 @@ async def evaluate(args: argparse.Namespace) -> int:
                 "n_total": res["n_total"],
                 "n_success": res["n_success"],
                 "n_failed": res["n_failed"],
+                "n_error": res["n_error"],
                 "n_degraded": res["n_degraded"],
                 "failure_counts": res["failure_counts"],
                 "wall_seconds": res["wall_seconds"],
@@ -1248,7 +1374,14 @@ async def evaluate(args: argparse.Namespace) -> int:
             "population counts are computed at runtime from the indexed corpus; "
             "no hardcoded denominators",
             "raw_results.json is a local artifact; its sha256 is recorded below",
+            "evidence_validity is a fail-closed gate on self-certification: "
+            "status=VERIFIED_FULL requires verdict=VALID, and "
+            "scripts/rag_evidence_status.py recomputes the verdict from "
+            "evidence_validity.observed instead of trusting this label",
+            "VERIFIED describes the validity of the evidence, not the exit status "
+            "of this process; a valid run may still show poor retrieval metrics",
         ] + status_notes,
+        "evidence_validity": validity,
         "raw_results_sha256": _sha256_file(raw_path),
         "subset_run": subset_run,
     }
@@ -1270,10 +1403,19 @@ async def evaluate(args: argparse.Namespace) -> int:
     print()
     print("=" * 76)
     print(f"  status: {status}")
+    print(f"  evidence_validity: {validity['verdict']} ({validity['contract']})")
+    for reason in validity["reasons"]:
+        print(f"    - {reason['code']} [{reason['group']}] {reason['scope']}: "
+              f"{reason['detail']}")
     print(f"  report:   {report_path}")
     print(f"  failures: {failures_path}")
     print(f"  raw (local, sha256 recorded): {raw_path}")
     print("=" * 76)
+    if not subset_run and not evidence_valid:
+        # fail closed：正式全量 run 无法自证时不能以 0 退出，否则 CI 会把
+        # NOT_VERIFIED 的 artifact 当成通过。诊断 artifact 仍然已写出。
+        print("  [FAIL] 正式评测证据无效：状态保持 NOT_VERIFIED，不得作为正式指标引用")
+        return 1
     return 0
 
 
