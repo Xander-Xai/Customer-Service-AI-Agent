@@ -381,7 +381,13 @@ class ServiceContainer:
         """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）"""
         if self.llm is not None:
             return
-        from core.config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+        from core.config import (
+            DEV_MODE,
+            LLM_PROVIDER,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_MODEL,
+        )
         from llm.client import OpenAICompatibleClient
 
         # v4.1: 检查 API Key 是否有效（v5.5: 使用游标原则检测，防止 test-mock-key 等非生产 Key 绕过）
@@ -400,8 +406,13 @@ class ServiceContainer:
             try:
                 from llm.rule_based_llm import RuleBasedLLM
 
-                logger.warning("⚠️ DeepSeek API Key 未配置，自动切换到规则引擎模式（开发降级）")
-                logger.warning("💡 配置真实的 API Key：编辑 .env.dev 文件第 7 行")
+                logger.warning(
+                    f"⚠️ {LLM_PROVIDER} 的 API Key 未配置或无效，自动切换到规则引擎模式（开发降级）"
+                )
+                logger.warning(
+                    f"💡 配置真实的 API Key：在当前环境文件中设置 OPENAI_API_KEY"
+                    f"（provider={LLM_PROVIDER}，当前长度 {len(OPENAI_API_KEY)}）"
+                )
                 self.llm = RuleBasedLLM()
             except ImportError:
                 logger.error("❌ 规则引擎模块不可用，请配置 API Key", exc_info=True)

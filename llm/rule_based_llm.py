@@ -108,10 +108,23 @@ class RuleBasedLLM:
 
         return response
 
-    async def async_invoke(self, messages: list[Any], tools: Any = None) -> Any:
+    async def async_invoke(
+        self,
+        messages: list[Any],
+        timeout: float | None = None,
+        tools: Any = None,
+    ) -> Any:
         """
         模拟 LLM API 调用（规则引擎实现）
         兼容 LangChain 消息格式
+
+        参数与 `core/protocols.LLMProtocol.async_invoke` / `OpenAICompatibleClient.async_invoke`
+        保持同一形态：调用方（如 `QueryRouter._llm_classify` 传 `timeout=LLM_ROUTER_TIMEOUT`）
+        不需要知道注入的是降级实现还是真实客户端。
+
+        `timeout` 在此**不被强制执行**：本实现没有网络 I/O，也没有 await 点，
+        因此不存在可被超时打断的长等待。它只是为了满足调用契约而被接受。
+        真正的超时语义只在真实客户端（`OpenAICompatibleClient`）上生效。
         """
         # 提取用户查询
         user_query = ""
@@ -138,7 +151,7 @@ class RuleBasedLLM:
         # 生成回复
         response_content = self._generate_response(user_query, query_type)
 
-        # 构造兼容的响应对象
+        # 构造兼容的响应对象（消费方读 .content / .tool_calls 两个属性）
         class MockResponse:
             def __init__(self, content, tool_calls=None):
                 self.content = content
@@ -146,8 +159,13 @@ class RuleBasedLLM:
 
         return MockResponse(response_content)
 
-    def invoke(self, messages: list[Any], tools: Any = None) -> Any:
-        """同步版本（兼容性）"""
+    def invoke(
+        self,
+        messages: list[Any],
+        timeout: float | None = None,
+        tools: Any = None,
+    ) -> Any:
+        """同步版本（兼容性）；签名与 async_invoke 对齐"""
         import asyncio
 
         try:
@@ -155,5 +173,5 @@ class RuleBasedLLM:
             raise RuntimeError("Use async_invoke() in async context")
         except RuntimeError as e:
             if "no running" in str(e) or "Use async" in str(e):
-                return asyncio.run(self.async_invoke(messages, tools))
+                return asyncio.run(self.async_invoke(messages, timeout=timeout, tools=tools))
             raise
