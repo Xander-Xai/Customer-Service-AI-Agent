@@ -781,7 +781,25 @@ API_KEY=your-secure-api-key-here                    # API Key 值
 MONITORING_ADMIN_TOKEN=your-admin-token             # 监控端点管理令牌
 JWT_SECRET=your-jwt-secret-here                     # JWT 签名密钥（≥32 字符）
 SESSION_TOKEN_SECRET=your-session-secret            # 会话令牌签名密钥
+ADMIN_PASSWORD=your-admin-password-here             # 引导 admin 账号口令（仅 app 容器需要）
 CORS_ORIGINS=["https://your-domain.com"]            # CORS 允许来源
+```
+
+> `ADMIN_PASSWORD` 只被 `auth/service.py::init_default_admin` 读取，用于在
+> `users` 表**尚无** `admin` 时创建引导账号。该调用位于 `api/app_factory.py` 的
+> **模块导入期**（不在 lifespan 内），因此变量缺失时进程无法启动，表现为
+> `app` 容器 crash loop；账号已存在时则不再读取该变量。
+> Docker Compose 对 `app` 使用 `${ADMIN_PASSWORD:?...}` fail fast，未配置时
+> `docker compose config` 即报错并给出明确提示：
+>
+> ```
+> error: Please provide a value for the ADMIN_PASSWORD environment variable
+> ```
+>
+> `worker` 虽与 `app` 共用同一 Docker image，但**不会**接收该变量：
+> `runtime/celery_app.py` → `tasks` → `executor` 不导入 `api.app_factory`，
+> 从不执行 `init_default_admin`。共享镜像不构成注入理由，那只会无谓扩大
+> 高权限口令的暴露面。
 
 # ===== ERP 配置 =====
 ERP_MODE=mock                                       # mock（模拟数据）| real（真实金蝶 API）

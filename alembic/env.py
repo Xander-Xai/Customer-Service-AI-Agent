@@ -23,8 +23,21 @@ from db.models import Base
 config = context.config
 
 # 日志配置
+#
+# `disable_existing_loggers` 必须显式传 False：`fileConfig()` 的该参数默认值是
+# True（本项目 Python 3.10；注意它只认函数参数，**不读** alembic.ini 里的同名
+# 键，那是 `dictConfig` 的行为），会把此刻已存在、但未被 alembic.ini 声明的
+# logger 全部置为 `disabled = True`。
+#
+# 本项目在迁移之前就已经通过 `core.logger.get_logger()` 装配好带 stderr +
+# 轮转文件 + JSON 格式的 logger —— `api/app_factory.py` 里 "app_factory"
+# （第 23 行）就早于紧随其后的 `init_db()`（第 28 行）。一旦被禁用，这些
+# logger 的调用会在 `isEnabledFor()` 处直接返回，连 stderr 都不会写，
+# "启动失败必须留下可行动错误日志"的契约随即失效。
+#
+# alembic 只应配置自己的 logger（root/sqlalchemy/alembic），无权关掉应用的。
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # 目标元数据（用于 --autogenerate）
 target_metadata = Base.metadata

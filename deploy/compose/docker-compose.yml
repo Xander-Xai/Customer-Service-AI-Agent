@@ -77,6 +77,13 @@ services:
       # P0-5: PostgreSQL 数据库连接（生产启用）
       - DATABASE_URL=${DATABASE_URL:-}
       - JWT_SECRET=${JWT_SECRET:-}
+      # 引导 admin 账号口令：auth/service.py::init_default_admin 仅在 users 表中
+      # 没有 admin 时创建账号，密码只从本变量读取；缺失即 raise ValueError。
+      # 该调用发生在 api/app_factory.py 的**模块导入期**（不在 lifespan 内），
+      # 所以缺失会导致容器 crash loop 而不是降级 —— 这里用 `:?` fail fast，
+      # 与 POSTGRES_PASSWORD / GRAFANA_PASSWORD 同一口径。
+      # 只注入 app：worker 不导入 api.app_factory，不需要该变量。
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD（app 首次启动引导 admin 账号必需）}
       # v6.0: Qdrant 向量数据库
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -126,6 +133,10 @@ services:
       # 进程角色：worker 不终结 HTTP 请求，因此**不**需要 API_KEY / CORS_ORIGINS /
       # JWT_SECRET / SESSION_TOKEN_SECRET。缺少这些不再阻止 worker 启动
       # （core/config.py 按 SERVICE_ROLE 跳过 API 专属校验）。
+      # 同理**不注入 ADMIN_PASSWORD**：runtime/celery_app.py → tasks → executor
+      # 不会导入 api/app_factory，也就从不执行 init_default_admin。
+      # 与 app 共用同一 Docker image 不构成注入理由——那只会无谓扩大
+      # 高权限口令的暴露面。
       - SERVICE_ROLE=worker
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
