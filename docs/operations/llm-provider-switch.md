@@ -107,6 +107,26 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 # 健康检查（/api/health，不是 /health）
 curl -s http://localhost:8000/api/health
 
+# 只看 LLM 段：确认 provider 已切换，且 key 可用、没有被降级到规则引擎
+curl -s http://localhost:8000/api/health | jq '.components.llm'
+# 期望（切换成功且凭据有效）：
+# {
+#   "configured": true,
+#   "key_usable": true,          # 与运行时同一个判定的结论
+#   "key_valid": true,           # 既有字段，与 key_usable 同源同值
+#   "key_reason": "ok",
+#   "key_length": 53,
+#   "provider": "deepseek",      # 应为刚切换的目标 provider
+#   "implementation": "OpenAICompatibleClient",
+#   "degraded": false            # true = 正在用 RuleBasedLLM 模板兜底
+# }
+#
+# ⚠️ `degraded: true` 或 `key_usable: false` 表示 key 未被接受（占位前缀或
+#    长度 < 40），进程已回落到 RuleBasedLLM —— 此时接口仍能返回内容，但那是模板，
+#    不是模型。切换后请以此字段为准，不要只看 HTTP 200。
+# 该判定由 core/config.py::evaluate_llm_api_key 唯一实现，健康面与运行时不会不一致；
+# /api/health 不会为了确认 key 去调用 provider（无鉴权端点，不打计费接口）。
+
 # 测试请求
 curl -s -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \

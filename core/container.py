@@ -375,30 +375,42 @@ class ServiceContainer:
     # ===== 内部初始化方法 =====
 
     async def _init_llm(self):
-        """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）"""
+        """初始化 LLM 客户端（v4.1: 智能降级 - API Key 无效时自动切换到规则引擎）
+
+        key 是否可用由 :func:`core.config.evaluate_llm_api_key` 唯一判定 —— 与
+        ``/api/health`` 读的是同一个函数（issue #51）。此前这里内联了一套
+        placeholder 前缀黑名单 + 长度规则，health 端点另写了一套更弱的，两套在
+        ``your_`` / ``your-``、``test-`` / ``mock-`` 的归属上都不一致，会出现
+        「health 说 key 有效、进程却在跑 RuleBasedLLM」的组合。
+        """
         if self.llm is not None:
             return
-        from core.config import DEV_MODE, OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL
+        from core.config import (
+            DEV_MODE,
+            LLM_KEY_REASON_TOO_SHORT,
+            OPENAI_API_KEY,
+            OPENAI_BASE_URL,
+            OPENAI_MODEL,
+            evaluate_llm_api_key,
+        )
         from llm.client import OpenAICompatibleClient
 
-        # v4.1: 检查 API Key 是否有效（v5.5: 使用游标原则检测，防止 test-mock-key 等非生产 Key 绕过）
-        _PLACEHOLDER_PREFIXES = ("your_", "test-", "mock-", "sk-placeholder", "sk-xxx", "sk-your")
-        api_key_valid = bool(OPENAI_API_KEY) and not any(
-            OPENAI_API_KEY.lower().startswith(p) for p in _PLACEHOLDER_PREFIXES
-        )
-        # 真实 API Key 至少 40 字符（SiliconFlow / OpenAI 等）
-        if api_key_valid and len(OPENAI_API_KEY) < 40:
-            api_key_valid = False
-            if DEV_MODE:
-                logger.warning(f"⚠️ API Key 长度异常（{len(OPENAI_API_KEY)} < 40），视为无效")
+        # v4.1: 检查 API Key 是否有效（v5.5: 游标原则检测，防止 test-mock-key 等非生产 Key 绕过）
+        # 唯一权威判定，纯函数、不发网络请求；长度下限 40 也在这里（此前只有本路径有）。
+        key_status = evaluate_llm_api_key(OPENAI_API_KEY)
+        api_key_valid = key_status.usable
+        if not api_key_valid and key_status.configured and key_status.reason == LLM_KEY_REASON_TOO_SHORT and DEV_MODE:
+            logger.warning(
+                f"⚠️ API Key 长度异常（{key_status.length} < 40），视为无效"
+            )
 
         if not api_key_valid and DEV_MODE:
             # 开发模式：API Key 无效时自动降级到规则引擎
             try:
                 from llm.rule_based_llm import RuleBasedLLM
 
-                logger.warning("⚠️ DeepSeek API Key 未配置，自动切换到规则引擎模式（开发降级）")
-                logger.warning("💡 配置真实的 API Key：编辑 .env.dev 文件第 7 行")
+                logger.warning("⚠️ LLM API Key 不可用，自动切换到规则引擎模式（开发降级）")
+                logger.warning("💡 配置真实的 API Key：在当前环境文件中设置 OPENAI_API_KEY")
                 self.llm = RuleBasedLLM()
             except ImportError:
                 logger.error("❌ 规则引擎模块不可用，请配置 API Key", exc_info=True)

@@ -3,7 +3,6 @@
 从 api/app.py create_app() 提取，通过 request.app.state 访问依赖。
 """
 
-import os
 import re
 import sys
 import time
@@ -72,25 +71,46 @@ async def health(request: Request):
             logger.debug(f"[Health] Redis 连接检查失败: {e}")
 
     # LLM
-    llm_api_key = os.environ.get("OPENAI_API_KEY", "")
-    _placeholder_prefixes = ("sk-placeholder", "your-", "sk-xxx", "sk-your", "sk-test-placeholder")
-    llm_key_valid = bool(llm_api_key) and not any(
-        llm_api_key.lower().startswith(p) for p in _placeholder_prefixes
-    )
+    #
+    # key 是否可用由 core.config.evaluate_llm_api_key 唯一判定，与
+    # core/container.py 的运行时选择读同一个函数（issue #51）。此前这里内联了一套
+    # 更弱的规则（只有前缀黑名单、没有长度下限，且前缀表与运行时那份不一致），
+    # 于是会出现 key_valid=true 与「进程正在跑 RuleBasedLLM」同时成立 ——
+    # 而 /api/health 既是 README 的验证入口也是 compose 给 app 的 healthcheck。
+    #
+    # 本路径**不做任何 provider 调用**：它是无鉴权端点，不能因为确认 key 就去打
+    # 计费接口。key 是否真被接受由启动期 ServiceContainer._check_llm_health 用一次
+    # 真实调用确认，其结论只体现在 implementation / degraded 上。
     from core.config import (
         AGENT_EXECUTION_MODE,
         AGENT_INLINE_COMPAT_ENDPOINTS,
         AGENT_QUEUED_RUN_ENDPOINTS,
         LLM_PROVIDER,
+        evaluate_llm_api_key,
     )
 
+    llm_key_status = evaluate_llm_api_key()
+    llm_key_valid = llm_key_status.usable
     llm_provider = LLM_PROVIDER
+
+    # 「实际在跑哪个实现」是运行时事实，只能从容器里读，不能重算一遍 —— 重算就是
+    # 第二套逻辑，正是本 issue 要消除的东西。
+    llm_implementation = "unknown"
+    llm_degraded = False
+    container = getattr(state, "container", None)
+    active_llm = getattr(container, "llm", None)
+    if active_llm is not None:
+        llm_implementation = type(active_llm).__name__
+        from llm.rule_based_llm import RuleBasedLLM
+
+        # 降级 = 活跃实现不是真实 provider 客户端。RuleBasedLLM 是模板兜底，
+        # 它能回答请求但不代表 LLM 能力可用，必须在健康面可见。
+        llm_degraded = isinstance(active_llm, RuleBasedLLM)
 
     # v6.0: Qdrant 健康检查
     qdrant_ok = False
     try:
         import asyncio
-        container = getattr(state, "container", None)
         if container and getattr(container, "knowledge_base", None):
             kb = container.knowledge_base
             qdrant_ok = kb.available
@@ -133,7 +153,6 @@ async def health(request: Request):
 
     # LangGraph Checkpoint 后端 + 连通性（严禁返回 URI/用户名/密码）
     checkpoint_info = {"backend": "disabled", "status": "unavailable"}
-    container = getattr(state, "container", None)
     if container is not None:
         try:
             from core.checkpointer import probe_checkpoint_runtime
@@ -180,9 +199,18 @@ async def health(request: Request):
             },
             "redis": {"connected": redis_ok, "latency_ms": redis_latency_ms},
             "llm": {
-                "configured": bool(llm_api_key),
+                "configured": llm_key_status.configured,
+                # key_usable: 与运行时同一个判定的结论（issue #51）
+                "key_usable": llm_key_valid,
+                # key_valid: 既有字段，保留以免破坏 compose healthcheck / 既有消费者；
+                # 与 key_usable 同源同值，不再是独立实现。
                 "key_valid": llm_key_valid,
+                "key_reason": llm_key_status.reason,
+                "key_length": llm_key_status.length,
                 "provider": llm_provider,
+                # 实际活跃实现与降级状态：回答"进程现在到底在用什么"
+                "implementation": llm_implementation,
+                "degraded": llm_degraded,
             },
             "qdrant": {"connected": qdrant_ok},
             "database": {"connected": db_ok, "latency_ms": db_latency_ms},

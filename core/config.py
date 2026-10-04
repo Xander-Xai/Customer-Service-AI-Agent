@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
@@ -48,6 +49,119 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.siliconflow.cn/v1")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-8B")  # v6.0: 从 Qwen2.5-7B 升级
 LLM_MAX_TOKENS = _int_env("LLM_MAX_TOKENS", 4096)
+
+
+# ===== LLM API Key 可用性：单一权威判定（issue #51）=====
+#
+# 为什么必须只有一份：运行时会用「key 是否可用」决定**到底跑哪个 LLM 实现**
+# （不可用就退到 RuleBasedLLM），而 /api/health 用它告诉运维「key 是不是好的」。
+# 这两处一旦各自实现，就会出现最糟的组合：health 报 key_valid=true，
+# 同时进程正在用规则引擎模板回答所有请求 —— 而 /api/health 既是 README 的验证
+# 入口，也是 compose 给 app 容器定的 healthcheck，于是这个部署会通过自己的健康
+# 门禁。健康面与运行面必须读同一个判定。
+#
+# 本函数是**纯函数**：只做字符串检查，不发任何网络请求。/api/health 是无鉴权
+# 端点，绝不能因为"确认一下 key"就去打付费 provider（那既是延迟来源，也是把
+# 无鉴权端点变成可被反复触发的计费入口）。key 到底能不能用，由启动期的
+# ServiceContainer._check_llm_health 用真实调用确认，它的结论不进这里。
+
+#: 占位/示例 key 的前缀黑名单（小写比较）。
+#:
+#: 这是历史两套实现的历史并集，不是新造的第三套：
+#:   core/container.py 曾用 ("your_", "test-", "mock-", "sk-placeholder", "sk-xxx", "sk-your")
+#:   api/routes/monitoring.py 曾用 ("sk-placeholder", "your-", "sk-xxx", "sk-your", "sk-test-placeholder")
+#: 两者在 "your_" vs "your-"（下划线 vs 连字符）、test-/mock-/sk-test-placeholder
+#: 的归属上就不一致，因此 mock- 开头的 45 字符 key 会被 health 判成可用、
+#: 被运行时判成不可用。并集保证任一路径原来认定的占位 key 仍然被认定。
+LLM_PLACEHOLDER_PREFIXES: tuple[str, ...] = (
+    "your_",
+    "your-",
+    "test-",
+    "mock-",
+    "sk-placeholder",
+    "sk-xxx",
+    "sk-your",
+    "sk-test-placeholder",
+)
+
+#: 真实 key 的最小长度。SiliconFlow / OpenAI / DeepSeek 的 key 都在 40 字符以上；
+#: 低于该长度的字符串几乎一定是占位符或测试残留。运行时原本就有这条规则，
+#: health 路径缺失 —— 这正是 issue #51 报告的核心症状。
+LLM_API_KEY_MIN_LENGTH = 40
+
+#: evaluate_llm_api_key() 的 reason 取值（稳定字符串，便于日志与测试断言）。
+LLM_KEY_REASON_OK = "ok"
+LLM_KEY_REASON_EMPTY = "empty"
+LLM_KEY_REASON_PLACEHOLDER = "placeholder_prefix"
+LLM_KEY_REASON_TOO_SHORT = "too_short"
+
+
+@dataclass(frozen=True)
+class LlmKeyStatus:
+    """``OPENAI_API_KEY`` 的判定结果（不可变）。
+
+    :param configured: 是否设置了非空值（"有没有配"）
+    :param usable: 是否可用于真实 provider 调用（"配了且能不能用"）
+    :param reason: ``usable`` 为 False 时的原因，取值见 ``LLM_KEY_REASON_*``
+    :param length: 实际长度（不泄漏 key 内容，便于排查"我明明配了"）
+    """
+
+    configured: bool
+    usable: bool
+    reason: str
+    length: int
+
+
+def evaluate_llm_api_key(api_key: str | None = None) -> LlmKeyStatus:
+    """判定 LLM API Key 是否可用于真实 provider 调用（纯函数，无 IO）。
+
+    这是**唯一**权威实现：`core/container.py` 的运行时选择与
+    `api/routes/monitoring.py` 的健康上报都必须调用它，不得各自内联规则。
+
+    规则（与历史运行时行为一致，并把缺失的长度规则补齐到所有调用方）：
+
+    1. 空 / 缺失 → ``configured=False, usable=False``（reason=empty）
+    2. 以任一 :data:`LLM_PLACEHOLDER_PREFIXES` 开头（大小写不敏感）→ 不可用
+    3. 长度 < :data:`LLM_API_KEY_MIN_LENGTH` → 不可用（reason=too_short）
+    4. 否则可用
+
+    参数默认读 :data:`OPENAI_API_KEY`，因此健康面与运行时读的是同一个来源，
+    避免"一个读 os.environ、一个读 core.config"这种时序上的分叉。
+
+    注意：本函数**不验证 key 是否真的被 provider 接受**。它只排除明显不可用的
+    值；真实可用性由启动期的一次实际调用确认。
+    """
+    if api_key is None:
+        api_key = OPENAI_API_KEY
+    key = api_key.strip()
+
+    if not key:
+        return LlmKeyStatus(configured=False, usable=False, reason=LLM_KEY_REASON_EMPTY, length=0)
+
+    lowered = key.lower()
+    if any(lowered.startswith(prefix) for prefix in LLM_PLACEHOLDER_PREFIXES):
+        return LlmKeyStatus(
+            configured=True,
+            usable=False,
+            reason=LLM_KEY_REASON_PLACEHOLDER,
+            length=len(key),
+        )
+
+    if len(key) < LLM_API_KEY_MIN_LENGTH:
+        return LlmKeyStatus(
+            configured=True,
+            usable=False,
+            reason=LLM_KEY_REASON_TOO_SHORT,
+            length=len(key),
+        )
+
+    return LlmKeyStatus(configured=True, usable=True, reason=LLM_KEY_REASON_OK, length=len(key))
+
+
+def is_llm_key_usable(api_key: str | None = None) -> bool:
+    """:func:`evaluate_llm_api_key` 的布尔简写，语义完全一致。"""
+    return evaluate_llm_api_key(api_key).usable
+
 
 # ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
 VERSION = os.getenv("APP_VERSION", "6.3")  # 可从环境变量覆盖，便于 CI/CD
