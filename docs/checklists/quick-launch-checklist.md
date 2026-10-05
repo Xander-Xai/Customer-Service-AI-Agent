@@ -23,6 +23,12 @@ vim .env.prod
 - [ ] `API_KEY` — 生成强随机密钥: `openssl rand -hex 32`
 - [ ] `JWT_SECRET` — 生成强随机密钥（≥32字符）
 - [ ] `SESSION_TOKEN_SECRET` — 生成强随机密钥
+- [ ] `ADMIN_PASSWORD` — 引导 `admin` 账号口令，建议 `openssl rand -base64 24`。
+      Compose contract：`app`（及 `canary`）用 `${ADMIN_PASSWORD:?...}` fail fast，
+      未配置时 `docker compose config` 直接报错并指名变量；账号已存在后不再需要。
+      `worker` 不接收该变量（它不导入 `api.app_factory`，从不执行
+      `init_default_admin`）——与 `app` 共用镜像不构成注入理由。生成的账号带
+      `force_password_change`，首次登录须改密
 - [ ] `REDIS_PASSWORD` — 设置Redis密码
 - [ ] `POSTGRES_PASSWORD` — 设置数据库密码
 - [ ] `GRAFANA_PASSWORD` — 设置Grafana管理员密码
@@ -407,6 +413,39 @@ docker compose logs app
 # - 环境变量缺失: docker compose config | grep -A5 environment
 # - 依赖服务未就绪: docker compose ps
 ```
+
+### 问题1b: `app` 容器 crash loop，日志含 `ADMIN_PASSWORD environment variable must be set`
+
+**现象**：`app` 反复重启，日志出现
+
+```
+ValueError: ADMIN_PASSWORD environment variable must be set to initialize the admin account.
+  File "/app/api/app_factory.py", line 32, in <module>
+    init_default_admin()
+  File "/app/auth/service.py", line 533, in init_default_admin
+```
+
+**为什么发生**：该 `raise` 在 `api/app_factory.py` 的**模块导入期**执行，不在
+lifespan 内，所以进程在服务任何请求之前就退出。用已存在的数据库（`users` 表中已有
+`admin` 行）不会触发——它只在**首次**引导时读取该变量。
+
+**处置**：
+
+```bash
+# 1. 在 .env 中设置（Compose 对 app/canary 是 fail fast 的，缺失时下面第 2 步会报错）
+echo "ADMIN_PASSWORD=$(openssl rand -base64 24)" >> .env
+
+# 2. 确认 contract 已生效（能看到 app 拿到该变量）
+docker compose -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/docker-compose.prod.yml config | grep -A2 ADMIN_PASSWORD
+
+# 3. 重新拉起
+docker compose -f deploy/compose/docker-compose.yml \
+  -f deploy/compose/docker-compose.prod.yml up -d app
+```
+
+> `worker` 报同一个 `ValueError` 说明它被误配进了 worker 的 `environment`——它不需要
+> 该变量（不导入 `api.app_factory`），且注入只会扩大高权限口令的暴露面。
 
 ### 问题2: LLM API调用失败
 ```bash

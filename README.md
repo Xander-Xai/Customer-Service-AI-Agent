@@ -781,7 +781,26 @@ API_KEY=your-secure-api-key-here                    # API Key 值
 MONITORING_ADMIN_TOKEN=your-admin-token             # 监控端点管理令牌
 JWT_SECRET=your-jwt-secret-here                     # JWT 签名密钥（≥32 字符）
 SESSION_TOKEN_SECRET=your-session-secret            # 会话令牌签名密钥
+ADMIN_PASSWORD=your-admin-password-here             # 引导 admin 账号口令（仅首次引导必需）
 CORS_ORIGINS=["https://your-domain.com"]            # CORS 允许来源
+```
+
+> `ADMIN_PASSWORD` 只被 `auth/service.py::init_default_admin` 读取（不走
+> `core/config.py`），用于在 `users` 表**尚无** `admin` 行时创建引导账号；该调用位于
+> `api/app_factory.py` 的**模块导入期**（`api/app_factory.py:32`，不在 lifespan 内），
+> 所以变量缺失时进程起不来，表现为 `app` 容器 crash loop；`admin` 行已存在时不再读取。
+> `deploy/compose/docker-compose.yml` 对 `app`（以及 `canary`）使用
+> `${ADMIN_PASSWORD:?...}` fail fast —— 未配置时 `docker compose config` 就报错并指名
+> 变量，而不是让容器起来再反复重启：
+>
+> ```
+> error while interpolating services.app.environment.[]: required variable ADMIN_PASSWORD is missing a value: 请在 .env 中设置 ADMIN_PASSWORD（app 首次启动引导 admin 账号必需）
+> ```
+>
+> `worker` 虽与 `app` 共用同一 Docker image，但**不接收**该变量：
+> `runtime/celery_app.py` → `runtime.tasks` → `runtime.executor` 不导入
+> `api.app_factory`，从不执行 `init_default_admin`。共享镜像不构成注入理由，那只会
+> 无谓扩大高权限口令的暴露面。生成的账号带 `force_password_change`，首次登录须改密。
 
 # ===== ERP 配置 =====
 ERP_MODE=mock                                       # mock（模拟数据）| real（真实金蝶 API）
@@ -1080,6 +1099,7 @@ locust -f tests/performance/locustfile.py --host=http://localhost:8000
 | `WS_IDLE_TIMEOUT` | 300 | WebSocket 空闲超时（秒） |
 | `JWT_SECRET` | - | JWT 签名密钥（生产必改，≥32 字符） |
 | `SESSION_TOKEN_SECRET` | - | 会话令牌签名密钥（生产必改） |
+| `ADMIN_PASSWORD` | - | 引导 `admin` 账号口令（仅 `app`/`canary` 首次启动需要；缺失则 crash loop） |
 | `JWT_EXPIRE_HOURS` | 72 | JWT token 有效期（小时） |
 | `JWT_ACCESS_EXPIRE_HOURS` | 2 | access_token 有效期（小时） |
 | `JWT_REFRESH_EXPIRE_HOURS` | 168 | refresh_token 有效期（小时，默认 7 天） |

@@ -57,6 +57,11 @@ services:
       - SESSION_IDLE_TTL=3600
       - MONITORING_ADMIN_TOKEN=${MONITORING_ADMIN_TOKEN:-}
       - SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-}
+      # canary 与 app 共用同一镜像、同一个入口（Dockerfile CMD → api.app_factory:app），
+      # 因此同样会在模块导入期执行 auth/service.py::init_default_admin()，缺失
+      # ADMIN_PASSWORD 一样 crash loop。这里必须与 base compose 的 app 保持同口径的
+      # `:?` fail fast（该文件是独立 service，不继承 base app 的 environment）。
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD（canary 首次启动引导 admin 账号必需）}
       - GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
       - GUNICORN_BIND=0.0.0.0:8000
     volumes:
