@@ -108,10 +108,27 @@ class RuleBasedLLM:
 
         return response
 
-    async def async_invoke(self, messages: list[Any], tools: Any = None) -> Any:
-        """
-        模拟 LLM API 调用（规则引擎实现）
-        兼容 LangChain 消息格式
+    async def async_invoke(
+        self,
+        messages: list[Any],
+        timeout: float | None = None,
+        tools: list | None = None,
+    ) -> Any:
+        """模拟 LLM API 调用（规则引擎实现）。
+
+        签名必须与 ``llm.client.OpenAICompatibleClient.async_invoke`` 完全一致 ——
+        ``(messages, timeout=None, tools=None)``，参见
+        :data:`core.protocols.LLM_CALL_CONTRACT_PARAMS`。
+
+        issue #46：这里曾是 ``(messages, tools=None)``，而
+        ``router/query_router.py`` 按契约传 ``timeout=LLM_ROUTER_TIMEOUT``，
+        于是开发降级模式下每一次 LLM 路由都抛
+        ``TypeError: unexpected keyword argument 'timeout'``，静默退化成规则分类。
+
+        ``timeout`` 与 ``tools`` 对规则引擎没有意义（没有远端调用、没有 Function
+        Calling），但**必须接受**：调用方按统一契约传参，实现方无权决定调用方怎么调。
+        它们被显式声明而不是塞进 ``**kwargs``，这样签名漂移仍能被
+        ``llm_call_contract_mismatches`` 抓到。
         """
         # 提取用户查询
         user_query = ""
@@ -146,14 +163,37 @@ class RuleBasedLLM:
 
         return MockResponse(response_content)
 
-    def invoke(self, messages: list[Any], tools: Any = None) -> Any:
-        """同步版本（兼容性）"""
+    async def async_invoke_stream(
+        self,
+        messages: list[Any],
+        timeout: float | None = None,
+    ):
+        """流式版本（规则引擎实现）。
+
+        与 :meth:`async_invoke` 同源产出，但按 SSE 的消费方式逐块 yield，
+        以满足 ``core.protocols.LLMProtocol`` 里声明的流式方法。
+
+        issue #46 同源问题：``agents/base_agent.py`` 在带 ``stream_callback`` 时走
+        ``async_invoke_stream``，而此前 ``RuleBasedLLM`` 根本没有这个方法 ——
+        降级 + 流式请求会抛 ``AttributeError`` 并被上层
+        ``except Exception`` 吞成 ``fallback_response``，同样是无声的降级失败。
+        """
+        response = await self.async_invoke(messages, timeout=timeout)
+        yield response.content
+
+    def invoke(
+        self,
+        messages: list[Any],
+        timeout: float | None = None,
+        tools: list | None = None,
+    ) -> Any:
+        """同步版本（兼容性）。签名与 :meth:`async_invoke` 对齐。"""
         import asyncio
 
         try:
             asyncio.get_running_loop()
-            raise RuntimeError("Use async_invoke() in async context")
-        except RuntimeError as e:
-            if "no running" in str(e) or "Use async" in str(e):
-                return asyncio.run(self.async_invoke(messages, tools))
-            raise
+        except RuntimeError:
+            return asyncio.run(self.async_invoke(messages, timeout=timeout, tools=tools))
+        raise RuntimeError(
+            "invoke() cannot be called from a running event loop; use async_invoke()"
+        )

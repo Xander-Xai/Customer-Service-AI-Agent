@@ -8,12 +8,25 @@
 - 面试时展示对 Python 类型系统的深入理解
 """
 
+import inspect
 from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
 class LLMProtocol(Protocol):
-    """LLM 客户端协议：所有 LLM 实现必须满足此接口。"""
+    """LLM 客户端协议：所有 LLM 实现必须满足此接口。
+
+    ``async_invoke`` 的签名是**唯一权威**的调用契约：调用方（router / agents /
+    session / rag）按 ``(messages, timeout=..., tools=...)`` 调用，真实 provider
+    客户端与规则引擎降级实现必须都能接住同一组参数。issue #46 就是这条契约漂移
+    的实例 —— router 传 ``timeout=``，而 ``RuleBasedLLM`` 只声明了
+    ``(messages, tools=None)``，于是每次 LLM 路由都抛 ``TypeError`` 并静默退化成
+    规则分类。
+
+    ``runtime_checkable`` 只校验方法**存在**，不校验签名，所以光靠
+    ``issubclass(Impl, LLMProtocol)`` 抓不到这类漂移。需要签名的请用
+    :func:`llm_call_contract_mismatches`。
+    """
 
     async def async_invoke(
         self,
@@ -31,6 +44,36 @@ class LLMProtocol(Protocol):
     ) -> Any:
         """流式调用 LLM（SSE）。"""
         ...
+
+
+#: ``async_invoke`` 契约里除 ``self`` 外的形参名（顺序即调用方约定的顺序）。
+#: 真实客户端与降级实现必须逐一对上；多一个 ``**kwargs`` 也不算数 ——
+#: ``**kwargs`` 会把「调用方传错了参数」变成静默接受，正是 issue #46 想暴露的那类 bug。
+LLM_CALL_CONTRACT_PARAMS: tuple[str, ...] = ("messages", "timeout", "tools")
+
+
+def llm_call_contract_mismatches(impl: type) -> list[str]:
+    """比对某个 LLM 实现的 ``async_invoke`` 与 :class:`LLMProtocol` 的签名差异。
+
+    返回可读的差异描述列表；空列表表示签名一致。这是一个**纯函数**（只用
+    ``inspect``，不发网络请求、不构造实例），因此可以在单测里对真实客户端和降级
+    实现同时跑，且不会因为某个实现的 ``__init__`` 需要凭据而失败。
+
+    只比对参数名与顺序，不比对注解 —— 真实客户端用 ``list`` / ``list | None``，
+    协议写的是 ``list[dict[str, Any]]``，注解差异不构成调用期故障。
+    """
+    method = getattr(impl, "async_invoke", None)
+    if method is None:
+        return ["async_invoke 缺失"]
+
+    params = tuple(inspect.signature(method).parameters)
+    if params[:1] == ("self",):
+        params = params[1:]
+
+    mismatches: list[str] = []
+    if params != LLM_CALL_CONTRACT_PARAMS:
+        mismatches.append(f"async_invoke{params} != async_invoke{LLM_CALL_CONTRACT_PARAMS}")
+    return mismatches
 
 
 @runtime_checkable

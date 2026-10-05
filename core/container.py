@@ -388,6 +388,7 @@ class ServiceContainer:
         from core.config import (
             DEV_MODE,
             LLM_KEY_REASON_TOO_SHORT,
+            LLM_PROVIDER,
             OPENAI_API_KEY,
             OPENAI_BASE_URL,
             OPENAI_MODEL,
@@ -409,7 +410,15 @@ class ServiceContainer:
             try:
                 from llm.rule_based_llm import RuleBasedLLM
 
-                logger.warning("⚠️ LLM API Key 不可用，自动切换到规则引擎模式（开发降级）")
+                # provider 名取自 LLM_PROVIDER，而不是写死某个供应商：写死过一次
+                # （"DeepSeek API Key 未配置"），而默认 LLM_PROVIDER 是 siliconflow，
+                # 于是这条告警在默认配置下直接说错了供应商（issue #46）。
+                logger.warning(
+                    f"⚠️ LLM API Key 不可用（provider={LLM_PROVIDER}），"
+                    "自动切换到规则引擎模式（开发降级）"
+                )
+                # 指向环境变量名，不指向某个文件的具体行号：.env.dev 不入库、
+                # 行号随文件改动漂移，指过去运维找不到东西。
                 logger.warning("💡 配置真实的 API Key：在当前环境文件中设置 OPENAI_API_KEY")
                 self.llm = RuleBasedLLM()
             except ImportError:
