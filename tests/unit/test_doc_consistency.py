@@ -553,9 +553,9 @@ def test_metric_check_uses_artifact_state_not_doc_state(tmp_repo: Path, monkeypa
     assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any(
-        "unproven current RAG metric claim" in e for e in errors
-    ), "docs cannot own/promote the evidence state — guard must still fire"
+    assert any("unproven current RAG metric claim" in e for e in errors), (
+        "docs cannot own/promote the evidence state — guard must still fire"
+    )
 
 
 # ------------------------------------------- artifact-driven governance
@@ -812,9 +812,9 @@ def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
     doc = write(tmp_repo, "README.md", "current Hit@3 82%")  # no provenance binding
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any(
-        "bind the number to provenance" in e for e in errors
-    ), "VERIFIED artifacts allow claims but provenance binding stays required"
+    assert any("bind the number to provenance" in e for e in errors), (
+        "VERIFIED artifacts allow claims but provenance binding stays required"
+    )
     qualified = write(tmp_repo, "README.md", "current Hit@3 82% (artifact: rag-649 run)")
     errors2: list[str] = []
     audit.check_unproven_current_metrics([qualified], errors2, root=tmp_repo)
@@ -872,9 +872,9 @@ def test_stale_not_verified_doc_against_derived_verified_fails(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any(
-            "stale formal-status claim" in e and rel in e for e in errors
-        ), f"{rel} must be reported as stale: {errors}"
+        assert any("stale formal-status claim" in e and rel in e for e in errors), (
+            f"{rel} must be reported as stale: {errors}"
+        )
 
 
 def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
@@ -886,9 +886,9 @@ def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo, **promoted)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any(
-            "must not self-promote" in e and rel in e for e in errors
-        ), f"{rel} must be reported as self-promotion: {errors}"
+        assert any("must not self-promote" in e and rel in e for e in errors), (
+            f"{rel} must be reported as self-promotion: {errors}"
+        )
 
 
 def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
@@ -901,9 +901,9 @@ def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
     _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
     artifact_rel = "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
 
-    assert _status_agreement_after_writing(
-        tmp_repo
-    ), "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
+    assert _status_agreement_after_writing(tmp_repo), (
+        "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
+    )
 
     rendered = {
         rel: body.replace("NOT_VERIFIED", "VERIFIED").replace(
@@ -1007,9 +1007,9 @@ def test_doc_claiming_both_states_is_a_conflict(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo, **conflicting)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any(
-            "status conflict" in e and rel in e for e in errors
-        ), f"{rel} must be reported as CONFLICT: {errors}"
+        assert any("status conflict" in e and rel in e for e in errors), (
+            f"{rel} must be reported as CONFLICT: {errors}"
+        )
 
 
 def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
@@ -1033,9 +1033,9 @@ def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
     assert formal_status_agreement_problems(None, "NOT_VERIFIED", "d.md") == []
 
     src = (REAL_ROOT / "scripts" / "project_facts.py").read_text(encoding="utf-8")
-    assert (
-        "formal_status_agreement_problems" in src
-    ), "project_facts must delegate to the shared rule, not reimplement it"
+    assert "formal_status_agreement_problems" in src, (
+        "project_facts must delegate to the shared rule, not reimplement it"
+    )
 
 
 def test_real_repo_status_agreement_is_clean_and_status_stays_not_verified():
@@ -2172,7 +2172,7 @@ def test_reranker_blocker_described_as_global_blocker_is_detected(tmp_repo: Path
     write(
         tmp_repo,
         "docs/interview/rag-deep-dive.md",
-        "`RERANKER_PROVIDER_AUTH` 是整个 preflight 的 global blocker，" "阻塞所有实验。\n",
+        "`RERANKER_PROVIDER_AUTH` 是整个 preflight 的 global blocker，阻塞所有实验。\n",
     )
     errors: list[str] = []
     audit.check_reranker_blocker_semantics(errors, root=tmp_repo)
@@ -2432,9 +2432,9 @@ def test_real_repo_declares_all_runtime_capabilities_implemented():
     """Guards V are fail-open when code is absent; assert the shipped code really
     satisfies every marker set so the guard cannot be silently disabled."""
     for capability, (markers, _pattern) in audit.RUNTIME_CAPABILITIES.items():
-        assert audit._capability_is_implemented(
-            REAL_ROOT, markers
-        ), f"{capability} marker set is not fully present in the repository"
+        assert audit._capability_is_implemented(REAL_ROOT, markers), (
+            f"{capability} marker set is not fully present in the repository"
+        )
 
 
 # ===========================================================================
@@ -2544,7 +2544,7 @@ def test_guard_ab_unified_chain_is_allowed(tmp_repo: Path):
     doc = write(
         tmp_repo,
         "docs/design/architecture-design.md",
-        "状态机：`PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING → " "SUCCEEDED`。\n",
+        "状态机：`PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING → SUCCEEDED`。\n",
     )
     errors: list[str] = []
     audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
@@ -2783,4 +2783,103 @@ def test_guard_af_inactive_when_router_not_mounted(tmp_repo: Path):
 def test_real_repo_approval_surface_is_present():
     errors: list[str] = []
     audit.check_approval_surface_present(errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AG
+
+
+def _mcp_repo(tmp_repo: Path, *, adapter: bool = True) -> Path:
+    if adapter:
+        write(tmp_repo, audit.MCP_ADAPTER_RELPATH, "class MCPAdapter: ...\n")
+    return tmp_repo
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "MCP 适配器未合并，尚未进入主线。",
+        "MCP 不在 main，等合并后再补文档。",
+        "MCP adapter is NOT_IMPLEMENTED.",
+        "MCP 未实现，暂不支持。",
+    ],
+)
+def test_guard_ag_mcp_absent_claim_is_detected(tmp_repo: Path, line: str):
+    _mcp_repo(tmp_repo)
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_mcp_main_state_drift([doc], errors, root=tmp_repo)
+    assert errors, f"MCP-absent claim escaped Guard AG: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "历史决策记录：早期版本曾决定「MCP 不进主线」（NOT_IMPLEMENTED）。",
+        "older PR #42/#43 were closed; the MCP adapter is now on main.",
+        "MCP 已进入 main（PR #61/#64），默认关闭 / read-only-first。",
+    ],
+)
+def test_guard_ag_historical_or_current_correct_wording_is_allowed(tmp_repo: Path, line: str):
+    _mcp_repo(tmp_repo)
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_mcp_main_state_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ag_is_inactive_when_adapter_absent(tmp_repo: Path):
+    _mcp_repo(tmp_repo, adapter=False)
+    doc = write(tmp_repo, "docs/reference/x.md", "MCP 未合并，尚未进入主线。\n")
+    errors: list[str] = []
+    audit.check_mcp_main_state_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ag_real_repo_mcp_is_on_main():
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_mcp_main_state_drift(docs, errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------------------------- Guard AH
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "当前 RAG 正式 649-query 评测被 provider 认证（HTTP 401）阻塞。",
+        "当前 definitive root blocker = EMBEDDING_PROVIDER_AUTH。",
+        "The current RAG retrieval metrics are blocked by provider 401.",
+    ],
+)
+def test_guard_ah_current_provider_auth_blocker_is_detected(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_rag_current_blocker_drift([doc], errors, root=tmp_repo)
+    assert errors, f"current provider-auth blocker claim escaped Guard AH: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "2026-10-02 preflight returned HTTP 401 as historical evidence; "
+        "the current blocker is a dataset defect (Issue #99).",
+        '  "primary_blocker": "EMBEDDING_PROVIDER_AUTH",',
+        "> `status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`（该次运行语义）。",
+        "当前 649-query 指标不可测：shipped gold 无 relevance 语义（Issue #99）。",
+    ],
+)
+def test_guard_ah_historical_or_dataset_framing_is_allowed(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_rag_current_blocker_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ah_real_repo_has_no_current_provider_auth_blocker():
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_rag_current_blocker_drift(docs, errors, root=REAL_ROOT)
     assert errors == []

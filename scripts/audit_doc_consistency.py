@@ -1490,6 +1490,90 @@ def check_approval_surface_present(errors: list[str], root: Path = ROOT) -> None
         )
 
 
+# ---- Guard AG: MCP main-state drift (issue #103). tools/mcp_adapter.py is on
+# main via PR #61/#64, so an active CURRENT doc must not describe MCP as absent
+# from main. The pre-#61 decision may still be preserved with explicit
+# historical framing (PR #42/#43, "early version", "was closed", ...).
+MCP_ADAPTER_RELPATH = "tools/mcp_adapter.py"
+MCP_ABSENT_CLAIM_RE = re.compile(
+    r"(?:MCP|mcp)[^\n]{0,60}"
+    r"(?:NOT_IMPLEMENTED|未实现|未合并|尚未合并|尚未\s*merge|未\s*merge|"
+    r"不在\s*`?main`?|不存在于\s*`?main`?|未进入(?:当前)?主线|未落地|"
+    r"not\s+(?:on|in)\s+main|not\s+merged)",
+    re.IGNORECASE,
+)
+MCP_HISTORICAL_RE = re.compile(
+    r"历史|historical|曾经|曾|当时|早期|older|previous|previously|closed|"
+    r"superseded|archive|已归档|PR\s*#42|PR\s*#43|#42|#43|2026-0",
+    re.IGNORECASE,
+)
+
+
+def check_mcp_main_state_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard AG: while `tools/mcp_adapter.py` exists, an active CURRENT doc must
+    not claim MCP is absent from main. Historical framing is preserved."""
+    if not (root / MCP_ADAPTER_RELPATH).exists():
+        return
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not MCP_ABSENT_CLAIM_RE.search(line):
+                continue
+            if MCP_HISTORICAL_RE.search(line):
+                continue
+            errors.append(
+                f"MCP main-state drift: {rel}:{line_no} says MCP is absent from main "
+                f"while {MCP_ADAPTER_RELPATH} is present (PR #61/#64) — frame the "
+                f"pre-#61 decision as historical instead"
+            )
+
+
+# ---- Guard AH: RAG current-blocker drift (issue #103). The 2026-10-02 provider
+# HTTP 401 preflight is historical evidence; presenting it as the definitive
+# CURRENT RAG blocker is drift. Historical artifacts, schema examples and the
+# Issue #99 dataset-defect framing stay allowed.
+RAG_PROVIDER_AUTH_RE = re.compile(
+    r"401|EMBEDDING_PROVIDER_AUTH|RERANKER_PROVIDER_AUTH|PROVIDER_AUTH|"
+    r"provider\s*(?:认证|auth|authentication)",
+    re.IGNORECASE,
+)
+RAG_BLOCKER_RE = re.compile(r"阻塞|blocker|blocked|根因|root\s*cause|primary|root\s*blocker")
+RAG_CURRENT_MARKER_RE = re.compile(r"当前|current|正式|最新|today|now")
+RAG_BLOCKER_HISTORICAL_RE = re.compile(
+    r"历史|historical|preflight|artifact|该次|当次|复盘|留档|当时|早期|曾|"
+    r"older|previous|was|schema|示例|example|2026-10-0|issue\s*#99|#99|"
+    r"dataset|数据集|gold|provenance|不可测|unmeasurable",
+    re.IGNORECASE,
+)
+RAG_CONTEXT_RE = re.compile(r"RAG|检索|评测|649|embedding|recall|mrr|ndcg", re.IGNORECASE)
+
+
+def check_rag_current_blocker_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard AH: an active CURRENT doc must not assert provider authentication /
+    HTTP 401 as the definitive CURRENT RAG blocker. Historical artifact wording,
+    schema examples and the Issue #99 dataset-defect framing stay allowed."""
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not RAG_CONTEXT_RE.search(line):
+                continue
+            if not RAG_PROVIDER_AUTH_RE.search(line):
+                continue
+            if not RAG_BLOCKER_RE.search(line):
+                continue
+            if not RAG_CURRENT_MARKER_RE.search(line):
+                continue
+            if RAG_BLOCKER_HISTORICAL_RE.search(line):
+                continue
+            errors.append(
+                f"RAG current-blocker drift: {rel}:{line_no} presents provider auth / "
+                f"HTTP 401 as the definitive current RAG blocker — the 2026-10-02 401 "
+                f"is historical preflight evidence and the current blocker is a dataset "
+                f"defect (Issue #99); keep the historical framing explicit or point at "
+                f"docs/reference/rag-gold-label-provenance.md"
+            )
+
+
 # ---- No accidental product-version promotion. Runtime VERSION is 6.3; a
 # `v6.4`/`6.4` claim in an active doc (outside historical context) would be a
 # release that was never made.
@@ -2456,6 +2540,9 @@ def main() -> int:
     check_hitl_fastpath_not_claimed(docs, errors)
     check_real_erp_write_not_verified(docs, errors)
     check_approval_surface_present(errors)
+    # MCP main-state and RAG current-blocker drift guards (issue #103).
+    check_mcp_main_state_drift(docs, errors)
+    check_rag_current_blocker_drift(docs, errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -2480,7 +2567,7 @@ def main() -> int:
         f"multi-worker deployment truth, root-level snapshot hygiene, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
-        f"approval API surface"
+        f"approval API surface, MCP main-state drift, RAG current-blocker drift"
     )
     return 0
 
