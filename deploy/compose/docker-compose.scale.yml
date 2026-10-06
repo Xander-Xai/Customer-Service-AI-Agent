@@ -19,6 +19,18 @@
 # ⚠️ **worker 必须同步扩容**：只扩 app 不扩 worker 会让 agent_runs 队列无限堆积。
 #    用 --scale worker=N（base compose 已定义独立 worker service）。
 #    队列积压、autoscaling、生产吞吐数字当前均为 NOT_VERIFIED / NOT_MEASURED。
+#
+# ⚠️ **多副本目前不会在 nginx 前均匀分摊（实测，NOT_MEASURED 分布）**：
+#    deploy/nginx/nginx.conf 的 upstream 是 `server app:8000`（单条 server）。
+#    nginx 只在**启动时**解析一次 upstream 主机名，而 Docker 内嵌 DNS 是
+#    round-robin（每次查询返回一个地址）。实测 3 副本 + 仓库原样 nginx.conf：
+#    nginx 正常启动（upstream 可解析，0 条 emerg），但连续 8 次请求全部落到
+#    **同一个** 副本 —— upstream 里只有启动时解析到的那一个地址。
+#    结论：`make scale` 目前让 N 个副本跑起来、容器命名正确、nginx 可用，
+#    但**不构成负载分发**；重启 nginx 会重新选一个副本。
+#    这不是本文件能修的：要真正分摊需要让 nginx 周期性重解析（例如 resolver +
+#    变量形式的 proxy_pass），那会改动 upstream/灰度路由的设计，属于独立议题。
+#    在此之前，生产 HA / 水平扩展分摊能力一律按 NOT_VERIFIED 对待。
 version: '3.8'
 
 services:

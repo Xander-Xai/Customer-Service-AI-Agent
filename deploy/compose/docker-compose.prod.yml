@@ -11,7 +11,10 @@ services:
       dockerfile: Dockerfile
       args:
         APP_MODE: prod
-    container_name: customer-service-ai-prod
+    # 刻意不设 container_name（issue #58）。本 overlay 是 make prod / make scale
+    # 都会叠加的那一层：在这里重新声明固定名字，会把 base 里刚解掉的冲突原样带回来
+    # —— 覆盖文件不会因为 base 删掉了就自动跟着删。命名交给 Compose 生成
+    # （<project>-app-<index>）。
     environment:
       - DEV_MODE=false
       - LOG_LEVEL=INFO

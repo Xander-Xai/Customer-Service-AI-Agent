@@ -80,7 +80,19 @@ services:
   # ===== 主应用服务 =====
   app:
     build: ../..
-    container_name: customer-service-ai
+    # 刻意不设 container_name（issue #58）：Compose 禁止 container_name 与
+    # deploy.replicas / --scale 同时使用 —— 固定名字要求全局唯一，多副本必然撞名，
+    # 于是 `docker compose config` 直接报
+    #     can't set container_name and app as container name must be unique
+    # 水平扩容与固定容器名在 Compose 里互斥，契约要成立只能二选一。
+    # 这里选"可扩容"：命名退化为 Compose 原生的 <project>-<service>-<index>
+    # （如 compose-app-1 / compose-app-2），由 Compose 保证唯一。
+    #
+    # 影响面已核对：仓库内没有任何脚本/Makefile/工作流按字面容器名寻址 app，
+    # 全部使用服务名（`docker compose logs app` / `exec app` / `ps app`），
+    # 服务名寻址在多副本下依然有效。monitoring/prometheus.yml 里的
+    # service: 'customer-service-ai' 是**静态标签**（配合 targets: ['app:8000']），
+    # 不来自容器名；promtail 同理（job 标签 + __path__ 路径）。两者均不受影响。
     expose:
       - "8000"
     environment:
@@ -186,7 +198,9 @@ services:
   # Redis 仅作 broker（result backend 不启用）。
   worker:
     build: ../..
-    container_name: customer-service-worker
+    # 同样不设 container_name（issue #58），原因同 app：worker 必须与 app 同步扩容
+    # （docker-compose.scale.yml 的说明要求 --scale worker=N），而固定容器名与
+    # 多副本互斥。只扩 app 不扩 worker 会让 agent_runs 队列无限堆积。
     command: >
       celery -A runtime.celery_app:celery_app worker
       -Q ${AGENT_RUN_QUEUE:-agent_runs} -c ${WORKER_CONCURRENCY:-2}
