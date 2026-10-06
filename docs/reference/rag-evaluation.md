@@ -315,9 +315,21 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > `scripts/evaluate_rag.py` 在运行时对索引 corpus 动态计算（§3.3.2），
 > 上述 manifest 数字仅为语料文件口径的参考，不作为评测分母硬编码。
 >
-> 后续顺序：先按 Issue #99 审计 benchmark / gold-label provenance；数据契约可用后，
-> 再在真实 provider 与完整索引环境按 §3.1 复现 `make rag-eval-import` →
-> `make rag-eval-649-preflight` → `make rag-eval-649`。在此之前不生成或引用正式指标。
+> **Gold-label provenance（Issue #99，静态审计已完成）**：仓库中唯一记录
+> `expected_doc_ids` 生成方式的是 `scripts/regenerate_benchmark_ids.py`
+> （`random.seed(42)` + 同类别 pool 的 `random.sample`，目的是 doc-ID alignment，
+> 不是 relevance labelling）。静态审计（`scripts/rag_gold_label_provenance.py`，
+> 详见 [rag-gold-label-provenance.md](rag-gold-label-provenance.md)）显示：
+> 649 条 query 中仅 49 条能复现该生成方式，其余 600 条 gold 来源无仓库记录；
+> **没有一条 gold 是 relevance judgement**。因此正式检索指标用当前 shipped
+> benchmark **当前不可测**
+> （`FORMAL_RETRIEVAL_METRICS_NOT_MEASURABLE_FROM_CURRENT_GOLD`），
+> 而不只是"未测"。`rag_formal_metrics_status` 保持 `NOT_VERIFIED`。
+>
+> 后续顺序：先构建 relevance-judged gold 集（人工标注或 LLM-judge + 人工抽检），
+> 数据契约可用后，再在真实 provider 与完整索引环境按 §3.1 复现
+> `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649`。
+> 在此之前不生成或引用正式指标。
 
 ### 3.5 历史评估结果
 

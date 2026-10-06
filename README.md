@@ -343,7 +343,7 @@ CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `
 
 | 限制 | 状态 |
 |---|---|
-| RAG 正式 649-query 指标（Hit@K / Recall / NDCG / MRR） | `NOT_VERIFIED` — 当前 root blocker 未定；Issue #99 先审计 benchmark gold-label provenance，真实 provider / full-run 证据后补 |
+| RAG 正式 649-query 指标（Hit@K / Recall / NDCG / MRR） | `NOT_VERIFIED` — shipped benchmark gold 无 relevance provenance（Issue #99 静态审计：当前不可测）；需 relevance-judged gold 后重跑 |
 | 生产集群 / 多副本长期稳定性 / K8s autoscaling / 跨区域 | `NOT_VERIFIED` |
 | 真实 ERP 写操作（退款、改单） | `NOT_VERIFIED` — 只在 `tools/hitl_staging_tools.py` 上验证治理机制 |
 | 生产 QPS / P95 / P99 / Token 成本 / 真实用户 FCR 与满意度 | `NOT_MEASURED` |

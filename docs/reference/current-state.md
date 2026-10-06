@@ -34,8 +34,16 @@
 - Metric family：Hit@K、Recall@K、Precision@K、NDCG@K、MRR@K（multi-K：1/3/5/8）。
 - Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
   `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
-- **当前 blocker 结论：UNRESOLVED / NOT_VERIFIED。** 正式 649-query 指标仍未取得
-  provenance-bearing full-run evidence，当前不得把任何单一 blocker 写成已确认根因。
+- **当前 blocker 结论：DATASET_DEFECT — shipped benchmark gold 不含 relevance 标注。**
+  Issue #99 的静态 provenance 审计已在当前 `main` 完成
+  （`scripts/rag_gold_label_provenance.py`，
+  [rag-gold-label-provenance.md](rag-gold-label-provenance.md)）：649 条 query 中
+  仅 49 条能复现仓库唯一记录的生成方式（同类别随机抽样），其余 600 条 gold
+  来源无仓库记录，**没有一条是 relevance judgement**；另有 160 个 gold id
+  不在 5000 条评测语料中（40 条 query 全部 gold 缺失）。因此正式检索指标用当前
+  benchmark **当前不可测**
+  （`FORMAL_RETRIEVAL_METRICS_NOT_MEASURABLE_FROM_CURRENT_GOLD`），
+  而不只是"未测"。provider auth 是否恢复属环境问题，本轮无凭据、不验证。
 - **2026-10-02 preflight 是历史证据，不是当前 root-cause verdict**：
   `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
   （`schema_version: rag-eval-evidence/v2`，`status: BLOCKED`）当时记录
@@ -43,11 +51,11 @@
   `VECTOR_INDEX_EMPTY` 为 downstream symptom，reranker auth 只阻塞
   `hybrid_rerank`。这些语义对**该次 artifact**仍然成立，但不能自动外推到当前
   `main`。
-- **Issue #99 是当前需要先解决的静态证据缺口**：较新的诊断来自遗留复合分支，
-  指向 benchmark / gold-label provenance 可能存在 `INVALID_GOLD_LABELS`。
-  但该 artifact 来自 dirty / unmerged branch，尚未在当前 `main` 复现，所以它同样
-  不能升级成当前根因结论。先审计 `tests/eval/rag_benchmark.json` 的
-  `expected_doc_ids` provenance；真实 provider / 全量运行等环境依赖证据后补。
+- **Issue #99（静态审计已完成，留作 gold 替换的 tracking）**：仓库需要一份
+  relevance-judged gold 集（人工标注，或 LLM-judge + 人工抽检），并保留 40 条
+  全 gold 缺失的 query 作为显式 excluded/undeterminable population。在替换之前，
+  `rag_formal_metrics_status` 保持 `NOT_VERIFIED`，不得生成或引用正式指标。
+  真实 provider / 全量运行等环境依赖证据后补。
 - 更早的 `preflight-20260929T191128Z`（v1 schema，
   `status: BLOCKED_VECTOR_INDEX`）继续作为历史记录原样保留，不回填。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、

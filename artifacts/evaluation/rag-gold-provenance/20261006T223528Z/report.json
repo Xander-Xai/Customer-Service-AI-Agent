@@ -1,0 +1,87 @@
+{
+  "schema_version": "rag-gold-label-provenance/v1",
+  "generated_at": "2026-10-06T22:35:28.260062+00:00",
+  "tested_git_sha": "fb17aae4e3e7093d16465f244131dc3138ed19aa",
+  "dirty_tree": false,
+  "dirty_tree_scope": "repository changes excluding the tool's own artifact directory",
+  "working_tree_changed_files": [],
+  "benchmark_path": "tests/eval/rag_benchmark.json",
+  "benchmark_sha256": "0185fcfabbb7437c87dc0ff417af883c468761cc2931f75e29b68aab833e693c",
+  "benchmark_total_queries": 649,
+  "corpus_path": "data/knowledge_base/knowledge_base_5000.jsonl",
+  "corpus_sha256": "a81ea7f3347b45b3adefe474790fabd0b2277eada05327422134d3ca0737502d",
+  "corpus_documents": 5000,
+  "corpus_source": "scripts.generate_knowledge_base.generate() — the corpus .jsonl is generated and gitignored, so the document set is reproduced deterministically in memory",
+  "documented_generator": "scripts/regenerate_benchmark_ids.py",
+  "documented_generator_sha256": "f00de8748ca5f347354b0c85d66c6e893b0dc51adaf6ac8e25eef9029a1ada86",
+  "metrics_produced": null,
+  "evidence_semantics": "NOT_MEASURED / NOT_VERIFIED: this audit produces no Hit@K, Precision@K, Recall@K, MRR or NDCG. It only establishes whether the shipped gold labels can support them.",
+  "notes": [
+    "Category membership is not relevance. A same-category document is not a relevance judgement.",
+    "The documented generator (scripts/regenerate_benchmark_ids.py) samples three random same-category documents per query with random.seed(42); its purpose is doc-id alignment, not labelling.",
+    "A label that does not reproduce from the generator still has no recorded relevance provenance anywhere in the repository.",
+    "tests/eval/golden/expected_doc_ids.json is a mechanical copy of the benchmark's expected_doc_ids, not an independent annotation.",
+    "No query, label or corpus document was modified by this audit."
+  ],
+  "total_queries": 649,
+  "total_gold_labels": 1947,
+  "valid_labels": 0,
+  "invalid_labels": 307,
+  "unknown_provenance_labels": 1640,
+  "provenance_sources": {
+    "relevance_annotation": 0,
+    "documented_generator_random_same_category": 147,
+    "absent_from_corpus": 160,
+    "unknown_provenance": 1640
+  },
+  "reproduced_query_count": 49,
+  "reproduced_label_count": 147,
+  "queries_with_absent_gold": 80,
+  "queries_fully_uncovered": 40,
+  "labels_absent_from_corpus": 160,
+  "distinct_labels_absent_from_corpus": 30,
+  "examples": {
+    "documented_generator_random_same_category": {
+      "query_id": "bench_0000",
+      "query_category": "成分知识",
+      "expected_doc_ids": [
+        "derm_001310",
+        "derm_000229",
+        "derm_000052"
+      ]
+    },
+    "unknown_provenance": {
+      "query_id": "bench_0049",
+      "query_category": "产品推荐",
+      "expected_doc_ids": [
+        "faq_01752",
+        "faq_00040",
+        "faq_00459"
+      ]
+    },
+    "absent_from_corpus": {
+      "query_id": "bench_0539",
+      "query_category": "投诉处理",
+      "expected_doc_ids": [
+        "scene_000801",
+        "scene_000802",
+        "scene_000803"
+      ]
+    }
+  },
+  "reproduced_query_examples": [
+    "bench_0000",
+    "bench_0001",
+    "bench_0002",
+    "bench_0003",
+    "bench_0004"
+  ],
+  "fully_uncovered_query_examples": [
+    "bench_0539",
+    "bench_0540",
+    "bench_0541",
+    "bench_0542",
+    "bench_0543"
+  ],
+  "verdict": "FORMAL_RETRIEVAL_METRICS_NOT_MEASURABLE_FROM_CURRENT_GOLD"
+}
