@@ -582,9 +582,54 @@ def _make_benchmark(tmp_repo: Path, n: int = 16) -> str:
 EXPERIMENTS = ["vector_only", "bm25_only", "hybrid_no_rerank", "hybrid_rerank"]
 
 
+def _valid_observations(n: int) -> dict:
+    """Healthy formal-run observations (all 4 legs, clean channels, full corpus).
+
+    Built through the real contract helpers so this fixture cannot drift from
+    ``scripts/rag_evidence_validity.py``; the evidence_validity block below is
+    the predicate's own verdict on these observations.
+    """
+    from rag_evidence_validity import required_channels
+
+    legs = {}
+    for name in EXPERIMENTS:
+        required = set(required_channels(name))
+        legs[name] = {
+            "n_total": n,
+            "n_success": n,
+            "n_error": 0,
+            "n_degraded": 0,
+            "failure_counts": {},
+            "channels": {
+                channel: {
+                    "required": channel in required,
+                    "used_count": n if channel in required else 0,
+                    "executed_count": n if channel in required else 0,
+                    "candidate_total": 32 * n if channel in required else 0,
+                }
+                for channel in ("vector", "bm25", "rerank")
+            },
+        }
+    return {
+        "subset_run": False,
+        "declared_queries": n,
+        "executed_queries": n,
+        "preflight_status": "OK",
+        "population_counts": {
+            "all_queries": n,
+            "retrieval_eligible": n,
+            "full_gold_covered": n,
+        },
+        "experiments": legs,
+    }
+
+
 def _formal_shaped_report(sha: str, n: int, **overrides) -> dict:
+    from rag_evidence_validity import assess_evidence_validity
+
+    observed = _valid_observations(n)
     report = {
-        "schema_version": "rag-eval-evidence/v2",
+        "schema_version": "rag-eval-evidence/v3",
         "run_id": "run-20261001T000000Z",
         "timestamp": "2026-10-01T00:00:00.000000+00:00",
         "status": "VERIFIED_FULL",
@@ -595,15 +640,24 @@ def _formal_shaped_report(sha: str, n: int, **overrides) -> dict:
             "actual_queries": n,
             "executed_queries": n,
         },
+        "preflight": {"status": observed["preflight_status"], "blockers": []},
         "metrics": {name: {"hit@3": 0.5, "recall@3": 0.5, "mrr@3": 0.5} for name in EXPERIMENTS},
         "run_summary": {
-            name: {"n_total": n, "n_success": n, "n_failed": 0, "n_degraded": 0}
-            for name in EXPERIMENTS
+            name: {
+                "n_total": leg["n_total"],
+                "n_success": leg["n_success"],
+                "n_failed": 0,
+                "n_error": leg["n_error"],
+                "n_degraded": leg["n_degraded"],
+                "failure_counts": leg["failure_counts"],
+            }
+            for name, leg in observed["experiments"].items()
         },
         "evaluation_populations": {
             "primary_view": "all_queries",
-            "counts": {"all_queries": n, "retrieval_eligible": n, "full_gold_covered": n},
+            "counts": observed["population_counts"],
         },
+        "evidence_validity": assess_evidence_validity(observed),
         "subset_run": False,
     }
     report.update(overrides)
@@ -637,7 +691,7 @@ def test_no_formal_artifact_is_not_verified(tmp_repo: Path):
 def test_preflight_artifact_does_not_verify_metrics(tmp_repo: Path):
     sha = _make_benchmark(tmp_repo)
     report = {
-        "schema_version": "rag-eval-evidence/v2",
+        "schema_version": "rag-eval-evidence/v3",
         "run_id": "preflight-x",
         "timestamp": "2026-10-01T00:00:00+00:00",
         "status": "BLOCKED_PROVIDER_AUTH",
@@ -668,7 +722,7 @@ def test_valid_formal_artifact_marks_verified(tmp_repo: Path):
         "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
     )
     assert info["rag_formal_artifact_git_sha"] == report["git_sha"]
-    assert info["rag_formal_artifact_schema_version"] == "rag-eval-evidence/v2"
+    assert info["rag_formal_artifact_schema_version"] == "rag-eval-evidence/v3"
     assert audit.formal_rag_metrics(root=tmp_repo) == "VERIFIED"
 
 

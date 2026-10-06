@@ -31,7 +31,16 @@ schema; this module invents no second schema):
   source) have non-empty ``metrics`` and a ``run_summary`` entry whose
   ``n_success`` equals the executed query count (full-run contract)
 - ``evaluation_populations.primary_view == "all_queries"`` with counts
-  (v2 population contract)
+  (population contract, unchanged since schema v2)
+- the mandatory ``evidence_validity`` block (``scripts/rag_evidence_validity.py``):
+  ``contract == "rag-evidence-validity/v1"``, ``verdict == "VALID"`` with no
+  reasons, recorded observations that agree with the artifact's own
+  ``run_summary`` / ``evaluation_populations`` / ``preflight`` / ``subset_run``,
+  and a verdict this module **recomputes** itself. A legacy artifact without
+  the block, or one whose block disagrees with its own facts, is rejected
+  (fail-closed). This is what stops a run that completed 649/649 requests on a
+  dead retrieval channel over a corpus whose gold documents were never indexed
+  from certifying itself (issue #45).
 
 Without such an artifact the status is NOT_VERIFIED (fail-closed).
 """
@@ -51,7 +60,15 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from eval_contract import EXPERIMENT_NAMES  # noqa: E402
+from eval_contract import (  # noqa: E402
+    EXPERIMENT_NAMES,
+    VALIDITY_CONTRACT_VERSION,
+    VERDICT_VALID,
+)
+from rag_evidence_validity import (  # noqa: E402
+    assess_evidence_validity,
+    observations_are_consistent,
+)
 
 RELATIVE_REFERENCE_DIRS = ("artifacts", "evaluation", "rag-649")
 
@@ -196,6 +213,24 @@ def validate_formal_rag_report(
         return None
     if not isinstance(populations.get("counts"), dict) or not populations["counts"]:
         return None
+
+    # ---- evidence validity (issue #45) -----------------------------------
+    # The producer's own status label is NOT accepted as proof: the verdict is
+    # recomputed here from the recorded observations, which are themselves
+    # cross-checked against the artifact's independent facts.
+    validity = report.get("evidence_validity")
+    if not isinstance(validity, dict):
+        return None  # legacy / hand-written artifact: cannot certify
+    if validity.get("contract") != VALIDITY_CONTRACT_VERSION:
+        return None
+    observed = validity.get("observed")
+    if not observations_are_consistent(observed, report, executed):
+        return None
+    recomputed = assess_evidence_validity(observed)
+    if recomputed["verdict"] != VERDICT_VALID:
+        return None
+    if validity.get("verdict") != recomputed["verdict"] or validity.get("reasons"):
+        return None  # self-declared verdict disagrees with the facts
 
     info = {
         "path": report_path,

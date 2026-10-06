@@ -177,6 +177,77 @@ artifact 使用上述结构化语义。
 单独对外宣称。引用指标时必须注明 population（例如
 "649-query end-to-end benchmark" 或 "full-gold-covered subset"）。
 
+#### 3.3.3 Evidence validity：VERIFIED 描述的是证据，不是「程序跑完了」
+
+schema v3 起 `report.json` 强制携带 `evidence_validity` 块，判定逻辑在
+`scripts/rag_evidence_validity.py`（阈值与通道需求在
+`scripts/eval_contract.py`，producer 与 consumer 共用同一份契约）：
+
+```json
+{
+  "evidence_validity": {
+    "contract": "rag-evidence-validity/v1",
+    "verdict": "INVALID",
+    "reasons": [
+      {"code": "C01_FULLY_DEGRADED", "group": "channel_availability",
+       "scope": "vector_only",
+       "detail": "649/649 queries ran degraded: ..."}
+    ],
+    "thresholds": {"max_acceptable_degraded_ratio": 0.1, "...": "..."},
+    "observed": {"experiments": {"...": "n_total / n_success / n_error / n_degraded / failure_counts / channels"}}
+  }
+}
+```
+
+`status: VERIFIED_FULL` **仅当** `verdict == "VALID"`（即 `reasons` 为空）
+时产生；否则诊断 artifact 照常写出，状态降级为 `NOT_VERIFIED`，且
+`make rag-eval-649` 以退出码 1 结束（fail closed，CI 不会把不可认证的
+artifact 当成通过）。冒烟（`subset_run=true`）保持 `SUBSET_SMOKE` + 退出码 0。
+
+三组判定门（全部机器可读，稳定 reason code）：
+
+| 组 | code | 触发条件 |
+|---|---|---|
+| `execution_integrity` | `E01_SUBSET_RUN` | `subset_run` 不为 false（子集跑只是诊断） |
+| | `E02_QUERY_COUNT_INVALID` | declared / executed 不一致或为 0 |
+| | `E03_CANONICAL_LEG_MISSING` | 4-config ablation 缺任一 canonical leg |
+| | `E04_REQUEST_ERRORS` | 任一 leg 有 exception / timeout（`n_error > 0`） |
+| | `E05_EXECUTION_INCOMPLETE` | 任一 leg `n_success != n_total` |
+| `channel_availability` | `C01_FULLY_DEGRADED` | 整轮 degraded（`n_degraded == n_total`） |
+| | `C02_DEGRADED_RATIO_ABOVE_LIMIT` | degraded 比例 > 10%（指标混入两种检索机制） |
+| | `C03_REQUIRED_CHANNEL_NEVER_USED` | 该 leg 必需的通道在 0 条查询上生效 |
+| | `C04_REQUIRED_CHANNEL_EMPTY` | 必需通道整轮候选数为 0 |
+| | `C05_PREFLIGHT_NOT_CLEAN` | `preflight.status != "OK"`（通道级不可用） |
+| `corpus_coverage` | `G01_GOLD_NOT_INDEXED_ABOVE_LIMIT` | GOLD_NOT_INDEXED 占比 > 10% |
+| | `G02_RETRIEVAL_ELIGIBLE_BELOW_FLOOR` | `retrieval_eligible / all_queries < 90%` |
+| | `G03_FULL_GOLD_COVERED_BELOW_FLOOR` | `full_gold_covered / all_queries < 80%` |
+| 任意 | `S00_OBSERVATIONS_MALFORMED` | observations 结构非法（fail closed） |
+
+必要通道由 ablation 定义本身推导（`eval_contract.required_channels`），
+leg 无法自行声明更弱的要求：`vector_only` → vector；`bm25_only` → bm25；
+`hybrid_no_rerank` → vector + bm25；`hybrid_rerank` → vector + bm25 + rerank。
+通道事实来自 retrieval trace 的 stage（status / candidate_out）与
+`RetrievalResult.meta` 的 `vector_channel_used` / `lexical_channel_used`
+（rerank 没有 meta 标记，以 RERANK stage 是否 `executed` 为准，不从返回条数
+推断）。
+
+**判定不看指标大小。** `metrics` 不是 predicate 的输入：Hit@K 全 0 的
+「诚实测量」（语料齐全、通道健康、只是检索器差）仍然是 VALID 证据；反之
+指标全 0 但 649/649 走降级旁路、625 条 gold 未入库的 run 是 INVALID 证据。
+判据围绕 execution integrity / corpus coverage / channel availability。
+
+双实现、同一定理（producer 与 consumer 互不信任）：
+
+- **producer**（`scripts/evaluate_rag.py`）跑完 leg 后汇总 observations，
+  调用 `assess_evidence_validity`，把 verdict 与 reasons 一起写进 artifact；
+- **consumer**（`scripts/rag_evidence_status.py`）要求 artifact 携带该块，
+  核对 observations 与 `run_summary` / `evaluation_populations` /
+  `preflight` / `subset_run` / `benchmark` 计数一致（改一个数字就会被发现），
+  然后**自行重算** verdict，与 artifact 自称的 verdict 不一致即拒绝。
+
+因此 legacy artifact（无 `evidence_validity` 块，例如所有已提交的
+preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
+
 ### 3.4 当前评测状态
 
 > **当前 649-query 正式指标：NOT_VERIFIED。**
