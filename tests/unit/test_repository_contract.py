@@ -85,14 +85,36 @@ class TestVersionContract:
         assert "6.3" in description
 
     def test_historical_versions_are_preserved(self):
-        """A blind global version replace would delete history: the README's
-        dated v6.0/v5.4 sections and the release notes must survive."""
-        readme = _read("README.md")
-        assert "v6.0 核心更新" in readme
-        assert "v5.4" in readme
-        assert (REPO_ROOT / "docs/reports/releases/release-notes-v6.0.md").exists()
+        """A blind global version replace would delete history.
+
+        History lives in ``docs/reports/releases/`` — the README deliberately does
+        not restate it, because a per-version section in the first screen is
+        exactly the rot a global ``v6.x -> v6.y`` replace would silently rewrite.
+        So the guard asserts history where it is *canonical*, and separately
+        asserts the README still **points** at it, so removing the changelog
+        cannot quietly orphan the link.
+        """
+        releases = REPO_ROOT / "docs" / "reports" / "releases"
+        assert (releases / "release-notes-v6.0.md").exists(), (
+            "the v6.0 release notes are the canonical record of that version's "
+            "changes and must survive"
+        )
+        v60_notes = _read("docs/reports/releases/release-notes-v6.0.md")
+        assert "v6.0" in v60_notes
         changelog = _read("docs/reports/releases/changelog.md")
+        # The superseded versions must remain reachable from the changelog and
+        # keep their own notes, rather than being folded away on every bump.
         assert "## v6.2" in changelog and "## v6.3" in changelog
+        assert "## v5.4" in changelog, "v5.4's changelog entry was dropped"
+        assert (releases / "release-notes-v5.4.md").exists(), (
+            "v5.4 has a changelog entry but its release notes are gone; that is "
+            "the exact half-deletion a global version replace produces"
+        )
+        readme = _read("README.md")
+        assert "docs/reports/releases/changelog.md" in readme, (
+            "README must point at the canonical history instead of duplicating it; "
+            "without the link the changelog becomes unreachable from the front page"
+        )
 
 
 class TestDependencyContract:

@@ -1,0 +1,254 @@
+{
+  "schema": "runtime-crash-diagnostics/v1",
+  "tag": "ea3aa584",
+  "run_id": "ckpt-crash-ea3aa584",
+  "thread_id": "T-ckpt-crash-ea3aa584",
+  "queue": "agent_runs_test_ea3aa584",
+  "key_prefix": "ckpt:ea3aa584",
+  "host": "Ydxx.localdomain",
+  "pid": 780316,
+  "env": {
+    "AGENT_RUN_MAX_ATTEMPTS": "3",
+    "LANGGRAPH_CHECKPOINT_BACKEND": "memory"
+  },
+  "timeline": {
+    "started_at": "2026-10-06T08:07:48.123378+00:00",
+    "marks": [
+      {
+        "mark": "worker_a_started",
+        "at": "2026-10-06T08:07:48.124058+00:00",
+        "t_s": 0.0007
+      },
+      {
+        "mark": "worker_a_entered_second",
+        "at": "2026-10-06T08:07:49.934369+00:00",
+        "t_s": 1.811
+      },
+      {
+        "mark": "first_superstep_durable",
+        "at": "2026-10-06T08:07:49.942560+00:00",
+        "t_s": 1.8192,
+        "durable": true,
+        "checkpoints": 3
+      },
+      {
+        "mark": "run_running_observed",
+        "at": "2026-10-06T08:07:49.948568+00:00",
+        "t_s": 1.8252
+      },
+      {
+        "mark": "kill_sent:worker_a",
+        "at": "2026-10-06T08:07:49.948618+00:00",
+        "t_s": 1.8252
+      },
+      {
+        "mark": "worker_a_killed",
+        "at": "2026-10-06T08:07:49.964700+00:00",
+        "t_s": 1.8413
+      },
+      {
+        "mark": "visibility_timeout_elapsed",
+        "at": "2026-10-06T08:07:57.966682+00:00",
+        "t_s": 9.8433
+      },
+      {
+        "mark": "worker_b_started",
+        "at": "2026-10-06T08:07:57.967841+00:00",
+        "t_s": 9.8445
+      },
+      {
+        "mark": "final_state_observed",
+        "at": "2026-10-06T08:10:28.065887+00:00",
+        "t_s": 151.0635,
+        "status": null
+      },
+      {
+        "mark": "failure:wait_final_state",
+        "at": "2026-10-06T08:10:28.071005+00:00",
+        "t_s": 151.0686
+      }
+    ],
+    "marks_seconds_since_start": [
+      0.0007,
+      1.811,
+      1.8192,
+      1.8252,
+      1.8252,
+      1.8413,
+      9.8433,
+      9.8445,
+      151.0635,
+      151.0686
+    ]
+  },
+  "visible_worker_processes": [],
+  "agent_run": {
+    "__collector_error__": "ProgrammingError: (psycopg2.errors.UndefinedColumn) column \"attempts\" does not exist\nLINE 1: SELECT run_id, attempts, error_type, error_code, created_at ...\n                       ^\n\n[SQL: SELECT run_id, attempts, error_type, error_code, created_at FROM agent_dead_letters WHERE run_id = %(id)s]\n[parameters: {'id': 'ckpt-crash-ea3aa584'}]\n(Background on this error at: https://sqlalche.me/e/20/f405)"
+  },
+  "checkpoints": {
+    "thread_id": "T-ckpt-crash-ea3aa584",
+    "committed_checkpoint_count": 4,
+    "durable_channels": [
+      "customer_query",
+      "response",
+      "resumed",
+      "stage"
+    ],
+    "checkpoints": [
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "parent_checkpoint_id": null,
+        "channels": []
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bd1-65d6-8000-3731f58cfd4b",
+        "parent_checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "channels": [
+          "branch:to:first",
+          "customer_query",
+          "response",
+          "resumed",
+          "stage"
+        ]
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bde-60e6-8001-bc409d5e61b3",
+        "parent_checkpoint_id": "1f1c15d0-5bd1-65d6-8000-3731f58cfd4b",
+        "channels": [
+          "branch:to:second",
+          "customer_query",
+          "response",
+          "resumed",
+          "stage"
+        ]
+      },
+      {
+        "checkpoint_id": "1f1c15d1-c16d-6273-8002-63bc91f20dbb",
+        "parent_checkpoint_id": "1f1c15d0-5bde-60e6-8001-bc409d5e61b3",
+        "channels": [
+          "customer_query",
+          "response",
+          "resumed",
+          "stage"
+        ]
+      }
+    ],
+    "pending_write_count": 10,
+    "pending_writes": [
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "task_id": "bbb67f88-6060-3e6f-23ea-28d8eafaafde",
+        "channel": "customer_query",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "task_id": "bbb67f88-6060-3e6f-23ea-28d8eafaafde",
+        "channel": "response",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "task_id": "bbb67f88-6060-3e6f-23ea-28d8eafaafde",
+        "channel": "stage",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "task_id": "bbb67f88-6060-3e6f-23ea-28d8eafaafde",
+        "channel": "resumed",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bcf-68af-bfff-ead00969d7f9",
+        "task_id": "bbb67f88-6060-3e6f-23ea-28d8eafaafde",
+        "channel": "branch:to:first",
+        "type": "null"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bd1-65d6-8000-3731f58cfd4b",
+        "task_id": "9babac2f-151c-7e47-277b-4d2cea2d9821",
+        "channel": "response",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bd1-65d6-8000-3731f58cfd4b",
+        "task_id": "9babac2f-151c-7e47-277b-4d2cea2d9821",
+        "channel": "stage",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bd1-65d6-8000-3731f58cfd4b",
+        "task_id": "9babac2f-151c-7e47-277b-4d2cea2d9821",
+        "channel": "branch:to:second",
+        "type": "null"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bde-60e6-8001-bc409d5e61b3",
+        "task_id": "e4a0af8c-499f-1620-4864-5eb1ca8395bd",
+        "channel": "response",
+        "type": "msgpack"
+      },
+      {
+        "checkpoint_id": "1f1c15d0-5bde-60e6-8001-bc409d5e61b3",
+        "task_id": "e4a0af8c-499f-1620-4864-5eb1ca8395bd",
+        "channel": "stage",
+        "type": "msgpack"
+      }
+    ]
+  },
+  "broker": {
+    "queue": "agent_runs_test_ea3aa584",
+    "queue_length": 0,
+    "broker_global_keys": {
+      "unacked": {
+        "type": "none",
+        "size": null
+      },
+      "unacked_index": {
+        "type": "none",
+        "size": null
+      }
+    },
+    "unacked_size": 0,
+    "unacked_task_ids": []
+  },
+  "run_events": {
+    "__collector_error__": "ResponseError: WRONGTYPE Operation against a key holding the wrong kind of value"
+  },
+  "redis_signals": {
+    "__collector_error__": "ResponseError: WRONGTYPE Operation against a key holding the wrong kind of value"
+  },
+  "phase": "wait_final_state",
+  "exception": {
+    "type": "AssertionError",
+    "message": "run 未进入终态: ('RUNNING', 2, 'Ydxx:782716:ea1c8805', None)\nassert None is not None",
+    "repr": "AssertionError(\"run 未进入终态: ('RUNNING', 2, 'Ydxx:782716:ea1c8805', None)\\nassert None is not None\")"
+  },
+  "workers": {
+    "worker_a": {
+      "name": "worker_a",
+      "started": true,
+      "pid": 782379,
+      "alive_now": false,
+      "returncode": -9,
+      "exit_code": -9,
+      "killed_by_signal": "SIGKILL",
+      "kill_sent_at": "2026-10-06T08:07:49.948611+00:00",
+      "pgid": {
+        "__collector_error__": "ProcessLookupError: [Errno 3] No such process"
+      }
+    },
+    "worker_b": {
+      "name": "worker_b",
+      "started": true,
+      "pid": 782679,
+      "alive_now": true,
+      "returncode": null,
+      "exit_code": null,
+      "killed_by_signal": null,
+      "kill_sent_at": null,
+      "pgid": 782679
+    }
+  }
+}
