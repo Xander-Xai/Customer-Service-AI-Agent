@@ -821,6 +821,253 @@ def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
     assert errors2 == []
 
 
+# ------------------------------- RAG status agreement guard (issue #53)
+#
+# Rule K only fires on lines carrying a *number*. A line that states the
+# evidence status in words carries no number, so the invariant the status
+# vocabulary exists to protect was unguarded. These synthetic tests plant the
+# contradiction the issue reports and assert the audit now fails, then assert
+# restoring agreement turns it green again.
+
+STATUS_AGREEMENT_DOCS: dict[str, str] = {
+    "README.md": "# RAG\n\n- 当前 649-query 正式指标（Hit@K / MRR）：**NOT_VERIFIED**\n",
+    "CLAUDE.md": "- **RAG 当前 649-query 正式指标为 NOT_VERIFIED**：无 artifact 不得引用百分比。\n",
+    "docs/reference/current-state.md": "- 当前 649-query 正式指标：NOT_VERIFIED。\n",
+    "docs/reference/rag-evaluation.md": "> **当前 649-query 正式指标：NOT_VERIFIED。**\n",
+    "docs/evaluation/production-evidence.md": (
+        "**Current status: the formal 649-query metrics are `NOT_VERIFIED`.**\n"
+    ),
+}
+
+
+def _write_status_docs(tmp_repo: Path, **replacements: str) -> None:
+    for rel, body in {**STATUS_AGREEMENT_DOCS, **replacements}.items():
+        write(tmp_repo, rel, body)
+
+
+def _run_status_agreement(tmp_repo: Path) -> list[str]:
+    """The guard resolves its own doc set from root; pass the real call shape."""
+    errors: list[str] = []
+    audit.check_rag_status_agreement(
+        audit.discover_docs(tmp_repo), errors, root=tmp_repo
+    )
+    return errors
+
+
+def _status_agreement_after_writing(tmp_repo: Path, **replacements: str) -> list[str]:
+    _write_status_docs(tmp_repo, **replacements)
+    return _run_status_agreement(tmp_repo)
+
+
+def test_status_agreement_guard_is_green_without_formal_artifact(tmp_repo: Path):
+    """Baseline: no formal artifact derives NOT_VERIFIED and every doc agrees."""
+    _make_benchmark(tmp_repo)
+    errors = _status_agreement_after_writing(tmp_repo)
+    assert errors == [], errors
+
+
+def test_stale_not_verified_doc_against_derived_verified_fails(tmp_repo: Path):
+    """The issue's exact contradiction: derived VERIFIED, doc says NOT_VERIFIED."""
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    assert facts_derive(tmp_repo)["rag_formal_metrics_status"] == "VERIFIED"
+    errors = _status_agreement_after_writing(tmp_repo)
+    assert len(errors) == 5, errors
+    for rel in STATUS_AGREEMENT_DOCS:
+        assert any(
+            "stale formal-status claim" in e and rel in e for e in errors
+        ), f"{rel} must be reported as stale: {errors}"
+
+
+def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
+    """The other direction: docs may not claim VERIFIED without an artifact."""
+    _make_benchmark(tmp_repo)  # no artifact -> derived NOT_VERIFIED
+    promoted = {
+        rel: body.replace("NOT_VERIFIED", "VERIFIED")
+        for rel, body in STATUS_AGREEMENT_DOCS.items()
+    }
+    errors = _status_agreement_after_writing(tmp_repo, **promoted)
+    assert len(errors) == 5, errors
+    for rel in STATUS_AGREEMENT_DOCS:
+        assert any(
+            "must not self-promote" in e and rel in e for e in errors
+        ), f"{rel} must be reported as self-promotion: {errors}"
+
+
+def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
+    """Acceptance both ways: contradiction fails, agreement passes, same artifact.
+
+    The artifact is deliberately left in place across both halves — the guard
+    must key on doc/derived agreement, not on the presence of an artifact.
+    """
+    sha = _make_benchmark(tmp_repo)
+    _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
+    artifact_rel = "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
+
+    assert _status_agreement_after_writing(tmp_repo), (
+        "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
+    )
+
+    rendered = {
+        rel: body.replace("NOT_VERIFIED", "VERIFIED").replace(
+            "**VERIFIED", f"**VERIFIED（artifact: {artifact_rel}）"
+        )
+        for rel, body in STATUS_AGREEMENT_DOCS.items()
+    }
+    rendered["docs/reference/current-state.md"] += f"\nartifact: {artifact_rel}\n"
+    assert _status_agreement_after_writing(tmp_repo, **rendered) == []
+
+
+def test_every_current_truth_doc_is_covered_by_the_guard(tmp_repo: Path):
+    """A doc that quietly drops its status line must not silently pass."""
+    _make_benchmark(tmp_repo)
+    silent = dict(STATUS_AGREEMENT_DOCS)
+    silent["docs/evaluation/production-evidence.md"] = "# Evidence\n\nNo status here.\n"
+    errors = _status_agreement_after_writing(tmp_repo, **silent)
+    assert len(errors) == 1, errors
+    assert "states no formal RAG evidence status" in errors[0]
+    assert "docs/evaluation/production-evidence.md" in errors[0]
+
+
+def test_guard_covers_exactly_the_documented_current_truth_set():
+    """The doc set is part of the contract, so it is pinned, not discovered."""
+    assert [p.as_posix() for p in audit.CURRENT_TRUTH_DOCS] == [
+        "README.md",
+        "CLAUDE.md",
+        "docs/reference/current-state.md",
+        "docs/reference/rag-evaluation.md",
+        "docs/evaluation/production-evidence.md",
+    ]
+
+
+def test_claude_md_is_current_truth_and_is_discovered():
+    """CLAUDE.md must be both guarded **and** discovered.
+
+    This test originally pinned the opposite: ``discover_docs`` dropped any file
+    containing the literal ``HISTORICAL AUDIT SNAPSHOT`` in its first 2000
+    characters, and CLAUDE.md contains that string because it *documents the
+    convention* -- so a current-truth document was invisible to every guard. The
+    original author deliberately froze that undesirable state so that fixing it
+    would surface as a visible, explainable test change rather than a silent one.
+
+    Issue #66 has since been fixed (``has_historical_banner`` now recognises a
+    self-declaring banner, PR #84), so this is that visible change:
+
+    - CLAUDE.md **is** discovered, so its RAG status agreement is actually
+      checked instead of being skipped;
+    - and it remains in ``CURRENT_TRUTH_DOCS``, so the guard contract still names
+      it explicitly rather than relying on discovery order.
+
+    Dropping the first assertion would make the guard silently stop covering
+    CLAUDE.md again, which is the exact regression this test exists to prevent.
+    """
+    assert any(p.name == "CLAUDE.md" for p in audit.discover_docs(REAL_ROOT)), (
+        "CLAUDE.md stopped being discovered; its evidence-status agreement is now "
+        "unguarded. This is the #66 banner-heuristic regression, not a harmless change."
+    )
+    assert Path("CLAUDE.md") in audit.CURRENT_TRUTH_DOCS
+
+
+def test_guard_reports_a_missing_current_truth_doc(tmp_repo: Path):
+    """The doc set is a contract: a vanished truth-document is a hard failure."""
+    _make_benchmark(tmp_repo)
+    for rel, body in STATUS_AGREEMENT_DOCS.items():
+        if rel == "CLAUDE.md":
+            continue
+        write(tmp_repo, rel, body)
+    errors = _run_status_agreement(tmp_repo)
+    assert len(errors) == 1, errors
+    assert "current-truth doc missing: CLAUDE.md" in errors[0]
+
+
+def test_english_status_claim_is_recognised(tmp_repo: Path):
+    """A bilingual doc set must not exempt whichever doc is in the other language.
+
+    This was a real hole: the claim extractor only matched the Chinese marker,
+    so ``docs/evaluation/production-evidence.md`` declared its status in English
+    and was silently exempt from the agreement check entirely.
+    """
+    from rag_evidence_status import claimed_doc_formal_status
+
+    english = STATUS_AGREEMENT_DOCS["docs/evaluation/production-evidence.md"]
+    assert claimed_doc_formal_status(english) == "NOT_VERIFIED"
+    assert claimed_doc_formal_status(
+        "**Current status: the formal 649-query metrics are `VERIFIED`.**\n"
+    ) == "VERIFIED"
+    # unrelated uses of "verified" must not be read as a status claim
+    assert claimed_doc_formal_status("CI verified the build.\n") is None
+
+
+def test_doc_claiming_both_states_is_a_conflict(tmp_repo: Path):
+    _make_benchmark(tmp_repo)
+    conflicting = {
+        rel: body + "当前 649-query 正式指标：VERIFIED\n"
+        for rel, body in STATUS_AGREEMENT_DOCS.items()
+    }
+    errors = _status_agreement_after_writing(tmp_repo, **conflicting)
+    assert len(errors) == 5, errors
+    for rel in STATUS_AGREEMENT_DOCS:
+        assert any(
+            "status conflict" in e and rel in e for e in errors
+        ), f"{rel} must be reported as CONFLICT: {errors}"
+
+
+def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
+    """One rule, two entry points — the drift issue #45 taught us to avoid."""
+    from rag_evidence_status import formal_status_agreement_problems
+
+    assert formal_status_agreement_problems("NOT_VERIFIED", "VERIFIED", "d.md") == [
+        formal_status_agreement_problems("NOT_VERIFIED", "VERIFIED", "d.md")[0]
+    ]
+    assert "stale formal-status claim" in formal_status_agreement_problems(
+        "NOT_VERIFIED", "VERIFIED", "d.md"
+    )[0]
+    assert "must not self-promote" in formal_status_agreement_problems(
+        "VERIFIED", "NOT_VERIFIED", "d.md"
+    )[0]
+    assert formal_status_agreement_problems("VERIFIED", "VERIFIED", "d.md") == []
+    assert formal_status_agreement_problems("NOT_VERIFIED", "NOT_VERIFIED", "d.md") == (
+        []
+    )
+    # silence is a coverage question for the caller, not a contradiction here
+    assert formal_status_agreement_problems(None, "NOT_VERIFIED", "d.md") == []
+
+    src = (REAL_ROOT / "scripts" / "project_facts.py").read_text(encoding="utf-8")
+    assert "formal_status_agreement_problems" in src, (
+        "project_facts must delegate to the shared rule, not reimplement it"
+    )
+
+
+def test_real_repo_status_agreement_is_clean_and_status_stays_not_verified():
+    """Pins the actual checkout: the guard is wired and the repo agrees."""
+    errors: list[str] = []
+    audit.check_rag_status_agreement(
+        audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT
+    )
+    assert errors == [], errors
+    assert facts_derive(REAL_ROOT)["rag_formal_metrics_status"] == "NOT_VERIFIED"
+
+
+def test_canonical_doc_documents_the_status_agreement_guard():
+    """The guard must be written down, not only implemented.
+
+    A guard nobody can find is a guard nobody maintains, and the canonical RAG
+    doc is where the evidence-status contract lives.
+    """
+    doc = (REAL_ROOT / "docs/reference/rag-evaluation.md").read_text(encoding="utf-8")
+    assert "check_rag_status_agreement" in doc
+    assert "status-agreement guard" in doc
+    # both directions, and the fact that they are errors rather than warnings
+    assert "自证提升" in doc and "陈旧未重渲染" in doc
+    # silence must not pass, and discovery must not decide coverage
+    assert "沉默会让 guard 永久空转满足" in doc
+    assert "不经过 doc discovery" in doc
+    for rel in ("README.md", "CLAUDE.md", "docs/reference/current-state.md",
+                "docs/reference/rag-evaluation.md",
+                "docs/evaluation/production-evidence.md"):
+        assert rel in doc, rel
+
+
 # ------------------------------------------------- E. make target refs
 
 

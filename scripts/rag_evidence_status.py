@@ -244,6 +244,21 @@ def validate_formal_rag_report(
 
 
 FORMAL_STATUS_MARKER = "当前 649-query 正式指标"
+
+#: A line declares the formal 649-query evidence status when it names that
+#: measurement. Both the Chinese and the English phrasings are accepted: the
+#: doc set is bilingual, and matching only one of them silently exempts
+#: whichever doc happens to be written in the other language — which is how
+#: ``docs/evaluation/production-evidence.md`` escaped the guard (issue #53).
+#: The pattern requires the 649-query measurement itself, so unrelated uses of
+#: "verified" cannot be picked up; a matched line still contributes a state only
+#: when it also carries an explicit VERIFIED / NOT_VERIFIED token, so prose like
+#: "649-query 指标族：hit@{k}" adds nothing.
+FORMAL_STATUS_MARKER_RE = re.compile(
+    r"649[\s-]*query\s*(?:的\s*)?(?:正式\s*(?:指标|评测)|指标|metrics?)"
+    r"|RAG\s*evidence\s*状态",
+    re.IGNORECASE,
+)
 _DOC_STATE_RE = re.compile(r"NOT_VERIFIED|(?<![A-Z_])VERIFIED(?![A-Z_])")
 
 
@@ -256,7 +271,7 @@ def claimed_doc_formal_status(text: str) -> str | None:
     """
     states: set[str] = set()
     for line in text.splitlines():
-        if FORMAL_STATUS_MARKER not in line:
+        if FORMAL_STATUS_MARKER not in line and not FORMAL_STATUS_MARKER_RE.search(line):
             continue
         # Negated phrasings ("不是 VERIFIED" is not possible in our docs; but
         # NOT_VERIFIED contains VERIFIED) — strip NOT_VERIFIED first.
@@ -271,6 +286,47 @@ def claimed_doc_formal_status(text: str) -> str | None:
     if len(states) == 2:
         return "CONFLICT"
     return next(iter(states))
+
+
+def formal_status_agreement_problems(claimed: str | None, actual: str, doc_label: str) -> list[str]:
+    """Bidirectional agreement between a doc's claim and the derived status.
+
+    One rule, shared by every caller (``scripts/audit_doc_consistency.py`` for the
+    current-truth doc set, ``scripts/project_facts.py`` for a single-doc check) so
+    the two entry points cannot drift into disagreeing about what "agreement"
+    means. The derived status is authoritative in both directions:
+
+    - a doc claiming VERIFIED without a valid formal artifact is
+      self-promotion (the artifact, never Markdown, owns the state);
+    - a doc claiming NOT_VERIFIED while a valid artifact derives VERIFIED is
+      stale and must be re-rendered.
+
+    ``claimed is None`` (the doc says nothing) is *not* reported here: silence
+    is a coverage question, not a contradiction, and is handled separately by
+    the caller so the two failures are not conflated.
+    """
+    problems: list[str] = []
+    if claimed == "CONFLICT":
+        problems.append(
+            f"formal metrics status conflict: {doc_label} claims both "
+            f"{STATUS_NOT_VERIFIED} and {STATUS_VERIFIED}"
+        )
+        return problems
+    if claimed == STATUS_VERIFIED and actual != STATUS_VERIFIED:
+        problems.append(
+            f"docs must not self-promote formal metrics: {doc_label} claims "
+            f"{STATUS_VERIFIED} but evidence artifacts derive {actual} "
+            f"(artifact owns the state; regenerate a formal artifact via "
+            f"`make rag-eval-649` first)"
+        )
+    if actual == STATUS_VERIFIED and claimed != STATUS_VERIFIED:
+        problems.append(
+            f"stale formal-status claim: {doc_label} does not claim {STATUS_VERIFIED} "
+            f"but the evidence artifact derives {STATUS_VERIFIED}; re-render the doc "
+            f"and bind it to the artifact path reported by "
+            f"scripts/rag_evidence_status.py"
+        )
+    return problems
 
 
 def derive_rag_formal_status(root: Path = PROJECT_ROOT) -> dict:

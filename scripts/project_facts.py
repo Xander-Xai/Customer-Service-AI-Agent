@@ -41,7 +41,11 @@ from eval_contract import (  # noqa: E402
     POPULATION_VIEWS,
     REPORT_SCHEMA_VERSION,
 )
-from rag_evidence_status import claimed_doc_formal_status, derive_rag_formal_status  # noqa: E402
+from rag_evidence_status import (  # noqa: E402
+    claimed_doc_formal_status,
+    derive_rag_formal_status,
+    formal_status_agreement_problems,
+)
 
 BENCHMARK_PATH = PROJECT_ROOT / "tests" / "eval" / "rag_benchmark.json"
 CONFIG_PATH = PROJECT_ROOT / "core" / "config.py"
@@ -312,6 +316,13 @@ def check_formal_status_claims(
 ) -> list[str]:
     """Both check-doc directions against the ARTIFACT-derived formal status.
 
+    The two-directional agreement rule itself lives in
+    ``rag_evidence_status.formal_status_agreement_problems`` so that this
+    single-doc entry point and ``scripts/audit_doc_consistency.py``'s
+    repo-wide guard cannot drift into disagreeing about what agreement means
+    (issue #53). The extra provenance-binding rule below is specific to this
+    path and stays here.
+
     - docs must NOT claim VERIFIED without a valid formal artifact
       (docs cannot self-promote: artifact, not Markdown, owns the state);
     - when a formal artifact IS VERIFIED, docs still claiming NOT_VERIFIED
@@ -321,25 +332,12 @@ def check_formal_status_claims(
     facts_evaluation = _evaluation_facts(root)
     actual = facts_evaluation["rag_formal_metrics_status"]
     claimed = claimed_doc_formal_status(text)
-    if claimed == "CONFLICT":
-        problems.append(
-            f"formal metrics status conflict: {doc_path} claims both NOT_VERIFIED and VERIFIED"
-        )
-    if claimed == "VERIFIED" and actual != "VERIFIED":
-        problems.append(
-            f"docs must not self-promote formal metrics: {doc_path} claims VERIFIED "
-            f"but evidence artifacts derive {actual} (artifact owns the state; "
-            f"regenerate a formal artifact via `make rag-eval-649` first)"
-        )
-    if actual == "VERIFIED" and claimed != "VERIFIED":
-        problems.append(
-            f"stale formal-status claim: {doc_path} does not claim VERIFIED "
-            f"but the evidence artifact derives VERIFIED; re-render the doc "
-            f"and bind it to {facts_evaluation['rag_formal_artifact_path']}"
-        )
-    if actual == "VERIFIED" and claimed == "VERIFIED" and facts_evaluation[
-        "rag_formal_artifact_path"
-    ] not in text:
+    problems.extend(formal_status_agreement_problems(claimed, actual, str(doc_path)))
+    if (
+        actual == "VERIFIED"
+        and claimed == "VERIFIED"
+        and facts_evaluation["rag_formal_artifact_path"] not in text
+    ):
         problems.append(
             f"formal-metric claim must bind provenance: {doc_path} claims VERIFIED "
             f"without referencing the evidence artifact "

@@ -676,6 +676,20 @@ METRIC_PROVENANCE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# (K2) The current-truth doc set. Every one of these must state the formal RAG
+# evidence status explicitly AND agree with the artifact-derived status
+# (``check_rag_status_agreement``). Listed once here so Rule K (numeric metric
+# claims) and Rule K2 (status agreement) can never cover different doc sets —
+# a doc guarded by one rule but not the other is exactly the drift issue #53
+# describes.
+CURRENT_TRUTH_DOCS: tuple[Path, ...] = (
+    Path("README.md"),
+    Path("CLAUDE.md"),
+    Path("docs/reference/current-state.md"),
+    Path("docs/reference/rag-evaluation.md"),
+    Path("docs/evaluation/production-evidence.md"),
+)
+
 # (L) make targets referenced by current-truth docs must be defined.
 # Guard O generalization: ANY active doc referencing `make <target>` (not just
 # the RAG eval targets or a fixed doc list) must point at a defined target.
@@ -852,13 +866,7 @@ def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Pa
     status = evidence["rag_formal_metrics_status"]
     if status not in (STATUS_NOT_VERIFIED, STATUS_VERIFIED):
         return  # defensive: nothing else may pass the gate
-    truth_rels = {
-        Path("README.md"),
-        Path("CLAUDE.md"),
-        Path("docs/reference/current-state.md"),
-        Path("docs/reference/rag-evaluation.md"),
-        Path("docs/evaluation/production-evidence.md"),
-    }
+    truth_rels = set(CURRENT_TRUTH_DOCS)
     for path in docs:
         rel = path.relative_to(root)
         if rel not in truth_rels or rel == Path("docs/reference/rag-evaluation.md"):
@@ -885,6 +893,71 @@ def check_unproven_current_metrics(docs: list[Path], errors: list[str], root: Pa
                     f"{evidence['rag_formal_artifact_path']}; bind the number to provenance "
                     f"(artifact reference) on the line"
                 )
+
+
+def check_rag_status_agreement(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule K2 (issue #53): current-truth docs must AGREE with the derived status.
+
+    ``check_unproven_current_metrics`` (Rule K) only fires on lines carrying a
+    *numeric* metric claim. A line that merely states the evidence status in
+    words carries no number, so the single invariant the status vocabulary
+    exists to protect — "is the documented evidence state true?" — was
+    unguarded, while ``derive_rag_formal_status`` was authoritative only in
+    theory. The bidirectional logic already existed in
+    ``scripts/project_facts.py`` but was reachable only through a manual
+    ``project_facts.py --check <doc>`` invocation and was never called by this
+    repo-wide audit, which is why ``make audit-docs`` reported OK while
+    ``current-state.md`` asserted NOT_VERIFIED against a derived VERIFIED.
+
+    Three holes are closed here:
+
+    1. the shared ``formal_status_agreement_problems`` rule is actually called,
+       so the audit and the single-doc CLI cannot drift;
+    2. every current-truth doc is covered, and *silence* is an error — a doc
+       that quietly drops its status line would otherwise leave the guard
+       permanently, silently satisfied;
+    3. the doc set is resolved from ``root`` rather than taken from the
+       discovered ``docs`` list, because these five paths are a fixed contract
+       and not every one of them necessarily survives doc discovery (CLAUDE.md
+       currently does not — see issue #66). Discovery must not decide which
+       truth-documents are guarded.
+
+    The derived status is authoritative; the docs are a projection of it.
+    """
+    from rag_evidence_status import (
+        STATUS_NOT_VERIFIED,
+        STATUS_VERIFIED,
+        claimed_doc_formal_status,
+        derive_rag_formal_status,
+        formal_status_agreement_problems,
+    )
+
+    evidence = derive_rag_formal_status(root)
+    status = evidence["rag_formal_metrics_status"]
+    if status not in (STATUS_NOT_VERIFIED, STATUS_VERIFIED):
+        return  # defensive: nothing else may pass the gate
+
+    del docs  # the current-truth set is a fixed contract, not a discovered one
+
+    for rel in CURRENT_TRUTH_DOCS:
+        path = root / rel
+        if not path.is_file():
+            errors.append(
+                f"current-truth doc missing: {rel} is part of the RAG "
+                f"status-agreement contract (derived status is {status}) but is "
+                f"absent from the repository"
+            )
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        claimed = claimed_doc_formal_status(text)
+        errors.extend(formal_status_agreement_problems(claimed, status, str(rel)))
+        if claimed is None:
+            errors.append(
+                f"current-truth doc states no formal RAG evidence status: {rel} "
+                f"declares neither VERIFIED nor NOT_VERIFIED for the 649-query "
+                f"formal metrics, so it is not covered by the status-agreement "
+                f"guard (derived status is {status}); state it explicitly"
+            )
 
 
 def check_makefile_doc_targets(
@@ -2346,6 +2419,7 @@ def main() -> int:
     check_test_count_framing(docs, errors)
     check_rag_eval_references(docs, errors)
     check_unproven_current_metrics(docs, errors)
+    check_rag_status_agreement(docs, errors)
     check_makefile_doc_targets(errors, docs=docs)
     check_tracked_ignored_files(errors, warnings)
     # Final-closeout guards (2026-09-30): reverse existence claims, stale
@@ -2389,6 +2463,7 @@ def main() -> int:
         f"OK: checked {len(docs)} active documents — links, file references, env coverage, "
         f"canonical model config, OpenAPI snapshot, benchmark metadata, stale terminology, "
         f"test-count framing, RAG eval references, unproven metric claims, "
+        f"RAG status agreement, "
         f"make targets (all active docs), tracked-ignored hygiene, "
         f"negative-existence claims, stale embedding-fallback semantics, "
         f"latency absolutes, production framing, env references, "

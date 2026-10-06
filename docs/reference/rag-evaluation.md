@@ -261,6 +261,20 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > `scripts/project_facts.py --check` 与 `scripts/audit_doc_consistency.py`
 > 会将文档行与推导状态比对，双向漂移都算 FAIL。
 >
+> **status-agreement guard（issue #53）**：本状态是**文字声明**，不带任何数字，
+> 因此只检查「数字是否有 provenance」的规则看不到它。显式 guard
+> `audit_doc_consistency.py::check_rag_status_agreement` 覆盖固定的
+> current-truth 文档集（`README.md` / `CLAUDE.md` /
+> `docs/reference/current-state.md` / `docs/reference/rag-evaluation.md` /
+> `docs/evaluation/production-evidence.md`），并**双向**比对：文档自称 VERIFIED
+> 而 artifact 派生 NOT_VERIFIED = 自证提升；artifact 派生 VERIFIED 而文档仍写
+> NOT_VERIFIED = 陈旧未重渲染。两者都是 **ERROR**（不是 warning）——推导状态
+> 是权威方，文档只是它的投影。该文档集固定从仓库根解析，不经过 doc discovery，
+> 因此某个 current-truth 文档被 discovery 漏掉也不会变成「无人看守」。
+> 文档若完全不声明状态同样是 ERROR（沉默会让 guard 永久空转满足）。
+> 判定规则本身在 `rag_evidence_status.formal_status_agreement_problems`，
+> audit 与 `project_facts --check` 共用同一份，不会各自漂移。
+>
 > **最新已提交的 preflight evidence**：
 > `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
 > （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
