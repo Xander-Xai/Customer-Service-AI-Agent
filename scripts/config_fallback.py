@@ -77,7 +77,7 @@ _FALSE_STRINGS = {"false", "0", "no", "off"}
 def _as_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()

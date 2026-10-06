@@ -18,7 +18,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("API_KEY_ENABLED", "false")
 os.environ.setdefault("DEV_MODE", "true")
 
-from core.tool_result_cache import InMemoryToolResultCache, ToolCachePolicy
+# E402 below is deliberate: the sys.path bootstrap and the API_KEY_ENABLED /
+# DEV_MODE defaults must both be in place before `core.tool_result_cache` is
+# imported, because core.config reads API_KEY_ENABLED at import time.
+
+from core.tool_result_cache import (  # noqa: E402
+    InMemoryToolResultCache,
+    ToolCachePolicy,
+)
 
 
 async def run_sequence(

@@ -945,7 +945,7 @@ class QdrantKnowledgeBase:
         failure_reason: str | None = None
         for r in raw:
             if isinstance(r, BaseException):
-                if isinstance(r, (asyncio.TimeoutError, TimeoutError)):
+                if isinstance(r, asyncio.TimeoutError | TimeoutError):
                     failure_reason = "retrieval_timeout"
                 else:
                     failure_reason = "vector_channel_error"
@@ -1349,7 +1349,7 @@ class QdrantKnowledgeBase:
         meta = metadata or {}
 
         def _matches(stored: Any, expected: Any) -> bool:
-            if isinstance(stored, (list, tuple, set)):
+            if isinstance(stored, list | tuple | set):
                 return expected in stored
             return stored == expected
 

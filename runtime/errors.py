@@ -101,9 +101,9 @@ def classify_exception(exc: BaseException) -> str:
         return exc.error_type
     if isinstance(exc, asyncio.CancelledError):
         return TRANSIENT
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+    if isinstance(exc, asyncio.TimeoutError | TimeoutError):
         return TIMEOUT
-    if isinstance(exc, (ConnectionError, OSError)):
+    if isinstance(exc, ConnectionError | OSError):
         return TRANSIENT
     if isinstance(exc, _PERMANENT_BUILTINS):
         return PERMANENT

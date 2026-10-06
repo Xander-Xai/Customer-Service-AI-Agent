@@ -90,13 +90,13 @@ def _redact(value: Any) -> Any:
             k: ("***" if any(h in str(k).lower() for h in _SECRET_HINTS) else _redact(v))
             for k, v in value.items()
         }
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return [_redact(v) for v in value]
     return value
 
 
 def _json_default(value: Any) -> str:
-    if isinstance(value, (bytes, bytearray)):
+    if isinstance(value, bytes | bytearray):
         return f"<{len(value)} bytes>"
     if isinstance(value, datetime):
         return value.isoformat()

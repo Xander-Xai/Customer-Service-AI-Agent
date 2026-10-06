@@ -8,11 +8,10 @@ v5.4: 添加复合索引优化常用查询性能
 - ix_chat_user_created: 加速用户历史查询
 - ix_audit_action_time: 加速审计日志查询
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
+from typing import Union
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # revision identifiers, used by Alembic.
 revision: str = '8ea0ec90ba74'
@@ -29,7 +28,7 @@ def upgrade() -> None:
         'chat_histories',
         ['user_id', 'created_at']
     )
-    
+
     # 为 audit_logs 表添加动作时间复合索引
     op.create_index(
         'ix_audit_action_time',

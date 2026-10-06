@@ -119,10 +119,10 @@ class AlertNotifier:
 
         # v5.4: 告警抑制检查（同类型告警5分钟内不重复发送）
         now = time.time()
-        if alert_key in self.suppression_window:
-            if now - self.suppression_window[alert_key] < 300:  # 5分钟
-                logger.debug(f"告警抑制: {alert_key}")
-                return
+        if alert_key in self.suppression_window and now - self.suppression_window[alert_key] < 300:
+            # 5 分钟内的同类型告警不重复发送
+            logger.debug(f"告警抑制: {alert_key}")
+            return
 
         alert = {
             "title": title,
@@ -191,16 +191,19 @@ class AlertNotifier:
                     alert_info["escalated"] = True
 
             # emergency 持续1小时 → 再次通知
-            elif severity == "emergency" and elapsed > self.UPGRADE_TIMEOUT_EMERGENCY:
-                if not alert_info["escalated"]:
-                    logger.critical(f"告警持续: {alert_key} 已超过1小时")
-                    title, _ = alert_key.rsplit(":", 1)
-                    await self.send_alert(
-                        f"[紧急] {title} - 持续未解决",
-                        f"此emergency告警已持续{elapsed//60:.0f}分钟，请立即处理！",
-                        severity="emergency"
-                    )
-                    alert_info["escalated"] = True
+            elif (
+                severity == "emergency"
+                and elapsed > self.UPGRADE_TIMEOUT_EMERGACY
+                and not alert_info["escalated"]
+            ):
+                logger.critical(f"告警持续: {alert_key} 已超过1小时")
+                title, _ = alert_key.rsplit(":", 1)
+                await self.send_alert(
+                    f"[紧急] {title} - 持续未解决",
+                    f"此emergency告警已持续{elapsed//60:.0f}分钟，请立即处理！",
+                    severity="emergency"
+                )
+                alert_info["escalated"] = True
 
     async def _send_webhook(self, webhook: dict[str, str], alert: dict[str, Any]):
         """发送 Webhook 通知"""

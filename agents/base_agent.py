@@ -10,6 +10,7 @@
 """
 
 import asyncio
+import contextlib
 import json
 import time
 from abc import ABC, abstractmethod
@@ -650,14 +651,12 @@ class BaseAgent(ABC):
         # v6.0: 全链路流式 — emit thinking + tool_call + tool_result 事件
         stream_callback = get_stream_callback(state)
         if stream_callback:
-            try:
+            with contextlib.suppress(Exception):
                 await stream_callback({
                     "type": "thinking",
                     "content": f"🤔 {self.name} Agent 正在分析中...",
                     "agent": self.name,
                 })
-            except Exception:
-                pass
 
         # human-in-the-loop：本轮被摘出、等待人工审批的高风险动作。
         # 声明在循环**之外**：循环可能一次都不进 `if response.tool_calls:`
@@ -699,15 +698,13 @@ class BaseAgent(ABC):
                 # v6.0: emit tool_call events for visualization
                 if stream_callback:
                     for p in parsed_tcs:
-                        try:
+                        with contextlib.suppress(Exception):
                             await stream_callback({
                                 "type": "tool_call",
                                 "name": p["name"],
                                 "args": p["args"],
                                 "agent": self.name,
                             })
-                        except Exception:
-                            pass
 
                 # 追加 assistant 消息（含 tool_calls）
                 messages.append(
@@ -853,15 +850,13 @@ class BaseAgent(ABC):
 
                     # v6.0: emit tool_result event
                     if stream_callback:
-                        try:
+                        with contextlib.suppress(Exception):
                             await stream_callback({
                                 "type": "tool_result",
                                 "name": p["name"],
                                 "summary": result_content[:200] if result_content else "无结果",
                                 "agent": self.name,
                             })
-                        except Exception:
-                            pass
                     messages.append(ToolMessage(content=result_content, tool_call_id=p["id"]))
                     if self.tool_result_optimizer.enabled:
                         messages[:] = compact_old_tool_messages(
@@ -874,22 +869,18 @@ class BaseAgent(ABC):
             else:
                 # v6.0: 有流式回调时使用 async_invoke_stream 输出最终响应
                 if stream_callback:
-                    try:
+                    with contextlib.suppress(Exception):
                         await stream_callback({
                             "type": "thinking",
                             "content": "💡 正在生成回答...",
                             "agent": self.name,
                         })
-                    except Exception:
-                        pass
                     response_content = ""
                     try:
                         async for chunk in effective_llm.async_invoke_stream(messages):
                             response_content += chunk
-                            try:
+                            with contextlib.suppress(Exception):
                                 await stream_callback({"type": "chunk", "content": chunk})
-                            except Exception:
-                                pass
                     except LLMServiceError as e:
                         is_quota = "Quota" in str(e)
                         self.logger.warning(
@@ -899,19 +890,15 @@ class BaseAgent(ABC):
                         response_content = (
                             "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
                         )
-                        try:
+                        with contextlib.suppress(Exception):
                             await stream_callback({"type": "chunk", "content": response_content})
-                        except Exception:
-                            pass
                     except Exception as e:
                         self.logger.error(
                             f"LLM 流式调用异常 (final) [{get_trace_id()}]: {e}", exc_info=True
                         )
                         response_content = fallback_response
-                        try:
+                        with contextlib.suppress(Exception):
                             await stream_callback({"type": "chunk", "content": fallback_response})
-                        except Exception:
-                            pass
                 else:
                     response_content = response.content
                 break
@@ -946,7 +933,7 @@ class BaseAgent(ABC):
             response_content = fallback_response
 
         if stream_callback:
-            try:
+            with contextlib.suppress(Exception):
                 await stream_callback(
                     {
                         "type": "content_complete",
@@ -954,8 +941,6 @@ class BaseAgent(ABC):
                         "agent": self.name,
                     }
                 )
-            except Exception:
-                pass
 
         await self._add_message_to_session(session_id, response_content, is_user=False)
         state["response"] = response_content

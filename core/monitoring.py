@@ -1165,25 +1165,24 @@ class SLAAlertManager:
             severity = alert_info["severity"]
 
             # critical → emergency 升级（30分钟未解决）
-            if severity == "critical" and elapsed > 1800:
-                if not alert_info["escalated"]:
-                    logger.warning(f"[SLA-Alert] 告警升级: {alert_key} critical → emergency")
+            if severity == "critical" and elapsed > 1800 and not alert_info["escalated"]:
+                logger.warning(f"[SLA-Alert] 告警升级: {alert_key} critical → emergency")
 
-                    # 发送升级通知
-                    try:
-                        from alerts.notifier import alert_notifier
+                # 发送升级通知
+                try:
+                    from alerts.notifier import alert_notifier
 
-                        await alert_notifier.send_alert(
-                            title="[升级] SLA 告警",
-                            content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
-                            severity="emergency"
-                        )
+                    await alert_notifier.send_alert(
+                        title="[升级] SLA 告警",
+                        content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
+                        severity="emergency"
+                    )
 
-                        alert_info["escalated"] = True
-                        alert_info["severity"] = "emergency"
-                        upgraded.append(alert_key)
-                    except Exception as e:
-                        logger.error(f"[SLA-Alert] 升级通知失败: {e}")
+                    alert_info["escalated"] = True
+                    alert_info["severity"] = "emergency"
+                    upgraded.append(alert_key)
+                except Exception as e:
+                    logger.error(f"[SLA-Alert] 升级通知失败: {e}")
 
         return upgraded
 

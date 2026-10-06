@@ -15,8 +15,13 @@ os.environ.setdefault("API_KEY", "test-key")
 os.environ.setdefault("SESSION_TOKEN_SECRET", "test-secret")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
+# E402 below is deliberate: the API_KEY_ENABLED / API_KEY /
+# SESSION_TOKEN_SECRET / ADMIN_PASSWORD defaults must be in os.environ before
+# `db.database` imports core.config, and the schema init below then runs
+# against those settings.
+
 # 确保数据库表在测试前已创建
-from db.database import init_db
+from db.database import init_db  # noqa: E402
 
 init_db()
 os.environ.setdefault("DEV_MODE", "true")

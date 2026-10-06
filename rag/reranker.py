@@ -325,7 +325,7 @@ class ApiReranker:
             if idx < 0 or idx >= len(results):
                 continue
             score = item.get("relevance_score")
-            if not isinstance(score, (int, float)) or isinstance(score, bool):
+            if not isinstance(score, int | float) or isinstance(score, bool):
                 continue
             results[idx]["rerank_score"] = float(score)
             usable += 1

@@ -98,9 +98,8 @@ def init_db():
 
     _alembic_ok = False
     try:
-        from alembic.config import Config as AlembicConfig
-
         from alembic import command as alembic_command
+        from alembic.config import Config as AlembicConfig
 
         # 优先使用配置的 alembic.ini 路径
         try:

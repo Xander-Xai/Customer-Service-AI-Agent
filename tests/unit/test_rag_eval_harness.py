@@ -743,8 +743,7 @@ def _string_literals_in_code(func) -> list[str]:
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     docstrings = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
-                             ast.AsyncFunctionDef)):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             body = getattr(node, "body", None)
             if (body and isinstance(body[0], ast.Expr)
                     and isinstance(body[0].value, ast.Constant)

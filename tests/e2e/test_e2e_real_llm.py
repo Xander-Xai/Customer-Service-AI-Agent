@@ -27,8 +27,12 @@ os.environ.setdefault("API_KEY_ENABLED", "false")
 os.environ.setdefault("SESSION_TOKEN_SECRET", "test-secret")
 os.environ.setdefault("ADMIN_PASSWORD", "admin123")
 
+# E402 below is deliberate: the API_KEY_ENABLED / SESSION_TOKEN_SECRET /
+# ADMIN_PASSWORD defaults must be in os.environ before any application import,
+# so the module cannot move to the top of the file.
+
 # 真实 LLM 检测
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),

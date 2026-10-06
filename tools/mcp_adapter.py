@@ -971,7 +971,7 @@ class MCPToolAdapter:
         """把 SDK / transport 异常映射到本模块的错误分类。"""
         if isinstance(exc, MCPError):
             return exc
-        if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        if isinstance(exc, TimeoutError | ConnectionError | OSError):
             if isinstance(exc, TimeoutError):
                 return MCPTimeoutError(f"MCP 调用超时: {type(exc).__name__}")
             return MCPUnavailableError(f"MCP server 不可用: {type(exc).__name__}")

@@ -209,18 +209,18 @@ class ToolResultOptimizer:
             structured = structured_result
             compressor = compressor_for(tool_name, structured)
             compressed = compressor.compress(structured, max_tokens=policy.max_tokens, max_items=policy.max_items)
-            filtered = _filter_value(compressed.value, policy) if isinstance(compressed.value, (dict, list)) else compressed.value
+            filtered = _filter_value(compressed.value, policy) if isinstance(compressed.value, dict | list) else compressed.value
             filtered_items = len(filtered) if isinstance(filtered, list) else (1 if isinstance(filtered, dict) else None)
             if isinstance(filtered, list) and policy.max_items is not None:
                 filtered = filtered[: max(0, policy.max_items)]
-            fitted, budget_truncated = _fit_structured(filtered, policy) if isinstance(filtered, (dict, list)) else (filtered, False)
+            fitted, budget_truncated = _fit_structured(filtered, policy) if isinstance(filtered, dict | list) else (filtered, False)
             content = _json_content(fitted)
             truncated = compressed.truncated or (
                 content != raw_content
                 or budget_truncated
                 or (policy.max_items is not None and isinstance(filtered, list) and len(filtered) > policy.max_items)
             )
-            if policy.max_tokens is not None and _count_tokens(content) > policy.max_tokens and not isinstance(fitted, (dict, list)):
+            if policy.max_tokens is not None and _count_tokens(content) > policy.max_tokens and not isinstance(fitted, dict | list):
                 content = _truncate_text(content, policy.max_tokens)
                 truncated = True
             optimized_items = len(fitted) if isinstance(fitted, list) else filtered_items

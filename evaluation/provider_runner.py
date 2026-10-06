@@ -183,7 +183,7 @@ def run_provider_staging(
         unit="configured_currency",
     )
     estimated_cost_value = estimated_cost.value
-    if not isinstance(estimated_cost_value, (int, float)):
+    if not isinstance(estimated_cost_value, int | float):
         raise RuntimeError("estimated cost could not be calculated safely")
     if estimated_cost_value > estimated_cost_cap:
         raise RuntimeError("estimated cost cap would be exceeded; no artifact marked as production evidence")

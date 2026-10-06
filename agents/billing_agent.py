@@ -34,7 +34,7 @@ def _sanitize_pii(data: dict) -> dict:
             sanitized["address"] = "..."
     # 消费总额转为范围
     total = sanitized.get("total_spent", sanitized.get("total_amount", 0))
-    if isinstance(total, (int, float)):
+    if isinstance(total, int | float):
         if total < 1000:
             sanitized["total_spent"] = "< 1,000"
         elif total < 5000:

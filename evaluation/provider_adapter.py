@@ -189,7 +189,7 @@ def probe_chat_completion(
 
 
 def _number(value: Any) -> int | float | None:
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
 def _nested(mapping: Mapping[str, Any], *keys: str | int) -> Any:
@@ -204,7 +204,7 @@ def _nested(mapping: Mapping[str, Any], *keys: str | int) -> Any:
     current: Any = mapping
     for key in keys:
         if isinstance(key, int):
-            if not isinstance(current, (list, tuple)) or not 0 <= key < len(current):
+            if not isinstance(current, list | tuple) or not 0 <= key < len(current):
                 return None
             current = current[key]
         elif isinstance(current, Mapping):

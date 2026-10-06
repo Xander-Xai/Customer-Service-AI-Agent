@@ -82,9 +82,8 @@ def main() -> int:
         sys.path.insert(0, str(_REPO_ROOT))
 
         # 3. Run the real migration chain (no stamp, no create_all).
-        from alembic.config import Config
-
         from alembic import command
+        from alembic.config import Config
 
         cfg = Config(str(_REPO_ROOT / "alembic.ini"))
         command.upgrade(cfg, "head")

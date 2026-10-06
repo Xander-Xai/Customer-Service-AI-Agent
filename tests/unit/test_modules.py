@@ -1214,7 +1214,7 @@ class TestSecurityAudit:
         from core import config
 
         if hasattr(config, "ENV") and config.ENV == "production":
-            assert config.CORS_ORIGINS != ["*"]
+            assert ["*"] != config.CORS_ORIGINS
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
