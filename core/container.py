@@ -952,6 +952,29 @@ class ServiceContainer:
         # 1.5. 关闭 LangGraph checkpoint 后端（PostgreSQL 连接池）
         await self._close_checkpointer()
 
+        # 1.6. 关闭 Embedding HTTP 连接池（rag.api_embedding 模块级 AsyncClient 注册表）
+        #
+        # 容器在 _init_rag 里创建了 ApiEmbedding（self.embedding_model），但 embedding 的
+        # httpx.AsyncClient 是 rag.api_embedding 的**模块级**注册表（按归属 event loop 分区，
+        # 见 #44），并不是某个 ApiEmbedding 实例的私有属性 —— 所以实例上没有任何可关的句柄，
+        # 只能通过模块函数释放。QdrantKnowledgeBase 自建的 ApiEmbedding 实例同理受益：注册表
+        # 是全局的，关一次即覆盖全部实例。
+        #
+        # close_async_client() 自身幂等、且只 aclose 归属当前 loop 的 client（绝不在别的 loop
+        # 上强行 aclose），所以这里不需要额外的跨 loop 保护。try/except 的目的是让 embedding
+        # 清理失败不阻断后面的 ERP 关闭与状态重置 —— 与上面 LLM/checkpointer 同一套约定。
+        try:
+            from rag.api_embedding import close_async_client
+
+            report = await close_async_client()
+            logger.info(
+                "  ✅ Embedding HTTP 连接池已关闭"
+                f"（aclose={report.closed}，丢弃已销毁归属 {report.dropped_dead_owners} 个"
+                f"，未关闭的其他存活归属 {report.foreign_live_owners} 个）"
+            )
+        except Exception as e:
+            logger.warning(f"  ⚠️ Embedding 连接池关闭异常: {e}")
+
         # 2. 关闭 ERP 适配器
         if self.erp and hasattr(self.erp, "close"):
             try:
