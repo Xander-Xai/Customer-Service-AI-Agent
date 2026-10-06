@@ -54,6 +54,18 @@ def _requirement_spec(text: str, name: str) -> str:
     return m.group(1).strip()
 
 
+def _requirement_specs(text: str, name: str) -> list[str]:
+    """Every declaration of ``name`` in a requirements file.
+
+    A single-spec helper cannot express "declared twice", which is exactly the
+    failure mode where two pins disagree and the later one silently wins.
+    """
+    return [
+        m.group(1).strip()
+        for m in re.finditer(rf"(?m)^{re.escape(name)}\s*([<>=!~].*)$", text)
+    ]
+
+
 def _version_tuple(value: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", value))
 
@@ -118,6 +130,54 @@ class TestVersionContract:
 
 
 class TestDependencyContract:
+    def test_ruff_pin_is_declared_once_and_agrees_with_pre_commit(self):
+        """`make lint` must not mean two different rule sets on two machines.
+
+        Ruff was versioned in exactly one place -- `.pre-commit-config.yaml`
+        `rev: v0.4.0` -- and in no requirements file, so `ruff check .` ran
+        whatever was on PATH. Measured divergence on this tree:
+
+            pinned 0.4.0 : 38 errors, 156 files to reformat
+            PATH  0.16.10: 17 errors, 165 files to reformat
+
+        Neither satisfies the other, and 0.16.x additionally reformats Python
+        inside Markdown. Both declarations must therefore name the same version,
+        and the requirements pin must be exact -- a range would make `make format`
+        depend on install date.
+        """
+        dev = _read("requirements-dev.txt")
+        ruff_specs = _requirement_specs(dev, "ruff")
+        assert len(ruff_specs) == 1, (
+            f"requirements-dev.txt must declare ruff exactly once, found {ruff_specs}"
+        )
+        spec = ruff_specs[0].replace(" ", "")
+        assert spec.startswith("=="), (
+            f"ruff must be hard-pinned (`ruff==X.Y.Z`), got {spec!r}: Ruff's "
+            "formatter output changes between releases, so a range makes "
+            "`make format` non-reproducible"
+        )
+        pinned = spec.lstrip("=")
+
+        pre_commit = _read(".pre-commit-config.yaml")
+        match = re.search(
+            r"repo:\s*https://github\.com/astral-sh/ruff-pre-commit\s*\n\s*rev:\s*v?([^\s]+)",
+            pre_commit,
+        )
+        assert match, "ruff-pre-commit hook not found in .pre-commit-config.yaml"
+        assert match.group(1) == pinned, (
+            f"requirements-dev.txt pins ruff {pinned} but .pre-commit-config.yaml "
+            f"runs {match.group(1)}; `make lint` and `pre-commit run` must be the "
+            "same rule set"
+        )
+
+        # Ruff must not also appear in the runtime requirements, where it would
+        # ship to production for no reason.
+        for req in ("requirements.txt", "requirements-lock.txt"):
+            if (REPO_ROOT / req).exists():
+                assert not _requirement_specs(_read(req), "ruff"), (
+                    f"{req} must not carry ruff; it is a dev-only toolchain"
+                )
+
     def test_dev_pytest_asyncio_floor_is_0234(self):
         text = _read("requirements-dev.txt")
         pytest_spec = _requirement_spec(text, "pytest").replace(" ", "")

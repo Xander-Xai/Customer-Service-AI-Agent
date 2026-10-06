@@ -26,3 +26,17 @@ pytest-cov>=4.1.0
 # would change timings the committed coverage figure was measured under.
 pytest-timeout>=2.3.0
 mypy>=1.8.0
+
+# Linter / formatter. This is the **canonical** Ruff pin for the repository and
+# must stay byte-equal to the `.pre-commit-config.yaml` `rev:` (issue #71).
+#
+# Before this line, Ruff appeared in no requirements file, so `make lint` ran
+# whatever `ruff` happened to be on PATH while the pre-commit hook ran 0.4.0 --
+# two different rule sets under the same `make lint`. The version is a hard pin
+# rather than a range on purpose: Ruff's formatter output changes between
+# releases, and a range would make `make format` non-reproducible for anyone who
+# installs on a different day.
+#
+# tests/unit/test_repository_contract.py asserts the two declarations agree, so
+# this pin cannot silently drift away from the pre-commit hook again.
+ruff==0.4.0
