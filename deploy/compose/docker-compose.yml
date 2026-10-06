@@ -41,7 +41,10 @@ services:
         fi
         echo "✅ TLS 物料存在：/etc/nginx/ssl/{cert.pem,key.pem}"
     volumes:
-      - ../../deploy/nginx/ssl:/etc/nginx/ssl:ro
+      # 路径锚点是本文件所在目录 deploy/compose/，因此 `..` 即 deploy/。
+      # 写作 `../../deploy/nginx/ssl` 虽然解析到同一个目录，但在同一个目录里
+      # 把同一处拼成两种写法，正是 issue #48 里 `../../nginx` 被误信的由来。
+      - ../nginx/ssl:/etc/nginx/ssl:ro
     restart: "no"
     networks:
       - cs-network
