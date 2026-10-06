@@ -38,9 +38,40 @@ class TestRerankerFactory:
     """Reranker 工厂函数测试"""
 
     def test_create_reranker_returns_api(self):
-        """工厂函数返回 ApiReranker 实例"""
-        reranker = create_reranker()
+        """provider=remote 时工厂函数返回 ApiReranker（issue #52）。
+
+        默认 lane 是 local，所以这里必须显式钉住 provider —— 否则这条断言测的是
+        进程环境而不是契约本身。
+        """
+        from unittest.mock import patch
+
+        from core import config
+
+        # rag.reranker 用 `from core.config import RERANKER_PROVIDER` 在导入期就把
+        # 名字绑到自己模块上了，所以必须打在 rag.reranker 上，打 core.config 无效。
+        with patch("rag.reranker.RERANKER_PROVIDER", config.PROVIDER_REMOTE):
+            reranker = create_reranker()
         assert isinstance(reranker, ApiReranker)
+
+    def test_placeholder_credential_makes_api_reranker_unavailable(self):
+        """占位凭据按"未配置"处理：不构造 HTTP 客户端（issue #52）。
+
+        `sk-placeholder-reranker-test-key` 是真值，只判 truthiness 的旧写法挡不住
+        它，于是重排真的去连 api.siliconflow.cn 并吃 401。
+        """
+        reranker = ApiReranker(api_key="sk-placeholder-reranker-test-key")
+        assert reranker.available is False
+
+    def test_create_reranker_local_provider_is_offline(self):
+        """provider=local 时返回进程内实现，零出网（issue #52）。"""
+        from unittest.mock import patch
+
+        from core import config
+        from rag.local_provider import LocalReranker
+
+        with patch("rag.reranker.RERANKER_PROVIDER", config.PROVIDER_LOCAL):
+            reranker = create_reranker()
+        assert isinstance(reranker, LocalReranker)
 
     def test_create_reranker_has_rerank_method(self):
         """工厂函数返回的实例有 rerank 方法"""

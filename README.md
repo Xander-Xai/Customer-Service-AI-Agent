@@ -837,7 +837,7 @@ make dev-https
 # 方式五：直接运行（仅开发，需已安装依赖）
 uvicorn api.app_factory:app --host 0.0.0.0 --port 8000 --reload
 
-# 方式六：仅运行测试（无需 API Key）
+# 方式六：仅运行测试（无需 API Key，默认离线不出网）
 make test
 ```
 
@@ -985,12 +985,20 @@ customer-service-ai-agent/
 
 ### 运行测试
 
+默认测试 lane 是**离线**的：`.env.test` 把 `EMBEDDING_PROVIDER` /
+`RERANKER_PROVIDER` / `STT_PROVIDER` / `TTS_PROVIDER` 全部设为 `local`，因此
+embedding / rerank / 语音识别 / 语音合成都走进程内确定性实现（`rag/local_provider.py`、
+`media/*_processor.py` 的 local 分支），**既不出网也不需要真实 API Key**。
+
 ```
-# 全量测试（离线，无需 API Key）
+# 全量测试（默认离线，无需 API Key，不发公网请求）
 make test
 
 # 或直接使用 pytest
 python3 -m pytest tests/ -v --ignore=tests/e2e/test_e2e_real_llm.py
+
+# 真实 provider 验证（需真实凭据 + 出网；默认不执行）
+make test-real-providers
 
 # 真实 LLM E2E 测试（需配置 OPENAI_API_KEY）
 python3 -m pytest tests/e2e/test_e2e_real_llm.py -v -m real_llm

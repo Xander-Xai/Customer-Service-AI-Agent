@@ -5,10 +5,12 @@ TTSProcessor — 文字转语音 TTS（v5.1）
 - Edge TTS（免费，中文效果好，无需 API Key）
 - 支持多种中文语音（zh-CN-XiaoxiaoNeural 等）
 - 返回音频字节流
+- issue #52: ``TTS_PROVIDER=local`` 时走进程内确定性替身，**零出网**
 """
 
 import io
 
+from core import config
 from core.logger import get_logger
 
 logger = get_logger("media.tts")
@@ -52,6 +54,19 @@ class TTSProcessor:
         if not text or not text.strip():
             raise ValueError("文本不能为空")
 
+        # issue #52: local provider —— 不构造 HTTP 客户端，不连 edge_tts 的
+        # 公网端点（speech.platform.bing.com）。默认测试 lane 走这里。
+        # 这不是"假装合成成功"：它返回的是**确定性占位音频**，内容随文本变化，
+        # 让调用方的字节流分支（audio/* 响应）被真实走到；同时它明确**不是**
+        # 可听的语音，所以不会被误当成 TTS 质量已验证。
+        if config.TTS_PROVIDER == config.PROVIDER_LOCAL:
+            audio_bytes = self._local_synthesize(text)
+            logger.info(
+                f"TTS 本地替身合成完成（provider=local，非真实语音）: "
+                f"{len(text)} chars → {len(audio_bytes)} bytes"
+            )
+            return audio_bytes
+
         try:
             import edge_tts
         except ImportError as e:
@@ -72,6 +87,23 @@ class TTSProcessor:
         audio_bytes = buf.getvalue()
         logger.info(f"TTS 合成完成: {len(text)} chars → {len(audio_bytes)} bytes")
         return audio_bytes
+
+    @staticmethod
+    def _local_synthesize(text: str) -> bytes:
+        """确定性占位音频（issue #52 的 local provider）。
+
+        刻意**不是**可播放的语音 —— 它是一段确定性字节流，作用是让"拿到音频字节 →
+        以audio/* 返回"这条业务链路在完全离线的默认 lane 里被真实走到。
+
+        用 blake2b 而不是内置 hash()：跨进程必须一致（与 rag/local_provider 同一
+        理由），否则同一段文本在两次请求里返回不同字节，无法作为确定性替身。
+        """
+        import hashlib
+
+        payload = hashlib.blake2b(
+            text.strip().encode("utf-8"), digest_size=32
+        ).digest()
+        return b"ID3\x03\x00\x00\x00\x00\x00\x00" + payload
 
     @staticmethod
     def list_voices() -> dict:

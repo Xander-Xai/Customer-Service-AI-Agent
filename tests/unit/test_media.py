@@ -192,6 +192,20 @@ class TestImageProcessor:
 class TestAudioProcessor:
     """AudioProcessor 全面验证"""
 
+    @pytest.fixture(autouse=True)
+    def _force_remote_provider(self):
+        """这一类里**打真实 Whisper 端点**的用例显式钉住remote provider。
+
+        issue #52 把默认 lane 切成 ``STT_PROVIDER=local``（进程内确定性替身），
+        所以 mock httpx 验证请求构造/错误传播的用例必须显式钉住 remote，否则它们
+        会走 local 分支而不再经过 httpx。local 分支由
+        tests/unit/test_offline_lane_contract.py 单独覆盖（含确定性、输入校验）。
+        """
+        from core import config
+
+        with patch.object(config, "STT_PROVIDER", config.PROVIDER_REMOTE):
+            yield
+
     def test_validate_audio_valid(self):
         """validate_audio() 合法音频返回 None"""
         from media.audio_processor import AudioProcessor
@@ -767,6 +781,20 @@ class TestDocumentProcessor:
 
 class TestTTSProcessor:
     """TTSProcessor 全面验证"""
+
+    @pytest.fixture(autouse=True)
+    def _force_remote_provider(self):
+        """这些测试专门验证 **edge_tts（remote provider）** 路径。
+
+        issue #52 把默认 lane 切成``TTS_PROVIDER=local``（进程内确定性替身），
+        所以验证真实 edge_tts 行为的用例必须显式钉住 remote，否则它们会走local
+        分支而失去被测对象。local 分支由 tests/unit/test_offline_lane_contract.py
+        单独覆盖。两条lane 各测各的，没有互相顶替。
+        """
+        from core import config
+
+        with patch.object(config, "TTS_PROVIDER", config.PROVIDER_REMOTE):
+            yield
 
     @pytest.mark.asyncio
     async def test_synthesize_empty_text_raises(self):

@@ -43,6 +43,7 @@ quote-style = "double"
 norecursedirs = ["scripts", "deploy", "htmlcov", "node_modules", ".venv", ".worktrees", ".claude"]
 markers = [
     "real_llm: 真实 LLM 端到端测试（需要真实 API Key，默认跳过）",
+    "real_provider: 真实 provider 验证（embedding/reranker/STT/TTS，需真实凭据+出网；走 make test-real-providers，默认跳过）",
     "stress: 压力测试（耗时较长）",
     "xdist_group: 组隔离执行标识",
     "unit: 单元测试（快速、隔离、无外部依赖）",

@@ -40,14 +40,24 @@ provider 不可用/失败时**仍然**返回融合后的原始排序，不抛异
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any, Union
 
 import httpx
 
-from core.config import RERANKER_API_KEY, RERANKER_BASE_URL, RERANKER_MODEL
+from core.config import (
+    PROVIDER_LOCAL,
+    RERANKER_API_KEY,
+    RERANKER_BASE_URL,
+    RERANKER_MODEL,
+    RERANKER_PROVIDER,
+    is_placeholder_api_key,
+)
 from core.logger import get_logger
 
 logger = get_logger("rag.reranker")
+
+if TYPE_CHECKING:  # pragma: no cover - 仅供类型检查，避免运行期循环导入
+    from rag.local_provider import LocalReranker
 
 
 class RerankReason(str, Enum):
@@ -120,6 +130,13 @@ class ApiReranker:
 
         if not self._api_key:
             logger.warning("RERANKER_API_KEY 未配置，API reranker 不可用")
+            self._available = False
+        elif is_placeholder_api_key(self._api_key):
+            # issue #52: 空值判断挡不住占位凭据 —— sk-placeholder-... 是真值，
+            # 于是重排真的去连 api.siliconflow.cn 并吃 401。占位凭据按未配置处理。
+            logger.warning(
+                "RERANKER_API_KEY 是占位值，API reranker 不可用（不构造 HTTP 客户端）"
+            )
             self._available = False
         else:
             self._available = True
@@ -327,10 +344,32 @@ class ApiReranker:
         return ordered[:top_k], None
 
 
-def create_reranker() -> ApiReranker:
-    """创建 API Reranker（BM25 词法重排器已移除——历史变更，生产环境始终使用 API Reranker）
+if TYPE_CHECKING:
+    from rag.local_provider import LocalReranker
 
-    Returns:
-        ApiReranker 实例（API Key 未配置时 available=False，rerank 回退到原始顺序）
+#: ``create_reranker`` 的真实返回类型（issue #52）。声明成 ``ApiReranker`` 是个谎：
+#: provider=local 时返回的是 :class:`rag.local_provider.LocalReranker`。两者实现
+#: 同一套 duck-typed 契约，所以联合类型既诚实又不会让调用方失去类型信息。
+Reranker = Union[ApiReranker, "LocalReranker"]
+
+
+def create_reranker() -> Reranker:
+    """创建 reranker（issue #52：provider 旋钮 + 占位凭据闸门）。
+
+    返回类型随 provider 变化，两者实现同一套 duck-typed 契约
+    (``rerank`` / ``rerank_with_outcome`` / ``available``)：
+
+    - ``RERANKER_PROVIDER=local`` → :class:`rag.local_provider.LocalReranker`，
+      进程内确定性重排，零网络零凭据。**这是默认测试 lane。**
+    - 否则 → :class:`ApiReranker`，且只有凭据不是占位值时才 ``available=True``。
+      **这是生产路径，与本 issue 之前一致。**
+
+    旧行为里 ``if not RERANKER_API_KEY`` 只挡空值，
+    ``RERANKER_API_KEY=sk-placeholder-reranker-test-key`` 会让重排真的去打
+    api.siliconflow.cn 并吃 401；现在占位凭据等同于"未配置"。
     """
+    if RERANKER_PROVIDER == PROVIDER_LOCAL:
+        from rag.local_provider import LocalReranker
+
+        return LocalReranker()
     return ApiReranker()

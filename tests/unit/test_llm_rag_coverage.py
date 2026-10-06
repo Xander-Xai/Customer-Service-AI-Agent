@@ -669,19 +669,41 @@ class TestCosmeticsKnowledgeBase:
         """_create_embedding_function 创建 API embedding（Mock 避免真实调用）"""
         from unittest.mock import MagicMock, patch
 
+        from rag.knowledge_base import CosmeticsKnowledgeBase
+
+        # --- 态2：provider=remote + 占位凭据 → 向量通道显式禁用，且**不**构造
+        # HTTP 客户端。issue #52 的核心：`sk-placeholder-...` 是真值，只判
+        # truthiness 的旧写法挡不住它，于是拿着假凭据去连 api.siliconflow.cn。
         with (
-            patch("core.config.EMBEDDING_API_KEY", "sk-test-key"),
+            patch("core.config.EMBEDDING_PROVIDER", "remote"),
+            patch("core.config.EMBEDDING_API_KEY", "sk-placeholder-not-a-real-key"),
+            patch("rag.api_embedding.ApiEmbedding") as mock_api_cls,
+        ):
+            ef = CosmeticsKnowledgeBase._create_embedding_function()
+            assert ef is None, "占位凭据必须禁用向量通道（embed_fn=None），不能伪造向量"
+            mock_api_cls.assert_not_called()
+
+        # --- 态3：provider=remote + 真实凭据 → 生产路径，仍构造 ApiEmbedding。
+        # 拼装而非字面量：secret guard 会把 sk- 前缀的 20+ 字符串判为疑似泄露。
+        synthetic_realistic_key = "synthetic" + "y" * 8 + "-notarealkey00000000"
+        with (
+            patch("core.config.EMBEDDING_PROVIDER", "remote"),
+            patch("core.config.EMBEDDING_API_KEY", synthetic_realistic_key),
             patch("rag.api_embedding.ApiEmbedding") as mock_api_cls,
         ):
             mock_api_instance = MagicMock()
             mock_api_cls.return_value = mock_api_instance
 
-            from rag.knowledge_base import CosmeticsKnowledgeBase
-
             ef = CosmeticsKnowledgeBase._create_embedding_function()
-            assert ef is not None
-            assert ef == mock_api_instance
+            assert ef is mock_api_instance
             mock_api_cls.assert_called_once()
+
+        # --- 态1：provider=local → 进程内确定性实现，零出网（默认测试 lane）。
+        from rag.local_provider import LocalEmbedding
+
+        with patch("core.config.EMBEDDING_PROVIDER", "local"):
+            ef = CosmeticsKnowledgeBase._create_embedding_function()
+            assert isinstance(ef, LocalEmbedding)
 
     def test_parse_query_result(self):
         """_parse_query_result 解析 Qdrant 结果"""
@@ -911,11 +933,23 @@ class TestReranker:
         assert reranked == []
 
     def test_create_reranker_factory_default(self):
-        """工厂函数返回 ApiReranker"""
+        """工厂函数按 provider 旋钮返回实现（issue #52）。
+
+        RERANKER_PROVIDER=local → LocalReranker（进程内、零出网，这是默认测试 lane）。
+        否则 → ApiReranker。两者实现同一套 duck-typed 契约，所以断言的是"选对了
+        实现"，而不是"永远只有一种实现"。
+        """
+        from core import config as core_config
+        from rag.local_provider import LocalReranker
         from rag.reranker import ApiReranker, create_reranker
 
-        reranker = create_reranker()
-        assert isinstance(reranker, ApiReranker)
+        # rag.reranker 在导入期就把 RERANKER_PROVIDER 绑到自己模块上了，
+        # 所以 patch 必须打在 rag.reranker 上。
+        with patch("rag.reranker.RERANKER_PROVIDER", core_config.PROVIDER_LOCAL):
+            assert isinstance(create_reranker(), LocalReranker)
+
+        with patch("rag.reranker.RERANKER_PROVIDER", core_config.PROVIDER_REMOTE):
+            assert isinstance(create_reranker(), ApiReranker)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -55,9 +55,25 @@ class AudioProcessor:
             return "音频文件为空"
         return None
 
+    @staticmethod
+    def _local_transcribe(audio_bytes: bytes) -> str:
+        """确定性占位转写（issue #52 的 local provider）。
+
+        刻意**不是**真实 ASR 结果 —— 它是随输入字节变化的确定性文本，作用是让
+        "语音 → 文本 → 进入对话/多模态链路"这条业务路径在完全离线的默认 lane
+        里被真实走到。blake2b 而非内置 hash()：跨进程必须一致。
+        """
+        import hashlib
+
+        digest = hashlib.blake2b(audio_bytes, digest_size=8).hexdigest()
+        return f"[本地STT替身:{digest}]"
+
     async def transcribe(self, audio_bytes: bytes, content_type: str, language: str = "zh") -> str:
         """
-        调用 Whisper API 转写语音为文字
+        转写语音为文字。
+
+        ``STT_PROVIDER=local``（issue #52）时不调用 Whisper API，返回确定性
+        占位转写；否则调用真实 Whisper 端点。
 
         Args:
             audio_bytes: 音频字节数据
@@ -74,6 +90,17 @@ class AudioProcessor:
         error = self.validate_audio(audio_bytes, content_type)
         if error:
             raise ValueError(error)
+
+        # issue #52: local provider —— 不构造 HTTP 客户端，默认测试 lane 不出网。
+        # 返回**确定性**转写文本（随字节内容变化），让"语音 → 文本 → 进对话链路"
+        # 这条业务路径被真实走到；同时明确不是真实 ASR 结果。
+        if config.STT_PROVIDER == config.PROVIDER_LOCAL:
+            text = self._local_transcribe(audio_bytes)
+            logger.info(
+                f"STT 本地替身转写完成（provider=local，非真实 ASR）: "
+                f"{len(audio_bytes)} bytes → {len(text)} chars"
+            )
+            return text
 
         # 确定文件扩展名
         ext_map = {

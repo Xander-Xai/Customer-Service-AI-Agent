@@ -152,7 +152,15 @@ async def test_tts_voices_endpoint():
 
 @pytest.mark.asyncio
 async def test_tts_endpoint():
-    """测试 TTS 合成端点"""
+    """测试 TTS 合成端点（issue #52：默认 lane 离线，不再接受 500）。
+
+    旧断言是 ``in (200, 422, 500)`` —— 因为 edge_tts 要连公网、失败就吃 500，
+    而 500 也算"通过"。这既让测试没验证到业务路径，又意味着默认测试 lane
+    仍然**需要出网**。现在 ``TTS_PROVIDER=local``（.env.test）走进程内确定性
+    替身，因此可以严格断言 200 + audio/*，并且这条断言在无网环境下也成立。
+
+    真实 edge_tts 合成走 ``make test-real-providers``（默认不执行）。
+    """
     from fastapi.testclient import TestClient
 
     try:
@@ -165,9 +173,12 @@ async def test_tts_endpoint():
             "/api/tts",
             json={"text": "你好，欢迎咨询", "voice": ""},
         )
-        assert response.status_code in (200, 422, 500)
-        if response.status_code == 200:
-            assert response.headers.get("content-type", "").startswith("audio/")
+        assert response.status_code == 200, (
+            f"默认离线 lane 下 /api/tts 必须成功（local provider），"
+            f"实际 {response.status_code}: {response.text[:200]}"
+        )
+        assert response.headers.get("content-type", "").startswith("audio/")
+        assert len(response.content) > 0
 
 
 @pytest.mark.asyncio

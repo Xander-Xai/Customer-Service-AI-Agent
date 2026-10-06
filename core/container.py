@@ -529,20 +529,32 @@ class ServiceContainer:
                 seed_tech_support,
             )
 
-            # v6.2: 加载容器级单例 Embedding 模型（API 调用）
+            # v6.2: 加载容器级单例 Embedding 模型
+            #
+            # issue #52: 选择交给 rag.embedding_factory 这唯一实现，不再在这里
+            # "try 构造 ApiEmbedding"。旧写法有两个问题：(1) 构造几乎不会失败，
+            # 所以 except 永远走不到；(2) 更要命的是它不判凭据是否真实 ——
+            # EMBEDDING_API_KEY=sk-placeholder-... 是真值，于是拿着占位凭据
+            # 真的去连 api.siliconflow.cn，默认测试 lane 因此需要出网。
             if self.embedding_model is None:
                 try:
-                    from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
-                    from rag.api_embedding import ApiEmbedding
+                    from rag.embedding_factory import select_embed_fn
 
-                    self.embedding_model = ApiEmbedding(
-                        api_key=EMBEDDING_API_KEY,
-                        model=EMBEDDING_MODEL,
-                        base_url=EMBEDDING_BASE_URL,
-                    )
-                    logger.info(f"容器级 Embedding 模型加载完成 ({EMBEDDING_MODEL})")
+                    selection = select_embed_fn()
+                    self.embedding_model = selection.embed_fn
+                    if self.embedding_model is None:
+                        logger.info(
+                            "容器级 Embedding 模型未启用（%s）：向量通道禁用，"
+                            "检索降级到词法/BM25 通道",
+                            selection.reason,
+                        )
+                    else:
+                        logger.info(
+                            f"容器级 Embedding 模型加载完成 (provider={selection.provider}, "
+                            f"reason={selection.reason})"
+                        )
                 except Exception as e:
-                    logger.warning(f"Embedding API 加载失败: {e}")
+                    logger.warning(f"Embedding 模型选择失败: {e}")
                     self.embedding_model = None
 
             # Qdrant 知识库

@@ -22,17 +22,28 @@ dev-docker: env-dev ## Docker 开发环境（自动加载 override）
 	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.override.yml up app --build
 
 # ===== 测试 =====
-test: env-test ## 运行测试
-	@echo "🧪 运行测试..."
+test: env-test ## 运行测试（默认离线：不出网、不需要真实 API Key）
+	@echo "🧪 运行测试（默认离线 lane：EMBEDDING/RERANKER/STT/TTS provider=local）..."
 	python3 -m pytest tests/ -x -v --tb=short
 
-test-cov: env-test ## 运行测试（带覆盖率）
-	@echo "🧪 运行测试（覆盖率）..."
+test-cov: env-test ## 运行测试（带覆盖率，默认离线）
+	@echo "🧪 运行测试（覆盖率，离线 lane）..."
 	python3 -m pytest tests/ -x -v --tb=short --cov=. --cov-report=term-missing --cov-report=html:htmlcov
 
-test-fast: env-test ## 快速测试（跳过慢测试）
+test-fast: env-test ## 快速测试（跳过慢测试，默认离线）
 	@echo "⚡ 快速测试..."
 	python3 -m pytest tests/ -x -v --tb=short -m "not slow"
+
+test-real-providers: ## 真实 provider 验证（issue #52：默认不执行，需要真实凭据）
+	@echo "⚠️  真实 provider lane —— 需要真实 API Key，且会发起外网请求。"
+	@echo "    凭据从环境变量读取：OPENAI_API_KEY / EMBEDDING_API_KEY / RERANKER_API_KEY"
+	@echo "    默认测试（make test）不依赖这些凭据，也不发起外网请求。"
+	@test -n "$$EMBEDDING_API_KEY" || { \
+		echo "❌ EMBEDDING_API_KEY 未设置。默认离线 lane 请用 'make test'。"; exit 1; }
+	@test -n "$$RERANKER_API_KEY" || { \
+		echo "❌ RERANKER_API_KEY 未设置。默认离线 lane 请用 'make test'。"; exit 1; }
+	EMBEDDING_PROVIDER=remote RERANKER_PROVIDER=remote STT_PROVIDER=remote TTS_PROVIDER=remote \
+		python3 -m pytest tests/ -v --tb=short -m "real_provider or real_llm"
 
 # ===== 代码质量 =====
 lint: ## 代码检查（ruff）

@@ -163,6 +163,75 @@ def is_llm_key_usable(api_key: str | None = None) -> bool:
     return evaluate_llm_api_key(api_key).usable
 
 
+#: 所有 provider 凭据共用的占位前缀黑名单。**与
+#: :data:`LLM_PLACEHOLDER_PREFIXES` 是同一个 tuple 对象**，不是第二份清单 ——
+#: 仓库里关于"什么是占位 key"的规则只能有一处，否则就会出现 issue #51 那种
+#: 两套实现各说各话的情况。
+API_KEY_PLACEHOLDER_PREFIXES: tuple[str, ...] = LLM_PLACEHOLDER_PREFIXES
+
+
+def is_placeholder_api_key(api_key: str | None) -> bool:
+    """判定一个凭据是否**不可用于真实请求**（空 / 占位 / 示例值）。
+
+    与 :func:`evaluate_llm_api_key` 的区别，以及为什么需要它
+    --------------------------------------------------------
+    ``evaluate_llm_api_key`` 只服务 LLM，且额外带一条 40 字符长度下限。本函数
+    是**更窄**的判定：只回答"这串东西是不是显然的占位值"，**不**引入任何新的长度
+    门槛。这一点对生产行为是硬约束：给 embedding / reranker 加一条长度规则，会
+    让某个真实但较短的凭据突然失去向量通道 —— 那是行为变更，不是本 issue 的范围。
+    本 issue（#52）要修的只是"占位 key 触发了真实外网请求"这一类。
+
+    纯函数、无 IO：调用方可以放心地在健康面/启动面使用。
+
+    Args:
+        api_key: 凭据字符串；``None`` 视为未配置。
+
+    Returns:
+        ``True`` 表示**不应**用它发起真实 provider 请求（空串、空白串，或以任一
+        :data:`API_KEY_PLACEHOLDER_PREFIXES` 开头的值，大小写不敏感）。
+    """
+    key = (api_key or "").strip()
+    if not key:
+        return True
+    lowered = key.lower()
+    return any(lowered.startswith(prefix) for prefix in API_KEY_PLACEHOLDER_PREFIXES)
+
+
+def credential_may_egress(api_key: str | None) -> bool:
+    """:func:`is_placeholder_api_key` 的取反，读起来更符合调用点语义。
+
+    ``True`` 表示"这是一个看起来真实的凭据，可以（也只有这种情况可以）构造
+    HTTP 客户端去打 provider"。
+    """
+    return not is_placeholder_api_key(api_key)
+
+
+# ===== Provider 选择（issue #52：默认 lane 必须零外网依赖）=====
+#
+# 每个会发起外部请求的 RAG / 媒体依赖都有一个 provider 旋钮：
+#
+#   remote（默认）— 构造 HTTP 客户端，打真实 provider。**这是生产路径。**
+#   local          — 使用进程内确定性实现（rag/local_provider.py），零网络、零凭据。
+#
+# `.env.test`（也就是 ``make test`` 用的 lane）把 EMBEDDING_PROVIDER /
+# RERANKER_PROVIDER / STT_PROVIDER / TTS_PROVIDER 设为 local，所以默认测试套件
+# 既不需要出网也不需要真实凭据。真实 provider 的验证走显式 opt-in lane
+# （``make test-real-providers``）。
+#
+# 注意旋钮与凭据判定是**两个独立的闸门**，任一关闭就不发外部请求：
+#   1. provider=local          → 走进程内实现，根本不构造 HTTP 客户端
+#   2. 凭据是占位值（:func:`is_placeholder_api_key`）→ 不构造 HTTP 客户端
+# 只看 truthiness 的旧写法（``if not EMBEDDING_API_KEY``）挡不住占位 key：
+# ``sk-placeholder-...`` 是真值，于是会拿着假凭据去连 api.siliconflow.cn 并吃 401。
+PROVIDER_REMOTE = "remote"
+PROVIDER_LOCAL = "local"
+
+
+def _normalize_provider(raw: str | None, *, default: str = PROVIDER_REMOTE) -> str:
+    value = (raw or default).strip().lower()
+    return value if value in (PROVIDER_REMOTE, PROVIDER_LOCAL) else default
+
+
 # ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
 VERSION = os.getenv("APP_VERSION", "6.3")  # 可从环境变量覆盖，便于 CI/CD
 APP_NAME = os.getenv("APP_NAME", "药妆智多星 - Customer Service AI Agent")
@@ -412,6 +481,31 @@ EMBEDDING_DIM = _int_env("EMBEDDING_DIM", 1024)  # bge-large-zh-v1.5 输出维�
 RERANKER_BASE_URL = os.getenv("RERANKER_BASE_URL", "https://api.siliconflow.cn/v1")
 RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
 RERANKER_API_KEY = os.getenv("RERANKER_API_KEY", "")
+
+# ---- issue #52：这两个依赖的 provider 选择与出网许可 ----
+#
+# EMBEDDING_PROVIDER / RERANKER_PROVIDER = local 时使用进程内确定性实现，
+# 零网络零凭据（见 rag/local_provider.py）。默认 remote = 生产行为不变。
+EMBEDDING_PROVIDER = _normalize_provider(os.getenv("EMBEDDING_PROVIDER"))
+RERANKER_PROVIDER = _normalize_provider(os.getenv("RERANKER_PROVIDER"))
+
+#: 出网许可闸门。占位 key **不构成**出网许可 —— 旧代码只判 truthiness，
+#: 而 ``sk-placeholder-embedding-test-key`` 是真值，于是默认测试 lane 会真的去
+#: 连 api.siliconflow.cn 并吃 401（实测单次 ~40s，见 issue #52）。
+#: 真实凭据仍然拿到 True，所以生产行为不变。
+EMBEDDING_CREDENTIAL_USABLE = credential_may_egress(EMBEDDING_API_KEY)
+RERANKER_CREDENTIAL_USABLE = credential_may_egress(RERANKER_API_KEY)
+
+if not EMBEDDING_CREDENTIAL_USABLE:
+    logging.getLogger("config").info(
+        "EMBEDDING_API_KEY 是占位值或未配置：远程 embedding 通道不构造 HTTP 客户端"
+        "（向量通道将不可用，检索诚实降级到 BM25/词法通道）。"
+    )
+if not RERANKER_CREDENTIAL_USABLE:
+    logging.getLogger("config").info(
+        "RERANKER_API_KEY 是占位值或未配置：远程 reranker 通道不构造 HTTP 客户端"
+        "（重排降级为原始排序）。"
+    )
 
 # ===== Hybrid retrieval (vector + BM25) configuration =====
 HYBRID_SEARCH_ENABLED = (
@@ -775,6 +869,17 @@ SSE_ENABLED = os.getenv("SSE_ENABLED", "true").lower() == "true"
 
 # ===== v4.1: 多模态配置 =====
 MULTIMODAL_ENABLED = os.getenv("MULTIMODAL_ENABLED", "false").lower() == "true"
+
+# ---- issue #52：STT / TTS 的 provider 选择与出网许可 ----
+#
+# STT（Whisper）与 embedding/reranker 一样是**带凭据**的 HTTP 依赖，因此复用
+# OPENAI_API_KEY，并复用 :func:`is_llm_key_usable` 这一权威判定。
+STT_PROVIDER = _normalize_provider(os.getenv("STT_PROVIDER"))
+STT_CREDENTIAL_USABLE = is_llm_key_usable(OPENAI_API_KEY)
+
+# TTS 走 edge_tts —— 一个**无凭据**的第三方端点（speech.platform.bing.com）。
+# 所以它没有"key 是否可用"这个问题，只有"这条 lane 是否允许出网"。
+TTS_PROVIDER = _normalize_provider(os.getenv("TTS_PROVIDER"))
 MAX_IMAGE_SIZE_MB = _int_env("MAX_IMAGE_SIZE_MB", 5)
 ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
 

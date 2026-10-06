@@ -200,27 +200,34 @@ class QdrantKnowledgeBase:
 
     @staticmethod
     def _create_embedding_function():
-        """创建 API 嵌入客户端（替代本地 SentenceTransformer）"""
+        """创建嵌入客户端（issue #52：选择逻辑收敛到 rag.embedding_factory）。
+
+        三态与理由都写在 ``rag/embedding_factory.select_embed_fn`` 里 —— 这里
+        不再自己判 ``if not EMBEDDING_API_KEY``，因为那条真值判断挡不住占位 key
+        （``sk-placeholder-...`` 是真值），会让默认测试 lane 真的去连
+        api.siliconflow.cn 并吃 401。
+        """
         try:
-            from core.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
-
-            if not EMBEDDING_API_KEY:
-                logger.warning(
-                    "EMBEDDING_API_KEY 未配置，embedding 不可用（向量通道将被禁用，"
-                    "不生成随机向量）"
-                )
-                return None
-
-            from rag.api_embedding import ApiEmbedding
-
-            model = ApiEmbedding(
-                api_key=EMBEDDING_API_KEY,
-                model=EMBEDDING_MODEL,
-                base_url=EMBEDDING_BASE_URL,
+            from rag.embedding_factory import (
+                REASON_NO_CREDENTIAL,
+                REASON_PLACEHOLDER_CREDENTIAL,
+                REASON_REMOTE_PROVIDER,
+                select_embed_fn,
             )
-            QdrantKnowledgeBase._embed_fn_name = EMBEDDING_MODEL.split("/")[-1]
-            logger.info(f"API Embedding 客户端创建成功: {EMBEDDING_MODEL}")
-            return model
+
+            selection = select_embed_fn()
+            QdrantKnowledgeBase._embed_fn_name = (
+                selection.model if selection.embed_fn is not None else "unavailable"
+            )
+            if selection.reason in (REASON_PLACEHOLDER_CREDENTIAL, REASON_NO_CREDENTIAL):
+                # select_embed_fn 已经在选择点记过一次原因，这里不再重复告警。
+                logger.info(
+                    "向量通道未启用（%s）：检索降级到词法/BM25 通道，不生成随机向量",
+                    selection.reason,
+                )
+            elif selection.reason == REASON_REMOTE_PROVIDER:
+                logger.info(f"API Embedding 客户端创建成功: {selection.model}")
+            return selection.embed_fn
         except Exception as e:
             QdrantKnowledgeBase._embed_fn_name = "default(unavailable)"
             logger.warning(
