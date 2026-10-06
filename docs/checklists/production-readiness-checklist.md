@@ -38,7 +38,7 @@
 - [ ] DLQ 处置流程已演练：`GET /api/runs/dead` →
       `python scripts/replay_dead_run.py <run_id>` 确认重放复用原 run_id
 - [ ] 确认无 dead-letter 堆积：`agent_run_dead_letter_total` 无异常增长
-      （注意：**目前没有 dead-letter 告警**，需自行加基于该指标��规则）
+      （注意：**目前没有 dead-letter 告警**，需自行加基于该指标的告警规则）
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -56,6 +56,19 @@
       [docs/operations/distributed-runtime-runbook.md](../operations/distributed-runtime-runbook.md) §3.7/§5
 - [ ] **HITL 值班演练已做**：制造一个 HIGH 风险 run → 确认进入 `WAITING_APPROVAL` →
       审批 reject/approve/超时三条路径各自的结果与 `agent_approval_*` 指标
+- [ ] **Tracing 链路已复核（四层分开验收，不要合并成"可观测性已就绪"）**：
+      1. 应用语义 span = `OTEL_ENABLED=true` 时产出（`tests/unit/test_telemetry.py`）；
+      2. 真实 OTLP Collector 传输 = `make otel-collector-smoke` PASS 且生成
+         `artifacts/observability/otel-collector-<ts>/report.json`
+         （`status: VERIFIED_LOCAL`）；
+      3. **持久化 / 可查询 trace 后端（Jaeger / Langfuse / Tempo 等）
+         `NOT_VERIFIED`** —— 被验证的 Collector 只有 `debug` exporter：
+         不存储、无 retention、无查询 UI、无 dashboard。「Collector 收到了 trace」
+         **不等于**「有 trace 后端」；
+      4. 生产 trace 传播 / 真实流量 `NOT_VERIFIED`：`OPENTELEMETRY_ENABLED` /
+         `OTEL_ENABLED` 在 `.env.example` 中默认仍为 `false`，未默认打开。
+      见 [生产证据边界](../evaluation/production-evidence.md) 与
+      [docs/reference/current-state.md](../reference/current-state.md) 的 tracing 四层。
 
 ## 1. 结构性实现事实（IMPLEMENTED / LOCALLY VERIFIED；不构成 production validation）
 
