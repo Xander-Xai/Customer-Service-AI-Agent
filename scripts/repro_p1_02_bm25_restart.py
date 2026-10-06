@@ -77,9 +77,7 @@ def _make_kb(path: str) -> QdrantKnowledgeBase:
 def _force_collection(kb: QdrantKnowledgeBase, name: str) -> None:
     kb._client.create_collection(
         collection_name=name,
-        vectors_config=models.VectorParams(
-            size=_EMBEDDING_DIM, distance=models.Distance.COSINE
-        ),
+        vectors_config=models.VectorParams(size=_EMBEDDING_DIM, distance=models.Distance.COSINE),
     )
     kb._collection_cache[name] = True
 
@@ -156,7 +154,10 @@ def main() -> int:
         # [B] no rebuild → BM25 empty + degradation MUST be observable (not silent)
         if bm25_size_B != 0:
             failures.append(f"[B] BM25 unexpectedly populated without rebuild: {bm25_size_B}")
-        if meta_b.get("retrieval_degraded") is not True or meta_b.get("degraded_reason") != "bm25_not_ready":
+        if (
+            meta_b.get("retrieval_degraded") is not True
+            or meta_b.get("degraded_reason") != "bm25_not_ready"
+        ):
             failures.append(
                 "[B] BM25-3: empty BM25 must be honestly degraded (bm25_not_ready), "
                 f"got degraded={meta_b.get('retrieval_degraded')} reason={meta_b.get('degraded_reason')!r}"
@@ -168,7 +169,10 @@ def main() -> int:
             )
         if not bm25_hits_C:
             failures.append("[C] BM25 search returned no hits after rebuild")
-        if meta_cqm.get("retrieval_degraded") is not False or meta_cqm.get("lexical_channel_used") is not True:
+        if (
+            meta_cqm.get("retrieval_degraded") is not False
+            or meta_cqm.get("lexical_channel_used") is not True
+        ):
             failures.append(
                 "[C] after rebuild hybrid must be non-degraded with lexical channel used, "
                 f"got degraded={meta_cqm.get('retrieval_degraded')} lexical={meta_cqm.get('lexical_channel_used')}"

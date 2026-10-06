@@ -19,6 +19,7 @@ async def test_tool_execute_forwards_stream_callback():
     registry.register("test_tool", "Test", {"type": "object", "properties": {}}, test_handler)
 
     cb_events = []
+
     async def mock_cb(e):
         cb_events.append(e)
 

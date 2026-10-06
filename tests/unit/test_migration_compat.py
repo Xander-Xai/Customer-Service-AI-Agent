@@ -72,7 +72,9 @@ class TestKnowledgeBaseAPIBehavior:
     def mock_qdrant_client(self):
         with (
             patch("rag.qdrant_knowledge_base.QdrantClient") as mock_client_cls,
-            patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()),
+            patch.object(
+                QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()
+            ),
         ):
             mock_client = MagicMock()
             mock_client_cls.return_value = mock_client
@@ -120,9 +122,7 @@ class TestKnowledgeBaseAPIBehavior:
         result = kb.get_or_create_collection("test_col")
         assert result == "test_col"
 
-    def test_get_or_create_collection_returns_none_when_unavailable(
-        self, kb, mock_qdrant_client
-    ):
+    def test_get_or_create_collection_returns_none_when_unavailable(self, kb, mock_qdrant_client):
         """unavailable 时返回 None（兼容 ChromaDB 行为）"""
         kb._available = False
         result = kb.get_or_create_collection("test_col")

@@ -346,9 +346,9 @@ class TestAgentSessionContext:
             # 验证第二轮调用时 messages 中包含第一轮的对话
             if call_count == 1:
                 msg_contents = [str(m.content) for m in messages]
-                assert any("第一轮" in c or "精华液" in c for c in msg_contents), (
-                    "第二轮 LLM 调用应包含第一轮的对话上下文"
-                )
+                assert any(
+                    "第一轮" in c or "精华液" in c for c in msg_contents
+                ), "第二轮 LLM 调用应包含第一轮的对话上下文"
             resp.content = responses[call_count]
             call_count += 1
             return resp

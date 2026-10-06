@@ -30,33 +30,37 @@ from scripts._benchmark_utils import load_eval_queries
 
 _eval_queries = load_eval_queries()
 # Use first 25 eval-set queries as exact-match seed (more diverse than hardcoded)
-EXACT_QUERIES = _eval_queries[:25] if len(_eval_queries) >= 25 else [
-    "烟酰胺有什么功效？",
-    "敏感肌可以用视黄醇吗？",
-    "透明质酸是什么？",
-    "油性皮肤适合用什么面霜？",
-    "VC精华不能和什么一起用？",
-    "传明酸能祛斑吗？",
-    "果酸和水杨酸有什么区别？",
-    "神经酰胺对皮肤屏障有什么作用？",
-    "防晒霜物理防晒和化学防晒怎么选？",
-    "维诺雅有哪些美白产品？",
-    "你们发什么快递？多久能到？",
-    "怎么退货？退货流程是什么？",
-    "会员有什么等级？各等级权益？",
-    "支持什么付款方式？",
-    "产品保质期多久？开封后能用多长时间？",
-    "怎么辨别产品是不是正品？",
-    "孕期可以用你们的产品吗？",
-    "怎么开发票？",
-    "积分怎么用？怎么兑换？",
-    "企业采购有优惠吗？",
-    "用了产品过敏了怎么办？",
-    "护肤品的正确使用顺序是什么？",
-    "夏天护肤和冬天护肤有什么不同？",
-    "黑头怎么去除？",
-    "医美手术后怎么护理皮肤？",
-]
+EXACT_QUERIES = (
+    _eval_queries[:25]
+    if len(_eval_queries) >= 25
+    else [
+        "烟酰胺有什么功效？",
+        "敏感肌可以用视黄醇吗？",
+        "透明质酸是什么？",
+        "油性皮肤适合用什么面霜？",
+        "VC精华不能和什么一起用？",
+        "传明酸能祛斑吗？",
+        "果酸和水杨酸有什么区别？",
+        "神经酰胺对皮肤屏障有什么作用？",
+        "防晒霜物理防晒和化学防晒怎么选？",
+        "维诺雅有哪些美白产品？",
+        "你们发什么快递？多久能到？",
+        "怎么退货？退货流程是什么？",
+        "会员有什么等级？各等级权益？",
+        "支持什么付款方式？",
+        "产品保质期多久？开封后能用多长时间？",
+        "怎么辨别产品是不是正品？",
+        "孕期可以用你们的产品吗？",
+        "怎么开发票？",
+        "积分怎么用？怎么兑换？",
+        "企业采购有优惠吗？",
+        "用了产品过敏了怎么办？",
+        "护肤品的正确使用顺序是什么？",
+        "夏天护肤和冬天护肤有什么不同？",
+        "黑头怎么去除？",
+        "医美手术后怎么护理皮肤？",
+    ]
+)
 
 SEMANTIC_VARIANTS = [
     ("烟酰胺有什么功效？", "烟酰胺的护肤功效有哪些？"),
@@ -137,15 +141,19 @@ async def benchmark_cache_hierarchy():
         _save_error_report(str(e))
         return
 
-    print(f"  Cache initialized: L1 Redis={cache._redis is not None}, "
-          f"L2 Qdrant={cache._qdrant is not None}, "
-          f"L3 Jaccard={cache._fallback_enabled}")
+    print(
+        f"  Cache initialized: L1 Redis={cache._redis is not None}, "
+        f"L2 Qdrant={cache._qdrant is not None}, "
+        f"L3 Jaccard={cache._fallback_enabled}"
+    )
     print()
 
     # ── Seed L1 (exact matches) ──
     print("[2/5] Seeding L1 cache with exact queries...")
     for q in EXACT_QUERIES:
-        cache.set(q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"})
+        cache.set(
+            q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"}
+        )
     print(f"  Seeded {len(EXACT_QUERIES)} L1 entries")
     print()
 
@@ -203,9 +211,15 @@ async def benchmark_cache_hierarchy():
     print("  ├───────────────────────────────────────────────┤")
     print("  │  Layer     │  Hits   │  Rate       │  Status  │")
     print("  ├────────────┼─────────┼─────────────┼──────────┤")
-    print(f"  │  L1 (MD5)  │  {l1:>5d}  │  {l1_rate:>5.1f}%      │  {'Yes' if l1 > 0 else 'No'}       │")
-    print(f"  │  L2 (Qd)   │  {l2:>5d}  │  {l2_rate:>5.1f}%      │  {'Yes' if l2 > 0 else 'No'}       │")
-    print(f"  │  L3 (Jac)  │  {l3:>5d}  │  {l3_rate:>5.1f}%      │  {'Yes' if l3 > 0 else 'No'}       │")
+    print(
+        f"  │  L1 (MD5)  │  {l1:>5d}  │  {l1_rate:>5.1f}%      │  {'Yes' if l1 > 0 else 'No'}       │"
+    )
+    print(
+        f"  │  L2 (Qd)   │  {l2:>5d}  │  {l2_rate:>5.1f}%      │  {'Yes' if l2 > 0 else 'No'}       │"
+    )
+    print(
+        f"  │  L3 (Jac)  │  {l3:>5d}  │  {l3_rate:>5.1f}%      │  {'Yes' if l3 > 0 else 'No'}       │"
+    )
     print(f"  │  Miss      │  {misses:>5d}  │  {miss_rate:>5.1f}%      │          │")
     print("  ├────────────┼─────────┼─────────────┼──────────┤")
     print(f"  │  Total     │  {l1 + l2 + l3:>5d}  │  {total_hit_rate:>5.1f}%      │  {status}  │")
@@ -253,7 +267,9 @@ async def benchmark_cache_hierarchy():
         },
         "notes": {
             "l1_performance": "exact_match",
-            "l2_performance": "semantic" if l2 > 0 else ("jaccard_fallback" if l3 > 0 else "unavailable"),
+            "l2_performance": "semantic"
+            if l2 > 0
+            else ("jaccard_fallback" if l3 > 0 else "unavailable"),
             "l3_performance": "jaccard_fallback" if l3 > 0 else "inactive",
         },
     }

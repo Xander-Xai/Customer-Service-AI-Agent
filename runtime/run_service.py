@@ -163,16 +163,12 @@ class RunService:
             raise RunNotFound(run_id)
         return run
 
-    def list_recoverable_runs(
-        self, *, limit: int = 100, now: datetime | None = None
-    ) -> list[str]:
+    def list_recoverable_runs(self, *, limit: int = 100, now: datetime | None = None) -> list[str]:
         """列出"卡住"的 run：RETRYING/QUEUED 且 next_retry_at 已到。
 
         用于重试投递失败后的兜底恢复（见 ``runtime/retry.py::reconcile_stuck_runs``）。
         """
-        return self.repo.list_recoverable_runs(
-            limit=limit, now=now or _utcnow()
-        )
+        return self.repo.list_recoverable_runs(limit=limit, now=now or _utcnow())
 
     def get_dead_letter(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get_dead_letter(run_id)
@@ -495,9 +491,7 @@ class RunService:
                     if latest["status"] == RunStatus.DEAD_LETTER.value:
                         updated = latest
                     else:
-                        raise InvalidRunTransition(
-                            run_id, latest["status"], "DEAD_LETTER"
-                        )
+                        raise InvalidRunTransition(run_id, latest["status"], "DEAD_LETTER")
         elif cur == RunStatus.DEAD_LETTER:
             updated = run
         else:
@@ -515,9 +509,7 @@ class RunService:
         )
         return updated
 
-    def requeue_dead_letter(
-        self, run_id: str, *, reset_attempts: bool = True
-    ) -> dict[str, Any]:
+    def requeue_dead_letter(self, run_id: str, *, reset_attempts: bool = True) -> dict[str, Any]:
         """把 DEAD_LETTER run 重新投递（人工 replay / redrive）。
 
         刻意**复用原 run_id**，而不是复制出一个新 run：

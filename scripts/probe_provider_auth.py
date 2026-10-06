@@ -61,8 +61,14 @@ def run_probe() -> tuple[int, dict[str, Any]]:
     raw_key = os.getenv("OPENAI_API_KEY")
     base_url = os.getenv("OPENAI_BASE_URL", DEFAULT_BASE_URL)
     requested_model = os.getenv("OPENAI_MODEL", DEFAULT_MODEL)
-    proxy_vars = {name: bool(os.getenv(name)) for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")}
-    proxy_involved = "DIRECT_SILICONFLOW" if base_url.rstrip("/") == DEFAULT_BASE_URL else "PROXY_CHAIN_OR_CUSTOM_ENDPOINT"
+    proxy_vars = {
+        name: bool(os.getenv(name)) for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
+    }
+    proxy_involved = (
+        "DIRECT_SILICONFLOW"
+        if base_url.rstrip("/") == DEFAULT_BASE_URL
+        else "PROXY_CHAIN_OR_CUSTOM_ENDPOINT"
+    )
 
     result: dict[str, Any] = {
         "credential": _credential_metadata(raw_key),
@@ -80,7 +86,9 @@ def run_probe() -> tuple[int, dict[str, Any]]:
         result["auth_probe"] = {
             "status_code": None,
             "authenticated": False,
-            "error_category": "CREDENTIAL_MISSING" if raw_key is None or not raw_key.strip() else "CREDENTIAL_FORMAT_INVALID",
+            "error_category": "CREDENTIAL_MISSING"
+            if raw_key is None or not raw_key.strip()
+            else "CREDENTIAL_FORMAT_INVALID",
             "retryable": False,
             "attempt_count": 0,
             "trace_id": None,
@@ -100,7 +108,9 @@ def run_probe() -> tuple[int, dict[str, Any]]:
         "model_count": len(auth.model_ids),
     }
     if not auth.authenticated:
-        result["decision"] = "BLOCKED_BY_AUTHENTICATION" if auth.status_code == 401 else "STOP_BEFORE_CHAT"
+        result["decision"] = (
+            "BLOCKED_BY_AUTHENTICATION" if auth.status_code == 401 else "STOP_BEFORE_CHAT"
+        )
         return 2, result
 
     effective_model, selection_reason = _select_model(requested_model, auth.model_ids)
@@ -151,7 +161,11 @@ def run_probe() -> tuple[int, dict[str, Any]]:
         "response_nonempty": stream.response_nonempty,
         "usage": stream.usage.to_dict(),
     }
-    result["decision"] = "READY_FOR_CONTROLLED_STAGING" if stream.final_status == "SUCCESS" else "STOP_BEFORE_STAGING"
+    result["decision"] = (
+        "READY_FOR_CONTROLLED_STAGING"
+        if stream.final_status == "SUCCESS"
+        else "STOP_BEFORE_STAGING"
+    )
     return (0 if result["decision"] == "READY_FOR_CONTROLLED_STAGING" else 2), result
 
 

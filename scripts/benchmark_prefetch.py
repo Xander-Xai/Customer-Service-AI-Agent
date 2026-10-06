@@ -41,7 +41,10 @@ async def _simulate_search(query: str, latency_ms: float = 150.0) -> list[dict]:
     # Add jitter
     actual_latency = latency_ms * (0.8 + _random.random() * 0.4)
     await asyncio.sleep(actual_latency / 1000.0)
-    return [{"content": f"模拟检索结果：{query}", "score": _random.random(), "collection": c} for c in COLLECTIONS]
+    return [
+        {"content": f"模拟检索结果：{query}", "score": _random.random(), "collection": c}
+        for c in COLLECTIONS
+    ]
 
 
 async def _simulate_classify(query: str, latency_ms: float = 100.0) -> str:
@@ -98,6 +101,7 @@ async def benchmark_prefetch():
         if _kb_available and _kb is not None:
             # Real: classify first (via router), then search
             from router.query_router import QueryRouter
+
             try:
                 router = QueryRouter()
                 await router.route(query)  # classify
@@ -144,9 +148,7 @@ async def benchmark_prefetch():
             classify_task = asyncio.create_task(
                 _simulate_classify(query, Config.classify_latency_ms)
             )
-            search_task = asyncio.create_task(
-                _simulate_search(query, Config.search_latency_ms)
-            )
+            search_task = asyncio.create_task(_simulate_search(query, Config.search_latency_ms))
             await asyncio.gather(classify_task, search_task)
 
         elapsed = (time.time() - start) * 1000
@@ -169,7 +171,7 @@ async def benchmark_prefetch():
     # Theoretical optimum: max(classify, search) vs (classify + search)
     theoretical_seq = Config.classify_latency_ms + Config.search_latency_ms
     theoretical_pf = max(Config.classify_latency_ms, Config.search_latency_ms)
-    theoretical_reduction = ((theoretical_seq - theoretical_pf) / theoretical_seq * 100)
+    theoretical_reduction = (theoretical_seq - theoretical_pf) / theoretical_seq * 100
 
     print()
     print("  ┌────────────────────────────────────────────────────────────┐")
@@ -180,12 +182,22 @@ async def benchmark_prefetch():
     print(f"  │ Sequential avg latency          │ {seq_avg:>7.0f} ms                   │")
     print(f"  │ Prefetch avg latency            │ {pf_avg:>7.0f} ms                   │")
     print(f"  │ Measured latency reduction      │ {avg_reduction:>6.1f}%                     │")
-    print(f"  │ Theoretical max reduction       │ {theoretical_reduction:>6.1f}%                     │")
-    print(f"  │ Overlap efficiency              │ {avg_reduction / max(theoretical_reduction, 1) * 100:>5.1f}%                     │")
+    print(
+        f"  │ Theoretical max reduction       │ {theoretical_reduction:>6.1f}%                     │"
+    )
+    print(
+        f"  │ Overlap efficiency              │ {avg_reduction / max(theoretical_reduction, 1) * 100:>5.1f}%                     │"
+    )
     print("  ├────────────────────────────────┼───────────────────────────┤")
-    print(f"  │ Search latency (baseline)       │ {Config.search_latency_ms:>7.0f} ms                   │")
-    print(f"  │ Classify latency (baseline)     │ {Config.classify_latency_ms:>7.0f} ms                   │")
-    print(f"  │ Parallel speedup factor         │ {seq_avg / max(pf_avg, 0.1):>5.2f}x                     │")
+    print(
+        f"  │ Search latency (baseline)       │ {Config.search_latency_ms:>7.0f} ms                   │"
+    )
+    print(
+        f"  │ Classify latency (baseline)     │ {Config.classify_latency_ms:>7.0f} ms                   │"
+    )
+    print(
+        f"  │ Parallel speedup factor         │ {seq_avg / max(pf_avg, 0.1):>5.2f}x                     │"
+    )
     print("  └────────────────────────────────┴───────────────────────────┘")
     print()
 
@@ -214,9 +226,7 @@ async def benchmark_prefetch():
         "comparison": {
             "latency_reduction_pct": round(avg_reduction, 2),
             "theoretical_max_reduction_pct": round(theoretical_reduction, 2),
-            "overlap_efficiency_pct": round(
-                avg_reduction / max(theoretical_reduction, 1) * 100, 2
-            ),
+            "overlap_efficiency_pct": round(avg_reduction / max(theoretical_reduction, 1) * 100, 2),
             "speedup_factor": round(seq_avg / max(pf_avg, 0.1), 4),
         },
     }

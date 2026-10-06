@@ -12,7 +12,9 @@ from erp.pagination import paginate_records
 async def test_store_scope_ttl_and_opaque_reference():
     now = [100.0]
     store = InMemoryToolResultStore(clock=lambda: now[0])
-    reference = await store.put("search", {"secret": "value"}, scope={"user_id": "u1"}, ttl_seconds=10)
+    reference = await store.put(
+        "search", {"secret": "value"}, scope={"user_id": "u1"}, ttl_seconds=10
+    )
     assert reference.startswith("tr_")
     assert await store.get(reference, scope={"user_id": "u2"}) is None
     assert (await store.get(reference, scope={"user_id": "u1"})).payload == {"secret": "value"}
@@ -24,7 +26,9 @@ async def test_store_scope_ttl_and_opaque_reference():
 async def test_optimizer_offload_recovery_and_store_failure_is_fail_soft():
     store = InMemoryToolResultStore()
     raw = [{"title": f"item-{i}", "payload": "large" * 100} for i in range(20)]
-    optimizer = ToolResultOptimizer(enabled=True, store=store, offload_enabled=True, offload_min_tokens=1)
+    optimizer = ToolResultOptimizer(
+        enabled=True, store=store, offload_enabled=True, offload_min_tokens=1
+    )
     result = await optimizer.optimize_async("search", raw, scope={"user_id": "u1"})
     preview = json.loads(result.content)
     assert preview["status"] == "result_offloaded"
@@ -36,16 +40,25 @@ async def test_optimizer_offload_recovery_and_store_failure_is_fail_soft():
         async def put(self, *args, **kwargs):
             raise ToolResultStoreError("down")
 
-    fallback = ToolResultOptimizer(enabled=True, store=BrokenStore(), offload_enabled=True, offload_min_tokens=1)
+    fallback = ToolResultOptimizer(
+        enabled=True, store=BrokenStore(), offload_enabled=True, offload_min_tokens=1
+    )
     fallback_result = await fallback.optimize_async("search", raw, scope={"user_id": "u1"})
     assert "result_offloaded" not in fallback_result.content
 
 
 def test_search_compressor_deduplicates_and_bounds_fields():
     result = SearchResultCompressor().compress(
-        [{"title": "A", "url": "https://x.test/?utm_source=a&id=1", "snippet": "x" * 1000, "raw_html": "bad"},
-         {"title": "A", "url": "https://x.test/?id=1", "snippet": "duplicate"},
-         {"title": "B", "url": "https://b.test", "score": 0.8, "snippet": "ok"}],
+        [
+            {
+                "title": "A",
+                "url": "https://x.test/?utm_source=a&id=1",
+                "snippet": "x" * 1000,
+                "raw_html": "bad",
+            },
+            {"title": "A", "url": "https://x.test/?id=1", "snippet": "duplicate"},
+            {"title": "B", "url": "https://b.test", "score": 0.8, "snippet": "ok"},
+        ],
         max_items=2,
         snippet_tokens=10,
     )

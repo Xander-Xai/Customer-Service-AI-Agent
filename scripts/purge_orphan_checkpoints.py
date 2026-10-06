@@ -64,9 +64,7 @@ def _load_live_session_ids() -> set[str]:
         try:
             import redis
 
-            client = redis.Redis.from_url(
-                REDIS_URL, decode_responses=True, socket_timeout=3
-            )
+            client = redis.Redis.from_url(REDIS_URL, decode_responses=True, socket_timeout=3)
             try:
                 for key in client.scan_iter(match=f"{prefix}*", count=500):
                     if not key.startswith(prefix):

@@ -188,9 +188,7 @@ async def build_postgres_checkpointer(
         )
     except Exception as e:
         _record_checkpoint_error()
-        raise CheckpointBackendError(
-            f"PostgreSQL checkpoint 连接失败（{type(e).__name__}）"
-        ) from e
+        raise CheckpointBackendError(f"PostgreSQL checkpoint 连接失败（{type(e).__name__}）") from e
     await probe.close()
 
     pool = AsyncConnectionPool(
@@ -227,12 +225,8 @@ async def build_postgres_checkpointer(
             f"PostgreSQL checkpoint 初始化失败（{type(e).__name__}）"
         ) from e
 
-    logger.info(
-        "LangGraph checkpoint 后端已就绪: postgres (pool %s-%s)", min_size, max_size
-    )
-    return CheckpointRuntime(
-        backend=BACKEND_POSTGRES, checkpointer=saver, pool=pool
-    )
+    logger.info("LangGraph checkpoint 后端已就绪: postgres (pool %s-%s)", min_size, max_size)
+    return CheckpointRuntime(backend=BACKEND_POSTGRES, checkpointer=saver, pool=pool)
 
 
 async def _close_pool(pool: Any) -> None:

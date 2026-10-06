@@ -99,6 +99,7 @@ try:
         from core.monitoring import cache_l1_hits_total as _l1
         from core.monitoring import cache_l2_hits_total as _l2
         from core.monitoring import semantic_cache_embedding_failures_total as _sem_fail
+
         cache_l1_hits = _l1
         cache_l2_hits = _l2
         semantic_cache_embedding_failures = _sem_fail
@@ -173,13 +174,13 @@ except ImportError:
 
 # ===== 默认 TTL 策略 =====
 _DEFAULT_TTL_POLICY: dict[str, int] = {
-    "knowledge_qa": 604800,    # 7 天
-    "pricing_stock": 300,      # 5 分钟
-    "policy_rule": 86400,      # 1 天
-    "order_status": 300,       # 5 分钟
-    "after_sales": 3600,       # 1 小时
-    "chitchat": 600,           # 10 分钟
-    "default": 3600,           # 1 小时
+    "knowledge_qa": 604800,  # 7 天
+    "pricing_stock": 300,  # 5 分钟
+    "policy_rule": 86400,  # 1 天
+    "order_status": 300,  # 5 分钟
+    "after_sales": 3600,  # 1 小时
+    "chitchat": 600,  # 10 分钟
+    "default": 3600,  # 1 小时
 }
 
 # ===== L3 常量 =====
@@ -247,7 +248,7 @@ class ResponseCache:
         self._qdrant = qdrant_client
         self._embed_fn = embedding_model
         self._l1_prefix = "cache:resp:"
-        self._l1_ttl_policy = (l1_ttl_policy or _DEFAULT_TTL_POLICY.copy())
+        self._l1_ttl_policy = l1_ttl_policy or _DEFAULT_TTL_POLICY.copy()
         # v6.3: default_ttl 映射到 l1_ttl_policy["default"]
         if default_ttl is not None:
             self._l1_ttl_policy["default"] = default_ttl
@@ -530,20 +531,14 @@ class ResponseCache:
             + self._stats["fallback_hits"]
             + self._stats["misses"]
         )
-        hit_count = (
-            self._stats["l1_hits"]
-            + self._stats["l2_hits"]
-            + self._stats["fallback_hits"]
-        )
+        hit_count = self._stats["l1_hits"] + self._stats["l2_hits"] + self._stats["fallback_hits"]
         hit_rate = (hit_count / max(total, 1)) * 100
 
         # L1 大小（Redis scan 近似值）
         l1_size = 0
         if self._redis is not None:
             with contextlib.suppress(Exception):
-                l1_size = len(
-                    list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
-                )
+                l1_size = len(list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100)))
 
         return {
             # v6.3: 无 Redis 时 fallback_hits 合并进 l1_hits（向后兼容旧测试）
@@ -1051,9 +1046,7 @@ class ResponseCache:
             # fail closed：个性化回答缺少可信身份，绝不进入共享缓存。
             # P0-02 Step 17：日志只记 scope/reason，不写查询正文（可能含订单号等
             # customer/order data）或响应正文。
-            logger.debug(
-                f"跳过缓存写入（policy disabled, scope={policy.scope.value}）"
-            )
+            logger.debug(f"跳过缓存写入（policy disabled, scope={policy.scope.value}）")
             return
 
         now = time.time()
@@ -1116,9 +1109,7 @@ class ResponseCache:
         )
         if total > 0:
             hit_rate = (
-                self._stats["l1_hits"]
-                + self._stats["l2_hits"]
-                + self._stats["fallback_hits"]
+                self._stats["l1_hits"] + self._stats["l2_hits"] + self._stats["fallback_hits"]
             ) / total
             cache_hit_rate.set(hit_rate)
 
@@ -1129,9 +1120,7 @@ class ResponseCache:
             now = time.monotonic()
             if force or (now - getattr(self, "_l1_size_last_scan", 0)) > 60.0:
                 try:
-                    l1_size = len(
-                        list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100))
-                    )
+                    l1_size = len(list(self._redis.scan_iter(f"{self._l1_prefix}*", count=100)))
                     self._l1_size_last_scan = now
                     self._l1_size_cached = l1_size
                 except Exception as e:
@@ -1165,16 +1154,13 @@ class ResponseCache:
         Args:
             bus: MessageBus 实例
         """
+
         async def _handle_invalidation(message):
             payload = message.payload if isinstance(message.payload, dict) else {}
             query = payload.get("query")
             if query:
                 # 若 payload 携带身份则定向失效，否则仅 shared（公开知识更新场景）
-                meta = {
-                    k: payload[k]
-                    for k in ("user_id", "tenant_id")
-                    if k in payload
-                } or None
+                meta = {k: payload[k] for k in ("user_id", "tenant_id") if k in payload} or None
                 self.invalidate(query, metadata=meta)
 
         await bus.subscribe("cache:invalidate", _handle_invalidation)

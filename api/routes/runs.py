@@ -239,9 +239,7 @@ async def stream_run_events(
                     )
                 except Exception as e:
                     logger.warning("run 事件流读取失败 run_id=%s: %s", run_id, type(e).__name__)
-                    yield format_sse(
-                        "0-0", {"event": "error", "reason": type(e).__name__}
-                    )
+                    yield format_sse("0-0", {"event": "error", "reason": type(e).__name__})
                     break
 
                 for event_id, fields in events:

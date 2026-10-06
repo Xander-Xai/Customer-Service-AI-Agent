@@ -39,9 +39,9 @@ from enum import Enum
 class CacheScope(str, Enum):
     """缓存作用域。str 子类便于 JSON 序列化与 Qdrant payload 比较。"""
 
-    SHARED = "shared"      # 公开内容，所有用户共享
-    USER = "user"          # 用户级，按 user_id 隔离
-    TENANT = "tenant"      # 租户级，按 tenant_id 隔离（预留）
+    SHARED = "shared"  # 公开内容，所有用户共享
+    USER = "user"  # 用户级，按 user_id 隔离
+    TENANT = "tenant"  # 租户级，按 tenant_id 隔离（预留）
     DISABLED = "disabled"  # 不可缓存（fail closed）
 
 

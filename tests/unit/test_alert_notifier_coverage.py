@@ -72,9 +72,7 @@ class TestSendAlert:
         from alerts.notifier import AlertNotifier
 
         notifier = AlertNotifier()
-        asyncio.run(
-            notifier.send_alert("测试标题", "测试内容", "warning")
-        )
+        asyncio.run(notifier.send_alert("测试标题", "测试内容", "warning"))
         assert len(notifier.alert_history) == 1
         assert notifier.alert_history[0]["title"] == "测试标题"
 

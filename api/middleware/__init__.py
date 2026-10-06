@@ -111,7 +111,15 @@ def setup_middleware(app: FastAPI):
     async def rate_limit_middleware(request: Request, call_next):
         path_norm = request.url.path.rstrip("/").lower()
         if (
-            path_norm in ("", "/api/health", "/login.html", "/admin.html", "/widget.html", "/theme-comparison.html")
+            path_norm
+            in (
+                "",
+                "/api/health",
+                "/login.html",
+                "/admin.html",
+                "/widget.html",
+                "/theme-comparison.html",
+            )
             or request.url.path.startswith("/static/")
             or request.url.path.startswith("/ws/")
         ):
@@ -170,7 +178,11 @@ def setup_middleware(app: FastAPI):
         path = request.url.path
 
         # Vite 构建产物（含 hash 文件名）→ 长缓存
-        if path.startswith("/assets/") or path.startswith("/static/") or path.startswith("/styles/"):
+        if (
+            path.startswith("/assets/")
+            or path.startswith("/static/")
+            or path.startswith("/styles/")
+        ):
             response.headers["cache-control"] = "public, max-age=31536000, immutable"
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         # HTML 页面 → 每次验证
@@ -205,7 +217,11 @@ def setup_middleware(app: FastAPI):
             "/theme-comparison.html",
         ) or path.startswith("/static/"):
             return await call_next(request)
-        if path.startswith("/api/auth/login") or path.startswith("/api/auth/register") or path.startswith("/api/auth/refresh"):
+        if (
+            path.startswith("/api/auth/login")
+            or path.startswith("/api/auth/register")
+            or path.startswith("/api/auth/refresh")
+        ):
             return await call_next(request)
 
         required_auth = "api_key_or_jwt"
@@ -269,7 +285,14 @@ def setup_middleware(app: FastAPI):
     _CSRF_HEADER_NAME = "X-CSRF-Token"
     _CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
     # 浏览器请求特征：携带 Cookie 但无 Bearer Token
-    _CSRF_SKIP_PATHS = {"/", "/api/health", "/login.html", "/admin.html", "/widget.html", "/theme-comparison.html"}
+    _CSRF_SKIP_PATHS = {
+        "/",
+        "/api/health",
+        "/login.html",
+        "/admin.html",
+        "/widget.html",
+        "/theme-comparison.html",
+    }
     _CSRF_SKIP_PREFIXES = ("/static/", "/ws/")
 
     @app.middleware("http")
@@ -392,6 +415,7 @@ def setup_middleware(app: FastAPI):
         # 确保 Content-Type 含 charset=utf-8 且为小写
         if content_type:
             import re
+
             if "charset=" in content_type.lower():
                 new_ct = re.sub(r"charset=\S+", "charset=utf-8", content_type, flags=re.IGNORECASE)
                 response.headers["content-type"] = new_ct
@@ -411,7 +435,6 @@ def setup_middleware(app: FastAPI):
                     response.headers["Content-Type"] = new_ct
 
         return response
-
 
 
 # ── 角色权限映射 ──

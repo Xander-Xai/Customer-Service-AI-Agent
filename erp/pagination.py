@@ -12,7 +12,9 @@ class ERPPage:
     has_more: bool
 
 
-def paginate_records(records: list[dict], *, limit: int = 50, cursor: str | None = None, max_limit: int = 100) -> ERPPage:
+def paginate_records(
+    records: list[dict], *, limit: int = 50, cursor: str | None = None, max_limit: int = 100
+) -> ERPPage:
     if limit <= 0 or limit > max_limit:
         raise ValueError(f"limit must be between 1 and {max_limit}")
     offset = 0
@@ -24,4 +26,6 @@ def paginate_records(records: list[dict], *, limit: int = 50, cursor: str | None
     items = ordered[offset : offset + limit]
     next_offset = offset + len(items)
     has_more = next_offset < len(ordered)
-    return ERPPage(items=items, next_cursor=str(next_offset) if has_more else None, has_more=has_more)
+    return ERPPage(
+        items=items, next_cursor=str(next_offset) if has_more else None, has_more=has_more
+    )

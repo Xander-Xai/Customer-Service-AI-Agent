@@ -183,7 +183,9 @@ def validate_formal_rag_report(
         return None
     if benchmark_sha is not None and artifact_bench_sha != benchmark_sha:
         return None  # provenance must bind to the CURRENT benchmark asset
-    counts = [benchmark.get(key) for key in ("declared_queries", "actual_queries", "executed_queries")]
+    counts = [
+        benchmark.get(key) for key in ("declared_queries", "actual_queries", "executed_queries")
+    ]
     if any(not isinstance(c, int) for c in counts):
         return None
     if declared_queries is None or len(set(counts)) != 1 or counts[0] != declared_queries:
@@ -255,8 +257,7 @@ FORMAL_STATUS_MARKER = "当前 649-query 正式指标"
 #: when it also carries an explicit VERIFIED / NOT_VERIFIED token, so prose like
 #: "649-query 指标族：hit@{k}" adds nothing.
 FORMAL_STATUS_MARKER_RE = re.compile(
-    r"649[\s-]*query\s*(?:的\s*)?(?:正式\s*(?:指标|评测)|指标|metrics?)"
-    r"|RAG\s*evidence\s*状态",
+    r"649[\s-]*query\s*(?:的\s*)?(?:正式\s*(?:指标|评测)|指标|metrics?)" r"|RAG\s*evidence\s*状态",
     re.IGNORECASE,
 )
 _DOC_STATE_RE = re.compile(r"NOT_VERIFIED|(?<![A-Z_])VERIFIED(?![A-Z_])")
@@ -370,6 +371,4 @@ if __name__ == "__main__":
     import json as _json
     import sys as _sys
 
-    _sys.stdout.write(
-        _json.dumps(derive_rag_formal_status(), ensure_ascii=False, indent=2) + "\n"
-    )
+    _sys.stdout.write(_json.dumps(derive_rag_formal_status(), ensure_ascii=False, indent=2) + "\n")

@@ -270,9 +270,9 @@ class TestExitCodePropagation:
                 continue  # not a blocking test-execution step
             if re.search(r"continue-on-error\s*:\s*true", block):
                 offenders.append(name)
-        assert not offenders, (
-            f"Test-execution steps softened with continue-on-error: true: {offenders}"
-        )
+        assert (
+            not offenders
+        ), f"Test-execution steps softened with continue-on-error: true: {offenders}"
 
 
 class TestCoverageGate:
@@ -711,9 +711,9 @@ class TestMcpContractWiring:
             re.sub(r"\s+", " ", m.replace('"', "").replace("'", "").strip())
             for m in re.findall(r"[\"']mcp[^\"']*[\"']", run)
         }
-        assert ci_specs, (
-            f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
-        )
+        assert (
+            ci_specs
+        ), f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
         declared = self._declared_mcp_spec(self.REQ_OPT)
         assert declared is not None, (
             "requirements-optional.txt no longer declares the official mcp SDK. "

@@ -263,9 +263,7 @@ class AgentRunRepository:
             )
         session = self._session()
         try:
-            result = session.execute(
-                update(AgentRun).where(*predicates).values(**values)
-            )
+            result = session.execute(update(AgentRun).where(*predicates).values(**values))
             session.commit()
             if result.rowcount == 0:
                 return None
@@ -399,9 +397,7 @@ class AgentRunRepository:
         stmt = (
             select(AgentRun.id)
             .where(
-                AgentRun.status.in_(
-                    [RunStatus.RETRYING.value, RunStatus.QUEUED.value]
-                ),
+                AgentRun.status.in_([RunStatus.RETRYING.value, RunStatus.QUEUED.value]),
                 or_(
                     and_(
                         AgentRun.next_retry_at.isnot(None),

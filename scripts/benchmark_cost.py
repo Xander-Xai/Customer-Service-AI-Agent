@@ -48,8 +48,8 @@ _DEFAULT_SCENARIO_B = {
 def calculate_total_cost(input_tokens: int, output_tokens: int) -> dict:
     """计算 Token 成本"""
     llm_cost = (
-        input_tokens / 1000 * COST_PER_1K_TOKENS["input"] +
-        output_tokens / 1000 * COST_PER_1K_TOKENS["output"]
+        input_tokens / 1000 * COST_PER_1K_TOKENS["input"]
+        + output_tokens / 1000 * COST_PER_1K_TOKENS["output"]
     )
     return {
         "input_cost": round(input_tokens / 1000 * COST_PER_1K_TOKENS["input"], 4),
@@ -81,9 +81,13 @@ def load_from_ab_report(path: str) -> tuple[dict, dict]:
         "cache_hit_rate": vb.get("cache_hit_rate", 0.65),
     }
     print(f"  从 AB 测试报告加载数据: {path}")
-    print(f"  变体 A: {scenario_a['llm_calls']} LLM调用, {scenario_a['total_input_tokens']+scenario_a['total_output_tokens']} tokens")
-    print(f"  变体 B: {scenario_b['llm_calls']} LLM调用, {scenario_b['cache_hits']} 缓存命中, "
-          f"{scenario_b['total_input_tokens']+scenario_b['total_output_tokens']} tokens")
+    print(
+        f"  变体 A: {scenario_a['llm_calls']} LLM调用, {scenario_a['total_input_tokens']+scenario_a['total_output_tokens']} tokens"
+    )
+    print(
+        f"  变体 B: {scenario_b['llm_calls']} LLM调用, {scenario_b['cache_hits']} 缓存命中, "
+        f"{scenario_b['total_input_tokens']+scenario_b['total_output_tokens']} tokens"
+    )
     return scenario_a, scenario_b
 
 
@@ -105,14 +109,18 @@ def analyze_cost(input_path: str = None):
         scenario_a = dict(_DEFAULT_SCENARIO_A)
         scenario_b = dict(_DEFAULT_SCENARIO_B)
 
-    cost_a = calculate_total_cost(scenario_a["total_input_tokens"], scenario_a["total_output_tokens"])
-    cost_b = calculate_total_cost(scenario_b["total_input_tokens"], scenario_b["total_output_tokens"])
+    cost_a = calculate_total_cost(
+        scenario_a["total_input_tokens"], scenario_a["total_output_tokens"]
+    )
+    cost_b = calculate_total_cost(
+        scenario_b["total_input_tokens"], scenario_b["total_output_tokens"]
+    )
 
     # 基础设施成本
     infra_cost_a = 0  # 无缓存，无基础设施开销
     infra_cost_b = (
-        scenario_b["cache_hits"] / 1000 * INFRA_COST["redis"] +
-        scenario_b["cache_hits"] / 1000 * INFRA_COST["qdrant"]
+        scenario_b["cache_hits"] / 1000 * INFRA_COST["redis"]
+        + scenario_b["cache_hits"] / 1000 * INFRA_COST["qdrant"]
     )
 
     total_a = cost_a["total_llm_cost"] + infra_cost_a
@@ -124,17 +132,27 @@ def analyze_cost(input_path: str = None):
     print("  ├──────────────┬──────────┬───────────┤")
     print("  │               │ 无缓存(A) │ 有缓存(B) │")
     print("  ├──────────────┼──────────┼───────────┤")
-    print(f"  │ 查询数       │ {scenario_a['total_queries']:>8d} │ {scenario_b['total_queries']:>9d} │")
+    print(
+        f"  │ 查询数       │ {scenario_a['total_queries']:>8d} │ {scenario_b['total_queries']:>9d} │"
+    )
     print(f"  │ LLM 调用数    │ {scenario_a['llm_calls']:>8d} │ {scenario_b['llm_calls']:>9d} │")
     print(f"  │ 缓存命中数   │ {0:>8d} │ {scenario_b['cache_hits']:>9d} │")
-    print(f"  │ 输入 Token   │ {scenario_a['total_input_tokens']:>8d} │ {scenario_b['total_input_tokens']:>9d} │")
-    print(f"  │ 输出 Token   │ {scenario_a['total_output_tokens']:>8d} │ {scenario_b['total_output_tokens']:>9d} │")
-    print(f"  │ LLM 成本     │ {cost_a['total_llm_cost']:>8.4f}$ │ {cost_b['total_llm_cost']:>9.4f}$ │")
+    print(
+        f"  │ 输入 Token   │ {scenario_a['total_input_tokens']:>8d} │ {scenario_b['total_input_tokens']:>9d} │"
+    )
+    print(
+        f"  │ 输出 Token   │ {scenario_a['total_output_tokens']:>8d} │ {scenario_b['total_output_tokens']:>9d} │"
+    )
+    print(
+        f"  │ LLM 成本     │ {cost_a['total_llm_cost']:>8.4f}$ │ {cost_b['total_llm_cost']:>9.4f}$ │"
+    )
     print(f"  │ 基础设施成本 │ {infra_cost_a:>8.4f}$ │ {infra_cost_b:>9.4f}$ │")
     print(f"  │ 总成本       │ {total_a:>8.4f}$ │ {total_b:>9.4f}$ │")
     print("  └──────────────┴──────────┴───────────┘")
 
-    llm_reduction = (scenario_a["llm_calls"] - scenario_b["llm_calls"]) / scenario_a["llm_calls"] * 100
+    llm_reduction = (
+        (scenario_a["llm_calls"] - scenario_b["llm_calls"]) / scenario_a["llm_calls"] * 100
+    )
     print("\n  📊 缓存效果:")
     print(f"     LLM 调用减少:    {llm_reduction:.1f}%")
     print(f"     成本降低:        {cost_reduction:.1f}%")
@@ -178,7 +196,8 @@ def analyze_cost(input_path: str = None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Token 成本分析")
     parser.add_argument(
-        "--input", "-i",
+        "--input",
+        "-i",
         help="benchmark_ab_test.py 输出的 JSON 报告路径（省略时使用默认场景数据）",
     )
     args = parser.parse_args()

@@ -306,9 +306,9 @@ def test_approved_side_effect_executes_exactly_once_under_concurrency(
     executed = [s for s in settled if s[0] == "ok"]
     assert executed, "至少应有一个执行者成功"
     # 无论成败，副作用只发生一次
-    assert staging_call_count(order_id) == 1, (
-        f"已批准的副作用必须只发生一次，实际 {staging_call_count(order_id)} 次 settled={settled}"
-    )
+    assert (
+        staging_call_count(order_id) == 1
+    ), f"已批准的副作用必须只发生一次，实际 {staging_call_count(order_id)} 次 settled={settled}"
 
     row = ledger.get("staging_refund", operation_key)
     assert row is not None, "执行必须落 side-effect ledger"

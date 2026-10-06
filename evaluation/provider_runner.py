@@ -30,7 +30,9 @@ def _placeholder(value: str) -> bool:
     return not value or lowered.startswith(("your-", "sk-placeholder", "change-me", "replace-"))
 
 
-def provider_preflight(*, max_requests: int, max_input_tokens: int, max_output_tokens: int, estimated_cost_cap: float) -> dict[str, Any]:
+def provider_preflight(
+    *, max_requests: int, max_input_tokens: int, max_output_tokens: int, estimated_cost_cap: float
+) -> dict[str, Any]:
     api_key = os.getenv("OPENAI_API_KEY", "")
     return {
         "credential_present": not _placeholder(api_key),
@@ -44,7 +46,9 @@ def provider_preflight(*, max_requests: int, max_input_tokens: int, max_output_t
     }
 
 
-def _aggregate_measurements(results: list[ProviderCallResult], attribute: str, unit: str) -> Measurement:
+def _aggregate_measurements(
+    results: list[ProviderCallResult], attribute: str, unit: str
+) -> Measurement:
     values = [getattr(result.usage, attribute).value for result in results]
     if not values or any(value is None for value in values):
         return _missing(f"provider did not report {attribute} for every measured request")
@@ -68,7 +72,12 @@ def run_provider_staging(
         raise ValueError("repeat must be positive and warmup cannot be negative")
     if total_requests > max_requests:
         raise ValueError("request cap is below the planned warmup plus measured requests")
-    if max_requests <= 0 or max_input_tokens <= 0 or max_output_tokens <= 0 or estimated_cost_cap <= 0:
+    if (
+        max_requests <= 0
+        or max_input_tokens <= 0
+        or max_output_tokens <= 0
+        or estimated_cost_cap <= 0
+    ):
         raise ValueError("all provider safety caps must be positive")
     preflight = provider_preflight(
         max_requests=max_requests,
@@ -96,16 +105,18 @@ def run_provider_staging(
         raise ValueError("EVAL_PROVIDER_MAX_ATTEMPTS must be positive")
     planned_attempts = total_requests * max_attempts
     if planned_attempts > max_requests:
-        raise RuntimeError("request cap includes worst-case provider retry attempts; no request made")
+        raise RuntimeError(
+            "request cap includes worst-case provider retry attempts; no request made"
+        )
     if estimated_input_cost_per_1k is None or estimated_output_cost_per_1k is None:
-        raise RuntimeError("estimated cost rates are required for the cost cap; no price lookup is performed")
+        raise RuntimeError(
+            "estimated cost rates are required for the cost cap; no price lookup is performed"
+        )
     # Worst case every planned request is retried up to max_attempts: warmup
     # and retried attempts are billable too. Guarding only the measured repeats
     # undercounted real spend several-fold.
     planned_input = (
-        sum(_estimate_input_tokens(case.query) for case in cases)
-        * (repeat + warmup)
-        * max_attempts
+        sum(_estimate_input_tokens(case.query) for case in cases) * (repeat + warmup) * max_attempts
     )
     if planned_input > max_input_tokens:
         raise RuntimeError("planned estimated input-token cap would be exceeded; no request made")
@@ -141,8 +152,12 @@ def run_provider_staging(
         prompt = case.query
         input_budget += _estimate_input_tokens(prompt)
         if input_budget > max_input_tokens:
-            raise RuntimeError("estimated input-token cap would be exceeded; no further request made")
-        result = adapter.stream_chat([{"role": "user", "content": prompt}], max_tokens=max_output_tokens, provider=provider)
+            raise RuntimeError(
+                "estimated input-token cap would be exceeded; no further request made"
+            )
+        result = adapter.stream_chat(
+            [{"role": "user", "content": prompt}], max_tokens=max_output_tokens, provider=provider
+        )
         results.append(result)
         if result.usage.output_tokens.value is not None:
             output_budget += int(result.usage.output_tokens.value)
@@ -164,8 +179,12 @@ def run_provider_staging(
     e2e = [result.e2e_ms for result in measured_results]
     ttft = [result.ttft_ms for result in measured_results if result.ttft_ms is not None]
     latency = summarize_latency(e2e, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED)
-    ttft_summary = summarize_latency(ttft, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED)
-    successes = sum(result.final_status == "SUCCESS" and result.response_nonempty for result in measured_results)
+    ttft_summary = summarize_latency(
+        ttft, warmup_count=0, source=EvidenceSource.APPLICATION_MEASURED
+    )
+    successes = sum(
+        result.final_status == "SUCCESS" and result.response_nonempty for result in measured_results
+    )
     failures = len(measured_results) - successes
     if authentication_blocked:
         final_status = "BLOCKED_BY_AUTHENTICATION"
@@ -186,7 +205,9 @@ def run_provider_staging(
     if not isinstance(estimated_cost_value, int | float):
         raise RuntimeError("estimated cost could not be calculated safely")
     if estimated_cost_value > estimated_cost_cap:
-        raise RuntimeError("estimated cost cap would be exceeded; no artifact marked as production evidence")
+        raise RuntimeError(
+            "estimated cost cap would be exceeded; no artifact marked as production evidence"
+        )
     return EvidenceRecord(
         run_id=str(uuid.uuid4()),
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -212,11 +233,7 @@ def run_provider_staging(
         retry_count=sum(result.retry_count for result in measured_results),
         timeout_count=sum(result.timeout_count for result in measured_results),
         provider_error_code=next(
-            (
-                result.error_code
-                for result in (*measured_results, *results)
-                if result.error_code
-            ),
+            (result.error_code for result in (*measured_results, *results) if result.error_code),
             None,
         ),
         final_status=final_status,
@@ -234,7 +251,9 @@ def run_provider_staging(
             "preflight": preflight,
             "artifact_privacy": "metrics_only_no_prompt_or_response",
         },
-        notes=["CONTROLLED_STAGING: this is not production latency or production task-success evidence."],
+        notes=[
+            "CONTROLLED_STAGING: this is not production latency or production task-success evidence."
+        ],
         samples=[
             {
                 "scenario_id": cases[index % len(cases)].workload_id,

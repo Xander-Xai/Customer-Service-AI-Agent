@@ -31,9 +31,7 @@ async def main():
         print(f"  --- 总计: {len(c._services)} 个组件 ---")
     else:
         svc_count = sum(
-            1
-            for x in dir(c)
-            if not x.startswith("_") and not callable(getattr(c, x, lambda: None))
+            1 for x in dir(c) if not x.startswith("_") and not callable(getattr(c, x, lambda: None))
         )
         print(f"  服务组件（自动检测）: {svc_count}")
 

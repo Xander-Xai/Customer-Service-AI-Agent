@@ -44,8 +44,7 @@ from runtime.statuses import RunStatus
 INFRA_REASON = "TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 未设置；需要真实 PG + Redis"
 requires_infra = pytest.mark.skipif(
     not (
-        os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip()
-        and os.getenv("TEST_REDIS_URL", "").strip()
+        os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip() and os.getenv("TEST_REDIS_URL", "").strip()
     ),
     reason=INFRA_REASON,
 )
@@ -60,9 +59,7 @@ def _expire_lease(service: RunService, run_id: str) -> None:
     past = datetime.now(timezone.utc) - timedelta(seconds=60)
     session = service.repo._session()  # noqa: SLF001 - test-only
     try:
-        session.query(AgentRun).filter(AgentRun.id == run_id).update(
-            {"lease_expires_at": past}
-        )
+        session.query(AgentRun).filter(AgentRun.id == run_id).update({"lease_expires_at": past})
         session.commit()
     finally:
         session.close()
@@ -108,9 +105,7 @@ class TestStaleOwnerCannotCommit:
                 id="failed",
             ),
             pytest.param(
-                lambda s, rid: s.mark_retrying(
-                    rid, delay_seconds=1, expected_worker_id="A"
-                ),
+                lambda s, rid: s.mark_retrying(rid, delay_seconds=1, expected_worker_id="A"),
                 id="retrying",
             ),
             pytest.param(
@@ -137,9 +132,7 @@ class TestStaleOwnerCannotCommit:
         assert after["status"] == RunStatus.RUNNING.value
         assert after["worker_id"] == "B"
 
-    def test_expired_owner_without_takeover_is_still_rejected(
-        self, run_service: RunService
-    ):
+    def test_expired_owner_without_takeover_is_still_rejected(self, run_service: RunService):
         """worker_id still matches, lease is gone: ownership is gone too."""
         run_id = _owned_run(run_service, worker="A")
         _expire_lease(run_service, run_id)
@@ -199,9 +192,10 @@ class TestTakeoverIsAtomic:
 
     def test_live_lease_blocks_takeover(self, run_service: RunService):
         run_id = _owned_run(run_service, worker="A", lease_s=300)
-        assert run_service.mark_running(
-            run_id, worker_id="B", task_id="t-B", lease_seconds=300
-        ) is None
+        assert (
+            run_service.mark_running(run_id, worker_id="B", task_id="t-B", lease_seconds=300)
+            is None
+        )
         assert run_service.get_run(run_id)["worker_id"] == "A"
 
 
@@ -243,8 +237,6 @@ class TestNonWorkerPathsUngated:
         )
         assert resumed["worker_id"] == "B"
         assert (
-            run_service.mark_succeeded(run_id, {"ok": 1}, expected_worker_id="B")[
-                "status"
-            ]
+            run_service.mark_succeeded(run_id, {"ok": 1}, expected_worker_id="B")["status"]
             == RunStatus.SUCCEEDED.value
         )

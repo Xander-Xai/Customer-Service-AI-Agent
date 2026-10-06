@@ -16,6 +16,7 @@ try:
         stream_ttfb_seconds,
         trace_spans_total,
     )
+
     PROMETHEUS_AVAILABLE = True
 except (ImportError, NameError):
     PROMETHEUS_AVAILABLE = False

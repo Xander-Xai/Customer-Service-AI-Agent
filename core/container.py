@@ -257,6 +257,7 @@ class ServiceContainer:
             # v6.1: 设置活跃组件 Prometheus 指标
             try:
                 from core.monitoring import active_components_total
+
                 active_components_total.set(len(self._services))
             except Exception:
                 pass
@@ -403,10 +404,13 @@ class ServiceContainer:
         # 唯一权威判定，纯函数、不发网络请求；长度下限 40 也在这里（此前只有本路径有）。
         key_status = evaluate_llm_api_key(OPENAI_API_KEY)
         api_key_valid = key_status.usable
-        if not api_key_valid and key_status.configured and key_status.reason == LLM_KEY_REASON_TOO_SHORT and DEV_MODE:
-            logger.warning(
-                f"⚠️ API Key 长度异常（{key_status.length} < 40），视为无效"
-            )
+        if (
+            not api_key_valid
+            and key_status.configured
+            and key_status.reason == LLM_KEY_REASON_TOO_SHORT
+            and DEV_MODE
+        ):
+            logger.warning(f"⚠️ API Key 长度异常（{key_status.length} < 40），视为无效")
 
         if not api_key_valid and DEV_MODE:
             # 开发模式：API Key 无效时自动降级到规则引擎
@@ -455,7 +459,9 @@ class ServiceContainer:
             from langchain_core.messages import HumanMessage
 
             logger.info("[HealthCheck] 正在检查 LLM 端点...")
-            await asyncio.wait_for(self.llm.async_invoke([HumanMessage(content="hi")]), timeout=10.0)
+            await asyncio.wait_for(
+                self.llm.async_invoke([HumanMessage(content="hi")]), timeout=10.0
+            )
             logger.info("[HealthCheck] ✅ LLM 端点连通正常")
         except asyncio.TimeoutError:
             logger.warning("[HealthCheck] ⚠️ LLM 端点超时（10s），系统将以降级模式运行")
@@ -572,9 +578,7 @@ class ServiceContainer:
                 clip_enabled=CLIP_ENABLED,
                 embedding_model=self.embedding_model,
             )
-            logger.info(
-                f"Qdrant 知识库初始化完成 (host={QDRANT_HOST})"
-            )
+            logger.info(f"Qdrant 知识库初始化完成 (host={QDRANT_HOST})")
 
             # 种子数据（所有模式通用）
             if RAG_PERSIST_DIRECTORY:
@@ -722,9 +726,7 @@ class ServiceContainer:
                     await adapter.close()
                 logger.warning("%s；降级为 native-only", msg)
                 continue
-            logger.info(
-                "MCP server %s 注册 %d 个工具", adapter.config.name, len(registered)
-            )
+            logger.info("MCP server %s 注册 %d 个工具", adapter.config.name, len(registered))
             attempt_adapters.append(adapter)
             attempt_tools.extend(registered)
 
@@ -763,9 +765,7 @@ class ServiceContainer:
                 try:
                     registry.unregister(name)
                 except Exception as e:
-                    logger.warning(
-                        "MCP 初始化回滚：注销工具 %s 失败: %s", name, type(e).__name__
-                    )
+                    logger.warning("MCP 初始化回滚：注销工具 %s 失败: %s", name, type(e).__name__)
         if tool_names:
             logger.warning(
                 "MCP 初始化回滚：已注销本轮新增的 %d 个工具 %s", len(tool_names), tool_names
@@ -820,7 +820,9 @@ class ServiceContainer:
         )
 
         redis_client = self._create_redis_client()
-        qdrant_client = getattr(self.knowledge_base, "_client", None) if self.knowledge_base else None
+        qdrant_client = (
+            getattr(self.knowledge_base, "_client", None) if self.knowledge_base else None
+        )
 
         self.cache = ResponseCache(
             redis_client=redis_client,
@@ -941,7 +943,13 @@ class ServiceContainer:
             self.agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
-        for name in ("product_agent", "tech_agent", "complaint_agent", "sales_agent", "aftersales_agent"):
+        for name in (
+            "product_agent",
+            "tech_agent",
+            "complaint_agent",
+            "sales_agent",
+            "aftersales_agent",
+        ):
             if name in self.agents_dict:
                 self.agents_dict[name].set_knowledge_base(self.knowledge_base)
 
@@ -1012,6 +1020,7 @@ class ServiceContainer:
         if self.llm is not None:
             self._services["llm_client"] = self.llm
             from llm.rule_based_llm import RuleBasedLLM
+
             if isinstance(self.llm, RuleBasedLLM):
                 self._services["rule_llm"] = self.llm
 
@@ -1047,6 +1056,7 @@ class ServiceContainer:
         # 其他 v6.1 注册组件
         try:
             from core.ab_testing import ABTestManager
+
             ab_mgr = ABTestManager()
             self._services["ab_test_manager"] = ab_mgr
             self._services["ab_tester"] = ab_mgr  # 规范别名
@@ -1066,9 +1076,11 @@ class ServiceContainer:
     def _get_input_sanitizer(self):
         """v6.1: 返回输入净化模块的引用代理。"""
         import types
+
         sanitizer = types.ModuleType("input_sanitizer")
         try:
             from api.utils import sanitize_input
+
             sanitizer.sanitize = sanitize_input
         except ImportError:
             sanitizer.sanitize = lambda x, **kw: x
@@ -1077,9 +1089,11 @@ class ServiceContainer:
     def _get_rate_limiter(self):
         """v6.1: 返回限流器配置引用。"""
         import types
+
         limiter = types.ModuleType("rate_limiter")
         try:
             from core.config import RATE_LIMIT_MAX, RATE_LIMIT_WINDOW
+
             limiter.max_requests = RATE_LIMIT_MAX
             limiter.window_seconds = RATE_LIMIT_WINDOW
         except ImportError:
@@ -1126,7 +1140,6 @@ class ServiceContainer:
         # 放在 embedding 连接池之前：注销之后就不再有东西依赖那些共享 HTTP
         # 连接池，先摘工具再关池子，避免关池时还有适配器在收尾。
         await self._close_mcp_tools()
-
 
         # 1.7. 关闭 Embedding HTTP 连接池（rag.api_embedding 模块级 AsyncClient 注册表）
         #

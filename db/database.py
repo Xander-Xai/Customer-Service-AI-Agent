@@ -33,6 +33,7 @@ try:
         ConfigurationError as _ConfigurationError,
     )
 except ImportError:
+
     class _ConfigurationError(RuntimeError):
         pass
 

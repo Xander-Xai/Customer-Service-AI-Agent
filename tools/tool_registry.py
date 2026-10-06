@@ -123,7 +123,9 @@ class ToolRegistry:
         ]
 
     async def execute(
-        self, name: str, arguments: dict[str, Any],
+        self,
+        name: str,
+        arguments: dict[str, Any],
         stream_callback: Callable | None = None,  # v6.0: 转发给工具 handler
         tool_call_id: str | None = None,
     ) -> str:

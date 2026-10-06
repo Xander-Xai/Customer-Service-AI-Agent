@@ -189,14 +189,14 @@ class TestKnowledgeBaseRerankerIntegration:
 # ============================================================================
 
 
-
 def _candidates(n: int = 3) -> list[dict]:
     return [{"content": f"doc-{i}", "distance": 0.1 * i} for i in range(n)]
 
 
 def _resp(payload, status: int = 200) -> httpx.Response:
-    return httpx.Response(status_code=status, json=payload,
-                          request=httpx.Request("POST", "http://x/rerank"))
+    return httpx.Response(
+        status_code=status, json=payload, request=httpx.Request("POST", "http://x/rerank")
+    )
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:
@@ -214,16 +214,21 @@ class TestRerankOutcomeContract:
         assert len(out) == 2
 
     def test_outcome_is_frozen(self):
-        outcome = RerankOutcome(results=[], applied=False, degraded=True,
-                                reason=RerankReason.TIMEOUT)
+        outcome = RerankOutcome(
+            results=[], applied=False, degraded=True, reason=RerankReason.TIMEOUT
+        )
         with pytest.raises(FrozenInstanceError):
             outcome.applied = True  # type: ignore[misc]
 
     def test_reason_values_are_bounded(self):
         """Reasons must stay a fixed enum — they reach meta, trace and telemetry."""
         assert {r.value for r in RerankReason} == {
-            "", "unavailable", "timeout", "http_error",
-            "provider_error", "invalid_response",
+            "",
+            "unavailable",
+            "timeout",
+            "http_error",
+            "provider_error",
+            "invalid_response",
         }
         assert REASON_INSUFFICIENT_CANDIDATES == "insufficient_candidates"
 
@@ -231,10 +236,19 @@ class TestRerankOutcomeContract:
 class TestRerankSuccess:
     def test_real_rerank_reports_applied(self, monkeypatch):
         rr = ApiReranker(api_key="k")
-        monkeypatch.setattr(httpx, "post", lambda *a, **k: _resp(
-            {"results": [{"index": 0, "relevance_score": 0.1},
-                         {"index": 1, "relevance_score": 0.9},
-                         {"index": 2, "relevance_score": 0.5}]}))
+        monkeypatch.setattr(
+            httpx,
+            "post",
+            lambda *a, **k: _resp(
+                {
+                    "results": [
+                        {"index": 0, "relevance_score": 0.1},
+                        {"index": 1, "relevance_score": 0.9},
+                        {"index": 2, "relevance_score": 0.5},
+                    ]
+                }
+            ),
+        )
         out = rr.rerank_with_outcome("q", _candidates(), top_k=3)
         assert out.applied is True
         assert out.degraded is False
@@ -254,8 +268,14 @@ class TestRerankSuccess:
 
         def flaky_post(*_a, **_k):
             # Request A succeeds...
-            return _resp({"results": [{"index": 0, "relevance_score": 0.9},
-                                      {"index": 1, "relevance_score": 0.2}]})
+            return _resp(
+                {
+                    "results": [
+                        {"index": 0, "relevance_score": 0.9},
+                        {"index": 1, "relevance_score": 0.2},
+                    ]
+                }
+            )
 
         monkeypatch.setattr(httpx, "post", flaky_post)
         a = rr.rerank_with_outcome("qA", _candidates(2), top_k=2)
@@ -345,15 +365,15 @@ class TestRerankInvalidResponse:
     @pytest.mark.parametrize(
         "payload",
         [
-            {},                                    # no results key
-            {"results": []},                       # empty results
-            {"results": "nope"},                   # wrong type
-            {"results": [{"relevance_score": 0.5}]},           # no index
-            {"results": [{"index": 0}]},                        # no score
+            {},  # no results key
+            {"results": []},  # empty results
+            {"results": "nope"},  # wrong type
+            {"results": [{"relevance_score": 0.5}]},  # no index
+            {"results": [{"index": 0}]},  # no score
             {"results": [{"index": 0, "relevance_score": "high"}]},  # non-numeric
-            {"results": [{"index": 99, "relevance_score": 0.9}]},    # out of range
-            {"results": [{"index": -1, "relevance_score": 0.9}]},    # negative
-            [1, 2, 3],                             # not an object
+            {"results": [{"index": 99, "relevance_score": 0.9}]},  # out of range
+            {"results": [{"index": -1, "relevance_score": 0.9}]},  # negative
+            [1, 2, 3],  # not an object
         ],
     )
     def test_malformed_200_is_never_reported_as_applied(self, monkeypatch, payload):
@@ -368,18 +388,34 @@ class TestRerankInvalidResponse:
     def test_partial_valid_response_still_counts_as_applied(self, monkeypatch):
         """One usable score is enough to prove the candidates were reordered."""
         rr = ApiReranker(api_key="k")
-        monkeypatch.setattr(httpx, "post", lambda *a, **k: _resp(
-            {"results": [{"index": 0, "relevance_score": 0.2},
-                         {"index": 1, "relevance_score": 0.8},
-                         {"index": 7, "relevance_score": 0.99}]}))
+        monkeypatch.setattr(
+            httpx,
+            "post",
+            lambda *a, **k: _resp(
+                {
+                    "results": [
+                        {"index": 0, "relevance_score": 0.2},
+                        {"index": 1, "relevance_score": 0.8},
+                        {"index": 7, "relevance_score": 0.99},
+                    ]
+                }
+            ),
+        )
         out = rr.rerank_with_outcome("q", _candidates(2), top_k=2)
         assert out.applied is True
         assert [r["content"] for r in out.results] == ["doc-1", "doc-0"]
 
     def test_invalid_response_does_not_leak_payload_into_reason(self, monkeypatch):
         rr = ApiReranker(api_key="k")
-        monkeypatch.setattr(httpx, "post", lambda *a, **k: _resp(
-            {"results": [{"index": 0, "relevance_score": 0.1}],
-             "error": "SENSITIVE-PROVIDER-BODY"}))
+        monkeypatch.setattr(
+            httpx,
+            "post",
+            lambda *a, **k: _resp(
+                {
+                    "results": [{"index": 0, "relevance_score": 0.1}],
+                    "error": "SENSITIVE-PROVIDER-BODY",
+                }
+            ),
+        )
         out = rr.rerank_with_outcome("q", _candidates(1), top_k=1)
         assert "SENSITIVE-PROVIDER-BODY" not in out.reason_value

@@ -59,7 +59,9 @@ def main() -> int:
         # across environments even for the same API. The portable contract is
         # the surface, not byte-identical JSON (same rule as
         # scripts/audit_doc_consistency.py::check_openapi_snapshot).
-        current_surface = {p: sorted(o.keys()) for p, o in sorted(current_spec.get("paths", {}).items())}
+        current_surface = {
+            p: sorted(o.keys()) for p, o in sorted(current_spec.get("paths", {}).items())
+        }
         live_surface = {p: sorted(o.keys()) for p, o in sorted(spec["paths"].items())}
         if current_surface != live_surface:
             print(
@@ -68,9 +70,7 @@ def main() -> int:
             )
             return 1
         if current_spec.get("info", {}).get("version") != spec.get("info", {}).get("version"):
-            print(
-                "DRIFT: docs/openapi.json info.version != app.openapi() info.version"
-            )
+            print("DRIFT: docs/openapi.json info.version != app.openapi() info.version")
             return 1
         print(f"OK: docs/openapi.json surface matches app.openapi() ({len(spec['paths'])} paths)")
         return 0

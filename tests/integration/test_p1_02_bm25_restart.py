@@ -108,8 +108,11 @@ class _WorkingReranker:
         from rag.reranker import RerankOutcome, RerankReason
 
         return RerankOutcome(
-            results=results[:top_k], applied=True, degraded=False,
-            reason=RerankReason.OK, provider_called=True,
+            results=results[:top_k],
+            applied=True,
+            degraded=False,
+            reason=RerankReason.OK,
+            provider_called=True,
         )
 
 

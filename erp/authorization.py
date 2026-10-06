@@ -63,6 +63,7 @@ def _digest_resource_id(value: str) -> str:
     """Stable 12-hex SHA-256 digest for hashing an untrusted resource id."""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:_HASH_LEN]
 
+
 # P0-03: 当前请求的 authenticated principal（user_id）与入口标识。
 # 由 BaseAgent.process_with_retry 从 state["user_id"] 设置（P0-04 保证所有
 # transport 一致写入该字段）。ErpAuthorizationService 通过此 ContextVar 取得
@@ -125,9 +126,7 @@ def bound_erp_request(user_id: str | None, entrypoint: str | None):
         _erp_entrypoint.reset(etoken)
 
 
-def sanitize_resource_id(
-    resource_id: str | None, resource_type: str | None = None
-) -> str:
+def sanitize_resource_id(resource_id: str | None, resource_type: str | None = None) -> str:
     """Resource-type-aware strict allowlist + length-limit + stable-hash for
     any erp.* security/audit log (AC16 / Section 13).
 
@@ -151,11 +150,7 @@ def sanitize_resource_id(
     if len(rid) > _MAX_LOGGED_ID_LEN:
         return f"{_UNTRUSTED_PREFIX}{_digest_resource_id(rid)}"
     shape = _RESOURCE_ID_SHAPES.get(resource_type) if resource_type else None
-    matched = (
-        shape.match(rid)
-        if shape is not None
-        else _ALL_KNOWN_SHAPES_RE.match(rid)
-    )
+    matched = shape.match(rid) if shape is not None else _ALL_KNOWN_SHAPES_RE.match(rid)
     if matched:
         return rid
     return f"{_UNTRUSTED_PREFIX}{_digest_resource_id(rid)}"

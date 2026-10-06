@@ -138,10 +138,10 @@ async def _park_for_approval(
         return str(latest["status"]) if latest else "MISSING"
     metrics.record_run_status(RunStatus.WAITING_APPROVAL.value)
     metrics.record_worker_task("waiting_approval")
-    action = (interrupt_payload or {}).get("action") if isinstance(interrupt_payload, dict) else None
-    logger.info(
-        "高风险操作挂起等待人工审批 run_id=%s action=%s", run_id, action
+    action = (
+        (interrupt_payload or {}).get("action") if isinstance(interrupt_payload, dict) else None
     )
+    logger.info("高风险操作挂起等待人工审批 run_id=%s action=%s", run_id, action)
     return RunStatus.WAITING_APPROVAL.value
 
 
@@ -328,9 +328,7 @@ async def execute_run(
                     )
                 elif resuming_approval:
                     # 没有可消费的决策：审批仍在等待（或已被他人恢复）。
-                    logger.info(
-                        "run=%s 仍无可消费的审批决策，保持 WAITING_APPROVAL", run_id
-                    )
+                    logger.info("run=%s 仍无可消费的审批决策，保持 WAITING_APPROVAL", run_id)
                     return RunStatus.WAITING_APPROVAL.value
                 else:
                     running = svc.mark_running(
@@ -399,9 +397,7 @@ async def execute_run(
             # two are separate traces correlated by ``run_id`` / ``approval_id``
             # (see the module docstring of ``core/telemetry.py``).
             _span_cm = _telemetry_span(
-                "csai.agent.execute.resume"
-                if resume_command is not None
-                else "csai.agent.execute",
+                "csai.agent.execute.resume" if resume_command is not None else "csai.agent.execute",
                 attributes={
                     "csai.run_id": run_id,
                     "csai.thread_id": thread_id,
@@ -468,16 +464,12 @@ async def execute_run(
                     # WAITING_APPROVAL 停留到 TTL。两段各自成 trace，通过
                     # run_id / approval_id 关联。
                     with contextlib.suppress(Exception):
-                        trace_ctx.set_attribute(
-                            "csai.run_status", RunStatus.WAITING_APPROVAL.value
-                        )
+                        trace_ctx.set_attribute("csai.run_status", RunStatus.WAITING_APPROVAL.value)
                         _approval_id, _risk = _pending_approval_identity(result)
                         if _approval_id:
                             trace_ctx.set_attribute("csai.approval_id", _approval_id)
                         trace_ctx.set_attribute("csai.risk_level", "high")
-                    return await _park_for_approval(
-                        svc, run_id, result, expected_worker_id=owner
-                    )
+                    return await _park_for_approval(svc, run_id, result, expected_worker_id=owner)
                 try:
                     svc.mark_succeeded(run_id, result, expected_worker_id=owner)
                 except RunOwnershipLost as lost:
@@ -533,9 +525,7 @@ async def execute_run(
         # 重试消息投递失败：run 已经在 RETRYING/QUEUED 等一条**不会到来**的消息。
         # 这里绝不能 ACK，也不能把它改成 FAILED（那会丢掉一次合法重试机会）。
         # 逃逸出任务 -> Celery acks_late 不 ACK -> broker 重新投递 -> 租约到期后被接管。
-        logger.error(
-            "重试投递失败，让任务逃逸以触发 broker redelivery: run_id=%s", run_id
-        )
+        logger.error("重试投递失败，让任务逃逸以触发 broker redelivery: run_id=%s", run_id)
         metrics.record_retry_publication_failure()
         raise
     except Exception as e:  # pragma: no cover - 未预期错误：标记失败避免卡死

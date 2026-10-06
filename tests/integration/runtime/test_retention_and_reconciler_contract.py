@@ -135,9 +135,9 @@ def test_live_session_enumeration_matches_configured_prefix(monkeypatch):
         client.set(f"{config.REDIS_SESSION_PREFIX}{session_id}:meta", "{}")
         found = _load_live_session_ids()
         # The key must be discoverable under the *configured* prefix.
-        assert session_id in found, (
-            f"expected {session_id} in live ids; prefix={config.REDIS_SESSION_PREFIX!r}"
-        )
+        assert (
+            session_id in found
+        ), f"expected {session_id} in live ids; prefix={config.REDIS_SESSION_PREFIX!r}"
         # and the returned value is the bare session id, not "<id>:messages"
         for got in found:
             assert not got.endswith(":messages")
@@ -315,16 +315,12 @@ def test_reconciler_still_respects_backoff_for_retrying_runs():
         svc = RunService(repo)
         run = svc.create_run(query="q", session_id="T-retry-backoff", max_attempts=3)
         svc.mark_running(run["id"], worker_id="w1", lease_seconds=60)
-        svc.mark_retrying(
-            run["id"], delay_seconds=300.0, error_type="timeout", error_message="t"
-        )
+        svc.mark_retrying(run["id"], delay_seconds=300.0, error_type="timeout", error_message="t")
 
         too_soon = repo.list_recoverable_runs(now=_utcnow())
         assert run["id"] not in too_soon
 
-        after_backoff = repo.list_recoverable_runs(
-            now=_utcnow() + timedelta(seconds=600)
-        )
+        after_backoff = repo.list_recoverable_runs(now=_utcnow() + timedelta(seconds=600))
         assert run["id"] in after_backoff
     finally:
         dispose(engine, path)

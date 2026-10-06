@@ -319,14 +319,14 @@ class TestLogStartupFailureContract:
         assert extra["phase"] == "startup"
         assert extra["stage"] == "container.initialize"
         assert extra["exception_type"] == "RuntimeError"
-        assert extra["root_exception_type"] == "KeyError", (
-            "the root cause type must be distinguishable from the wrapper type"
-        )
+        assert (
+            extra["root_exception_type"] == "KeyError"
+        ), "the root cause type must be distinguishable from the wrapper type"
         assert "innermost" in record["message"], "root cause message must be present"
         assert "Traceback" in record["message"], "traceback must be present"
-        assert "set ADMIN_PASSWORD in .env" in record["message"], (
-            "remediation must reach the operator"
-        )
+        assert (
+            "set ADMIN_PASSWORD in .env" in record["message"]
+        ), "remediation must reach the operator"
 
     @pytest.mark.unit
     def test_severity_is_critical(self) -> None:
@@ -371,9 +371,9 @@ class TestLogStartupFailureContract:
         logger.setLevel(logging.CRITICAL)
         log_startup_failure("container.initialize", exc, "y", logger=logger)
         record = json.loads(stream.getvalue().strip())
-        assert "exception" not in record, (
-            "record must not carry logging's own unredacted exception rendering"
-        )
+        assert (
+            "exception" not in record
+        ), "record must not carry logging's own unredacted exception rendering"
         assert "hunter2" not in json.dumps(record)
 
 
@@ -576,9 +576,9 @@ class TestHealthyStartupStillWorks:
         try:
             deadline = time.monotonic() + 150
             while time.monotonic() < deadline:
-                assert proc.poll() is None, (
-                    f"a healthy startup exited early with {proc.returncode}:\n{proc.stdout.read()}"
-                )
+                assert (
+                    proc.poll() is None
+                ), f"a healthy startup exited early with {proc.returncode}:\n{proc.stdout.read()}"
                 if self.LIFESPAN_COMPLETED in (proc.stdout.readline() or ""):
                     break
         finally:
@@ -588,6 +588,6 @@ class TestHealthyStartupStillWorks:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 output = proc.communicate()[0] or ""
-        assert "lifespan_startup_failed" not in output, (
-            f"a healthy startup was reported as a failure:\n{output[-1500:]}"
-        )
+        assert (
+            "lifespan_startup_failed" not in output
+        ), f"a healthy startup was reported as a failure:\n{output[-1500:]}"

@@ -120,9 +120,9 @@ class TestSSEIdentityPropagation:
         assert self.run_graph.called, "run_graph was not called"
         call_kwargs = self.run_graph.call_args.kwargs
         assert "user_id" in call_kwargs, f"run_graph kwargs missing user_id. Got: {call_kwargs}"
-        assert call_kwargs["user_id"] == "user-123", (
-            f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
-        )
+        assert (
+            call_kwargs["user_id"] == "user-123"
+        ), f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
 
     def test_sse_user_id_is_not_from_client_body(self):
         """SSE /api/chat/stream: client body 'user_id' cannot override auth."""
@@ -161,9 +161,9 @@ class TestSSEIdentityPropagation:
         call_kwargs = self.run_graph.call_args.kwargs
         # Anonymous: user_id kwarg present but None
         assert "user_id" in call_kwargs, f"run_graph kwargs missing user_id. Got: {call_kwargs}"
-        assert call_kwargs["user_id"] is None, (
-            f"Anonymous SSE should pass user_id=None, got: {call_kwargs['user_id']}"
-        )
+        assert (
+            call_kwargs["user_id"] is None
+        ), f"Anonymous SSE should pass user_id=None, got: {call_kwargs['user_id']}"
 
     # ── Multimodal SSE /api/chat/multimodal/stream ──
 
@@ -186,12 +186,12 @@ class TestSSEIdentityPropagation:
         _ = resp.text
         assert self.run_graph.called, "run_graph was not called"
         call_kwargs = self.run_graph.call_args.kwargs
-        assert "user_id" in call_kwargs, (
-            f"Multimodal SSE kwargs missing user_id. Got: {call_kwargs}"
-        )
-        assert call_kwargs["user_id"] == "user-123", (
-            f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
-        )
+        assert (
+            "user_id" in call_kwargs
+        ), f"Multimodal SSE kwargs missing user_id. Got: {call_kwargs}"
+        assert (
+            call_kwargs["user_id"] == "user-123"
+        ), f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
 
     # ── REST /api/chat (identity parity baseline) ──
 
@@ -233,9 +233,9 @@ class TestSSEIdentityPropagation:
         _ = resp2.text
         sse_user_id = sse_run_graph.call_args.kwargs.get("user_id")
 
-        assert rest_user_id == sse_user_id, (
-            f"Identity parity broken: REST user_id={rest_user_id}, SSE user_id={sse_user_id}"
-        )
+        assert (
+            rest_user_id == sse_user_id
+        ), f"Identity parity broken: REST user_id={rest_user_id}, SSE user_id={sse_user_id}"
 
     # ── Multimodal REST identity ──
 
@@ -256,12 +256,12 @@ class TestSSEIdentityPropagation:
         assert resp.status_code == 200
         assert self.run_graph.called, "run_graph was not called"
         call_kwargs = self.run_graph.call_args.kwargs
-        assert "user_id" in call_kwargs, (
-            f"Multimodal REST kwargs missing user_id. Got: {call_kwargs}"
-        )
-        assert call_kwargs["user_id"] == "user-123", (
-            f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
-        )
+        assert (
+            "user_id" in call_kwargs
+        ), f"Multimodal REST kwargs missing user_id. Got: {call_kwargs}"
+        assert (
+            call_kwargs["user_id"] == "user-123"
+        ), f"Expected user_id='user-123', got: {call_kwargs['user_id']}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -306,12 +306,12 @@ class TestRunGraphIdentityPropagation:
             result = await _run_graph("test-session", "你好", user_id=user_id)
             assert result["response"] == "ok"
             # Verify the state passed to the actual graph app has user_id
-            assert "user_id" in recorded_state, (
-                f"State missing user_id. State keys: {list(recorded_state.keys())}"
-            )
-            assert recorded_state["user_id"] == user_id, (
-                f"Expected state['user_id']='{user_id}', got: {recorded_state['user_id']}"
-            )
+            assert (
+                "user_id" in recorded_state
+            ), f"State missing user_id. State keys: {list(recorded_state.keys())}"
+            assert (
+                recorded_state["user_id"] == user_id
+            ), f"Expected state['user_id']='{user_id}', got: {recorded_state['user_id']}"
 
     @pytest.mark.asyncio
     async def test_run_graph_writes_session_id_and_trace_id(self):
@@ -394,9 +394,9 @@ class TestWSIdentityPropagation:
         assert run_graph.called, "run_graph was not called via WebSocket"
         call_kwargs = run_graph.call_args.kwargs
         assert "user_id" in call_kwargs, f"WebSocket kwargs missing user_id. Got: {call_kwargs}"
-        assert call_kwargs["user_id"] == "ws-user-42", (
-            f"Expected user_id='ws-user-42' from JWT sub, got: {call_kwargs['user_id']}"
-        )
+        assert (
+            call_kwargs["user_id"] == "ws-user-42"
+        ), f"Expected user_id='ws-user-42' from JWT sub, got: {call_kwargs['user_id']}"
 
     def test_rest_sse_ws_identity_parity(self):
         """Same auth identity gets same user_id via REST, SSE, and WebSocket."""
@@ -446,6 +446,6 @@ class TestWSIdentityPropagation:
                     break
         ws_user = ws_run_graph.call_args.kwargs.get("user_id")
 
-        assert rest_user == sse_user == ws_user, (
-            f"Identity parity broken: REST={rest_user}, SSE={sse_user}, WS={ws_user}"
-        )
+        assert (
+            rest_user == sse_user == ws_user
+        ), f"Identity parity broken: REST={rest_user}, SSE={sse_user}, WS={ws_user}"

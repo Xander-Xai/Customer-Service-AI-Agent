@@ -337,9 +337,9 @@ class TestCollisionGuardAdversarial:
             ("image_knowledge", "img_000"),
             ("product_knowledge", "derm_001310"),
         ]:
-            assert document_id_to_point_id(coll, doc) == accepted_df328b5(coll, doc), (
-                f"mapping drifted from df328b5 for {coll}/{doc}"
-            )
+            assert document_id_to_point_id(coll, doc) == accepted_df328b5(
+                coll, doc
+            ), f"mapping drifted from df328b5 for {coll}/{doc}"
 
     def test_reimport_after_df328b5_collection_does_not_create_ghost_duplicate(
         self, kb, mock_qdrant_client

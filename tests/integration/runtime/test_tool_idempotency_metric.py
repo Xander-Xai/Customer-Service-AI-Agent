@@ -19,9 +19,7 @@ DB_URL = os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip()
 
 pytestmark = [
     pytest.mark.slow,
-    pytest.mark.skipif(
-        not DB_URL, reason="TEST_DISTRIBUTED_DB_URL 未设置；需要真实 PostgreSQL"
-    ),
+    pytest.mark.skipif(not DB_URL, reason="TEST_DISTRIBUTED_DB_URL 未设置；需要真实 PostgreSQL"),
 ]
 
 

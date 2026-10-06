@@ -87,14 +87,11 @@ class EmbeddingDimensionError(ValueError):
         self.model = model
         self.reason = reason
         super().__init__(
-            f"embedding invalid: {reason} expected={expected} actual={actual} "
-            f"(model={model!r})"
+            f"embedding invalid: {reason} expected={expected} actual={actual} " f"(model={model!r})"
         )
 
 
-def validate_embedding_vector(
-    vector: list[float], expected_dim: int, *, model: str = ""
-) -> None:
+def validate_embedding_vector(vector: list[float], expected_dim: int, *, model: str = "") -> None:
     """Validate a single embedding vector; raise EmbeddingDimensionError if invalid.
 
     Checks: non-empty, correct dimension, finite (no NaN/Inf), numeric elements.
@@ -155,9 +152,7 @@ class RetrievalResultList(list):
 
     def __init__(self, seq: Any = (), *, meta: dict[str, Any] | None = None) -> None:
         super().__init__(seq)
-        self.meta: dict[str, Any] = (
-            dict(meta) if meta else {"retrieval_degraded": False}
-        )
+        self.meta: dict[str, Any] = dict(meta) if meta else {"retrieval_degraded": False}
 
     @property
     def retrieval_degraded(self) -> bool:

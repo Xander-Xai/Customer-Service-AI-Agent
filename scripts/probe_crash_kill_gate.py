@@ -182,9 +182,7 @@ def _checkpoint_count(engine, thread_id: str) -> int:
 def _commit_state(engine, thread_id: str) -> dict[str, object]:
     """Read the newest **committed** checkpoint for a thread."""
     with engine.connect() as conn:
-        count = int(
-            conn.execute(text(_COUNT_SQL), {"t": thread_id}).scalar() or 0
-        )
+        count = int(conn.execute(text(_COUNT_SQL), {"t": thread_id}).scalar() or 0)
         latest = conn.execute(text(_LATEST_CHECKPOINT_SQL), {"t": thread_id}).mappings().first()
         writes = conn.execute(text(_PENDING_WRITES_SQL), {"t": thread_id}).all()
 
@@ -203,9 +201,7 @@ def _commit_state(engine, thread_id: str) -> dict[str, object]:
         "checkpoint_id": latest["checkpoint_id"],
         "channels": channels,
         "durable_has_first_result": DURABLE_FIRST_CHANNEL in values,
-        "pending_writes": [
-            {"checkpoint_id": r[0], "channel": r[1], "type": r[2]} for r in writes
-        ],
+        "pending_writes": [{"checkpoint_id": r[0], "channel": r[1], "type": r[2]} for r in writes],
     }
 
 
@@ -281,6 +277,7 @@ def run_cycle(
             record["gate_satisfied"] = True
             record["gate_skipped"] = True
         else:
+
             def _gate() -> bool:
                 with engine.connect() as conn:
                     count = int(conn.execute(text(_COUNT_SQL), {"t": thread_id}).scalar() or 0)
@@ -351,18 +348,14 @@ def run_cycle(
         worker_b = _start_worker(
             _worker_env(queue, key_prefix), str(workdir / f"cycle-{index:03d}.worker-b.log")
         )
-        record["tail"].update(
-            _await_recovery(engine, redis_client, thread_id, run_id, key_prefix)
-        )
+        record["tail"].update(_await_recovery(engine, redis_client, thread_id, run_id, key_prefix))
         return record
     finally:
         _stop_worker(worker)
         _stop_worker(worker_b)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            conn.execute(
-                text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
-            )
+            conn.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
         redis_client.delete(*ckpt_keys, queue, "unacked", "unacked_index")
 
 
@@ -378,9 +371,7 @@ def _await_recovery(engine, redis_client, thread_id, run_id, key_prefix) -> dict
     def _row():
         with engine.connect() as conn:
             return conn.execute(
-                text(
-                    "SELECT status, attempt, worker_id, result FROM agent_runs WHERE id=:id"
-                ),
+                text("SELECT status, attempt, worker_id, result FROM agent_runs WHERE id=:id"),
                 {"id": run_id},
             ).fetchone()
 

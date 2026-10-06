@@ -231,16 +231,12 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
 
     from celery import Celery
 
-    Celery(broker=REDIS_URL).send_task(
-        "runtime.execute_agent_run", args=[run_id], queue=queue
-    )
+    Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
     def row():
         with engine.connect() as conn:
             return conn.execute(
-                text(
-                    "SELECT status, attempt, worker_id, result FROM agent_runs WHERE id=:id"
-                ),
+                text("SELECT status, attempt, worker_id, result FROM agent_runs WHERE id=:id"),
                 {"id": run_id},
             ).fetchone()
 
@@ -262,9 +258,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         exists" — the distinction the old count-based gate could not make.
         """
         with engine.connect() as conn:
-            rows = conn.execute(
-                text(_LATEST_CHECKPOINTS_SQL), {"t": thread_id}
-            ).mappings().all()
+            rows = conn.execute(text(_LATEST_CHECKPOINTS_SQL), {"t": thread_id}).mappings().all()
         return [
             {"checkpoint_id": r["checkpoint_id"], "channels": list(r["channels"] or [])}
             for r in rows
@@ -322,9 +316,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         # 等一个条件（真实不变式）而不是加 sleep：既不掩盖竞态，也不放宽断言，
         # 也不去改 visibility_timeout。
         phase = "wait_first_superstep_durable"
-        durable = _wait_for(
-            lambda: first_superstep_durable(committed_checkpoint_channels()), 20
-        )
+        durable = _wait_for(lambda: first_superstep_durable(committed_checkpoint_channels()), 20)
         diag.mark(
             "first_superstep_durable",
             durable=bool(durable),
@@ -340,9 +332,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         assert first_before == 1, f"first 应恰好执行一次，实际 {first_before}"
 
         phase = "wait_running"
-        running = _wait_for(
-            lambda: (r := row()) is not None and r[0] == "RUNNING" and r, 20
-        )
+        running = _wait_for(lambda: (r := row()) is not None and r[0] == "RUNNING" and r, 20)
         diag.mark("run_running_observed")
         assert running, f"未进入 RUNNING: {row()}"
         worker_a_id = running[2]
@@ -364,6 +354,7 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         diag.mark("worker_b_started")
 
         phase = "wait_final_state"
+
         # 注意 lambda 返回 **None** 而不是 False：``_wait_for`` 超时后返回最后一次
         # 求值；若返回 False，则 ``final is not None`` 会通过而 ``final[0]`` 抛
         # TypeError，把"run 没进终态"这个可诊断的失败变成看不懂的崩溃。
@@ -384,13 +375,11 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
         second_after = int(client.get(f"{key_prefix}:node_second") or 0)
         recovered = int(client.get(f"{key_prefix}:recovered") or 0)
         trace = client.lrange(f"{key_prefix}:trace", 0, -1) or []
-        diag.mark(
-            "resume_evidence", first=first_after, second=second_after, recovered=recovered
-        )
+        diag.mark("resume_evidence", first=first_after, second=second_after, recovered=recovered)
 
-        assert first_after == 1, (
-            f"first 被执行 {first_after} 次 —— 说明是从头重跑而非从 checkpoint 续跑；trace={trace}"
-        )
+        assert (
+            first_after == 1
+        ), f"first 被执行 {first_after} 次 —— 说明是从头重跑而非从 checkpoint 续跑；trace={trace}"
         assert second_after >= 2, f"second 应至少执行 2 次（崩溃后重做）：{second_after}"
         assert recovered >= 1, f"Worker B 未检测到未完成 checkpoint：trace={trace}"
 
@@ -418,12 +407,8 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
             _stop_worker(proc)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            conn.execute(
-                text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
-            )
+            conn.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
         client.delete(*ckpt_keys, queue)
         client.close()
         with engine.begin() as conn:
-            conn.execute(
-                text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id}
-            )
+            conn.execute(text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id})

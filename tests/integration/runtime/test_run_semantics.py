@@ -30,7 +30,9 @@ import pytest
 
 INFRA_REASON = "TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 未设置；需要真实 PG + Redis"
 requires_infra = pytest.mark.skipif(
-    not (os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip() and os.getenv("TEST_REDIS_URL", "").strip()),
+    not (
+        os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip() and os.getenv("TEST_REDIS_URL", "").strip()
+    ),
     reason=INFRA_REASON,
 )
 
@@ -131,15 +133,14 @@ def test_gate2_thread_and_run_are_separated(run_service, unique):
     session_id = unique("T-gate2")
 
     runs = [
-        run_service.create_run(query=f"q{i}", session_id=session_id, user_id="u1")
-        for i in range(3)
+        run_service.create_run(query=f"q{i}", session_id=session_id, user_id="u1") for i in range(3)
     ]
     run_ids = [r["id"] for r in runs]
 
     assert len(set(run_ids)) == 3, "run_id 必须互不相同"
-    assert all(r["thread_id"] == session_id for r in runs), (
-        "同一会话的多次 run 必须共享同一 thread_id"
-    )
+    assert all(
+        r["thread_id"] == session_id for r in runs
+    ), "同一会话的多次 run 必须共享同一 thread_id"
 
     # 全部能从数据库分别查回
     for rid, created in zip(run_ids, runs, strict=True):
@@ -156,13 +157,17 @@ def test_gate2_idempotency_scope_cannot_overflow_column(run_service, unique):
         query="q",
         session_id=unique("T-idem"),
         user_id="alice",
-        idempotency_key=run_service_module().build_idempotency_scope("alice", "POST:/api/runs", long_key),
+        idempotency_key=run_service_module().build_idempotency_scope(
+            "alice", "POST:/api/runs", long_key
+        ),
     )
     b = run_service.create_run(
         query="q",
         session_id=unique("T-idem"),
         user_id="bob",
-        idempotency_key=run_service_module().build_idempotency_scope("bob", "POST:/api/runs", long_key),
+        idempotency_key=run_service_module().build_idempotency_scope(
+            "bob", "POST:/api/runs", long_key
+        ),
     )
     assert a["id"] != b["id"], "不同 user 的同名原始 key 必须互相隔离"
     assert len(a["idempotency_key"]) <= 128
@@ -219,9 +224,7 @@ def test_gate3_same_thread_never_overlaps(run_service, redis_url, unique, monkey
 
     async def scenario():
         # A、B **同时**投递：必须由 thread lock 决定谁先跑，另一个被延迟重调度。
-        first, second = await asyncio.gather(
-            run_once(a["id"], "w-a"), run_once(b["id"], "w-b")
-        )
+        first, second = await asyncio.gather(run_once(a["id"], "w-a"), run_once(b["id"], "w-b"))
         return first, second
 
     first_status, second_status = asyncio.run(scenario())
@@ -230,9 +233,7 @@ def test_gate3_same_thread_never_overlaps(run_service, redis_url, unique, monkey
     assert dispatched, "同 thread 并发投递时应有一个 run 被延迟重调度"
     deferred_id = dispatched[0][0]
     deferred_status = first_status if deferred_id == a["id"] else second_status
-    assert deferred_status == "QUEUED", (
-        f"落败方应保持 QUEUED 等待重投，实际 {deferred_status}"
-    )
+    assert deferred_status == "QUEUED", f"落败方应保持 QUEUED 等待重投，实际 {deferred_status}"
 
     # 模拟 broker 的 countdown 重投，直到两个 run 都进入终态
     deadline = time.monotonic() + 30
@@ -271,7 +272,6 @@ def test_gate3_same_thread_never_overlaps(run_service, redis_url, unique, monkey
     ivals = sorted(by_thread[thread_id])
     for (s1, e1), (s2, _e2) in zip(ivals, ivals[1:], strict=False):
         assert e1 <= s2, f"同 thread 执行区间重叠: {(s1, e1)} vs {(s2, _e2)}"
-
 
 
 async def _close_thread_lock_manager() -> None:
@@ -345,9 +345,7 @@ def test_gate4_different_threads_run_concurrently(run_service, redis_url, unique
     assert run_service.require_run(r2["id"])["status"] == "SUCCEEDED"
     assert runtime.max_overlap() == 2, "不同 thread 应真正同时执行（证明锁不是全局锁）"
     # 串行会是 ~3s；并发应接近 1.5s。留足余量仍能区分。
-    assert elapsed < sleep * 1.8, (
-        f"不同 thread 被串行化了：elapsed={elapsed:.2f}s, sleep={sleep}s"
-    )
+    assert elapsed < sleep * 1.8, f"不同 thread 被串行化了：elapsed={elapsed:.2f}s, sleep={sleep}s"
 
 
 # ---------------------------------------------------------------------------
@@ -382,9 +380,9 @@ def test_gate5_lease_owner_safety_and_crash_takeover(redis_url, unique):
         short = unique("T-gate5-short")
         assert await lock_a.acquire(short, "owner-C", 1.0) is True
         await asyncio.sleep(1.5)
-        assert await lock_b.acquire(short, "owner-D", 30.0) is True, (
-            "TTL 到期后必须能被接管，否则会永久死锁"
-        )
+        assert (
+            await lock_b.acquire(short, "owner-D", 30.0) is True
+        ), "TTL 到期后必须能被接管，否则会永久死锁"
         assert await _raw_get(redis_url, f"gate5:{short}") == "owner-D"
 
     try:
@@ -489,9 +487,7 @@ def _counter(name: str) -> float:
         ("unsupported_operation", NotImplementedError("该工具在当前环境不支持")),
     ],
 )
-def test_gate9_permanent_error_does_not_retry(
-    run_service, unique, thread_lock_off, label, exc
-):
+def test_gate9_permanent_error_does_not_retry(run_service, unique, thread_lock_off, label, exc):
     """401/403/参数非法/业务校验错误 -> 立即 FAILED，attempt == 1，不重试、不进 DLQ。"""
     from runtime.executor import execute_run
 

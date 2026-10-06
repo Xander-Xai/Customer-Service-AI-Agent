@@ -567,6 +567,7 @@ class TestCosmeticsKnowledgeBase:
 
         class MockScoredPoint:
             """模拟 Qdrant ScoredPoint"""
+
             def __init__(self, content, score=0.9, doc_id=""):
                 self.payload = {"content": content, "doc_id": doc_id}
                 self.score = score
@@ -963,11 +964,14 @@ class TestCosmeticsKBClipAndMultimodal:
     def _make_real_kb(self):
         from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         mock_qdrant = MagicMock()
         mock_qdrant.get_collections.return_value = MagicMock()
         mock_ef = MagicMock()
         with (
-            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ),
             patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
             kb = CosmeticsKnowledgeBase(clip_enabled=False)
@@ -977,11 +981,14 @@ class TestCosmeticsKBClipAndMultimodal:
     def _make_real_kb_with_clip(self):
         from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         mock_qdrant = MagicMock()
         mock_qdrant.get_collections.return_value = MagicMock()
         mock_ef = MagicMock()
         with (
-            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ),
             patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
             kb = CosmeticsKnowledgeBase(clip_enabled=True)
@@ -999,11 +1006,14 @@ class TestCosmeticsKBClipAndMultimodal:
     def test_delete_documents_real(self):
         from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         mock_qdrant = MagicMock()
         mock_qdrant.get_collections.return_value = MagicMock()
         mock_ef = MagicMock()
         with (
-            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ),
             patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
             kb = CosmeticsKnowledgeBase(clip_enabled=False)
@@ -1019,16 +1029,21 @@ class TestCosmeticsKBClipAndMultimodal:
     def test_get_collection_count(self):
         from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         mock_qdrant = MagicMock()
         mock_qdrant.get_collections.return_value = MagicMock()
         mock_ef = MagicMock()
         with (
-            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ),
             patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
             kb = CosmeticsKnowledgeBase()
+
         class MockCountResult:
             count = 42
+
         mock_qdrant.count.return_value = MockCountResult()
         assert kb.get_collection_count("product_knowledge") == 42
 
@@ -1084,6 +1099,7 @@ class TestCosmeticsKBClipAndMultimodal:
 
     def test_simple_rerank_basic(self):
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         results = [
             {"content": "unrelated", "distance": 0.1},
             {"content": "niacinamide whitening serum", "distance": 0.5},
@@ -1093,10 +1109,12 @@ class TestCosmeticsKBClipAndMultimodal:
 
     def test_simple_rerank_empty(self):
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         assert CosmeticsKnowledgeBase.simple_rerank("query", []) == []
 
     def test_simple_rerank_without_jieba(self):
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         results = [
             {"content": "unrelated", "distance": 0.1},
             {"content": "niacinamide whitening serum", "distance": 0.5},
@@ -1117,16 +1135,21 @@ class TestCosmeticsKBClipAndMultimodal:
     def test_seed_if_empty_not_empty(self):
         from rag import qdrant_knowledge_base as kb_mod
         from rag.knowledge_base import CosmeticsKnowledgeBase
+
         mock_qdrant = MagicMock()
         mock_qdrant.get_collections.return_value = MagicMock()
         mock_ef = MagicMock()
         with (
-            patch.object(CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef),
+            patch.object(
+                CosmeticsKnowledgeBase, "_create_embedding_function", return_value=mock_ef
+            ),
             patch.object(kb_mod, "QdrantClient", return_value=mock_qdrant),
         ):
             kb = CosmeticsKnowledgeBase()
+
         class MockColInfo:
             points_count = 5
+
         mock_qdrant.get_collection.return_value = MockColInfo()
         seed_fn = MagicMock()
         kb.seed_if_empty("product_knowledge", seed_fn)

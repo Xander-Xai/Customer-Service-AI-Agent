@@ -170,8 +170,9 @@ def render_report(plan: PurgePlan, *, as_json: bool) -> str:
     lines = [f"孤儿 checkpoint thread（可回收）: {len(plan.candidates)}"]
     for c in plan.candidates:
         lines.append(
-            f"  - {c.thread_id}  checkpoints={c.checkpoint_count} "
-            f"age={c.age_seconds:.0f}s" if c.age_seconds is not None else f"  - {c.thread_id}"
+            f"  - {c.thread_id}  checkpoints={c.checkpoint_count} " f"age={c.age_seconds:.0f}s"
+            if c.age_seconds is not None
+            else f"  - {c.thread_id}"
         )
     lines.append(f"因太新/时间未知而保留: {len(plan.skipped_too_young)}")
     for c in plan.skipped_too_young:

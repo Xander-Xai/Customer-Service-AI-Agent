@@ -61,8 +61,7 @@ def _requirement_specs(text: str, name: str) -> list[str]:
     failure mode where two pins disagree and the later one silently wins.
     """
     return [
-        m.group(1).strip()
-        for m in re.finditer(rf"(?m)^{re.escape(name)}\s*([<>=!~].*)$", text)
+        m.group(1).strip() for m in re.finditer(rf"(?m)^{re.escape(name)}\s*([<>=!~].*)$", text)
     ]
 
 
@@ -147,9 +146,9 @@ class TestDependencyContract:
         """
         dev = _read("requirements-dev.txt")
         ruff_specs = _requirement_specs(dev, "ruff")
-        assert len(ruff_specs) == 1, (
-            f"requirements-dev.txt must declare ruff exactly once, found {ruff_specs}"
-        )
+        assert (
+            len(ruff_specs) == 1
+        ), f"requirements-dev.txt must declare ruff exactly once, found {ruff_specs}"
         spec = ruff_specs[0].replace(" ", "")
         assert spec.startswith("=="), (
             f"ruff must be hard-pinned (`ruff==X.Y.Z`), got {spec!r}: Ruff's "
@@ -174,9 +173,9 @@ class TestDependencyContract:
         # ship to production for no reason.
         for req in ("requirements.txt", "requirements-lock.txt"):
             if (REPO_ROOT / req).exists():
-                assert not _requirement_specs(_read(req), "ruff"), (
-                    f"{req} must not carry ruff; it is a dev-only toolchain"
-                )
+                assert not _requirement_specs(
+                    _read(req), "ruff"
+                ), f"{req} must not carry ruff; it is a dev-only toolchain"
 
     def test_dev_pytest_asyncio_floor_is_0234(self):
         text = _read("requirements-dev.txt")
@@ -212,12 +211,12 @@ class TestDependencyContract:
         head = "\n".join(_read("requirements-lock.txt").splitlines()[:40])
         assert "SUPERSEDED" in head
         assert "NON-AUTHORITATIVE" in head
-        assert "pip install -r requirements-lock.txt" not in head, (
-            "requirements-lock.txt still advertises itself as an install entry"
-        )
-        assert not re.search(r"用法（生产部署）", head), (
-            "requirements-lock.txt still claims a production deployment role"
-        )
+        assert (
+            "pip install -r requirements-lock.txt" not in head
+        ), "requirements-lock.txt still advertises itself as an install entry"
+        assert not re.search(
+            r"用法（生产部署）", head
+        ), "requirements-lock.txt still claims a production deployment role"
 
     def test_makefile_lock_is_not_production_authority(self):
         makefile = _read("Makefile")
@@ -229,9 +228,9 @@ class TestDependencyContract:
         # `make lock` must not clobber the frozen historical snapshot (whose
         # SUPERSEDED header is guarded here); it writes an untracked local file.
         assert "requirements-lock.local.txt" in block
-        assert not re.search(r">\s*requirements-lock\.txt\b", block), (
-            "make lock overwrites requirements-lock.txt, destroying its non-authoritative header"
-        )
+        assert not re.search(
+            r">\s*requirements-lock\.txt\b", block
+        ), "make lock overwrites requirements-lock.txt, destroying its non-authoritative header"
 
     def test_local_lock_snapshot_is_gitignored(self):
         gitignore = _read(".gitignore")
@@ -261,9 +260,9 @@ class TestHistoricalAuthority:
     def test_codex_spec_no_longer_claims_unique_spec(self):
         text = _read("docs/audit/CODEX_PROJECT_REMEDIATION_SPEC.md")
         assert "SUPERSEDED" in text[:2500]
-        assert "本文件是项目整改的唯一执行规格" not in text, (
-            "CODEX_PROJECT_REMEDIATION_SPEC.md reclaimed its superseded '唯一执行规格' authority"
-        )
+        assert (
+            "本文件是项目整改的唯一执行规格" not in text
+        ), "CODEX_PROJECT_REMEDIATION_SPEC.md reclaimed its superseded '唯一执行规格' authority"
         assert "current-state.md" in text[:2500]
         assert "production-evidence.md" in text[:2500]
 
@@ -370,9 +369,9 @@ class TestLicenseContract:
     def test_readme_states_the_canonical_license(self):
         readme = _read("README.md")
         assert "Apache 2.0" in readme, "README no longer states Apache 2.0"
-        assert STRONG_COPYLEFT_RE.search(readme) is None, (
-            "README asserts a license that contradicts the canonical LICENSE"
-        )
+        assert (
+            STRONG_COPYLEFT_RE.search(readme) is None
+        ), "README asserts a license that contradicts the canonical LICENSE"
 
     def test_no_first_party_conflicting_license_declaration(self):
         """No tracked first-party file may declare a strong copyleft license.
@@ -394,9 +393,9 @@ class TestLicenseContract:
                 continue
             if STRONG_COPYLEFT_RE.search(content):
                 offenders.append(rel)
-        assert not offenders, (
-            f"first-party files declare a license contradicting the canonical LICENSE: {offenders}"
-        )
+        assert (
+            not offenders
+        ), f"first-party files declare a license contradicting the canonical LICENSE: {offenders}"
 
 
 class TestCurrentTruthUniqueness:
@@ -405,9 +404,9 @@ class TestCurrentTruthUniqueness:
 
     def test_entry_docs_point_to_current_state(self):
         for rel in ("README.md", "CLAUDE.md", "docs/README.md"):
-            assert "reference/current-state.md" in _read(rel), (
-                f"{rel} does not point at the canonical current-state entry"
-            )
+            assert "reference/current-state.md" in _read(
+                rel
+            ), f"{rel} does not point at the canonical current-state entry"
 
     def test_no_competing_current_truth_doc(self):
         docs_root = REPO_ROOT / "docs"

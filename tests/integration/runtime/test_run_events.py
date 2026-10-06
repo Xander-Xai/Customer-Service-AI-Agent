@@ -80,9 +80,7 @@ def test_gate13_events_are_written_to_redis_stream(redis_client, run_service, un
     names = [fields.get("event") for _eid, fields in events]
     assert EVENT_STARTED in names, f"缺少 started 事件: {names}"
     assert EVENT_COMPLETED in names, f"缺少 completed 事件: {names}"
-    assert names.index(EVENT_STARTED) < names.index(EVENT_COMPLETED), (
-        f"事件顺序不对: {names}"
-    )
+    assert names.index(EVENT_STARTED) < names.index(EVENT_COMPLETED), f"事件顺序不对: {names}"
 
     key = events_key(run["id"])
     assert key == f"agent:run:{run['id']}:events"
@@ -169,9 +167,5 @@ def test_gate13_sse_endpoint_is_registered():
     """SSE 端点必须在 OpenAPI surface 上存在（防止被误删）。"""
     from api.routes.runs import router
 
-    paths = {
-        getattr(r, "path", None)
-        for r in router.routes
-        if getattr(r, "path", None)
-    }
+    paths = {getattr(r, "path", None) for r in router.routes if getattr(r, "path", None)}
     assert "/api/runs/{run_id}/events" in paths, sorted(paths)

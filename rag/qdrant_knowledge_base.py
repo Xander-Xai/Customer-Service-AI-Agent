@@ -155,7 +155,9 @@ class QdrantKnowledgeBase:
         self._embedding_model_name: str = (
             _model_name
             if isinstance(_model_name, str)
-            else (QdrantKnowledgeBase._embed_fn_name if self._embed_fn is not None else "unavailable")
+            else (
+                QdrantKnowledgeBase._embed_fn_name if self._embed_fn is not None else "unavailable"
+            )
         )
         self._embedding_provider: str = (
             type(self._embed_fn).__name__ if self._embed_fn is not None else "unavailable"
@@ -192,7 +194,9 @@ class QdrantKnowledgeBase:
             )
             self._client.get_collections()
             self._available = True
-            clip_info = f", clip={'enabled' if clip_enabled else 'disabled'}" if clip_enabled else ""
+            clip_info = (
+                f", clip={'enabled' if clip_enabled else 'disabled'}" if clip_enabled else ""
+            )
             logger.info(f"Qdrant 连接成功 ({host}:{port}{clip_info})")
         except Exception as e:
             self._available = False
@@ -251,7 +255,9 @@ class QdrantKnowledgeBase:
 
     def embedding_status(self) -> EmbeddingStatus:
         """Typed embedding channel state for callers/metrics."""
-        return EmbeddingStatus.AVAILABLE if self._embed_fn is not None else EmbeddingStatus.UNAVAILABLE
+        return (
+            EmbeddingStatus.AVAILABLE if self._embed_fn is not None else EmbeddingStatus.UNAVAILABLE
+        )
 
     def _record_embedding_failure(self, reason: str) -> None:
         """Increment the embedding-provider-failure counter (label = reason only)."""
@@ -369,7 +375,9 @@ class QdrantKnowledgeBase:
             ids = [f"{collection_name}_{count + i}" for i in range(len(documents))]
         if metadatas is None:
             metadatas = [{}] * len(documents)
-        cleaned_metadatas = [{k: v for k, v in m.items() if v is not None} if m else {} for m in metadatas]
+        cleaned_metadatas = [
+            {k: v for k, v in m.items() if v is not None} if m else {} for m in metadatas
+        ]
 
         # P0-05: fail closed on embedding unavailability — NEVER persist a fake
         # (random/pseudo) vector. Skip the Qdrant vector upsert; the lexical
@@ -499,9 +507,7 @@ class QdrantKnowledgeBase:
         ``_embed_texts``); the caller decides degrade/error handling. After
         validation, forwards to the unified ``_dense_query`` (query_points).
         """
-        validate_embedding_vector(
-            query_vector, _EMBEDDING_DIM, model=self._embedding_model_name
-        )
+        validate_embedding_vector(query_vector, _EMBEDDING_DIM, model=self._embedding_model_name)
         return await self._dense_query(collection_name, query_vector, n_results, None)
 
     async def query(
@@ -518,9 +524,7 @@ class QdrantKnowledgeBase:
         the P0-05/P1-02 degraded contract, and ``.trace`` is available).
         """
         return await self.retrieve(
-            RetrievalRequest(
-                query=query_text, collections=[collection_name], top_k=n_results
-            )
+            RetrievalRequest(query=query_text, collections=[collection_name], top_k=n_results)
         )
 
     async def search(
@@ -634,20 +638,25 @@ class QdrantKnowledgeBase:
             else:
                 canonical = await self._canonical_rewrite(canonical, request.llm)
         trace.rewritten_query = canonical
-        trace.add(TraceStage(
-            STAGE_REWRITE,
-            StageStatus.EXECUTED if request.rewrite else StageStatus.SKIPPED,
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-            reason="" if request.rewrite else "rewrite_disabled",
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_REWRITE,
+                StageStatus.EXECUTED if request.rewrite else StageStatus.SKIPPED,
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+                reason="" if request.rewrite else "rewrite_disabled",
+            )
+        )
 
         # ---- 2. FILTER — scene + metadata, applied by the pipeline (step 11) ----
         t0 = time.perf_counter()
         query_filter = self._build_retrieve_filter(request.scene, request.metadata_filters)
-        trace.add(TraceStage(
-            STAGE_FILTER, StageStatus.EXECUTED,
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_FILTER,
+                StageStatus.EXECUTED,
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+            )
+        )
 
         # ---- 3. VECTOR — dense channel; consumes P0-05 (no fake vector) ----
         # Dense uses query_points (1.18). Prefetched embedding is reused so
@@ -667,7 +676,8 @@ class QdrantKnowledgeBase:
             if request.prefetched_embedding is not None:
                 try:
                     validate_embedding_vector(
-                        request.prefetched_embedding, _EMBEDDING_DIM,
+                        request.prefetched_embedding,
+                        _EMBEDDING_DIM,
                         model=self._embedding_model_name,
                     )
                     query_vector = request.prefetched_embedding
@@ -689,8 +699,11 @@ class QdrantKnowledgeBase:
             if query_vector is not None and vector_status == "ok":
                 vector_top_k = max(top_k * 2, HYBRID_VECTOR_TOP_K)
                 dense_results, dense_failure = await self._dense_query_multi(
-                    request.collections, query_vector, vector_top_k,
-                    query_filter, request.retrieval_timeout,
+                    request.collections,
+                    query_vector,
+                    vector_top_k,
+                    query_filter,
+                    request.retrieval_timeout,
                 )
                 if dense_failure is not None:
                     vector_status = dense_failure  # retrieval_timeout | vector_channel_error
@@ -698,14 +711,16 @@ class QdrantKnowledgeBase:
                 else:
                     vector_results = dense_results
 
-        trace.add(TraceStage(
-            STAGE_VECTOR,
-            StageStatus.EXECUTED if vector_status == "ok" else StageStatus.DEGRADED,
-            candidate_in=len(request.collections),
-            candidate_out=len(vector_results),
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-            reason=vector_status if vector_status != "ok" else "",
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_VECTOR,
+                StageStatus.EXECUTED if vector_status == "ok" else StageStatus.DEGRADED,
+                candidate_in=len(request.collections),
+                candidate_out=len(vector_results),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+                reason=vector_status if vector_status != "ok" else "",
+            )
+        )
 
         # ---- 4. BM25 — consumes P1-02 readiness (spec step 13) ----
         t0 = time.perf_counter()
@@ -726,17 +741,23 @@ class QdrantKnowledgeBase:
             except Exception as e:
                 logger.debug(f"retrieve() BM25 检索异常: {e}")
                 bm25_results = []
-            trace.add(TraceStage(
-                STAGE_BM25, StageStatus.EXECUTED,
-                candidate_out=len(bm25_results),
-                duration_ms=(time.perf_counter() - t0) * 1000.0,
-            ))
+            trace.add(
+                TraceStage(
+                    STAGE_BM25,
+                    StageStatus.EXECUTED,
+                    candidate_out=len(bm25_results),
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+            )
         else:
-            trace.add(TraceStage(
-                STAGE_BM25, StageStatus.DEGRADED,
-                reason=REASON_BM25_NOT_READY,
-                duration_ms=(time.perf_counter() - t0) * 1000.0,
-            ))
+            trace.add(
+                TraceStage(
+                    STAGE_BM25,
+                    StageStatus.DEGRADED,
+                    reason=REASON_BM25_NOT_READY,
+                    duration_ms=(time.perf_counter() - t0) * 1000.0,
+                )
+            )
 
         # ---- 5. FUSION_RRF — fuse only successful channels (spec step 14) ----
         t0 = time.perf_counter()
@@ -755,12 +776,15 @@ class QdrantKnowledgeBase:
         else:
             fused = []
             fusion_status = StageStatus.SKIPPED
-        trace.add(TraceStage(
-            STAGE_FUSION_RRF, fusion_status,
-            candidate_in=sum(len(c) for c in channels),
-            candidate_out=len(fused),
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_FUSION_RRF,
+                fusion_status,
+                candidate_in=sum(len(c) for c in channels),
+                candidate_out=len(fused),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+            )
+        )
 
         # ---- 6. RERANK — at most one canonical stage (spec step 15) ----
         t0 = time.perf_counter()
@@ -783,13 +807,16 @@ class QdrantKnowledgeBase:
             rerank_reason = (
                 "rerank_disabled" if not request.rerank else REASON_INSUFFICIENT_CANDIDATES
             )
-        trace.add(TraceStage(
-            STAGE_RERANK, rerank_status,
-            candidate_in=len(fused),
-            candidate_out=len(reranked),
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-            reason=rerank_reason,
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_RERANK,
+                rerank_status,
+                candidate_in=len(fused),
+                candidate_out=len(reranked),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+                reason=rerank_reason,
+            )
+        )
 
         # ---- 7. FINAL — evidence + degraded meta (4-combo contract; step 23) ----
         t0 = time.perf_counter()
@@ -834,11 +861,14 @@ class QdrantKnowledgeBase:
                 "embedding_provider": self._embedding_provider,
                 "embedding_model": self._embedding_model_name,
             }
-        trace.add(TraceStage(
-            STAGE_FINAL, StageStatus.EXECUTED,
-            candidate_out=len(evidence),
-            duration_ms=(time.perf_counter() - t0) * 1000.0,
-        ))
+        trace.add(
+            TraceStage(
+                STAGE_FINAL,
+                StageStatus.EXECUTED,
+                candidate_out=len(evidence),
+                duration_ms=(time.perf_counter() - t0) * 1000.0,
+            )
+        )
 
         # ---- Reranker truth, merged into meta WITHOUT erasing the root cause ----
         # A reranker degradation is a *component* fact; the embedding/BM25
@@ -849,9 +879,7 @@ class QdrantKnowledgeBase:
         rerank_requested = bool(request.rerank and len(fused) > 1)
         rerank_applied = bool(rerank_outcome is not None and rerank_outcome.applied)
         rerank_degraded = bool(rerank_outcome is not None and rerank_outcome.degraded)
-        rerank_reason = (
-            rerank_outcome.reason_value if rerank_outcome is not None else ""
-        )
+        rerank_reason = rerank_outcome.reason_value if rerank_outcome is not None else ""
         meta["rerank_requested"] = rerank_requested
         meta["rerank_applied"] = rerank_applied
         meta["rerank_degraded"] = rerank_degraded
@@ -1084,7 +1112,9 @@ class QdrantKnowledgeBase:
             return
         if self._bm25_readiness is BM25Readiness.READY:
             self._bm25_version_counter += 1
-            doc_count = self._bm25.total_documents() if hasattr(self._bm25, "total_documents") else 0
+            doc_count = (
+                self._bm25.total_documents() if hasattr(self._bm25, "total_documents") else 0
+            )
             prev = self._bm25_meta
             self._bm25_meta = BM25IndexMeta(
                 index_version=self._bm25_version_counter,
@@ -1186,7 +1216,12 @@ class QdrantKnowledgeBase:
                     continue
                 doc_id = payload.get("doc_id")
                 content = payload.get("content")
-                if not isinstance(doc_id, str) or not doc_id or not isinstance(content, str) or not content.strip():
+                if (
+                    not isinstance(doc_id, str)
+                    or not doc_id
+                    or not isinstance(content, str)
+                    or not content.strip()
+                ):
                     skipped += 1
                     continue
                 meta = {k: v for k, v in payload.items() if k not in ("doc_id", "content")}
@@ -1271,9 +1306,7 @@ class QdrantKnowledgeBase:
                     docs, ids, metadatas, skipped = self._scroll_collection_for_bm25(coll)
                     skipped_invalid += skipped
                     if docs:
-                        candidate.add_documents(
-                            docs, collection=coll, ids=ids, metadatas=metadatas
-                        )
+                        candidate.add_documents(docs, collection=coll, ids=ids, metadatas=metadatas)
                     per_collection[coll] = {
                         "point_count": self.get_collection_count(coll),
                         "doc_count": len(ids),
@@ -1401,7 +1434,9 @@ class QdrantKnowledgeBase:
                 continue
             try:
                 results = bm25.search(
-                    query, top_k=top_k, collection=coll,
+                    query,
+                    top_k=top_k,
+                    collection=coll,
                     metadata_filter=metadata_filter,
                 )
                 all_results.extend(results)
@@ -1420,7 +1455,9 @@ class QdrantKnowledgeBase:
                 {
                     "id": payload.get("doc_id", ""),
                     "content": payload.get("content", ""),
-                    "metadata": {k: v for k, v in payload.items() if k not in ("doc_id", "content")},
+                    "metadata": {
+                        k: v for k, v in payload.items() if k not in ("doc_id", "content")
+                    },
                     "distance": 1.0 - scored_point.score,
                     "score": scored_point.score,
                 }
@@ -1531,9 +1568,7 @@ class QdrantKnowledgeBase:
         try:
             legacy = cast(list[dict[str, Any]], self._reranker.rerank(query, results, top_k=top_k))
         except Exception as e:
-            logger.error(
-                "Rerank 调用失败，降级为原始排序: error_type=%s", type(e).__name__
-            )
+            logger.error("Rerank 调用失败，降级为原始排序: error_type=%s", type(e).__name__)
             return RerankOutcome(
                 results=results,
                 applied=False,
@@ -1674,7 +1709,9 @@ def _apply_retrieval_span(span_obj: Any, result: Any) -> None:
         # happened on every request, including the ones where the provider
         # failed and the pre-rerank ordering was returned untouched — which is
         # precisely the lie this attribute must not tell.
-        rerank_stage = getattr(pipeline_trace, "stage", lambda _n: None)(STAGE_RERANK) if stages else None
+        rerank_stage = (
+            getattr(pipeline_trace, "stage", lambda _n: None)(STAGE_RERANK) if stages else None
+        )
         if rerank_stage is not None and _stage_field(rerank_stage, "status") == (
             StageStatus.EXECUTED.value
         ):

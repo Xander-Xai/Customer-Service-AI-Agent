@@ -299,16 +299,16 @@ class TestCanaryConfigDeclaresBothBackends:
         assert blocks, "canary config must declare an http-level map"
         joined = "\n".join(blocks)
         assert "$cookie_canary_token" in joined, "the split must key off the canary cookie"
-        assert "canary_backend" in joined and "stable_backend" in joined, (
-            "both backends must appear as map results, or the cookie cannot select one"
-        )
+        assert (
+            "canary_backend" in joined and "stable_backend" in joined
+        ), "both backends must appear as map results, or the cookie cannot select one"
 
     @pytest.mark.unit
     def test_canary_proxy_uses_the_mapped_backend(self) -> None:
         text = _strip_comments(_read(CANARY_CONF))
-        assert re.search(r"proxy_pass\s+http://\$\w+\s*;", text), (
-            "the canary config must proxy through the mapped variable"
-        )
+        assert re.search(
+            r"proxy_pass\s+http://\$\w+\s*;", text
+        ), "the canary config must proxy through the mapped variable"
 
 
 # ---------------------------------------------------------------------------
@@ -332,9 +332,9 @@ class TestCanaryConfigIsWiredOnlyIntoTheCanaryStack:
     def test_canary_compose_mounts_the_canary_config(self) -> None:
         mounts = _nginx_volume_mounts(COMPOSE_DIR / "docker-compose.canary.yml")
         hosts = [h for h, _ in mounts]
-        assert any(h.endswith("nginx.conf.canary") for h in hosts), (
-            f"the canary variant must mount nginx.conf.canary; got {hosts}"
-        )
+        assert any(
+            h.endswith("nginx.conf.canary") for h in hosts
+        ), f"the canary variant must mount nginx.conf.canary; got {hosts}"
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
@@ -441,12 +441,12 @@ class TestStaticAssetsAreOwnedByTheApp:
         """
         app_source = _read(REPO_ROOT / "api" / "app.py")
         for mount_point in ('"/static"', '"/styles"', '"/assets"'):
-            assert f"app.mount({mount_point}" in app_source, (
-                f"the app must mount {mount_point} -- nginx no longer serves it"
-            )
-        assert "immutable" in app_source, (
-            "the app's static wrapper must set the immutable cache header"
-        )
+            assert (
+                f"app.mount({mount_point}" in app_source
+            ), f"the app must mount {mount_point} -- nginx no longer serves it"
+        assert (
+            "immutable" in app_source
+        ), "the app's static wrapper must set the immutable cache header"
         assert "nosniff" in app_source, "the app's static wrapper must set nosniff"
 
     @pytest.mark.unit
@@ -520,9 +520,9 @@ class TestBaseAndCanaryShareInvariants:
             text = _strip_comments(_read(conf))
             block = re.search(r"location\s*=\s*/api/health\s*\{(.*?)\n    \}", text, re.S)
             assert block, f"{conf.name} must keep an /api/health location"
-            assert "stable_backend" in block.group(1), (
-                f"{conf.name}: /api/health must proxy to stable_backend"
-            )
+            assert "stable_backend" in block.group(
+                1
+            ), f"{conf.name}: /api/health must proxy to stable_backend"
 
 
 # ---------------------------------------------------------------------------
@@ -621,9 +621,9 @@ class TestConfigsAreAcceptedByNginx:
         result = _nginx_t(None, cert_dir=throwaway_certs, network=upstream_network)
         combined = result.stdout + result.stderr
         assert result.returncode == 0, f"base config rejected by nginx:\n{combined}"
-        assert "directive is not allowed here" not in combined, (
-            f"a directive is in the wrong context:\n{combined}"
-        )
+        assert (
+            "directive is not allowed here" not in combined
+        ), f"a directive is in the wrong context:\n{combined}"
 
     @pytest.mark.unit
     def test_canary_config_parses_when_mounted_like_the_canary_compose(

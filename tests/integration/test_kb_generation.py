@@ -14,6 +14,7 @@ async def test_generate_script_imports():
     """测试 generate_knowledge_base.py 可导入"""
     try:
         from scripts import generate_knowledge_base as gen
+
         assert gen is not None
         assert hasattr(gen, "generate")
     except (ImportError, Exception) as e:
@@ -57,6 +58,7 @@ async def test_import_script_imports():
     """测试 import_real_docs.py 可导入"""
     try:
         from scripts import import_real_docs as imp
+
         assert imp is not None
         assert hasattr(imp, "import_from_csv")
         assert hasattr(imp, "import_from_json")
@@ -69,6 +71,7 @@ async def test_benchmark_scripts_import():
     """测试 benchmark 脚本可导入"""
     try:
         from scripts.benchmark_cache import benchmark_cache as bc
+
         assert bc is not None
     except (ImportError, Exception):
         # benchmark 脚本可能存在模块依赖，允许跳过
@@ -76,12 +79,14 @@ async def test_benchmark_scripts_import():
 
     try:
         from scripts.benchmark_latency import benchmark_latency as bl
+
         assert bl is not None
     except (ImportError, Exception):
         pass
 
     try:
         from scripts.benchmark_cost import analyze_cost as ac
+
         assert ac is not None
     except (ImportError, Exception):
         pass

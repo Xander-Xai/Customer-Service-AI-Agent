@@ -170,9 +170,7 @@ def run() -> dict:
 
         from celery import Celery
 
-        Celery(broker=REDIS_URL).send_task(
-            "runtime.execute_agent_run", args=[run_id], queue=queue
-        )
+        Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
         assert client.llen(queue) >= 1, "消息未进入 broker 队列"
         steps.append({"step": 2, "action": "enqueue", "queue": queue, "ok": True})
 
@@ -222,7 +220,9 @@ def run() -> dict:
         steps.append({"step": 6, "action": "restart_worker", "ok": True})
 
         final = wait_for(
-            lambda: (r := _row(engine, run_id)) and r[0] in ("SUCCEEDED", "FAILED", "DEAD_LETTER") and r,
+            lambda: (r := _row(engine, run_id))
+            and r[0] in ("SUCCEEDED", "FAILED", "DEAD_LETTER")
+            and r,
             150,
             "run 进入终态",
         )
@@ -246,9 +246,7 @@ def run() -> dict:
         ledger = _ledger(engine, thread_id)
 
         if final_counter != 1:
-            raise ChaosFailure(
-                f"副作用被重复执行：idem:counter={final_counter}（必须 == 1）"
-            )
+            raise ChaosFailure(f"副作用被重复执行：idem:counter={final_counter}（必须 == 1）")
         if invocations < 2:
             raise ChaosFailure(f"工具未被重新调用（{invocations} 次），未验证幂等去重")
         if hits < 1:
@@ -293,15 +291,9 @@ def run() -> dict:
             kill_worker_group(worker_b)
         with contextlib.suppress(Exception), engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            conn.execute(
-                text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
-            )
-            conn.execute(
-                text("DELETE FROM tool_side_effects WHERE run_id=:id"), {"id": run_id}
-            )
-            conn.execute(
-                text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id}
-            )
+            conn.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
+            conn.execute(text("DELETE FROM tool_side_effects WHERE run_id=:id"), {"id": run_id})
+            conn.execute(text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id})
         with contextlib.suppress(Exception):
             client.delete(*keys, queue, "unacked", "unacked_index")
             client.close()
@@ -312,9 +304,7 @@ def _row(engine, run_id: str):
 
     with engine.connect() as conn:
         return conn.execute(
-            text(
-                "SELECT status, attempt, worker_id FROM agent_runs WHERE id=:id"
-            ),
+            text("SELECT status, attempt, worker_id FROM agent_runs WHERE id=:id"),
             {"id": run_id},
         ).fetchone()
 

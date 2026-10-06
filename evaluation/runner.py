@@ -35,12 +35,19 @@ def _task_success(case: WorkloadCase) -> bool:
     evidence_ok = set(case.expected_doc_ids).intersection(case.ranked_doc_ids)
     fields_ok = set(case.expected_fields).issubset(case.observed_fields)
     tool_ok = case.expected_tool is None or case.expected_tool == case.observed_tool
-    degraded_ok = case.expected_degraded_signal is None or case.expected_degraded_signal == case.observed_degraded_signal
-    return (not case.expected_doc_ids or bool(evidence_ok)) and fields_ok and tool_ok and degraded_ok
+    degraded_ok = (
+        case.expected_degraded_signal is None
+        or case.expected_degraded_signal == case.observed_degraded_signal
+    )
+    return (
+        (not case.expected_doc_ids or bool(evidence_ok)) and fields_ok and tool_ok and degraded_ok
+    )
 
 
 def _unverified_record(suite: str) -> dict[str, Any]:
-    missing = Measurement.unavailable(EvidenceSource.NOT_VERIFIED, f"{suite} adapter disabled; no external call made")
+    missing = Measurement.unavailable(
+        EvidenceSource.NOT_VERIFIED, f"{suite} adapter disabled; no external call made"
+    )
     return {
         "run_id": str(uuid.uuid4()),
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -112,7 +119,9 @@ def run_local(*, repeat: int = 3, warmup: int = 1) -> EvidenceRecord:
     # vector_only/bm25_only outcomes would be fabricated attribution.
     channels: dict[str, int | float | str | None] = {
         "hit_at_k": round(hit_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
-        "recall_at_k": round(recall_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
+        "recall_at_k": round(recall_sum / retrieval_sample_count, 4)
+        if retrieval_sample_count
+        else None,
         "mrr": round(mrr_sum / retrieval_sample_count, 4) if retrieval_sample_count else None,
         "retrieval_sample_count": retrieval_sample_count,
         "vector_only_hit": "NOT_MEASURED",
@@ -160,11 +169,21 @@ def run_local(*, repeat: int = 3, warmup: int = 1) -> EvidenceRecord:
             "llm": not_measured_component,
             "tool": not_measured_component,
         },
-        estimated_tokens=Measurement.unavailable(EvidenceSource.NOT_AVAILABLE, "fixture has no token tracker input"),
-        input_tokens=Measurement.unavailable(EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"),
-        output_tokens=Measurement.unavailable(EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"),
-        cached_tokens=Measurement.unavailable(EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"),
-        provider_cost=Measurement.unavailable(EvidenceSource.NOT_AVAILABLE, "fixture has no provider billing record"),
+        estimated_tokens=Measurement.unavailable(
+            EvidenceSource.NOT_AVAILABLE, "fixture has no token tracker input"
+        ),
+        input_tokens=Measurement.unavailable(
+            EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"
+        ),
+        output_tokens=Measurement.unavailable(
+            EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"
+        ),
+        cached_tokens=Measurement.unavailable(
+            EvidenceSource.NOT_AVAILABLE, "fixture has no provider response"
+        ),
+        provider_cost=Measurement.unavailable(
+            EvidenceSource.NOT_AVAILABLE, "fixture has no provider billing record"
+        ),
         retrieval_channels=dict(channels),
         task_success={"passed": success_count, "failed": measured_samples - success_count},
         recoverability=dict(recoverability),

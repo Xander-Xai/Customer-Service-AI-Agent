@@ -58,7 +58,10 @@ def _seed_bm25(kb, collection, docs):
         index_version=kb._bm25_version_counter,
         document_count=kb._bm25.total_documents(),
         last_build_at=0.0,
-        source_snapshot={"collections": {collection: {"point_count": len(docs), "doc_count": len(docs)}}, "mode": "trace_repro"},
+        source_snapshot={
+            "collections": {collection: {"point_count": len(docs), "doc_count": len(docs)}},
+            "mode": "trace_repro",
+        },
         status=BM25Readiness.READY,
         reason="",
     )
@@ -84,17 +87,20 @@ def _embed_fn():
 def _print_trace(label, result):
     print(f"\n=== {label} ===")
     meta = result.meta
-    print(f"meta: degraded={meta.get('retrieval_degraded')} "
-          f"reason={meta.get('degraded_reason')!r} "
-          f"vector={meta.get('vector_channel_used')} "
-          f"lexical={meta.get('lexical_channel_used')}")
-    print(f"evidence_count={len(result)} "
-          f"rewritten_query={result.trace.rewritten_query[:60]!r}")
+    print(
+        f"meta: degraded={meta.get('retrieval_degraded')} "
+        f"reason={meta.get('degraded_reason')!r} "
+        f"vector={meta.get('vector_channel_used')} "
+        f"lexical={meta.get('lexical_channel_used')}"
+    )
+    print(f"evidence_count={len(result)} " f"rewritten_query={result.trace.rewritten_query[:60]!r}")
     print("stages:")
     for s in result.trace.stages:
-        print(f"  {s.name:12s} {s.status.value:9s} "
-              f"in={s.candidate_in} out={s.candidate_out} "
-              f"{s.duration_ms:.2f}ms reason={s.reason!r}")
+        print(
+            f"  {s.name:12s} {s.status.value:9s} "
+            f"in={s.candidate_in} out={s.candidate_out} "
+            f"{s.duration_ms:.2f}ms reason={s.reason!r}"
+        )
 
 
 async def main():
@@ -108,9 +114,12 @@ async def main():
     # B. scene-filtered
     kbB, mcB = _make_kb(embed_fn=_embed_fn())
     _seed_bm25(kbB, "complaint_knowledge", ["过敏投诉处理流程"])
-    mcB.query_points.return_value = MagicMock(points=[_point("d1", "过敏投诉处理", scene="投诉处理")])
-    resB = await kbB.retrieve(RetrievalRequest(
-        query="面霜过敏", collections=["complaint_knowledge"], scene="投诉处理"))
+    mcB.query_points.return_value = MagicMock(
+        points=[_point("d1", "过敏投诉处理", scene="投诉处理")]
+    )
+    resB = await kbB.retrieve(
+        RetrievalRequest(query="面霜过敏", collections=["complaint_knowledge"], scene="投诉处理")
+    )
     _print_trace("B. scene-filtered", resB)
 
     # C. embedding degraded (down + BM25 ready)
@@ -127,8 +136,12 @@ async def main():
 
     # Sanity assertions
     assert not resA.meta["retrieval_degraded"], "A should be non-degraded"
-    assert resC.meta["retrieval_degraded"] and resC.meta["lexical_channel_used"], "C should be lexical-degraded"
-    assert resD.meta["retrieval_degraded"] and resD.meta["vector_channel_used"], "D should be vector-degraded"
+    assert (
+        resC.meta["retrieval_degraded"] and resC.meta["lexical_channel_used"]
+    ), "C should be lexical-degraded"
+    assert (
+        resD.meta["retrieval_degraded"] and resD.meta["vector_channel_used"]
+    ), "D should be vector-degraded"
     print("\nP1-01 TRACE VALIDATION: PASS")
     print(json.dumps({"A_trace": resA.trace.to_dict(), "D_trace": resD.trace.to_dict()}, indent=2))
 

@@ -394,9 +394,7 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o
 # 完全不变；只有显式声明 SERVICE_ROLE=worker 的进程才跳过 API 专属校验。
 SERVICE_ROLE = os.getenv("SERVICE_ROLE", "api").strip().lower() or "api"
 if SERVICE_ROLE not in ("api", "worker"):
-    raise ConfigurationError(
-        f"SERVICE_ROLE 非法: {SERVICE_ROLE!r}（仅支持 api | worker）"
-    )
+    raise ConfigurationError(f"SERVICE_ROLE 非法: {SERVICE_ROLE!r}（仅支持 api | worker）")
 #: 当前进程是否为 Celery worker（据此跳过 API 专属校验）。
 IS_WORKER_PROCESS = SERVICE_ROLE == "worker"
 
@@ -745,8 +743,7 @@ def _resolve_execution_mode() -> str:
         return "queued" if AGENT_RUN_DISPATCH == "celery" else "inline"
     if AGENT_EXECUTION_MODE_RAW not in ("inline", "queued"):
         raise ConfigurationError(
-            f"AGENT_EXECUTION_MODE 非法: {AGENT_EXECUTION_MODE_RAW!r}"
-            "（仅支持 inline | queued）"
+            f"AGENT_EXECUTION_MODE 非法: {AGENT_EXECUTION_MODE_RAW!r}" "（仅支持 inline | queued）"
         )
     expected_dispatch = "celery" if AGENT_EXECUTION_MODE_RAW == "queued" else "inline"
     if AGENT_RUN_DISPATCH_RAW and expected_dispatch != AGENT_RUN_DISPATCH:
@@ -1069,8 +1066,7 @@ def validate_required_config():
 
         # Session Token Secret
         if not SESSION_TOKEN_SECRET or any(
-            p in SESSION_TOKEN_SECRET.lower()
-            for p in ("change-me", "change_me", "your-", "dev-")
+            p in SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
         ):
             errors.append("SESSION_TOKEN_SECRET 未配置或使用默认值/弱密钥")
         elif len(SESSION_TOKEN_SECRET) < 32:

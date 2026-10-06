@@ -34,7 +34,7 @@ def normalize_api_key(raw_key: str | None) -> str:
         raise ProviderCredentialFormatError("credential is missing")
     if key.lower().startswith("bearer "):
         raise ProviderCredentialFormatError("credential must not include a Bearer prefix")
-    if "\n" in key or "\r" in key or "\"" in key or "'" in key:
+    if "\n" in key or "\r" in key or '"' in key or "'" in key:
         raise ProviderCredentialFormatError("credential contains unsupported quoting or newline")
     return key
 
@@ -108,7 +108,9 @@ def probe_provider_auth(
                 body = response.json()
                 data = body.get("data", []) if isinstance(body, Mapping) else []
                 model_ids = tuple(
-                    item["id"] for item in data if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+                    item["id"]
+                    for item in data
+                    if isinstance(item, Mapping) and isinstance(item.get("id"), str)
                 )
             except (ValueError, TypeError):
                 category, retryable = "INVALID_PROVIDER_RESPONSE", False
@@ -156,11 +158,26 @@ def probe_chat_completion(
                 # HTTP 200 with an empty/HTML/malformed body must not traceback;
                 # mirror the auth probe's INVALID_PROVIDER_RESPONSE semantics.
                 return ChatProbeResult(
-                    200, "INVALID_PROVIDER_RESPONSE", False, 1,
-                    _trace_id(response.headers), None, None, False,
+                    200,
+                    "INVALID_PROVIDER_RESPONSE",
+                    False,
+                    1,
+                    _trace_id(response.headers),
+                    None,
+                    None,
+                    False,
                 )
             if not isinstance(body, Mapping):
-                return ChatProbeResult(200, "INVALID_PROVIDER_RESPONSE", False, 1, _trace_id(response.headers), None, None, False)
+                return ChatProbeResult(
+                    200,
+                    "INVALID_PROVIDER_RESPONSE",
+                    False,
+                    1,
+                    _trace_id(response.headers),
+                    None,
+                    None,
+                    False,
+                )
             usage = normalize_provider_response(body, provider="siliconflow", fallback_model=model)
             response_model = usage.model
             choices = body.get("choices")
@@ -216,8 +233,10 @@ def _nested(mapping: Mapping[str, Any], *keys: str | int) -> Any:
 
 def _reported(value: Any, unit: str | None = None) -> Measurement:
     number = _number(value)
-    return Measurement(number, EvidenceSource.PROVIDER_REPORTED, unit=unit) if number is not None else Measurement.unavailable(
-        EvidenceSource.NOT_AVAILABLE
+    return (
+        Measurement(number, EvidenceSource.PROVIDER_REPORTED, unit=unit)
+        if number is not None
+        else Measurement.unavailable(EvidenceSource.NOT_AVAILABLE)
     )
 
 
@@ -266,7 +285,9 @@ def normalize_provider_response(
         model=payload.get("model") or fallback_model,
         request_id=payload.get("id") or payload.get("request_id"),
         input_tokens=_reported(usage.get("prompt_tokens", usage.get("input_tokens")), "tokens"),
-        output_tokens=_reported(usage.get("completion_tokens", usage.get("output_tokens")), "tokens"),
+        output_tokens=_reported(
+            usage.get("completion_tokens", usage.get("output_tokens")), "tokens"
+        ),
         cached_tokens=_reported(cached, "tokens"),
         reasoning_tokens=_reported(reasoning, "tokens"),
         provider_cost=_reported(cost, "provider_currency"),
@@ -306,14 +327,18 @@ class ProviderCallResult:
 
 
 class ProviderAdapter:
-    def __init__(self, *, api_key: str, base_url: str, model: str, timeout: float, max_attempts: int):
+    def __init__(
+        self, *, api_key: str, base_url: str, model: str, timeout: float, max_attempts: int
+    ):
         self._api_key = normalize_api_key(api_key)
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self.model = model
         self.timeout = timeout
         self.max_attempts = max(1, max_attempts)
 
-    def stream_chat(self, messages: list[dict[str, str]], *, max_tokens: int, provider: str) -> ProviderCallResult:
+    def stream_chat(
+        self, messages: list[dict[str, str]], *, max_tokens: int, provider: str
+    ) -> ProviderCallResult:
         start = time.perf_counter()
         attempts = 0
         retries = 0
@@ -332,7 +357,9 @@ class ProviderAdapter:
             while attempts < self.max_attempts:
                 attempts += 1
                 try:
-                    with client.stream("POST", self._url, json=payload, headers=headers) as response:
+                    with client.stream(
+                        "POST", self._url, json=payload, headers=headers
+                    ) as response:
                         response.raise_for_status()
                         first_token_at: float | None = None
                         response_nonempty = False
@@ -352,7 +379,9 @@ class ProviderAdapter:
                                     first_token_at = time.perf_counter()
                         end = time.perf_counter()
                         final_payload.setdefault("id", response.headers.get("x-request-id"))
-                        usage = normalize_provider_response(final_payload, provider=provider, fallback_model=self.model)
+                        usage = normalize_provider_response(
+                            final_payload, provider=provider, fallback_model=self.model
+                        )
                         return ProviderCallResult(
                             usage=usage,
                             ttft_ms=(first_token_at - start) * 1000 if first_token_at else None,
@@ -397,7 +426,9 @@ class ProviderAdapter:
         elapsed = (time.perf_counter() - start) * 1000
         missing = Measurement.unavailable(EvidenceSource.NOT_AVAILABLE)
         return ProviderCallResult(
-            usage=NormalizedProviderUsage(provider, self.model, None, missing, missing, missing, missing, missing),
+            usage=NormalizedProviderUsage(
+                provider, self.model, None, missing, missing, missing, missing, missing
+            ),
             ttft_ms=None,
             e2e_ms=elapsed,
             network_ms=elapsed,
@@ -412,5 +443,9 @@ class ProviderAdapter:
                 if last_error and last_error.startswith("HTTP_")
                 else last_error
             ),
-            http_status=(int(last_error.split("_")[1]) if last_error and last_error.startswith("HTTP_") else None),
+            http_status=(
+                int(last_error.split("_")[1])
+                if last_error and last_error.startswith("HTTP_")
+                else None
+            ),
         )

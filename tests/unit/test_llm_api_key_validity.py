@@ -271,9 +271,9 @@ class TestRuntimeAndHealthAgree:
             f"/api/health reported key_valid={block['key_valid']} but the "
             f"authoritative verdict is {case.expect_usable} (reason={case.expect_reason})"
         )
-        assert block["key_usable"] == block["key_valid"], (
-            "key_usable and key_valid must be the same value from the same source"
-        )
+        assert (
+            block["key_usable"] == block["key_valid"]
+        ), "key_usable and key_valid must be the same value from the same source"
         assert block["configured"] is bool(case.key.strip())
 
         # and the reported implementation must be what would actually be selected
@@ -303,9 +303,9 @@ class TestHealthShapeIsComplete:
         active = RuleBasedLLM()
         block = await _health_llm_block_for(case.key, case.dev_mode, active)
         assert block["implementation"] == RULE_BASED
-        assert block["degraded"] is True, (
-            "an active RuleBasedLLM is a degraded mode and must be visible on /api/health"
-        )
+        assert (
+            block["degraded"] is True
+        ), "an active RuleBasedLLM is a degraded mode and must be visible on /api/health"
 
 
 class TestDegradedFlagTracksTheActiveImplementation:
@@ -387,9 +387,9 @@ class TestHealthDoesNotCallTheProvider:
         """evaluate_llm_api_key must stay IO-free so health can call it safely."""
         source = inspect.getsource(evaluate_llm_api_key)
         for forbidden in ("httpx", "requests", "urlopen", "socket", "Client(", "await "):
-            assert forbidden not in source, (
-                f"evaluate_llm_api_key must not do IO, but references {forbidden!r}"
-            )
+            assert (
+                forbidden not in source
+            ), f"evaluate_llm_api_key must not do IO, but references {forbidden!r}"
 
     def test_helper_is_the_only_place_the_rule_lives(self) -> None:
         """Guard against a second rule creeping back into either consumer."""

@@ -69,10 +69,7 @@ def test_postgres_checkpointer_config():
         )
         == "postgresql://u:p@h:5432/db"
     )
-    assert (
-        config.derive_checkpoint_database_url("postgres://u:p@h/db")
-        == "postgresql://u:p@h/db"
-    )
+    assert config.derive_checkpoint_database_url("postgres://u:p@h/db") == "postgresql://u:p@h/db"
     # 显式 URL 优先
     assert (
         config.derive_checkpoint_database_url(
@@ -177,9 +174,7 @@ class _FakePool:
 async def test_checkpointer_close():
     """关闭释放连接池并清空容器引用（幂等）。"""
     fake_pool = _FakePool()
-    runtime = CheckpointRuntime(
-        backend=BACKEND_POSTGRES, checkpointer=object(), pool=fake_pool
-    )
+    runtime = CheckpointRuntime(backend=BACKEND_POSTGRES, checkpointer=object(), pool=fake_pool)
     await close_checkpoint_runtime(runtime)
     assert fake_pool.closed is True
 

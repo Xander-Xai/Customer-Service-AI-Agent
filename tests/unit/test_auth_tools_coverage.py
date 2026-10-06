@@ -11,6 +11,7 @@ import pytest
 
 # ─── auth.service ───────────────────────────────────────────────
 
+
 @pytest.fixture(autouse=True)
 def _reset_auth_globals(monkeypatch):
     """Reset auth.service globals before each test to prevent cross-test/state leakage."""

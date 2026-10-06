@@ -57,13 +57,13 @@ async def test_voice_api_module_imports():
     """测试语音 API 路由模块可正常导入（无需完整 app 初始化）"""
     try:
         from api.routes import chat_multimodal
+
         assert chat_multimodal is not None
     except ImportError as e:
         pytest.skip(f"语音 API 路由模块导入失败（依赖服务未运行）: {e}")
     except Exception as e:
         # 可能因为缺失服务依赖而初始化失败
         pytest.skip(f"语音 API 路由初始化跳过: {e}")
-
 
 
 @pytest.mark.asyncio

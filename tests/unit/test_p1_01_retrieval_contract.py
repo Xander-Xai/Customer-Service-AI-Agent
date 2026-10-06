@@ -138,9 +138,7 @@ class TestRetrieveContractShape:
         """RAG-1/RAG-12: retrieve() returns a RetrievalResult carrying a trace."""
         kb, mock_client = _make_kb(embed_fn=_embed_fn())
         _seed_bm25(kb, "product_knowledge", ["烟酰胺精华液功效"])
-        mock_client.query_points.return_value = MagicMock(
-            points=[_point("d1", "烟酰胺精华液功效")]
-        )
+        mock_client.query_points.return_value = MagicMock(points=[_point("d1", "烟酰胺精华液功效")])
         result = await kb.retrieve(
             RetrievalRequest(query="烟酰胺", collections=["product_knowledge"])
         )
@@ -152,16 +150,19 @@ class TestRetrieveContractShape:
         """RAG-12: a healthy hybrid request records all 7 stages."""
         kb, mock_client = _make_kb(embed_fn=_embed_fn())
         _seed_bm25(kb, "product_knowledge", ["烟酰胺精华液"])
-        mock_client.query_points.return_value = MagicMock(
-            points=[_point("d1", "烟酰胺精华液")]
-        )
+        mock_client.query_points.return_value = MagicMock(points=[_point("d1", "烟酰胺精华液")])
         result = await kb.retrieve(
             RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], scene="售前咨询")
         )
         names = [s.name for s in result.trace.stages]
         for stage in (
-            STAGE_REWRITE, STAGE_FILTER, STAGE_VECTOR, STAGE_BM25,
-            STAGE_FUSION_RRF, STAGE_RERANK, STAGE_FINAL,
+            STAGE_REWRITE,
+            STAGE_FILTER,
+            STAGE_VECTOR,
+            STAGE_BM25,
+            STAGE_FUSION_RRF,
+            STAGE_RERANK,
+            STAGE_FINAL,
         ):
             assert stage in names, f"trace missing stage {stage}: {names}"
 
@@ -170,9 +171,7 @@ class TestRetrieveContractShape:
         """RAG-2: stage execution order is Rewrite→Filter→Vector→BM25→RRF→Rerank→Final."""
         kb, mock_client = _make_kb(embed_fn=_embed_fn())
         _seed_bm25(kb, "product_knowledge", ["烟酰胺精华液"])
-        mock_client.query_points.return_value = MagicMock(
-            points=[_point("d1", "烟酰胺精华液")]
-        )
+        mock_client.query_points.return_value = MagicMock(points=[_point("d1", "烟酰胺精华液")])
         result = await kb.retrieve(
             RetrievalRequest(query="烟酰胺", collections=["product_knowledge"])
         )
@@ -189,8 +188,14 @@ class TestRetrieveContractShape:
         assert positions[STAGE_RERANK] < positions[STAGE_FINAL]
         # The healthy-hybrid path executes every stage up to fusion; rerank
         # may skip only when fusion collapses to a single candidate.
-        for stage in (STAGE_REWRITE, STAGE_FILTER, STAGE_VECTOR, STAGE_BM25,
-                      STAGE_FUSION_RRF, STAGE_FINAL):
+        for stage in (
+            STAGE_REWRITE,
+            STAGE_FILTER,
+            STAGE_VECTOR,
+            STAGE_BM25,
+            STAGE_FUSION_RRF,
+            STAGE_FINAL,
+        ):
             assert stage in executed, f"{stage} not EXECUTED in healthy hybrid: {executed}"
 
     @pytest.mark.asyncio
@@ -331,9 +336,9 @@ class TestCollectionAndSceneMappingPreserved:
         called_collections = {
             call.kwargs.get("collection_name") for call in mock_client.query_points.call_args_list
         }
-        assert called_collections == {"complaint_knowledge"}, (
-            "retrieve() did not preserve the requested collection mapping"
-        )
+        assert called_collections == {
+            "complaint_knowledge"
+        }, "retrieve() did not preserve the requested collection mapping"
 
     @pytest.mark.asyncio
     async def test_multiple_collections_all_queried(self):
@@ -461,9 +466,9 @@ class TestDegradedContract:
 class TestAgentsUseUnifiedEntrypoint:
     def test_retrieve_is_the_canonical_knowledge_base_method(self):
         """RAG-1: the KnowledgeBase exposes a ``retrieve`` coroutine."""
-        assert hasattr(QdrantKnowledgeBase, "retrieve"), (
-            "QdrantKnowledgeBase must expose a unified retrieve() entrypoint"
-        )
+        assert hasattr(
+            QdrantKnowledgeBase, "retrieve"
+        ), "QdrantKnowledgeBase must expose a unified retrieve() entrypoint"
 
     def test_old_retrieval_shims_are_not_used_by_business_agents(self):
         """RAG-1: business agents must NOT call search/query/query_multiple/
@@ -488,9 +493,9 @@ class TestAgentsUseUnifiedEntrypoint:
             ".rewrite_query(",
             "knowledge_base.query(",
         ):
-            assert legacy not in src, (
-                f"BaseAgent._retrieve_knowledge still calls the legacy shim {legacy}"
-            )
+            assert (
+                legacy not in src
+            ), f"BaseAgent._retrieve_knowledge still calls the legacy shim {legacy}"
 
     def test_all_business_agents_route_through_retrieve(self):
         """RAG-1: every business agent's retrieval goes through
@@ -506,14 +511,20 @@ class TestAgentsUseUnifiedEntrypoint:
             tech_agent,
         )
 
-        for mod in (complaint_agent, tech_agent, product_agent, aftersales_agent,
-                    sales_agent, react_agent):
+        for mod in (
+            complaint_agent,
+            tech_agent,
+            product_agent,
+            aftersales_agent,
+            sales_agent,
+            react_agent,
+        ):
             src = inspect.getsource(mod)
             assert "_retrieve_knowledge" in src, f"{mod.__name__} does not use _retrieve_knowledge"
             # No direct knowledge_base.search/query/query_multiple calls.
-            assert ".search(" not in src and ".query_multiple(" not in src, (
-                f"{mod.__name__} calls the KB directly instead of _retrieve_knowledge"
-            )
+            assert (
+                ".search(" not in src and ".query_multiple(" not in src
+            ), f"{mod.__name__} calls the KB directly instead of _retrieve_knowledge"
 
 
 # ---------------------------------------------------------------------------
@@ -562,9 +573,7 @@ async def _retrieve_with(kb, mock_client, *, rerank: bool, outcome):
     )
     kb._reranker = _StubReranker(outcome)
     return await kb.retrieve(
-        RetrievalRequest(
-            query="烟酰胺精华液", collections=["product_knowledge"], rerank=rerank
-        )
+        RetrievalRequest(query="烟酰胺精华液", collections=["product_knowledge"], rerank=rerank)
     )
 
 
@@ -578,7 +587,9 @@ class TestRerankStageTruth:
         kb, mc = _make_kb(embed_fn=_embed_fn())
         fused = [{"content": "d1", "id": "d1"}, {"content": "d2", "id": "d2"}]
         res = await _retrieve_with(
-            kb, mc, rerank=True,
+            kb,
+            mc,
+            rerank=True,
             outcome=_outcome(applied=True, degraded=False, reason="", results=fused),
         )
         stage = _rerank_stage(res)
@@ -591,13 +602,16 @@ class TestRerankStageTruth:
         assert res.meta["retrieval_degraded"] is False
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("reason", ["unavailable", "timeout", "http_error",
-                                        "provider_error", "invalid_response"])
+    @pytest.mark.parametrize(
+        "reason", ["unavailable", "timeout", "http_error", "provider_error", "invalid_response"]
+    )
     async def test_provider_failure_is_degraded_never_executed(self, reason):
         kb, mc = _make_kb(embed_fn=_embed_fn())
         fused = [{"content": "d1", "id": "d1"}, {"content": "d2", "id": "d2"}]
         res = await _retrieve_with(
-            kb, mc, rerank=True,
+            kb,
+            mc,
+            rerank=True,
             outcome=_outcome(applied=False, degraded=True, reason=reason, results=fused),
         )
         stage = _rerank_stage(res)
@@ -614,9 +628,10 @@ class TestRerankStageTruth:
         kb, mc = _make_kb(embed_fn=_embed_fn())
         fused = [{"content": "first"}, {"content": "second"}]
         res = await _retrieve_with(
-            kb, mc, rerank=True,
-            outcome=_outcome(applied=False, degraded=True, reason="unavailable",
-                             results=fused),
+            kb,
+            mc,
+            rerank=True,
+            outcome=_outcome(applied=False, degraded=True, reason="unavailable", results=fused),
         )
         assert [e.get("content") for e in res] == ["first", "second"]
 
@@ -625,7 +640,9 @@ class TestRerankStageTruth:
         """Healthy channels + failed reranker is still a degraded result."""
         kb, mc = _make_kb(embed_fn=_embed_fn())
         res = await _retrieve_with(
-            kb, mc, rerank=True,
+            kb,
+            mc,
+            rerank=True,
             outcome=_outcome(applied=False, degraded=True, reason="timeout", results=[]),
         )
         assert res.meta["retrieval_degraded"] is True
@@ -635,7 +652,9 @@ class TestRerankStageTruth:
     async def test_http_status_is_exposed_as_a_code(self):
         kb, mc = _make_kb(embed_fn=_embed_fn())
         res = await _retrieve_with(
-            kb, mc, rerank=True,
+            kb,
+            mc,
+            rerank=True,
             outcome=_outcome(applied=False, degraded=True, reason="http_error", results=[]),
         )
         assert res.meta["reranker_http_status"] == 401
@@ -644,7 +663,9 @@ class TestRerankStageTruth:
     async def test_rerank_disabled_is_skipped(self):
         kb, mc = _make_kb(embed_fn=_embed_fn())
         res = await _retrieve_with(
-            kb, mc, rerank=False,
+            kb,
+            mc,
+            rerank=False,
             outcome=_outcome(applied=False, degraded=False, reason="", results=[]),
         )
         stage = _rerank_stage(res)
@@ -727,8 +748,10 @@ class TestRerankStageTruth:
         state: dict = {}
         await kb.retrieve(
             RetrievalRequest(
-                query="烟酰胺精华液", collections=["product_knowledge"],
-                rerank=True, state=state,
+                query="烟酰胺精华液",
+                collections=["product_knowledge"],
+                rerank=True,
+                state=state,
             )
         )
         assert state["retrieval_degraded"] is True
@@ -780,16 +803,24 @@ class TestRerankOutcomeIsNotDerivedFromSharedState:
                 if self.n == 2:
                     # Second request fails and writes the shared field.
                     self.last_error_status = 401
-                    return RerankOutcome(results=results[:top_k], applied=False,
-                                         degraded=True, reason=RerankReason.TIMEOUT)
-                return RerankOutcome(results=results[:top_k], applied=True,
-                                     degraded=False, reason=RerankReason.OK)
+                    return RerankOutcome(
+                        results=results[:top_k],
+                        applied=False,
+                        degraded=True,
+                        reason=RerankReason.TIMEOUT,
+                    )
+                return RerankOutcome(
+                    results=results[:top_k], applied=True, degraded=False, reason=RerankReason.OK
+                )
 
         kb._reranker = _Interleaving()
         _seed_bm25(kb, "product_knowledge", ["烟酰胺功效", "烟酰胺美白", "烟酰胺推荐"])
         mc.query_points.return_value = MagicMock(
-            points=[_point("d1", "烟酰胺功效"), _point("d2", "烟酰胺美白"),
-                    _point("d3", "烟酰胺推荐")]
+            points=[
+                _point("d1", "烟酰胺功效"),
+                _point("d2", "烟酰胺美白"),
+                _point("d3", "烟酰胺推荐"),
+            ]
         )
 
         first = await kb.retrieve(
@@ -814,14 +845,15 @@ class TestRerankOutcomeIsNotDerivedFromSharedState:
     async def test_stub_legacy_rerank_is_never_called_by_canonical_path(self):
         """The typed entry must be the one the pipeline uses."""
         kb, mc = _make_kb(embed_fn=_embed_fn())
-        stub = _StubReranker(
-            _outcome(applied=True, degraded=False, reason="", results=[])
-        )
+        stub = _StubReranker(_outcome(applied=True, degraded=False, reason="", results=[]))
         kb._reranker = stub
         _seed_bm25(kb, "product_knowledge", ["烟酰胺功效", "烟酰胺美白", "烟酰胺推荐"])
         mc.query_points.return_value = MagicMock(
-            points=[_point("d1", "烟酰胺功效"), _point("d2", "烟酰胺美白"),
-                    _point("d3", "烟酰胺推荐")]
+            points=[
+                _point("d1", "烟酰胺功效"),
+                _point("d2", "烟酰胺美白"),
+                _point("d3", "烟酰胺推荐"),
+            ]
         )
         await kb.retrieve(
             RetrievalRequest(query="烟酰胺", collections=["product_knowledge"], rerank=True)

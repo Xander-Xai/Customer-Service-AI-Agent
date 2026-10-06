@@ -56,9 +56,7 @@ class AftersalesAgent(BaseAgent):
         # ERP 订单查询
         erp_data = ""
         try:
-            erp_data = await self._safe_erp_query(
-                lambda: self._query_erp(customer_query)
-            )
+            erp_data = await self._safe_erp_query(lambda: self._query_erp(customer_query))
         except Exception as e:
             self.logger.debug(f"AftersalesAgent ERP 查询失败: {e}")
 

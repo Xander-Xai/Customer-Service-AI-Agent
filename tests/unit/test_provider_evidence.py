@@ -46,11 +46,17 @@ def test_missing_and_partial_usage_never_becomes_zero() -> None:
 
 
 def test_stream_parser_discards_non_data_and_done() -> None:
-    events = list(parse_sse_events(["", "comment", 'data: {"id":"x"}', "data: [DONE]", 'data: {"id":"ignored"}']))
+    events = list(
+        parse_sse_events(
+            ["", "comment", 'data: {"id":"x"}', "data: [DONE]", 'data: {"id":"ignored"}']
+        )
+    )
     assert events == [{"id": "x"}]
 
 
-def test_provider_staging_is_disabled_without_explicit_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_provider_staging_is_disabled_without_explicit_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("EVAL_REAL_PROVIDER", raising=False)
     result = run_provider_staging(repeat=1, warmup=1)
     assert result["external_calls"] == 0
@@ -133,7 +139,12 @@ class _FakeClient:
 
 @pytest.mark.parametrize(
     ("status_code", "category", "retryable"),
-    [(401, "AUTH_FAILED", False), (403, "FORBIDDEN", False), (429, "TRANSIENT_PROVIDER_FAILURE", True), (503, "TRANSIENT_PROVIDER_FAILURE", True)],
+    [
+        (401, "AUTH_FAILED", False),
+        (403, "FORBIDDEN", False),
+        (429, "TRANSIENT_PROVIDER_FAILURE", True),
+        (503, "TRANSIENT_PROVIDER_FAILURE", True),
+    ],
 )
 def test_auth_probe_classifies_status_without_retry(
     monkeypatch: pytest.MonkeyPatch, status_code: int, category: str, retryable: bool

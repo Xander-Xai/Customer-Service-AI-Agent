@@ -247,9 +247,7 @@ def rebuild_collection_point_ids(
         doc_id_counts[doc_id] = doc_id_counts.get(doc_id, 0) + 1
         stable_id_doc_ids.setdefault(stable_id, []).append(doc_id)
 
-    report.blocking_duplicates = sorted(
-        str(d) for d, count in doc_id_counts.items() if count > 1
-    )
+    report.blocking_duplicates = sorted(str(d) for d, count in doc_id_counts.items() if count > 1)
     report.blocking_conflicts = [
         (sid, sorted(str(x) for x in set(dids)))
         for sid, dids in stable_id_doc_ids.items()
@@ -316,9 +314,7 @@ def rebuild_collection_point_ids(
             continue
         processed_stable.add(stable_id)
         batch.append(
-            models.PointStruct(
-                id=stable_id, vector=getattr(rec, "vector", None), payload=payload
-            )
+            models.PointStruct(id=stable_id, vector=getattr(rec, "vector", None), payload=payload)
         )
         if rec.id in safe_to_delete_set:
             pending_deletes.append(rec.id)

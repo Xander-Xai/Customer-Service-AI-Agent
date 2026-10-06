@@ -553,9 +553,9 @@ def test_metric_check_uses_artifact_state_not_doc_state(tmp_repo: Path, monkeypa
     assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any("unproven current RAG metric claim" in e for e in errors), (
-        "docs cannot own/promote the evidence state — guard must still fire"
-    )
+    assert any(
+        "unproven current RAG metric claim" in e for e in errors
+    ), "docs cannot own/promote the evidence state — guard must still fire"
 
 
 # ------------------------------------------- artifact-driven governance
@@ -812,9 +812,9 @@ def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
     doc = write(tmp_repo, "README.md", "current Hit@3 82%")  # no provenance binding
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any("bind the number to provenance" in e for e in errors), (
-        "VERIFIED artifacts allow claims but provenance binding stays required"
-    )
+    assert any(
+        "bind the number to provenance" in e for e in errors
+    ), "VERIFIED artifacts allow claims but provenance binding stays required"
     qualified = write(tmp_repo, "README.md", "current Hit@3 82% (artifact: rag-649 run)")
     errors2: list[str] = []
     audit.check_unproven_current_metrics([qualified], errors2, root=tmp_repo)
@@ -848,9 +848,7 @@ def _write_status_docs(tmp_repo: Path, **replacements: str) -> None:
 def _run_status_agreement(tmp_repo: Path) -> list[str]:
     """The guard resolves its own doc set from root; pass the real call shape."""
     errors: list[str] = []
-    audit.check_rag_status_agreement(
-        audit.discover_docs(tmp_repo), errors, root=tmp_repo
-    )
+    audit.check_rag_status_agreement(audit.discover_docs(tmp_repo), errors, root=tmp_repo)
     return errors
 
 
@@ -883,8 +881,7 @@ def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
     """The other direction: docs may not claim VERIFIED without an artifact."""
     _make_benchmark(tmp_repo)  # no artifact -> derived NOT_VERIFIED
     promoted = {
-        rel: body.replace("NOT_VERIFIED", "VERIFIED")
-        for rel, body in STATUS_AGREEMENT_DOCS.items()
+        rel: body.replace("NOT_VERIFIED", "VERIFIED") for rel, body in STATUS_AGREEMENT_DOCS.items()
     }
     errors = _status_agreement_after_writing(tmp_repo, **promoted)
     assert len(errors) == 5, errors
@@ -904,9 +901,9 @@ def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
     _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
     artifact_rel = "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
 
-    assert _status_agreement_after_writing(tmp_repo), (
-        "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
-    )
+    assert _status_agreement_after_writing(
+        tmp_repo
+    ), "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
 
     rendered = {
         rel: body.replace("NOT_VERIFIED", "VERIFIED").replace(
@@ -991,9 +988,12 @@ def test_english_status_claim_is_recognised(tmp_repo: Path):
 
     english = STATUS_AGREEMENT_DOCS["docs/evaluation/production-evidence.md"]
     assert claimed_doc_formal_status(english) == "NOT_VERIFIED"
-    assert claimed_doc_formal_status(
-        "**Current status: the formal 649-query metrics are `VERIFIED`.**\n"
-    ) == "VERIFIED"
+    assert (
+        claimed_doc_formal_status(
+            "**Current status: the formal 649-query metrics are `VERIFIED`.**\n"
+        )
+        == "VERIFIED"
+    )
     # unrelated uses of "verified" must not be read as a status claim
     assert claimed_doc_formal_status("CI verified the build.\n") is None
 
@@ -1019,31 +1019,29 @@ def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
     assert formal_status_agreement_problems("NOT_VERIFIED", "VERIFIED", "d.md") == [
         formal_status_agreement_problems("NOT_VERIFIED", "VERIFIED", "d.md")[0]
     ]
-    assert "stale formal-status claim" in formal_status_agreement_problems(
-        "NOT_VERIFIED", "VERIFIED", "d.md"
-    )[0]
-    assert "must not self-promote" in formal_status_agreement_problems(
-        "VERIFIED", "NOT_VERIFIED", "d.md"
-    )[0]
-    assert formal_status_agreement_problems("VERIFIED", "VERIFIED", "d.md") == []
-    assert formal_status_agreement_problems("NOT_VERIFIED", "NOT_VERIFIED", "d.md") == (
-        []
+    assert (
+        "stale formal-status claim"
+        in formal_status_agreement_problems("NOT_VERIFIED", "VERIFIED", "d.md")[0]
     )
+    assert (
+        "must not self-promote"
+        in formal_status_agreement_problems("VERIFIED", "NOT_VERIFIED", "d.md")[0]
+    )
+    assert formal_status_agreement_problems("VERIFIED", "VERIFIED", "d.md") == []
+    assert formal_status_agreement_problems("NOT_VERIFIED", "NOT_VERIFIED", "d.md") == ([])
     # silence is a coverage question for the caller, not a contradiction here
     assert formal_status_agreement_problems(None, "NOT_VERIFIED", "d.md") == []
 
     src = (REAL_ROOT / "scripts" / "project_facts.py").read_text(encoding="utf-8")
-    assert "formal_status_agreement_problems" in src, (
-        "project_facts must delegate to the shared rule, not reimplement it"
-    )
+    assert (
+        "formal_status_agreement_problems" in src
+    ), "project_facts must delegate to the shared rule, not reimplement it"
 
 
 def test_real_repo_status_agreement_is_clean_and_status_stays_not_verified():
     """Pins the actual checkout: the guard is wired and the repo agrees."""
     errors: list[str] = []
-    audit.check_rag_status_agreement(
-        audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT
-    )
+    audit.check_rag_status_agreement(audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT)
     assert errors == [], errors
     assert facts_derive(REAL_ROOT)["rag_formal_metrics_status"] == "NOT_VERIFIED"
 
@@ -1062,9 +1060,13 @@ def test_canonical_doc_documents_the_status_agreement_guard():
     # silence must not pass, and discovery must not decide coverage
     assert "沉默会让 guard 永久空转满足" in doc
     assert "不经过 doc discovery" in doc
-    for rel in ("README.md", "CLAUDE.md", "docs/reference/current-state.md",
-                "docs/reference/rag-evaluation.md",
-                "docs/evaluation/production-evidence.md"):
+    for rel in (
+        "README.md",
+        "CLAUDE.md",
+        "docs/reference/current-state.md",
+        "docs/reference/rag-evaluation.md",
+        "docs/evaluation/production-evidence.md",
+    ):
         assert rel in doc, rel
 
 
@@ -1908,9 +1910,15 @@ def _write_preflight(root: Path, run_id: str, timestamp: str, status: str = "BLO
     write(
         root,
         rel,
-        json.dumps({"schema_version": "rag-eval-evidence/v2", "run_id": run_id,
-                    "timestamp": timestamp, "status": status,
-                    "primary_blocker": "EMBEDDING_PROVIDER_AUTH"}),
+        json.dumps(
+            {
+                "schema_version": "rag-eval-evidence/v2",
+                "run_id": run_id,
+                "timestamp": timestamp,
+                "status": status,
+                "primary_blocker": "EMBEDDING_PROVIDER_AUTH",
+            }
+        ),
     )
     return root / rel
 
@@ -2136,7 +2144,7 @@ def test_reranker_blocker_scope_correct_wording_passes(tmp_repo: Path):
         "docs/interview/rag-deep-dive.md",
         "最新 v2 preflight 检测到 `probe: silent_fallback`，对应条目 "
         "`RERANKER_PROVIDER_AUTH` 是 **non-blocking**（`blocking: false`，"
-        "`blocks_experiments: [\"hybrid_rerank\"]`），因此它**不是**整个 preflight "
+        '`blocks_experiments: ["hybrid_rerank"]`），因此它**不是**整个 preflight '
         "的 primary blocker。运行时静默回退仍是已知工程债。\n",
     )
     errors: list[str] = []
@@ -2164,8 +2172,7 @@ def test_reranker_blocker_described_as_global_blocker_is_detected(tmp_repo: Path
     write(
         tmp_repo,
         "docs/interview/rag-deep-dive.md",
-        "`RERANKER_PROVIDER_AUTH` 是整个 preflight 的 global blocker，"
-        "阻塞所有实验。\n",
+        "`RERANKER_PROVIDER_AUTH` 是整个 preflight 的 global blocker，" "阻塞所有实验。\n",
     )
     errors: list[str] = []
     audit.check_reranker_blocker_semantics(errors, root=tmp_repo)
@@ -2179,7 +2186,7 @@ def test_reranker_blocker_historical_quoting_is_not_flagged(tmp_repo: Path):
     write(
         tmp_repo,
         "docs/interview/rag-deep-dive.md",
-        "正确说法不是\"preflight 已经把它列为 blocker 而不是 warning\""
+        '正确说法不是"preflight 已经把它列为 blocker 而不是 warning"'
         "（那是 v1 之前的旧口径遗留）；v2 记录的是 `blocking: false`。\n",
     )
     errors: list[str] = []
@@ -2425,9 +2432,9 @@ def test_real_repo_declares_all_runtime_capabilities_implemented():
     """Guards V are fail-open when code is absent; assert the shipped code really
     satisfies every marker set so the guard cannot be silently disabled."""
     for capability, (markers, _pattern) in audit.RUNTIME_CAPABILITIES.items():
-        assert audit._capability_is_implemented(REAL_ROOT, markers), (
-            f"{capability} marker set is not fully present in the repository"
-        )
+        assert audit._capability_is_implemented(
+            REAL_ROOT, markers
+        ), f"{capability} marker set is not fully present in the repository"
 
 
 # ===========================================================================
@@ -2463,6 +2470,7 @@ def _hitl_repo(tmp_repo: Path, *, hitl_enabled: str = "false") -> Path:
 
 
 # ------------------------------------------------------------- Guard AA
+
 
 @pytest.mark.parametrize(
     "line",
@@ -2517,6 +2525,7 @@ def test_real_repo_has_no_handwritten_openapi_count_outside_anchor_docs():
 
 # ------------------------------------------------------------- Guard AB
 
+
 def test_guard_ab_state_chain_without_waiting_approval_is_detected(tmp_repo: Path):
     _hitl_repo(tmp_repo)
     doc = write(
@@ -2535,8 +2544,7 @@ def test_guard_ab_unified_chain_is_allowed(tmp_repo: Path):
     doc = write(
         tmp_repo,
         "docs/design/architecture-design.md",
-        "状态机：`PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING → "
-        "SUCCEEDED`。\n",
+        "状态机：`PENDING → QUEUED → RUNNING → WAITING_APPROVAL → RUNNING → " "SUCCEEDED`。\n",
     )
     errors: list[str] = []
     audit.check_run_state_machine_completeness([doc], errors, root=tmp_repo)
@@ -2577,11 +2585,14 @@ def test_guard_ab_inactive_when_statuses_lacks_the_state(tmp_repo: Path):
 
 def test_real_repo_state_chains_mention_waiting_approval():
     errors: list[str] = []
-    audit.check_run_state_machine_completeness(audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT)
+    audit.check_run_state_machine_completeness(
+        audit.discover_docs(REAL_ROOT), errors, root=REAL_ROOT
+    )
     assert errors == []
 
 
 # ------------------------------------------------------------- Guard AC
+
 
 def test_guard_ac_hitl_enabled_default_drift_is_detected(tmp_repo: Path):
     _hitl_repo(tmp_repo, hitl_enabled="false")
@@ -2608,9 +2619,17 @@ def test_guard_ac_reads_the_boolean_compare_idiom(tmp_repo: Path):
     ``false`` (the fallback), not be skipped as an unresolvable expression."""
     from config_fallback import extract_fallback_defaults
 
-    assert extract_fallback_defaults(write(tmp_repo, "core/config.py",
-        'import os\nHITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() == "true"\n',
-    ) and tmp_repo / "core/config.py").get("HITL_ENABLED") == "false"
+    assert (
+        extract_fallback_defaults(
+            write(
+                tmp_repo,
+                "core/config.py",
+                'import os\nHITL_ENABLED = os.getenv("HITL_ENABLED", "false").lower() == "true"\n',
+            )
+            and tmp_repo / "core/config.py"
+        ).get("HITL_ENABLED")
+        == "false"
+    )
 
 
 def test_real_repo_hitl_enabled_default_matches_config():
@@ -2623,6 +2642,7 @@ def test_real_repo_hitl_enabled_default_matches_config():
 
 
 # ------------------------------------------------------------- Guard AD
+
 
 @pytest.mark.parametrize(
     "line",
@@ -2668,6 +2688,7 @@ def test_guard_ad_does_not_match_unrelated_coverage_wording(tmp_repo: Path):
 
 
 # ------------------------------------------------------------- Guard AE
+
 
 @pytest.mark.parametrize(
     "line",
@@ -2718,6 +2739,7 @@ def test_guard_ae_allows_verified_for_another_capability_with_erp_exclusion(
 
 
 # ------------------------------------------------------------- Guard AF
+
 
 def _approval_repo(tmp_repo: Path, *, mounted: bool = True, drop: str | None = None) -> Path:
     write(tmp_repo, "api/routes/approvals.py", "router = APIRouter(prefix='/api/approvals')\n")

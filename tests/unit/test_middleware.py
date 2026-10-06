@@ -1,7 +1,6 @@
 """Trace middleware 功能测试。"""
 
 
-
 class TestTraceMiddleware:
     """验证 api/middleware.py 中 trace_middleware 的功能和包结构。"""
 
@@ -26,6 +25,5 @@ class TestTraceMiddleware:
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         init_path = os.path.join(base, "api", "middleware", "__init__.py")
         assert os.path.exists(init_path), (
-            f"api/middleware/__init__.py 不存在 ({init_path})\n"
-            "需要创建该文件以完善包结构"
+            f"api/middleware/__init__.py 不存在 ({init_path})\n" "需要创建该文件以完善包结构"
         )

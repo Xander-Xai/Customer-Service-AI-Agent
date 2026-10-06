@@ -36,6 +36,7 @@ def _load_env_module():
 
     spec = importlib.util.spec_from_file_location("_alembic_env_under_test", ENV_PATH)
     module = importlib.util.module_from_spec(spec)
+
     # Stub the alembic context so importing env.py does not require a live
     # Alembic run; ``run_migrations_*`` is never called by these tests.
     class _FakeConfig:
@@ -79,9 +80,7 @@ def env_module():
     return _load_env_module()
 
 
-def test_alembic_database_url_wins_over_dotenv_clobbered_database_url(
-    env_module, monkeypatch
-):
+def test_alembic_database_url_wins_over_dotenv_clobbered_database_url(env_module, monkeypatch):
     """``ALEMBIC_DATABASE_URL`` is the escape hatch that survives dotenv.
 
     ``load_dotenv(override=True)`` in ``core/config.py`` overwrites
@@ -94,7 +93,9 @@ def test_alembic_database_url_wins_over_dotenv_clobbered_database_url(
     monkeypatch.setenv(
         "ALEMBIC_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/verify"
     )
-    assert env_module._resolve_database_url() == "postgresql://postgres:postgres@localhost:5432/verify"
+    assert (
+        env_module._resolve_database_url() == "postgresql://postgres:postgres@localhost:5432/verify"
+    )
 
 
 def test_database_url_used_when_no_alembic_specific_override(env_module, monkeypatch):

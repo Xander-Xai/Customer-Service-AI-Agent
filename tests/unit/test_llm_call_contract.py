@@ -99,9 +99,9 @@ class TestCallContractSignature:
         """与协议的参数名/顺序/默认值一致（不是碰巧能接住某一个调用形态）"""
         proto = inspect.signature(LLMProtocol.async_invoke).parameters
         params = inspect.signature(impl.async_invoke).parameters
-        assert list(params) == list(proto), (
-            f"{impl.__name__}.async_invoke 参数列表与 LLMProtocol 不一致"
-        )
+        assert list(params) == list(
+            proto
+        ), f"{impl.__name__}.async_invoke 参数列表与 LLMProtocol 不一致"
         for name, ref in proto.items():
             assert params[name].default == ref.default, f"{impl.__name__}.{name} 默认值与协议不一致"
 
@@ -113,9 +113,9 @@ class TestCallContractSignature:
         `TypeError` 形式暴露、而一旦被 kwargs 吞掉就会变成永久静默的原因。
         """
         params = inspect.signature(impl.async_invoke).parameters
-        assert not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()), (
-            f"{impl.__name__}.async_invoke 不得用 **kwargs 接受契约外参数"
-        )
+        assert not any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        ), f"{impl.__name__}.async_invoke 不得用 **kwargs 接受契约外参数"
 
     @pytest.mark.parametrize("impl", _IMPLS, ids=_IMPL_IDS)
     def test_both_impls_satisfy_runtime_protocol(self, impl):
@@ -147,9 +147,9 @@ class TestCallContractSignature:
         """降级实现的同步入口不得与自己的异步入口漂移（否则 timeout 只在一半路径可用）"""
         async_params = inspect.signature(RuleBasedLLM.async_invoke).parameters
         sync_params = inspect.signature(RuleBasedLLM.invoke).parameters
-        assert list(sync_params) == list(async_params), (
-            "RuleBasedLLM.invoke 与 async_invoke 参数不一致"
-        )
+        assert list(sync_params) == list(
+            async_params
+        ), "RuleBasedLLM.invoke 与 async_invoke 参数不一致"
 
 
 class TestRealClientTimeoutIsEffective:

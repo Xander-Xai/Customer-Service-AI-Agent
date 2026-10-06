@@ -77,8 +77,7 @@ class TestDefaultLaneIsLocal:
         也不得放行真实请求。它是独立于 provider 旋钮的**第二道闸门**。
         """
         assert getattr(config, name) is False, (
-            f"{name} 为 True：占位凭据被判为可出网，"
-            f"这正是 issue #52 里 401 的成因"
+            f"{name} 为 True：占位凭据被判为可出网，" f"这正是 issue #52 里 401 的成因"
         )
 
     def test_is_placeholder_api_key_rejects_env_test_placeholders(self):
@@ -91,9 +90,9 @@ class TestDefaultLaneIsLocal:
             "   ",
             None,
         ):
-            assert config.is_placeholder_api_key(placeholder) is True, (
-                f"{placeholder!r} 应被判为占位凭据"
-            )
+            assert (
+                config.is_placeholder_api_key(placeholder) is True
+            ), f"{placeholder!r} 应被判为占位凭据"
 
     def test_is_placeholder_api_key_allows_realistic_credentials(self):
         """真实形态的凭据必须仍然被判为可用 —— 否则就是**行为变更**。
@@ -102,9 +101,9 @@ class TestDefaultLaneIsLocal:
         给 embedding 侧加长度门槛会让某个真实但较短的凭据突然失去向量通道。
         """
         for real in (_SYNTHETIC_REALISTIC_KEY, "ak-real-looking-credential-value"):
-            assert config.is_placeholder_api_key(real) is False, (
-                f"{real!r} 是真实形态凭据，不得被占位规则拦掉"
-            )
+            assert (
+                config.is_placeholder_api_key(real) is False
+            ), f"{real!r} 是真实形态凭据，不得被占位规则拦掉"
 
 
 # ===== 出网本身无法发生：哑弹 transport =====
@@ -250,9 +249,7 @@ class TestRemoteLaneIsOptInOnly:
 
         with (
             patch.object(config, "EMBEDDING_PROVIDER", config.PROVIDER_REMOTE),
-            patch.object(
-                config, "EMBEDDING_API_KEY", _SYNTHETIC_REALISTIC_KEY
-            ),
+            patch.object(config, "EMBEDDING_API_KEY", _SYNTHETIC_REALISTIC_KEY),
             patch("rag.api_embedding.ApiEmbedding") as mock_cls,
         ):
             selection = select_embed_fn()

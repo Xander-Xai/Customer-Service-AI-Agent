@@ -273,9 +273,9 @@ def test_aencode_under_two_short_lived_loops_uses_two_distinct_clients(
     _one_call()
     second_client = _only_client()
     second_loop = _only_owner()
-    assert second_client is not first_client, (
-        "第二个 loop 拿到了第一个（已销毁）loop 的 AsyncClient"
-    )
+    assert (
+        second_client is not first_client
+    ), "第二个 loop 拿到了第一个（已销毁）loop 的 AsyncClient"
     assert second_loop is not first_loop
 
 
@@ -531,9 +531,9 @@ def test_two_live_loops_alternating_keep_one_client_each(
     for tag in ("A", "B"):
         clients = run["observed"][tag]
         assert len(clients) == rounds, f"{tag} 只完成了 {len(clients)}/{rounds} 轮"
-        assert all(c is not None for c in clients), (
-            f"{tag} 的 loop 在分区表里查不到自己的 client —— 分区键不是归属 loop"
-        )
+        assert all(
+            c is not None for c in clients
+        ), f"{tag} 的 loop 在分区表里查不到自己的 client —— 分区键不是归属 loop"
         assert len({id(c) for c in clients}) == 1, (
             f"{tag} 的 client identity 在 {rounds} 轮交替中不稳定："
             f"{[id(c) for c in clients]}。另一条存活 loop 的调用把它顶掉了（last-loop-wins）"
@@ -545,12 +545,12 @@ def test_two_live_loops_alternating_keep_one_client_each(
         f"{rounds} 轮交替本应只建 2 个 client（每条存活 loop 一个），"
         f"实际建了 {len(run['created'])} 个"
     )
-    assert set(run["registry_sizes"]) == {2}, (
-        f"两条 loop 同时存活时分区表必须恰好 2 条，实际每轮规模为 {run['registry_sizes']}"
-    )
-    assert all(snap == run["snapshots"][0] for snap in run["snapshots"]), (
-        f"分区表的 (loop, client) 配对在交替过程中发生了变化：{run['snapshots']}"
-    )
+    assert set(run["registry_sizes"]) == {
+        2
+    }, f"两条 loop 同时存活时分区表必须恰好 2 条，实际每轮规模为 {run['registry_sizes']}"
+    assert all(
+        snap == run["snapshots"][0] for snap in run["snapshots"]
+    ), f"分区表的 (loop, client) 配对在交替过程中发生了变化：{run['snapshots']}"
 
 
 def test_two_live_loops_never_share_a_connection_pool(
@@ -604,13 +604,13 @@ async def test_closed_loop_client_is_dropped_and_never_reused(
     await _one_shot_loop_call(_second_one_shot())
 
     entries = dict(async_client_registry_snapshot())
-    assert dead_owner not in entries, (
-        "已销毁 loop 的 client 还留在分区表里 —— 条目不会随调用次数回收"
-    )
+    assert (
+        dead_owner not in entries
+    ), "已销毁 loop 的 client 还留在分区表里 —— 条目不会随调用次数回收"
     assert len(entries) == 2, f"期望主 loop + 新的一次性 loop 两条，实际 {len(entries)} 条"
-    assert entries[asyncio.get_running_loop()] is main_client, (
-        "别的 loop 的调用把主 loop 的 client 顶掉了"
-    )
+    assert (
+        entries[asyncio.get_running_loop()] is main_client
+    ), "别的 loop 的调用把主 loop 的 client 顶掉了"
     assert captured[0] is not dead_client, "已销毁 loop 的 client 被交给了一条活着的 loop"
     assert captured[0] is not main_client
     assert len(created) == 3
@@ -664,19 +664,19 @@ def test_shutdown_closes_only_the_calling_loop_and_reports_the_rest(
 
     report = reports["A"]
     assert report.closed, "A 关闭自己 loop 的 client 时必须真的 aclose 了"
-    assert report.foreign_live_owners == 1, (
-        f"B 的 client 归属另一条存活 loop，必须被如实计数，实际 {report.foreign_live_owners}"
-    )
+    assert (
+        report.foreign_live_owners == 1
+    ), f"B 的 client 归属另一条存活 loop，必须被如实计数，实际 {report.foreign_live_owners}"
     assert report.dropped_dead_owners == 0
 
     assert len(b_clients) == 2
-    assert b_clients[0] is b_clients[1], (
-        "A 的 shutdown 把 B 的 client 摘掉了 —— 那会逼 B 重建连接池"
-    )
+    assert (
+        b_clients[0] is b_clients[1]
+    ), "A 的 shutdown 把 B 的 client 摘掉了 —— 那会逼 B 重建连接池"
     assert not b_clients[0].is_closed, "A 的 shutdown 跨 loop 关掉了 B 的 client"
-    assert list(dict(async_client_registry_snapshot()).values()) == [b_clients[0]], (
-        "A 的 shutdown 之后分区表必须只剩 B 那一条"
-    )
+    assert list(dict(async_client_registry_snapshot()).values()) == [
+        b_clients[0]
+    ], "A 的 shutdown 之后分区表必须只剩 B 那一条"
 
 
 def test_two_live_loops_keep_provider_errors_as_http_status_error(

@@ -41,7 +41,11 @@ def _fit_text(value: str, max_tokens: int) -> str:
 def _clean_url(url: str) -> str:
     try:
         parts = urlsplit(url)
-        query = [(k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith(("utm_", "fbclid", "gclid"))]
+        query = [
+            (k, v)
+            for k, v in parse_qsl(parts.query)
+            if not k.lower().startswith(("utm_", "fbclid", "gclid"))
+        ]
         # Always emit the filtered query: restoring ``parts.query`` when every
         # parameter was tracking-only would keep the tracking string in the
         # ToolMessage and defeat deduplication.
@@ -51,8 +55,21 @@ def _clean_url(url: str) -> str:
 
 
 class SearchResultCompressor:
-    def compress(self, value: Any, *, max_tokens: int | None = None, max_items: int | None = None, snippet_tokens: int = 80) -> CompressedPayload:
-        rows = value if isinstance(value, list) else value.get("results", []) if isinstance(value, dict) else []
+    def compress(
+        self,
+        value: Any,
+        *,
+        max_tokens: int | None = None,
+        max_items: int | None = None,
+        snippet_tokens: int = 80,
+    ) -> CompressedPayload:
+        rows = (
+            value
+            if isinstance(value, list)
+            else value.get("results", [])
+            if isinstance(value, dict)
+            else []
+        )
         output, seen = [], set()
         for rank, row in enumerate(rows, 1):
             if not isinstance(row, dict):
@@ -64,7 +81,15 @@ class SearchResultCompressor:
             if key in seen:
                 continue
             seen.add(key)
-            output.append({"rank": rank, "title": title, "url": _clean_url(url), "snippet": _fit_text(snippet, snippet_tokens), **({"score": row["score"]} if "score" in row else {})})
+            output.append(
+                {
+                    "rank": rank,
+                    "title": title,
+                    "url": _clean_url(url),
+                    "snippet": _fit_text(snippet, snippet_tokens),
+                    **({"score": row["score"]} if "score" in row else {}),
+                }
+            )
             if max_items is not None and len(output) >= max_items:
                 break
         truncated = len(output) < len(rows)
@@ -108,7 +133,9 @@ class _VisibleTextParser(HTMLParser):
 
 
 class HTMLResultCompressor:
-    def compress(self, value: Any, *, max_tokens: int | None = None, max_items: int | None = None) -> CompressedPayload:
+    def compress(
+        self, value: Any, *, max_tokens: int | None = None, max_items: int | None = None
+    ) -> CompressedPayload:
         source = value if isinstance(value, str) else _json(value)
         parser = _VisibleTextParser()
         try:
@@ -122,11 +149,15 @@ class HTMLResultCompressor:
         if parser.title and parser.title.strip() not in text:
             text = parser.title.strip() + " " + text
         truncated = bool(max_tokens and _count_tokens(text) > max_tokens)
-        return CompressedPayload(_fit_text(text, max_tokens) if max_tokens else text, "html", truncated)
+        return CompressedPayload(
+            _fit_text(text, max_tokens) if max_tokens else text, "html", truncated
+        )
 
 
 class JSONResultCompressor:
-    def compress(self, value: Any, *, max_tokens: int | None = None, max_items: int | None = None) -> CompressedPayload:
+    def compress(
+        self, value: Any, *, max_tokens: int | None = None, max_items: int | None = None
+    ) -> CompressedPayload:
         return CompressedPayload(value, "json", False)
 
 
@@ -134,6 +165,8 @@ def compressor_for(tool_name: str, value: Any):
     name = tool_name.lower()
     if "search" in name or "web" in name:
         return SearchResultCompressor()
-    if "html" in name or (isinstance(value, str) and re.search(r"<\s*(html|body|article|main|h[1-6])\b", value, re.I)):
+    if "html" in name or (
+        isinstance(value, str) and re.search(r"<\s*(html|body|article|main|h[1-6])\b", value, re.I)
+    ):
         return HTMLResultCompressor()
     return JSONResultCompressor()

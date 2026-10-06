@@ -94,7 +94,13 @@ class InMemoryToolResultStore:
 class RedisToolResultStore:
     """Redis-backed store using the application's existing Redis client/URL."""
 
-    def __init__(self, redis_client=None, *, redis_url: str | None = None, key_prefix: str = "csai:tool-result:"):
+    def __init__(
+        self,
+        redis_client=None,
+        *,
+        redis_url: str | None = None,
+        key_prefix: str = "csai:tool-result:",
+    ):
         self._client = redis_client
         self._redis_url = redis_url
         self._key_prefix = key_prefix
@@ -106,7 +112,9 @@ class RedisToolResultStore:
             try:
                 import redis
 
-                self._client = redis.Redis.from_url(self._redis_url, decode_responses=True, socket_timeout=2)
+                self._client = redis.Redis.from_url(
+                    self._redis_url, decode_responses=True, socket_timeout=2
+                )
             except Exception as exc:
                 raise ToolResultStoreError("Redis client initialization failed") from exc
         return self._client
@@ -131,7 +139,12 @@ class RedisToolResultStore:
             metadata=metadata,
         )
         try:
-            await asyncio.to_thread(self._get_client().setex, self._key(reference_id), ttl_seconds, json.dumps(asdict(record), ensure_ascii=False, default=str))
+            await asyncio.to_thread(
+                self._get_client().setex,
+                self._key(reference_id),
+                ttl_seconds,
+                json.dumps(asdict(record), ensure_ascii=False, default=str),
+            )
         except Exception as exc:
             raise ToolResultStoreError("Redis tool result write failed") from exc
         return reference_id

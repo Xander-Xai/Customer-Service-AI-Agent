@@ -622,10 +622,7 @@ def _load_idempotency_module():
     import importlib.util
 
     path = (
-        Path(__file__).resolve().parents[1]
-        / "integration"
-        / "runtime"
-        / "test_tool_idempotency.py"
+        Path(__file__).resolve().parents[1] / "integration" / "runtime" / "test_tool_idempotency.py"
     )
     spec = importlib.util.spec_from_file_location("_tiem_idem_module", path)
     module = importlib.util.module_from_spec(spec)

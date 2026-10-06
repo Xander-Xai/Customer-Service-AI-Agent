@@ -125,7 +125,7 @@ def hash_password(password: str) -> str:
             memory_cost=65536,  # 64 MB
             parallelism=4,
             hash_len=32,
-            salt_len=16
+            salt_len=16,
         )
 
         return ph.hash(password)
@@ -461,7 +461,9 @@ async def revoke_token(token: str) -> bool:
             _evict_count = _MAX_REVOKED_JTIS // 10
             for _ in range(_evict_count):
                 _revoked_jtis.pop()
-            logger.warning(f"已吊销 JTI 缓存达到上限 {_MAX_REVOKED_JTIS}，淘汰 {_evict_count} 条旧记录")
+            logger.warning(
+                f"已吊销 JTI 缓存达到上限 {_MAX_REVOKED_JTIS}，淘汰 {_evict_count} 条旧记录"
+            )
         logger.info(f"Token 已吊销: jti={jti}")
         return True
     return False
@@ -529,8 +531,12 @@ def init_default_admin():
         if not admin:
             admin_password = os.getenv("ADMIN_PASSWORD")
             if not admin_password:
-                logger.error("[auth] 致命错误: 未设置 ADMIN_PASSWORD 环境变量。必须显式设置管理员密码。")
-                raise ValueError("ADMIN_PASSWORD environment variable must be set to initialize the admin account.")
+                logger.error(
+                    "[auth] 致命错误: 未设置 ADMIN_PASSWORD 环境变量。必须显式设置管理员密码。"
+                )
+                raise ValueError(
+                    "ADMIN_PASSWORD environment variable must be set to initialize the admin account."
+                )
 
             admin = User(
                 username="admin",

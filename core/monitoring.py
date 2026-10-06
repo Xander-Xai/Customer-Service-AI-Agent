@@ -78,79 +78,79 @@ try:
 
     # 用户满意度评分分布
     user_satisfaction_score = _histogram(
-        'user_satisfaction_score',
-        'User satisfaction score distribution (1-5)',
+        "user_satisfaction_score",
+        "User satisfaction score distribution (1-5)",
         buckets=[1, 2, 3, 4, 5],
     )
 
     # Agent 使用次数统计
     agent_usage_total = _counter(
-        'agent_usage_total',
-        'Agent usage count by type',
-        ['agent_type'],
+        "agent_usage_total",
+        "Agent usage count by type",
+        ["agent_type"],
     )
 
     # 查询意图分布
     intent_distribution_total = _counter(
-        'intent_distribution_total',
-        'Query intent distribution',
-        ['intent_type'],
+        "intent_distribution_total",
+        "Query intent distribution",
+        ["intent_type"],
     )
 
     # 协作模式使用统计
     collaboration_mode_total = _counter(
-        'collaboration_mode_total',
-        'Collaboration mode usage count',
-        ['mode_name'],
+        "collaboration_mode_total",
+        "Collaboration mode usage count",
+        ["mode_name"],
     )
 
     # 会话解决率
     session_resolution_rate = _gauge(
-        'session_resolution_rate',
-        'Session resolution rate (resolved / total)',
+        "session_resolution_rate",
+        "Session resolution rate (resolved / total)",
     )
 
     # 人工升级率
     escalation_rate = _gauge(
-        'escalation_rate',
-        'Human escalation rate (escalated / total)',
+        "escalation_rate",
+        "Human escalation rate (escalated / total)",
     )
 
     # 缓存命中率（业务维度）
     business_cache_hit_rate = _gauge(
-        'business_cache_hit_rate',
-        'Business-level cache hit rate',
+        "business_cache_hit_rate",
+        "Business-level cache hit rate",
     )
 
     # v6.1: 缓存分层命中率
-    cache_l1_hits_total = _counter('cache_l1_hits_total', 'L1 exact-match cache hits')
-    cache_l2_hits_total = _counter('cache_l2_hits_total', 'L2 semantic cache hits')
-    cache_l3_hits_total = _counter('cache_l3_hits_total', 'L3 jaccard fallback cache hits')
-    cache_fallback_total = _counter('cache_fallback_total', 'Fallback to L3 Jaccard')
+    cache_l1_hits_total = _counter("cache_l1_hits_total", "L1 exact-match cache hits")
+    cache_l2_hits_total = _counter("cache_l2_hits_total", "L2 semantic cache hits")
+    cache_l3_hits_total = _counter("cache_l3_hits_total", "L3 jaccard fallback cache hits")
+    cache_fallback_total = _counter("cache_fallback_total", "Fallback to L3 Jaccard")
 
     # v6.1: 流式响应性能
     stream_ttfb_seconds = _histogram(
-        'stream_ttfb_seconds',
-        'Time to first byte in streaming responses',
+        "stream_ttfb_seconds",
+        "Time to first byte in streaming responses",
         buckets=[0.1, 0.5, 1.0, 2.0, 5.0],
     )
 
     # v6.1: Trace 跟踪
-    trace_spans_total = _counter('trace_spans_total', 'Total trace spans')
+    trace_spans_total = _counter("trace_spans_total", "Total trace spans")
 
     # v6.1: RAG 检索
-    rag_queries_total = _counter('rag_queries_total', 'RAG queries count')
-    rag_recall_at_3 = _gauge('rag_recall_at_3', 'RAG recall@3 score')
+    rag_queries_total = _counter("rag_queries_total", "RAG queries count")
+    rag_recall_at_3 = _gauge("rag_recall_at_3", "RAG recall@3 score")
 
     # v6.1: 场景路由
     scene_routing_total = _counter(
-        'scene_routing_total',
-        'Scene routing count',
-        ['scene_name'],
+        "scene_routing_total",
+        "Scene routing count",
+        ["scene_name"],
     )
 
     # v6.1: DI 组件
-    active_components_total = _gauge('active_components_total', 'Active DI components')
+    active_components_total = _gauge("active_components_total", "Active DI components")
 
     # v6.1 收尾: RAG 搜索延迟
     rag_search_latency_seconds = _histogram(
@@ -201,38 +201,80 @@ try:
         "Semantic cache (L2) tiers skipped due to embedding failure",
     )
     tool_result_raw_bytes = _histogram(
-        "tool_result_raw_bytes", "Raw serialized tool result size in bytes", buckets=[100, 500, 1000, 5000, 10000, 50000]
+        "tool_result_raw_bytes",
+        "Raw serialized tool result size in bytes",
+        buckets=[100, 500, 1000, 5000, 10000, 50000],
     )
     tool_result_optimized_bytes = _histogram(
-        "tool_result_optimized_bytes", "Optimized serialized tool result size in bytes", buckets=[100, 500, 1000, 5000, 10000, 50000]
+        "tool_result_optimized_bytes",
+        "Optimized serialized tool result size in bytes",
+        buckets=[100, 500, 1000, 5000, 10000, 50000],
     )
     tool_result_tokens_before = _histogram(
-        "tool_result_tokens_before", "Estimated tool result tokens before optimization", buckets=[10, 50, 100, 500, 1000, 5000]
+        "tool_result_tokens_before",
+        "Estimated tool result tokens before optimization",
+        buckets=[10, 50, 100, 500, 1000, 5000],
     )
     tool_result_tokens_after = _histogram(
-        "tool_result_tokens_after", "Estimated tool result tokens after optimization", buckets=[10, 50, 100, 500, 1000, 5000]
+        "tool_result_tokens_after",
+        "Estimated tool result tokens after optimization",
+        buckets=[10, 50, 100, 500, 1000, 5000],
     )
     tool_result_optimized_total = _counter(
-        "tool_result_optimized_total", "Tool results processed by the context optimizer", ["tool_name"]
+        "tool_result_optimized_total",
+        "Tool results processed by the context optimizer",
+        ["tool_name"],
     )
     tool_result_truncated_total = _counter(
-        "tool_result_truncated_total", "Tool results truncated by the context optimizer", ["tool_name"]
+        "tool_result_truncated_total",
+        "Tool results truncated by the context optimizer",
+        ["tool_name"],
     )
-    tool_result_offloaded_total = _counter("tool_result_offloaded_total", "Tool results offloaded to external storage")
-    tool_result_recovered_total = _counter("tool_result_recovered_total", "Tool results recovered from external storage")
-    tool_result_recovery_failed_total = _counter("tool_result_recovery_failed_total", "Tool result recovery failures")
-    tool_result_store_latency_seconds = _histogram("tool_result_store_latency_seconds", "Tool result store latency")
-    tool_result_store_errors_total = _counter("tool_result_store_errors_total", "Tool result store errors")
-    tool_result_summary_total = _counter("tool_result_summary_total", "Tool result summaries attempted")
-    tool_result_summary_failed_total = _counter("tool_result_summary_failed_total", "Tool result summary failures")
-    tool_result_compressor_total = _counter("tool_result_compressor_total", "Tool result compressor strategies", ["strategy"])
-    tool_result_cache_requests_total = _counter("tool_result_cache_requests_total", "Tool result cache requests", ["tool_name", "outcome"])
-    tool_result_cache_hits_total = _counter("tool_result_cache_hits_total", "Tool result cache hits", ["tool_name"])
-    tool_result_cache_misses_total = _counter("tool_result_cache_misses_total", "Tool result cache misses", ["tool_name"])
-    tool_result_cache_writes_total = _counter("tool_result_cache_writes_total", "Tool result cache writes", ["tool_name"])
-    tool_result_cache_errors_total = _counter("tool_result_cache_errors_total", "Tool result cache errors", ["tool_name"])
-    tool_result_cache_bypass_total = _counter("tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"])
-    tool_result_cache_latency_seconds = _histogram("tool_result_cache_latency_seconds", "Tool result cache lookup latency")
+    tool_result_offloaded_total = _counter(
+        "tool_result_offloaded_total", "Tool results offloaded to external storage"
+    )
+    tool_result_recovered_total = _counter(
+        "tool_result_recovered_total", "Tool results recovered from external storage"
+    )
+    tool_result_recovery_failed_total = _counter(
+        "tool_result_recovery_failed_total", "Tool result recovery failures"
+    )
+    tool_result_store_latency_seconds = _histogram(
+        "tool_result_store_latency_seconds", "Tool result store latency"
+    )
+    tool_result_store_errors_total = _counter(
+        "tool_result_store_errors_total", "Tool result store errors"
+    )
+    tool_result_summary_total = _counter(
+        "tool_result_summary_total", "Tool result summaries attempted"
+    )
+    tool_result_summary_failed_total = _counter(
+        "tool_result_summary_failed_total", "Tool result summary failures"
+    )
+    tool_result_compressor_total = _counter(
+        "tool_result_compressor_total", "Tool result compressor strategies", ["strategy"]
+    )
+    tool_result_cache_requests_total = _counter(
+        "tool_result_cache_requests_total", "Tool result cache requests", ["tool_name", "outcome"]
+    )
+    tool_result_cache_hits_total = _counter(
+        "tool_result_cache_hits_total", "Tool result cache hits", ["tool_name"]
+    )
+    tool_result_cache_misses_total = _counter(
+        "tool_result_cache_misses_total", "Tool result cache misses", ["tool_name"]
+    )
+    tool_result_cache_writes_total = _counter(
+        "tool_result_cache_writes_total", "Tool result cache writes", ["tool_name"]
+    )
+    tool_result_cache_errors_total = _counter(
+        "tool_result_cache_errors_total", "Tool result cache errors", ["tool_name"]
+    )
+    tool_result_cache_bypass_total = _counter(
+        "tool_result_cache_bypass_total", "Tool result cache bypasses", ["tool_name"]
+    )
+    tool_result_cache_latency_seconds = _histogram(
+        "tool_result_cache_latency_seconds", "Tool result cache lookup latency"
+    )
 
     # 分布式 Agent Run 可靠性 + 可观测性（未发布版本；runtime 版本仍为 6.3）
     #
@@ -369,11 +411,20 @@ try:
 except ImportError:
     # Prometheus 未安装，降级为无操作
     class _NoopMetric:
-        def inc(self, *args, **kwargs): pass
-        def dec(self, *args, **kwargs): pass
-        def set(self, *args, **kwargs): pass
-        def observe(self, *args, **kwargs): pass
-        def labels(self, *args, **kwargs): return self
+        def inc(self, *args, **kwargs):
+            pass
+
+        def dec(self, *args, **kwargs):
+            pass
+
+        def set(self, *args, **kwargs):
+            pass
+
+        def observe(self, *args, **kwargs):
+            pass
+
+        def labels(self, *args, **kwargs):
+            return self
 
     user_satisfaction_score = _NoopMetric()
     agent_usage_total = _NoopMetric()
@@ -458,7 +509,12 @@ except ImportError:
 
 
 def record_tool_result_optimization(
-    tool_name: str, raw_size: int, optimized_size: int, raw_tokens: int, optimized_tokens: int, truncated: bool
+    tool_name: str,
+    raw_size: int,
+    optimized_size: int,
+    raw_tokens: int,
+    optimized_tokens: int,
+    truncated: bool,
 ) -> None:
     """Record bounded, content-free Tool Result optimization metrics."""
     tool_result_raw_bytes.observe(raw_size)
@@ -470,7 +526,9 @@ def record_tool_result_optimization(
         tool_result_truncated_total.labels(tool_name=tool_name).inc()
 
 
-def record_tool_result_event(event: str, *, latency_seconds: float | None = None, strategy: str | None = None) -> None:
+def record_tool_result_event(
+    event: str, *, latency_seconds: float | None = None, strategy: str | None = None
+) -> None:
     """Record content-free V2 events; failures in metrics never escape."""
     try:
         metric = {
@@ -491,7 +549,9 @@ def record_tool_result_event(event: str, *, latency_seconds: float | None = None
         return
 
 
-def record_tool_result_cache_event(tool_name: str, outcome: str, *, latency_seconds: float | None = None) -> None:
+def record_tool_result_cache_event(
+    tool_name: str, outcome: str, *, latency_seconds: float | None = None
+) -> None:
     """Record bounded cache outcomes; no arguments, identities, or keys are labels."""
     try:
         tool_result_cache_requests_total.labels(tool_name=tool_name, outcome=outcome).inc()
@@ -509,6 +569,7 @@ def record_tool_result_cache_event(tool_name: str, outcome: str, *, latency_seco
             tool_result_cache_latency_seconds.observe(latency_seconds)
     except Exception:
         return
+
 
 # ===== 性能指标常量 =====
 RESPONSE_TIMES_MAXLEN = 200  # 响应时间 deque 最大长度
@@ -920,7 +981,9 @@ class MetricsCollector:
                 "kpi": await self.get_kpi_stats(),
             }
             redis_client.set(
-                "metrics:snapshot", json.dumps(snapshot, ensure_ascii=False), ex=METRICS_SNAPSHOT_TTL
+                "metrics:snapshot",
+                json.dumps(snapshot, ensure_ascii=False),
+                ex=METRICS_SNAPSHOT_TTL,
             )
             redis_client.lpush("metrics:history", json.dumps(snapshot, ensure_ascii=False))
             redis_client.ltrim("metrics:history", 0, METRICS_HISTORY_MAX - 1)
@@ -1175,7 +1238,7 @@ class SLAAlertManager:
                     await alert_notifier.send_alert(
                         title="[升级] SLA 告警",
                         content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
-                        severity="emergency"
+                        severity="emergency",
                     )
 
                     alert_info["escalated"] = True

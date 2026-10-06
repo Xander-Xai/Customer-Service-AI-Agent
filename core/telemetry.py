@@ -350,9 +350,7 @@ def span(
             candidate = tracer.start_as_current_span(name)
             opened = (candidate, candidate.__enter__())
         except Exception as exc:  # noqa: BLE001 - observability must not break runtime
-            logger.warning(
-                "trace span 创建失败，降级为 no-op: %s %s", type(exc).__name__, exc
-            )
+            logger.warning("trace span 创建失败，降级为 no-op: %s %s", type(exc).__name__, exc)
             opened = None
 
     if opened is None:

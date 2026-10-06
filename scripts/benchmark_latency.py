@@ -93,9 +93,7 @@ def _simulate_streaming(query: str) -> tuple[float, float]:
     return max(10, ttfb), max(50, total)
 
 
-async def _real_streaming_test(
-    query: str, session, base_url: str
-) -> tuple[float, float]:
+async def _real_streaming_test(query: str, session, base_url: str) -> tuple[float, float]:
     """Measure TTFB and total response time from real streaming endpoint."""
 
     url = f"{base_url}/api/chat/stream"
@@ -170,7 +168,9 @@ async def benchmark_latency():
                 ttfb_values.append(ttfb)
                 total_values.append(total)
                 if (i + 1) % 10 == 0:
-                    print(f"    {i + 1}/{len(queries)} done (TTFB={ttfb:.0f}ms, total={total:.0f}ms)")
+                    print(
+                        f"    {i + 1}/{len(queries)} done (TTFB={ttfb:.0f}ms, total={total:.0f}ms)"
+                    )
     else:
         for i, query in enumerate(queries):
             ttfb, total = _simulate_streaming(query)
@@ -203,11 +203,15 @@ async def benchmark_latency():
     print("  ├──────────┼─────────────────┼──────────────────────────┤")
     for p in (50, 75, 90, 95, 99):
         pt = percentiles[f"p{p}"]
-        print(f"  │  P{p:<3d}     │  {pt['ttfb_ms']:>6.0f} ms    │  {pt['total_ms']:>6.0f} ms               │")
+        print(
+            f"  │  P{p:<3d}     │  {pt['ttfb_ms']:>6.0f} ms    │  {pt['total_ms']:>6.0f} ms               │"
+        )
     print("  ├──────────┼─────────────────┼──────────────────────────┤")
     print(f"  │  Mean    │  {mean_ttfb:>6.0f} ms    │  {mean_total:>6.0f} ms               │")
     print(f"  │  Stdev   │  {stdev_ttfb:>6.0f} ms    │  {stdev_total:>6.0f} ms               │")
-    print(f"  │  Max     │  {percentiles['p100']['ttfb_ms']:>6.0f} ms    │  {percentiles['p100']['total_ms']:>6.0f} ms               │")
+    print(
+        f"  │  Max     │  {percentiles['p100']['ttfb_ms']:>6.0f} ms    │  {percentiles['p100']['total_ms']:>6.0f} ms               │"
+    )
     print("  └──────────┴─────────────────┴──────────────────────────┘")
     print()
 

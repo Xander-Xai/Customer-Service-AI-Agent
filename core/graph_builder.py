@@ -166,16 +166,20 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         )
 
         # v6.3: 黑板写入 fire-and-forget（不阻塞主流程）
-        asyncio.create_task(c.bb.write(
-            "last_routing",
-            {
-                "query_type": result.query_type,
-                "agent": result.agent_name,
-                "complexity": result.complexity,
-            },
-        ))
+        asyncio.create_task(
+            c.bb.write(
+                "last_routing",
+                {
+                    "query_type": result.query_type,
+                    "agent": result.agent_name,
+                    "complexity": result.complexity,
+                },
+            )
+        )
 
-        await _emit_status(state, "classify", f"📋 分类结果: {result.query_type} (agent={result.agent_name})")
+        await _emit_status(
+            state, "classify", f"📋 分类结果: {result.query_type} (agent={result.agent_name})"
+        )
 
         return state
 
@@ -221,7 +225,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                 interval = 0.03
                 for i in range(0, len(cached), chunk_size):
                     try:
-                        await stream_callback({"type": "chunk", "content": cached[i:i + chunk_size]})
+                        await stream_callback(
+                            {"type": "chunk", "content": cached[i : i + chunk_size]}
+                        )
                     except Exception:
                         logger.debug("cache pseudo-stream callback failed")
                     await asyncio.sleep(interval)
@@ -288,9 +294,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         pending = result.get("pending_actions") or []
         if pending:
             state["pending_actions"] = list(state.get("pending_actions") or []) + list(pending)
-            logger.info(
-                "[%s] %d 个高风险动作待人工审批", mode_name, len(state["pending_actions"])
-            )
+            logger.info("[%s] %d 个高风险动作待人工审批", mode_name, len(state["pending_actions"]))
         logger.info(f"[{mode_name}] agents={state['agents_used']} {_format_duration(elapsed)}")
         return state
 
@@ -355,7 +359,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                                     "intent_type": state.get("query_type", "default"),
                                     "user_id": state.get("user_id"),
                                 }
-                                c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
+                                c.cache.put(
+                                    state["customer_query"], state["response"], metadata=cache_meta
+                                )
                             logger.info(f"[ModeUpgrade] 升级重试完成: mode={new_mode}")
                     except Exception as e:
                         logger.error(f"[ModeUpgrade] 升级重试失败: {e}，保留原响应", exc_info=True)

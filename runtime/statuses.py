@@ -74,9 +74,7 @@ APPROVAL_RESUMABLE_STATUSES: frozenset[RunStatus] = frozenset({RunStatus.WAITING
 
 #: 允许迁移
 ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
-    RunStatus.PENDING: frozenset(
-        {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.DEAD_LETTER}
-    ),
+    RunStatus.PENDING: frozenset({RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.DEAD_LETTER}),
     RunStatus.QUEUED: frozenset(
         {
             RunStatus.RUNNING,
@@ -94,9 +92,7 @@ ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
             RunStatus.CANCELLED,
         }
     ),
-    RunStatus.RETRYING: frozenset(
-        {RunStatus.RUNNING, RunStatus.DEAD_LETTER, RunStatus.CANCELLED}
-    ),
+    RunStatus.RETRYING: frozenset({RunStatus.RUNNING, RunStatus.DEAD_LETTER, RunStatus.CANCELLED}),
     RunStatus.WAITING_APPROVAL: frozenset(
         {RunStatus.RUNNING, RunStatus.DEAD_LETTER, RunStatus.CANCELLED}
     ),

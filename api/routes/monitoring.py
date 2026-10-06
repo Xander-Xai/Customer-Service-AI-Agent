@@ -111,6 +111,7 @@ async def health(request: Request):
     qdrant_ok = False
     try:
         import asyncio
+
         if container and getattr(container, "knowledge_base", None):
             kb = container.knowledge_base
             qdrant_ok = kb.available
@@ -136,6 +137,7 @@ async def health(request: Request):
         from db.database import engine
 
         t0 = time.time()
+
         def _check_db():
             with engine.connect() as conn:
                 conn.execute(_sql_text("SELECT 1"))
@@ -168,8 +170,7 @@ async def health(request: Request):
     if not db_ok or not llm_key_valid:
         overall = "unhealthy"
     elif (
-        checkpoint_info.get("backend") == "postgres"
-        and checkpoint_info.get("status") != "healthy"
+        checkpoint_info.get("backend") == "postgres" and checkpoint_info.get("status") != "healthy"
     ):
         # 生产要求可持久化 checkpoint；后端不可用算不健康
         overall = "unhealthy"

@@ -255,8 +255,7 @@ async def test_lifespan_exit_releases_a_live_pooled_connection(
     await embedding.aencode("hello")
     client = _registry()[asyncio.get_running_loop()]
     assert _pooled_connection_count(client) >= 1, (
-        "前置条件：stub 是 keep-alive，池里应该真的握住了长连接；"
-        "若为 0 说明本用例退化成了空断言"
+        "前置条件：stub 是 keep-alive，池里应该真的握住了长连接；" "若为 0 说明本用例退化成了空断言"
     )
 
     container = _closed_container()
@@ -471,9 +470,9 @@ async def test_shutdown_closes_the_tcp_socket_at_the_server_side(
     await embedding.aencode("hello")
     client = _registry()[asyncio.get_running_loop()]
     assert _pooled_connection_count(client) >= 1, "前置条件：池里握着长连接"
-    assert _wait_for(lambda: provider.open_connections >= 1), (
-        f"前置条件：服务端应看到至少 1 条连接，实际 {provider.open_connections}"
-    )
+    assert _wait_for(
+        lambda: provider.open_connections >= 1
+    ), f"前置条件：服务端应看到至少 1 条连接，实际 {provider.open_connections}"
 
     await container.close()
 

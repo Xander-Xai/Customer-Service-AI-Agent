@@ -117,8 +117,7 @@ HISTORICAL_MARKER = "HISTORICAL AUDIT SNAPSHOT"
 # that sentence silently excluded the whole file from the active scan. Naming
 # the concept is not the same as declaring the document historical.
 HISTORICAL_BANNER_RE = re.compile(
-    r"^>+[ \t]*(?:\[![A-Za-z]+\][ \t]*)?(?:\*\*|__|\*|_)?[ \t]*"
-    r"HISTORICAL\s+AUDIT\s+SNAPSHOT",
+    r"^>+[ \t]*(?:\[![A-Za-z]+\][ \t]*)?(?:\*\*|__|\*|_)?[ \t]*" r"HISTORICAL\s+AUDIT\s+SNAPSHOT",
     re.IGNORECASE,
 )
 
@@ -1246,8 +1245,7 @@ HITL_FASTPATH_DISCLAIMER_RE = re.compile(
 
 #: Real ERP write operations. Evidence is NOT_VERIFIED (no enterprise staging).
 REAL_ERP_WRITE_RE = re.compile(
-    r"真实\s*ERP\s*写(?:操作|入)|真实\s*ERP\s*(?:写操作|写入)|"
-    r"real\s+ERP\s+write",
+    r"真实\s*ERP\s*写(?:操作|入)|真实\s*ERP\s*(?:写操作|写入)|" r"real\s+ERP\s+write",
     re.IGNORECASE,
 )
 #: A VERIFIED claim on the same line. NOT_VERIFIED / 未验证 / 未实测 etc. clear it.
@@ -1276,7 +1274,9 @@ APPROVAL_ROUTER_MOUNT_RE = re.compile(r"include_router\s*\(\s*approvals_router\b
 API_REFERENCE_DOC_RELPATH = "docs/reference/api-reference.md"
 
 
-def check_openapi_counts_are_generated(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+def check_openapi_counts_are_generated(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
     """No CURRENT doc may hand-write an OpenAPI path/operation count.
 
     A hardcoded count is a second source of truth that silently rots: the
@@ -1326,7 +1326,9 @@ def _canonical_run_states_from_code(root: Path) -> set[str] | None:
     return None
 
 
-def check_run_state_machine_completeness(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+def check_run_state_machine_completeness(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
     """A CURRENT doc that draws the AgentRun state chain must include
     WAITING_APPROVAL on that same line/block.
 
@@ -1423,7 +1425,9 @@ def check_hitl_fastpath_not_claimed(docs: list[Path], errors: list[str], root: P
             )
 
 
-def check_real_erp_write_not_verified(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+def check_real_erp_write_not_verified(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
     """Real ERP write operations stay NOT_VERIFIED.
 
     There is no enterprise staging environment, so no artifact can support a
@@ -1978,7 +1982,9 @@ def latest_committed_preflight(root: Path = ROOT) -> tuple[str, str] | None:
     return run_id, rel
 
 
-def check_rag_preflight_pointer_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+def check_rag_preflight_pointer_drift(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
     """Guard AA: a CURRENT doc must not call a superseded preflight the latest.
 
     Scoped to CURRENT docs only (historical snapshots legitimately keep the

@@ -100,9 +100,7 @@ class TTSProcessor:
         """
         import hashlib
 
-        payload = hashlib.blake2b(
-            text.strip().encode("utf-8"), digest_size=32
-        ).digest()
+        payload = hashlib.blake2b(text.strip().encode("utf-8"), digest_size=32).digest()
         return b"ID3\x03\x00\x00\x00\x00\x00\x00" + payload
 
     @staticmethod

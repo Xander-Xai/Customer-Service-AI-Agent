@@ -106,4 +106,6 @@ def seed_image_knowledge(kb, collection_name="image_knowledge"):
         kb.add_image_documents(collection_name, image_paths, metadatas)
         logger.info(f"图片种子数据加载完成: {collection_name} ({len(items)} 条)")
     else:
-        logger.warning("当前知识库不支持 add_image_documents（Qdrant 未实现 CLIP 多模态检索），跳过图片种子数据")
+        logger.warning(
+            "当前知识库不支持 add_image_documents（Qdrant 未实现 CLIP 多模态检索），跳过图片种子数据"
+        )

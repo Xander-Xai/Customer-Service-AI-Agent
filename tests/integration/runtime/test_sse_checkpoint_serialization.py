@@ -133,9 +133,7 @@ def test_postgres_checkpointer_accepts_streaming_state_and_still_streams():
         cfg = {"configurable": {"thread_id": thread_id}}
         state = await graph.aget_state(cfg)
         assert state is not None, "checkpoint 应存在"
-        assert "stream_callback" not in (state.values or {}), (
-            "checkpointed state 不应含流式回调"
-        )
+        assert "stream_callback" not in (state.values or {}), "checkpointed state 不应含流式回调"
 
     graph_for_verify = asyncio.run(_rebuild_graph(DB_URL, node))
     asyncio.run(verify(graph_for_verify))

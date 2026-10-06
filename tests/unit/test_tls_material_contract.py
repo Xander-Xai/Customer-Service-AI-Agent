@@ -223,9 +223,9 @@ class TestPreflightFailsFastWithActionableMessage:
         assert result.returncode == 1
         combined = result.stdout + result.stderr
         assert "key.pem" in combined, "the missing file must be named"
-        assert "cert.pem" not in combined.split("缺少")[1][:200], (
-            "cert.pem is present and must not be reported as missing"
-        )
+        assert (
+            "cert.pem" not in combined.split("缺少")[1][:200]
+        ), "cert.pem is present and must not be reported as missing"
 
     @pytest.mark.unit
     def test_empty_files_fail(self, tmp_path: Path) -> None:
@@ -235,9 +235,9 @@ class TestPreflightFailsFastWithActionableMessage:
         (ssl / "key.pem").write_text("", encoding="utf-8")
         result = _run_check("--ssl-dir", str(ssl))
         assert result.returncode == 1
-        assert "0 字节" in result.stdout + result.stderr, (
-            "an empty bind-mount source is equivalent to a missing one and must be called out"
-        )
+        assert (
+            "0 字节" in result.stdout + result.stderr
+        ), "an empty bind-mount source is equivalent to a missing one and must be called out"
 
     @pytest.mark.unit
     def test_message_tells_the_operator_what_to_provide(self, tmp_path: Path) -> None:
@@ -275,9 +275,9 @@ class TestPreflightFailsFastWithActionableMessage:
         )
         assert generated.returncode == 0, generated.stderr
         result = _run_check("--ssl-dir", str(ssl))
-        assert result.returncode == 1, (
-            "a self-signed certificate must not pass the production check"
-        )
+        assert (
+            result.returncode == 1
+        ), "a self-signed certificate must not pass the production check"
         assert "自签名" in result.stdout + result.stderr
 
     @requires_openssl
@@ -293,9 +293,9 @@ class TestPreflightFailsFastWithActionableMessage:
         )
         result = _run_check("--ssl-dir", str(ssl), "--allow-self-signed")
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "非自签名" not in result.stdout, (
-            "when a self-signed cert is allowed the output must not claim otherwise"
-        )
+        assert (
+            "非自签名" not in result.stdout
+        ), "when a self-signed cert is allowed the output must not claim otherwise"
 
     @pytest.mark.unit
     def test_openssl_absence_is_reported_not_silently_passed(self, tmp_path: Path, monkeypatch):
@@ -317,9 +317,9 @@ class TestPreflightFailsFastWithActionableMessage:
             check=False,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "openssl" in result.stderr, (
-            "with openssl unavailable the check must disclose which validations it skipped"
-        )
+        assert (
+            "openssl" in result.stderr
+        ), "with openssl unavailable the check must disclose which validations it skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +341,9 @@ class TestComposeGateBlocksNginxWithoutTls:
             "compose needs a TLS gate; a missing certificate currently only surfaces "
             "after nginx has already started"
         )
-        assert services["tls-check"].get("restart") == "no", (
-            "a gate that restarts would mask the failure and loop"
-        )
+        assert (
+            services["tls-check"].get("restart") == "no"
+        ), "a gate that restarts would mask the failure and loop"
 
     @pytest.mark.unit
     def test_gate_mounts_the_same_host_directory_as_nginx(self) -> None:
@@ -360,27 +360,27 @@ class TestComposeGateBlocksNginxWithoutTls:
     @pytest.mark.unit
     def test_nginx_waits_for_the_gate_to_succeed(self) -> None:
         depends = self._compose()["services"]["nginx"]["depends_on"]
-        assert isinstance(depends, dict), (
-            "nginx depends_on must use the mapping form so a condition can be attached"
-        )
+        assert isinstance(
+            depends, dict
+        ), "nginx depends_on must use the mapping form so a condition can be attached"
         gate = depends.get("tls-check")
         assert gate, f"nginx must depend on the TLS gate; got {depends}"
-        assert gate.get("condition") == "service_completed_successfully", (
-            f"the gate must gate nginx; condition={gate.get('condition')!r}"
-        )
+        assert (
+            gate.get("condition") == "service_completed_successfully"
+        ), f"the gate must gate nginx; condition={gate.get('condition')!r}"
 
     @pytest.mark.unit
     def test_gate_message_points_at_the_operator_actions(self) -> None:
         blob = yaml_safe_dump(self._compose()["services"]["tls-check"])
-        assert "deploy/nginx/ssl/cert.pem" in blob, (
-            "the gate message must name the host path the operator has to create"
-        )
-        assert "tls-check" in blob or "make tls-check" in blob, (
-            "the gate must point at the full validation command"
-        )
-        assert "LOCAL DEVELOPMENT ONLY" in blob or "tls-local-cert" in blob, (
-            "the gate must mark the local self-signed escape hatch as local-only"
-        )
+        assert (
+            "deploy/nginx/ssl/cert.pem" in blob
+        ), "the gate message must name the host path the operator has to create"
+        assert (
+            "tls-check" in blob or "make tls-check" in blob
+        ), "the gate must point at the full validation command"
+        assert (
+            "LOCAL DEVELOPMENT ONLY" in blob or "tls-local-cert" in blob
+        ), "the gate must mark the local self-signed escape hatch as local-only"
 
     @pytest.mark.unit
     def test_gate_does_not_ship_its_own_certificate(self) -> None:
@@ -435,9 +435,9 @@ class TestLocalHelperIsMarkedLocalOnly:
                 timeout=60,
                 check=False,
             ).stdout
-            assert "LOCAL DEVELOPMENT ONLY" in subject, (
-                f"certificate subject must be self-identifying; got {subject.strip()!r}"
-            )
+            assert (
+                "LOCAL DEVELOPMENT ONLY" in subject
+            ), f"certificate subject must be self-identifying; got {subject.strip()!r}"
 
     @pytest.mark.unit
     def test_private_key_permissions_are_tightened(self) -> None:
@@ -503,9 +503,9 @@ class TestLocalHelperIsMarkedLocalOnly:
             check=False,
         )
         assert result.returncode == 1
-        assert not Path("/tmp/should-not-be-created-57").exists(), (
-            "a refused request must not create anything on disk"
-        )
+        assert not Path(
+            "/tmp/should-not-be-created-57"
+        ).exists(), "a refused request must not create anything on disk"
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +536,6 @@ class TestMakefileWiring:
         makefile = MAKEFILE.read_text(encoding="utf-8")
         line = next((ln for ln in makefile.splitlines() if ln.startswith("tls-local-cert:")), None)
         assert line, "a local-only escape hatch should be discoverable from make help"
-        assert "LOCAL DEVELOPMENT ONLY" in line, (
-            "make help is what an operator scans; the warning must be there"
-        )
+        assert (
+            "LOCAL DEVELOPMENT ONLY" in line
+        ), "make help is what an operator scans; the warning must be there"

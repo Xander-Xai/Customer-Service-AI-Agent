@@ -260,9 +260,9 @@ class TestBuildContextsResolve:
         """The context must be the directory that actually contains the Dockerfile."""
         context = _build_context(_load(BASE_COMPOSE)["services"]["nginx"])
         resolved = (BASE_COMPOSE.parent / context).resolve()
-        assert (resolved / "Dockerfile").is_file(), (
-            f"nginx build context resolves to {resolved}, which has no Dockerfile"
-        )
+        assert (
+            resolved / "Dockerfile"
+        ).is_file(), f"nginx build context resolves to {resolved}, which has no Dockerfile"
         assert (resolved / "nginx.conf").is_file(), (
             f"nginx build context resolves to {resolved}, which has no nginx.conf; "
             "the Dockerfile COPY would fail"
@@ -383,9 +383,9 @@ class TestReadmeProjectTreeMatchesRepository:
     def test_nginx_and_loki_are_listed_under_deploy(self) -> None:
         entries = _readme_tree_entries()
         root_names = {name for depth, name in entries if depth == 0}
-        assert "nginx/" not in root_names, (
-            "nginx/ is not at the repo root; it lives at deploy/nginx/ (Dockerfile + nginx.conf)"
-        )
+        assert (
+            "nginx/" not in root_names
+        ), "nginx/ is not at the repo root; it lives at deploy/nginx/ (Dockerfile + nginx.conf)"
         assert "loki/" not in root_names, (
             "loki/ is not at the repo root; it lives at deploy/loki/ "
             "(loki-config.yaml + promtail-config.yaml)"
@@ -429,9 +429,9 @@ class TestProductionStackPortSemantics:
 
     def test_nginx_is_published_as_the_application_ingress(self) -> None:
         published = _host_ports([BASE_COMPOSE, PROD_COMPOSE])
-        assert {80, 443} <= published.get("nginx", set()), (
-            "nginx must publish 80/443; it is the only application ingress"
-        )
+        assert {80, 443} <= published.get(
+            "nginx", set()
+        ), "nginx must publish 80/443; it is the only application ingress"
 
     def test_dev_override_publishes_app_on_8000(self) -> None:
         """The dev stack is where localhost:8000 is genuinely true."""

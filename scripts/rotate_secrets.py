@@ -60,7 +60,9 @@ def save_ledger(ledger: dict) -> None:
         json.dump(ledger, f, indent=2, ensure_ascii=False)
 
 
-def check_key_expiry(ledger: dict, key_name: str, rotation_days: int = DEFAULT_ROTATION_DAYS) -> tuple[bool, int]:
+def check_key_expiry(
+    ledger: dict, key_name: str, rotation_days: int = DEFAULT_ROTATION_DAYS
+) -> tuple[bool, int]:
     """检查密钥是否过期或即将过期
 
     Returns:
@@ -191,9 +193,7 @@ def main() -> None:
                     ledger["keys"][key] = {}
                 ledger["keys"][key]["last_rotated"] = now
                 ledger["keys"][key]["rotation_days"] = (
-                    HIGH_RISK_ROTATION_DAYS
-                    if rule["risk"] == "high"
-                    else DEFAULT_ROTATION_DAYS
+                    HIGH_RISK_ROTATION_DAYS if rule["risk"] == "high" else DEFAULT_ROTATION_DAYS
                 )
                 ledger["keys"][key]["risk_level"] = rule["risk"]
 

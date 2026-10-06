@@ -88,8 +88,7 @@ def main() -> None:
         print(f"MISSING IDs: {sorted(missing)[:10]}")
 
     assert ratio == 100.0, (
-        f"Doc IDs not fully aligned! Only {ratio:.1f}% overlap. "
-        f"Missing: {sorted(missing)[:10]}"
+        f"Doc IDs not fully aligned! Only {ratio:.1f}% overlap. " f"Missing: {sorted(missing)[:10]}"
     )
     print("PASS: All expected_doc_ids exist in knowledge base documents")
 

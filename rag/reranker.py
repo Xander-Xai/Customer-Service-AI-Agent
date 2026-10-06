@@ -134,9 +134,7 @@ class ApiReranker:
         elif is_placeholder_api_key(self._api_key):
             # issue #52: 空值判断挡不住占位凭据 —— sk-placeholder-... 是真值，
             # 于是重排真的去连 api.siliconflow.cn 并吃 401。占位凭据按未配置处理。
-            logger.warning(
-                "RERANKER_API_KEY 是占位值，API reranker 不可用（不构造 HTTP 客户端）"
-            )
+            logger.warning("RERANKER_API_KEY 是占位值，API reranker 不可用（不构造 HTTP 客户端）")
             self._available = False
         else:
             self._available = True
@@ -210,9 +208,7 @@ class ApiReranker:
         }
 
         try:
-            response = httpx.post(
-                url, headers=headers, json=payload, timeout=self._timeout
-            )
+            response = httpx.post(url, headers=headers, json=payload, timeout=self._timeout)
             response.raise_for_status()
             data = response.json()
         except httpx.TimeoutException:
@@ -238,8 +234,7 @@ class ApiReranker:
             # deliberately NOT logged: it can echo user documents or provider
             # internals back into the logs.
             logger.error(
-                "Reranker provider HTTP 失败，降级为原始排序: reason=%s "
-                "http_status=%s model=%s",
+                "Reranker provider HTTP 失败，降级为原始排序: reason=%s " "http_status=%s model=%s",
                 RerankReason.HTTP_ERROR.value,
                 status,
                 self._model,
@@ -256,8 +251,7 @@ class ApiReranker:
             self.last_error_status = None
             # Exception *class* only — the message can carry request content.
             logger.error(
-                "Reranker provider 调用失败，降级为原始排序: reason=%s "
-                "error_type=%s model=%s",
+                "Reranker provider 调用失败，降级为原始排序: reason=%s " "error_type=%s model=%s",
                 RerankReason.PROVIDER_ERROR.value,
                 type(e).__name__,
                 self._model,

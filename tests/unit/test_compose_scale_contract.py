@@ -242,9 +242,9 @@ class TestContainerNamingContract:
         # the mechanism is Compose's own; nothing in the repo should hardcode the
         # generated shape in a way that would break if the project name changes
         text = BASE.read_text(encoding="utf-8")
-        assert not re.search(r"container_name:\s*customer-service-(ai|worker)-\d", text), (
-            "do not hardcode an index-suffixed name; that reimplements Compose's naming"
-        )
+        assert not re.search(
+            r"container_name:\s*customer-service-(ai|worker)-\d", text
+        ), "do not hardcode an index-suffixed name; that reimplements Compose's naming"
 
     @pytest.mark.unit
     def test_no_tooling_addresses_the_former_container_names(self) -> None:
@@ -332,9 +332,9 @@ class TestComposeConfigSucceeds:
         result = _compose_config("-f", str(PROD), "-f", str(SCALE))
         assert result.returncode == 0, result.stderr[-1200:]
         rendered = yaml.safe_load(result.stdout)["services"]
-        assert rendered["app"].get("deploy", {}).get("replicas"), (
-            "the scale stack must actually carry replicas through to the rendered config"
-        )
+        assert (
+            rendered["app"].get("deploy", {}).get("replicas")
+        ), "the scale stack must actually carry replicas through to the rendered config"
         assert "container_name" not in rendered["app"], (
             "the rendered app service must not carry a fixed name, or Compose would "
             "have refused the merge anyway"
@@ -449,6 +449,6 @@ class TestProductionHaRemainsUnverified:
     @pytest.mark.unit
     def test_scale_file_does_not_claim_throughput_numbers(self) -> None:
         text = SCALE.read_text(encoding="utf-8")
-        assert not re.search(r"\d+\s*(QPS|qps|req/s|rps)", text), (
-            "the scale file must not carry throughput numbers; none were measured"
-        )
+        assert not re.search(
+            r"\d+\s*(QPS|qps|req/s|rps)", text
+        ), "the scale file must not carry throughput numbers; none were measured"

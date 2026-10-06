@@ -60,7 +60,9 @@ def load_eval_queries(min_count: int = 100) -> list[str]:
         查询字符串列表。
     """
     if not _EVAL_PATH.exists():
-        print(f"  WARNING: 评测集未找到 ({_EVAL_PATH})，回退到 {len(HARDCODED_FALLBACK)} 条硬编码查询")
+        print(
+            f"  WARNING: 评测集未找到 ({_EVAL_PATH})，回退到 {len(HARDCODED_FALLBACK)} 条硬编码查询"
+        )
         return HARDCODED_FALLBACK.copy()
 
     try:

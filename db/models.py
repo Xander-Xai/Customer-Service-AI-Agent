@@ -162,9 +162,7 @@ class AgentRun(Base):
     queued_at = Column(DateTime(timezone=True), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
-    )
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
     trace_id = Column(String(64), nullable=True)
     # 幂等键：同一 key 只创建一个 run（可为空；空值允许多条）
     idempotency_key = Column(String(128), nullable=True, unique=True, index=True)
@@ -238,15 +236,11 @@ class ToolSideEffect(Base):
     claim_owner = Column(String(64), nullable=True)
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
-    )
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
     finished_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint(
-            "tool_name", "operation_key", name="uq_tool_side_effects_operation"
-        ),
+        UniqueConstraint("tool_name", "operation_key", name="uq_tool_side_effects_operation"),
         Index("ix_tool_side_effects_tool_op", "tool_name", "operation_key"),
     )
 
@@ -287,9 +281,7 @@ class HumanApproval(Base):
     proposal_fingerprint = Column(String(64), nullable=False)
     status = Column(String(16), nullable=False, default="PENDING", index=True)
     requested_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
-    updated_at = Column(
-        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
-    )
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
     # 到期时刻；读取时惰性判定，过期由 service 落 EXPIRED
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)

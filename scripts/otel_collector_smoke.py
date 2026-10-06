@@ -223,19 +223,23 @@ def main() -> int:
         report["checks"]["clean_tree"] = git_state.get("dirty") is False
         report["status"] = verifier.finalize_status(report)
         report_path = work_dir / "report.json"
-        report_path.write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        print(json.dumps({
-            "report": str(report_path.relative_to(REPO_ROOT)),
-            "status": report["status"],
-            "observed_spans": report["observed_spans"],
-            "missing_spans": report["missing_spans"],
-            "privacy_canary_present": report["privacy_canary_present"],
-            "tested_git_sha": report["git"].get("git_sha"),
-            "clean_tree": report["checks"]["clean_tree"],
-        }, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "report": str(report_path.relative_to(REPO_ROOT)),
+                    "status": report["status"],
+                    "observed_spans": report["observed_spans"],
+                    "missing_spans": report["missing_spans"],
+                    "privacy_canary_present": report["privacy_canary_present"],
+                    "tested_git_sha": report["git"].get("git_sha"),
+                    "clean_tree": report["checks"]["clean_tree"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
         return 0 if report["status"] == "VERIFIED_LOCAL" else 1
     finally:
         if started and not args.keep_running:

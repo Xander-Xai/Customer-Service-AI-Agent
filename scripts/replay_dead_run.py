@@ -107,16 +107,10 @@ def main() -> int:
         description="重放一个 DEAD_LETTER AgentRun（保留原始失败历史）"
     )
     parser.add_argument("run_id", help="要重放的 run_id")
-    parser.add_argument(
-        "--yes", action="store_true", help="跳过交互确认（非交互环境/CI 使用）"
-    )
-    parser.add_argument(
-        "--delay", type=float, default=0.0, help="延迟多少秒后投递（默认立即）"
-    )
+    parser.add_argument("--yes", action="store_true", help="跳过交互确认（非交互环境/CI 使用）")
+    parser.add_argument("--delay", type=float, default=0.0, help="延迟多少秒后投递（默认立即）")
     args = parser.parse_args()
-    return asyncio.run(
-        replay(args.run_id, delay=args.delay, assume_yes=args.yes)
-    )
+    return asyncio.run(replay(args.run_id, delay=args.delay, assume_yes=args.yes))
 
 
 if __name__ == "__main__":

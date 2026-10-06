@@ -182,8 +182,13 @@ class TestCreateApp:
             send,
         )
 
-        start_message = next(message for message in sent_messages if message["type"] == "http.response.start")
-        headers = {key.decode("latin-1"): value.decode("latin-1") for key, value in start_message["headers"]}
+        start_message = next(
+            message for message in sent_messages if message["type"] == "http.response.start"
+        )
+        headers = {
+            key.decode("latin-1"): value.decode("latin-1")
+            for key, value in start_message["headers"]
+        }
 
         assert start_message["status"] == 200
         assert headers["cache-control"] == "public, max-age=31536000, immutable"

@@ -135,19 +135,19 @@ class TestQdrantProbeUsesOnlyWhatTheImageShips:
     def test_qdrant_probe_asserts_on_a_real_status_code(self) -> None:
         """A TCP connect alone is liveness; the contract is /healthz readiness."""
         probe = _probe_text(_compose()["services"]["qdrant"])
-        assert "/healthz" in probe, (
-            f"the qdrant probe must exercise the readiness endpoint, got: {probe!r}"
-        )
-        assert re.search(r'"?\s*200\s*"?', probe) or "200" in probe, (
-            f"the qdrant probe must assert on the HTTP status code, got: {probe!r}"
-        )
+        assert (
+            "/healthz" in probe
+        ), f"the qdrant probe must exercise the readiness endpoint, got: {probe!r}"
+        assert (
+            re.search(r'"?\s*200\s*"?', probe) or "200" in probe
+        ), f"the qdrant probe must assert on the HTTP status code, got: {probe!r}"
 
     def test_qdrant_probe_is_not_a_bare_tcp_connect(self) -> None:
         """Guard against regressing to a connect-only probe with no status check."""
         probe = _probe_text(_compose()["services"]["qdrant"])
-        assert "read -r" in probe or "grep" in probe, (
-            f"the qdrant probe must read the HTTP response, not just open a socket; got: {probe!r}"
-        )
+        assert (
+            "read -r" in probe or "grep" in probe
+        ), f"the qdrant probe must read the HTTP response, not just open a socket; got: {probe!r}"
 
 
 class TestWorkerProbeIsCeleryNative:
@@ -210,9 +210,9 @@ class TestWorkerProbeIsCeleryNative:
         repo_built = {
             name for name, service in services.items() if _build_context(service) == "../.."
         }
-        assert {"app", "worker"} <= repo_built, (
-            f"expected app and worker to build from the repo root, got {sorted(repo_built)}"
-        )
+        assert (
+            {"app", "worker"} <= repo_built
+        ), f"expected app and worker to build from the repo root, got {sorted(repo_built)}"
         offenders = [name for name in sorted(repo_built) if _healthcheck(services[name]) is None]
         assert not offenders, (
             f"{offenders} are built from the repo root but declare no healthcheck, "
@@ -258,9 +258,9 @@ class TestProbeTimingIsExplicitAndJustified:
             return int(str(value).rstrip("s"))
 
         health = _healthcheck(_compose()["services"][service])
-        assert seconds(health["timeout"]) < seconds(health["interval"]), (
-            f"{service} timeout ({health['timeout']}) must be below interval ({health['interval']})"
-        )
+        assert seconds(health["timeout"]) < seconds(
+            health["interval"]
+        ), f"{service} timeout ({health['timeout']}) must be below interval ({health['interval']})"
 
 
 class TestNoProbeIsDisabledAsAnEscape:
@@ -281,9 +281,13 @@ class TestNoProbeIsDisabledAsAnEscape:
         with_health = {
             name for name, service in _compose()["services"].items() if _healthcheck(service)
         }
-        assert {"postgres", "redis", "app", "qdrant", "worker"} <= with_health, (
-            f"expected healthchecks on the core stack; found {sorted(with_health)}"
-        )
+        assert {
+            "postgres",
+            "redis",
+            "app",
+            "qdrant",
+            "worker",
+        } <= with_health, f"expected healthchecks on the core stack; found {sorted(with_health)}"
 
 
 @pytest.mark.skipif(not _has_docker(), reason="docker CLI not available")

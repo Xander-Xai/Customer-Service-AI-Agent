@@ -70,7 +70,10 @@ def _git_sha() -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT, check=True,
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=True,
         ).stdout.strip()
     except Exception:
         return "unavailable"
@@ -137,16 +140,19 @@ def _collection_payload_index(kb, collection: str) -> dict[str, str | None]:
     offset = None
     while True:
         result = kb._client.scroll(
-            collection_name=collection, limit=1000, offset=offset,
-            with_payload=True, with_vectors=False,
+            collection_name=collection,
+            limit=1000,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
         )
         points = (
-            list(result[0]) if isinstance(result, tuple)
+            list(result[0])
+            if isinstance(result, tuple)
             else list(getattr(result, "points", []) or [])
         )
         offset = (
-            result[1] if isinstance(result, tuple)
-            else getattr(result, "next_page_offset", None)
+            result[1] if isinstance(result, tuple) else getattr(result, "next_page_offset", None)
         )
         for point in points:
             payload = getattr(point, "payload", None) or {}
@@ -181,9 +187,7 @@ async def import_corpus(
     counts: dict[str, int] = {}
     identity: dict[str, dict[str, Any]] = {}
     t0 = time.monotonic()
-    total_batches = sum(
-        (len(ds) + batch_size - 1) // batch_size for ds in per_collection.values()
-    )
+    total_batches = sum((len(ds) + batch_size - 1) // batch_size for ds in per_collection.values())
     done_batches = 0
     for coll in EVAL_COLLECTIONS:
         ds = per_collection[coll]
@@ -191,9 +195,7 @@ async def import_corpus(
         existing = _collection_payload_index(kb, coll)
         present = expected_ids & set(existing)
         missing = expected_ids - set(existing)
-        hash_mismatch = {
-            doc_id for doc_id in present if existing.get(doc_id) != corpus_sha256
-        }
+        hash_mismatch = {doc_id for doc_id in present if existing.get(doc_id) != corpus_sha256}
         foreign = set(existing) - expected_ids
         identity_clean = not missing and not hash_mismatch and not foreign
 
@@ -254,14 +256,10 @@ async def import_corpus(
         after = existing if action == "skipped" else _collection_payload_index(kb, coll)
         missing_after = expected_ids - set(after)
         hash_mismatch_after = {
-            doc_id
-            for doc_id in (expected_ids & set(after))
-            if after.get(doc_id) != corpus_sha256
+            doc_id for doc_id in (expected_ids & set(after)) if after.get(doc_id) != corpus_sha256
         }
         foreign_after = set(after) - expected_ids
-        identity_clean_after = (
-            not missing_after and not hash_mismatch_after and not foreign_after
-        )
+        identity_clean_after = not missing_after and not hash_mismatch_after and not foreign_after
 
         identity[coll] = {
             "expected_logical_ids": len(expected_ids),
@@ -286,8 +284,12 @@ async def import_corpus(
 async def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     parser.add_argument("--input", default=str(DEFAULT_CORPUS), help="语料 JSONL 路径")
-    parser.add_argument("--benchmark", default=str(DEFAULT_BENCHMARK), help="基准文件（覆盖率审计）")
-    parser.add_argument("--manifest-dir", default=str(DEFAULT_MANIFEST_DIR), help="manifest 输出目录")
+    parser.add_argument(
+        "--benchmark", default=str(DEFAULT_BENCHMARK), help="基准文件（覆盖率审计）"
+    )
+    parser.add_argument(
+        "--manifest-dir", default=str(DEFAULT_MANIFEST_DIR), help="manifest 输出目录"
+    )
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--dry-run", action="store_true", help="只统计与映射，不写 Qdrant")
     parser.add_argument("--skip-bm25", action="store_true", help="导入后不执行 BM25 rebuild")
@@ -316,9 +318,7 @@ async def main() -> int:
     # scripts/evaluate_rag.py. A hardcoded localhost:6333 would silently import
     # into a different database whenever the deployment overrides the host
     # (e.g. Docker Compose service name `qdrant`).
-    kb = QdrantKnowledgeBase(
-        host=QDRANT_HOST, port=QDRANT_PORT, api_key=QDRANT_API_KEY or ""
-    )
+    kb = QdrantKnowledgeBase(host=QDRANT_HOST, port=QDRANT_PORT, api_key=QDRANT_API_KEY or "")
     if not kb.available:
         print(f"[FATAL] Qdrant 不可达 ({QDRANT_HOST}:{QDRANT_PORT})")
         return 1
@@ -365,18 +365,14 @@ async def main() -> int:
         print("dry-run 映射结果:", json.dumps(mapped, ensure_ascii=False))
     else:
         print("开始导入（幂等，确定性 point id；按 logical identity 校验）...")
-        counts, identity = await import_corpus(
-            kb, docs, args.batch_size, corpus_sha256
-        )
+        counts, identity = await import_corpus(kb, docs, args.batch_size, corpus_sha256)
         manifest["imported_counts"] = counts
         manifest["total_indexed"] = sum(counts.values())
         manifest["identity"] = identity
         manifest["coverage"] = coverage
         print(f"导入完成: {json.dumps(counts, ensure_ascii=False)}")
 
-        dirty = [
-            coll for coll, info in identity.items() if not info["identity_clean_after"]
-        ]
+        dirty = [coll for coll, info in identity.items() if not info["identity_clean_after"]]
         if dirty:
             manifest["post_import_identity_clean"] = False
             print(

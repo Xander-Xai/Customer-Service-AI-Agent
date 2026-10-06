@@ -121,11 +121,7 @@ def compute_query_metrics(
         out[f"hit@{k}"] = 1.0 if hits > 0 else 0.0
         out[f"recall@{k}"] = hits / max(len(expected_set), 1)
         out[f"precision@{k}"] = hits / k
-        dcg = sum(
-            1.0 / math.log2(rank + 1)
-            for rank, d in enumerate(top_k, 1)
-            if d in expected_set
-        )
+        dcg = sum(1.0 / math.log2(rank + 1) for rank, d in enumerate(top_k, 1) if d in expected_set)
         n_relevant = min(len(expected_set), k)
         idcg = sum(1.0 / math.log2(i + 1) for i in range(1, n_relevant + 1))
         out[f"ndcg@{k}"] = dcg / idcg if idcg > 0 else 0.0
@@ -189,9 +185,7 @@ def group_by(rows: list[dict[str, Any]], key: str) -> dict[str, list[dict[str, A
     return grouped
 
 
-def category_metrics(
-    rows: list[dict[str, Any]], ks: tuple[int, ...]
-) -> dict[str, dict[str, Any]]:
+def category_metrics(rows: list[dict[str, Any]], ks: tuple[int, ...]) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for cat, grp in sorted(group_by(rows, "category").items()):
         lat = [r["total_ms"] for r in grp]
@@ -208,6 +202,7 @@ def category_metrics(
 # 评测分母三视图（population protocol；全部运行时动态计算，禁止硬编码）
 # ---------------------------------------------------------------------------
 
+
 def population_flags(expected_ids: list[str], corpus_ids: set[str]) -> dict[str, Any]:
     """单查询的 population 归属标记（基于 gold docs 是否在索引 corpus 中）。"""
     present = sum(1 for gid in expected_ids if gid in corpus_ids)
@@ -219,18 +214,13 @@ def population_flags(expected_ids: list[str], corpus_ids: set[str]) -> dict[str,
     }
 
 
-def population_counts(
-    queries: list[dict[str, Any]], corpus_ids: set[str]
-) -> dict[str, int]:
+def population_counts(queries: list[dict[str, Any]], corpus_ids: set[str]) -> dict[str, int]:
     """三视图分母计数（动态计算；不依赖任何硬编码数字）。"""
-    eligible = sum(
-        1 for q in queries if any(gid in corpus_ids for gid in q["expected_doc_ids"])
-    )
+    eligible = sum(1 for q in queries if any(gid in corpus_ids for gid in q["expected_doc_ids"]))
     covered = sum(
         1
         for q in queries
-        if q["expected_doc_ids"]
-        and all(gid in corpus_ids for gid in q["expected_doc_ids"])
+        if q["expected_doc_ids"] and all(gid in corpus_ids for gid in q["expected_doc_ids"])
     )
     return {
         "all_queries": len(queries),
@@ -309,9 +299,7 @@ def classify_failure(
     if degraded_reason and degraded_reason != "retrieval_timeout":
         diagnostics.append(f"CHANNEL_DEGRADED:{degraded_reason}")
 
-    if exception_type == "timeout" or (
-        timeout_s is not None and wall_ms > timeout_s * 1000
-    ):
+    if exception_type == "timeout" or (timeout_s is not None and wall_ms > timeout_s * 1000):
         return "TIMEOUT", diagnostics
     if exception_type is not None:
         return "PROVIDER_ERROR", diagnostics
@@ -341,14 +329,20 @@ def git_sha() -> str:
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT, check=True,
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=True,
         ).stdout.strip()
     except Exception:
         return "unavailable"
     try:
         dirty = subprocess.run(
             ["git", "status", "--porcelain"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT, check=True,
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            check=True,
         ).stdout.strip()
     except Exception:
         dirty = ""
@@ -536,32 +530,37 @@ def derive_blockers(
         embedding_http_status in PROVIDER_AUTH_HTTP_STATUSES
     )
     if embedding_probe == "failed":
-        blockers.append({
-            "code": (
-                "EMBEDDING_PROVIDER_AUTH"
-                if embedding_auth else "EMBEDDING_PROVIDER_UNAVAILABLE"
-            ),
-            "stage": "embedding",
-            "blocking": vector_channel_needed,
-            "blocks_experiments": [
-                e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
-            ],
-            "blocks_corpus_import": not embedding_configured or embedding_auth,
-            "http_status": embedding_http_status,
-            "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行",
-        })
+        blockers.append(
+            {
+                "code": (
+                    "EMBEDDING_PROVIDER_AUTH"
+                    if embedding_auth
+                    else "EMBEDDING_PROVIDER_UNAVAILABLE"
+                ),
+                "stage": "embedding",
+                "blocking": vector_channel_needed,
+                "blocks_experiments": [
+                    e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
+                ],
+                "blocks_corpus_import": not embedding_configured or embedding_auth,
+                "http_status": embedding_http_status,
+                "detail": "embedding provider 探针失败：语料导入与向量依赖实验无法进行",
+            }
+        )
     elif not embedding_configured:
-        blockers.append({
-            "code": "EMBEDDING_PROVIDER_UNAVAILABLE",
-            "stage": "embedding",
-            "blocking": vector_channel_needed,
-            "blocks_experiments": [
-                e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
-            ],
-            "blocks_corpus_import": True,
-            "http_status": None,
-            "detail": "embedding 通道未配置（无 embed_fn），向量依赖实验与导入均不可用",
-        })
+        blockers.append(
+            {
+                "code": "EMBEDDING_PROVIDER_UNAVAILABLE",
+                "stage": "embedding",
+                "blocking": vector_channel_needed,
+                "blocks_experiments": [
+                    e for e in ("vector_only", "hybrid_no_rerank", "hybrid_rerank") if e in wanted
+                ],
+                "blocks_corpus_import": True,
+                "http_status": None,
+                "detail": "embedding 通道未配置（无 embed_fn），向量依赖实验与导入均不可用",
+            }
+        )
 
     if qdrant_total_points == 0:
         downstream: dict[str, Any] = {
@@ -583,17 +582,19 @@ def derive_blockers(
         # Unconfigured / unprobed must never be read as healthy: hybrid_rerank
         # would then run without a proven rerank and be counted as a real rerank
         # ablation. Blocks hybrid_rerank only.
-        blockers.append({
-            "code": "RERANKER_PROVIDER_UNAVAILABLE",
-            "stage": "reranker",
-            "blocking": False,
-            "blocks_experiments": ["hybrid_rerank"],
-            "http_status": reranker_http_status,
-            "detail": (
-                "reranker 未配置或未探测（RERANKER_API_KEY 缺失 / 探针未运行）；"
-                "不得把 probe=None 当作健康；仅阻塞 hybrid_rerank"
-            ),
-        })
+        blockers.append(
+            {
+                "code": "RERANKER_PROVIDER_UNAVAILABLE",
+                "stage": "reranker",
+                "blocking": False,
+                "blocks_experiments": ["hybrid_rerank"],
+                "http_status": reranker_http_status,
+                "detail": (
+                    "reranker 未配置或未探测（RERANKER_API_KEY 缺失 / 探针未运行）；"
+                    "不得把 probe=None 当作健康；仅阻塞 hybrid_rerank"
+                ),
+            }
+        )
     elif rerank_needed and not _reranker_verdict_is_ok(
         reranker_applied=reranker_applied,
         reranker_degraded=reranker_degraded,
@@ -604,20 +605,22 @@ def derive_blockers(
         # never from shared mutable state.
         reranker_auth = reranker_http_status in PROVIDER_AUTH_HTTP_STATUSES
         reason = reranker_reason or "provider_error"
-        blockers.append({
-            "code": "RERANKER_PROVIDER_AUTH" if reranker_auth else "RERANKER_PROVIDER_DEGRADED",
-            "stage": "reranker",
-            # 只阻塞 hybrid_rerank；不影响 vector_only/bm25_only/hybrid_no_rerank
-            "blocking": False,
-            "blocks_experiments": ["hybrid_rerank"],
-            "http_status": reranker_http_status,
-            # detail 只带 bounded reason / 状态码；不含 exception message、
-            # provider 响应体、query 或 documents。
-            "detail": (
-                f"reranker 探针未确认真实 rerank：reason={reason}"
-                f"（仅阻塞 hybrid_rerank，其余实验照常运行）"
-            ),
-        })
+        blockers.append(
+            {
+                "code": "RERANKER_PROVIDER_AUTH" if reranker_auth else "RERANKER_PROVIDER_DEGRADED",
+                "stage": "reranker",
+                # 只阻塞 hybrid_rerank；不影响 vector_only/bm25_only/hybrid_no_rerank
+                "blocking": False,
+                "blocks_experiments": ["hybrid_rerank"],
+                "http_status": reranker_http_status,
+                # detail 只带 bounded reason / 状态码；不含 exception message、
+                # provider 响应体、query 或 documents。
+                "detail": (
+                    f"reranker 探针未确认真实 rerank：reason={reason}"
+                    f"（仅阻塞 hybrid_rerank，其余实验照常运行）"
+                ),
+            }
+        )
 
     blocking = [b for b in blockers if b["blocking"]]
     primary: str | None = None
@@ -796,9 +799,7 @@ async def run_experiment(
         warmup_ids: list[str] = []
         for q in queries[:warmup_n]:
             try:
-                await kb.retrieve(
-                    _build_request(q["query"], top_k, rerank_flag, timeout_s)
-                )
+                await kb.retrieve(_build_request(q["query"], top_k, rerank_flag, timeout_s))
                 warmup_ids.append(q["query_id"])
             except Exception:
                 pass  # warmup 失败不影响正式 run（记 ids 供审计）
@@ -899,9 +900,7 @@ async def run_experiment(
                     }
                 )
                 # 失败请求以零指标进入 all_queries 分母（end-to-end 主口径）。
-                population_rows.append(
-                    zero_metric_row(qid, expected, corpus_ids, ks)
-                )
+                population_rows.append(zero_metric_row(qid, expected, corpus_ids, ks))
                 continue
 
             # 成功行：产出失败分析（MISS_ALL / LOW_RANK / GOLD_NOT_INDEXED）
@@ -963,7 +962,9 @@ async def run_experiment(
             "population_metrics": population_metrics(population_rows, ks),
             "latency": aggregate_latency([r["total_ms"] for r in rows]),
             "stage_latency": {
-                stage: aggregate_latency([r["stages_ms"][stage] for r in rows if stage in r["stages_ms"]])
+                stage: aggregate_latency(
+                    [r["stages_ms"][stage] for r in rows if stage in r["stages_ms"]]
+                )
                 for stage in ("VECTOR", "BM25", "FUSION_RRF", "RERANK")
             },
             "category_metrics": category_metrics(rows, ks),
@@ -1121,7 +1122,8 @@ def ablation_analysis(results: dict[str, dict[str, Any]]) -> dict[str, Any]:
             ),
             "latency_p95_delta_ms": round(
                 results["hybrid_rerank"]["latency"]["p95_ms"]
-                - results["hybrid_no_rerank"]["latency"]["p95_ms"], 2
+                - results["hybrid_no_rerank"]["latency"]["p95_ms"],
+                2,
             ),
             "improved_queries": len(improved),
             "degraded_queries": len(degraded_),
@@ -1164,9 +1166,7 @@ async def evaluate(args: argparse.Namespace) -> int:
     from core.config import QDRANT_HOST, QDRANT_PORT
     from rag.qdrant_knowledge_base import QdrantKnowledgeBase
 
-    run_id = args.run_id or (
-        "rag649-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    )
+    run_id = args.run_id or ("rag649-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     out_dir = Path(args.output) / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1193,9 +1193,7 @@ async def evaluate(args: argparse.Namespace) -> int:
         print("  [FATAL] Qdrant 不可达")
         return 1
     want_rerank = "hybrid_rerank" in args.experiments
-    gates = preflight(
-        kb, rerank_probe=want_rerank, requested_experiments=tuple(args.experiments)
-    )
+    gates = preflight(kb, rerank_probe=want_rerank, requested_experiments=tuple(args.experiments))
     print(f"  preflight: {gates['status']} | points={gates.get('qdrant', {}).get('total_points')}")
     if gates["status"].startswith("BLOCKED"):
         print(f"  [FATAL] {gates.get('hint', '')}")
@@ -1229,8 +1227,10 @@ async def evaluate(args: argparse.Namespace) -> int:
     results: dict[str, dict[str, Any]] = {}
     for name in experiments:
         spec = EXPERIMENT_SPECS[name]
-        print(f"[experiment] {name}（vector={'on' if not spec['disable_embedding'] else 'off'} "
-              f"bm25={'on' if not spec['disable_hybrid'] else 'off'} rerank={spec['rerank']}）")
+        print(
+            f"[experiment] {name}（vector={'on' if not spec['disable_embedding'] else 'off'} "
+            f"bm25={'on' if not spec['disable_hybrid'] else 'off'} rerank={spec['rerank']}）"
+        )
         results[name] = await run_experiment(
             kb,
             name,
@@ -1243,15 +1243,16 @@ async def evaluate(args: argparse.Namespace) -> int:
             warmup_n=args.warmup,
         )
         m = results[name]["metrics"]
-        print(f"  -> n_success={results[name]['n_success']} "
-              f"MRR={m.get('mrr')} hit@3={m.get('hit@3')} "
-              f"P95={results[name]['latency']['p95_ms']}ms")
+        print(
+            f"  -> n_success={results[name]['n_success']} "
+            f"MRR={m.get('mrr')} hit@3={m.get('hit@3')} "
+            f"P95={results[name]['latency']['p95_ms']}ms"
+        )
 
     # 5. 组装 artifact
     rows_payload = {
         name: [
-            {k: r[k] for k in r if k not in ("expected_ids", "retrieved_ids")}
-            for r in res["rows"]
+            {k: r[k] for k in r if k not in ("expected_ids", "retrieved_ids")} for r in res["rows"]
         ]
         for name, res in results.items()
     }
@@ -1322,12 +1323,12 @@ async def evaluate(args: argparse.Namespace) -> int:
             "ks": list(args.ks),
             "warmup_per_experiment": args.warmup,
             "cache_policy": "no application-level retrieval cache involved; "
-                            "embedding/reranker HTTP keepalive warmed by warmup queries",
+            "embedding/reranker HTTP keepalive warmed by warmup queries",
             "denominator": "primary all_queries view is end-to-end: failed "
-                           "(exception/timeout/gold-not-indexed) requests enter the "
-                           "population with zero-valued metrics; diagnostic "
-                           "metrics/category views average over successful "
-                           "queries (n_success); latency only over completed requests",
+            "(exception/timeout/gold-not-indexed) requests enter the "
+            "population with zero-valued metrics; diagnostic "
+            "metrics/category views average over successful "
+            "queries (n_success); latency only over completed requests",
             "relevance": "binary (any of expected_doc_ids in top-k)",
             "mrr_truncation": f"MRR computed on top-{args.top_k} retrieved list",
         },
@@ -1337,9 +1338,7 @@ async def evaluate(args: argparse.Namespace) -> int:
             "definitions": POPULATION_DEFINITIONS,
             "primary_view": "all_queries",
             "counts": pop_counts,
-            "per_experiment": {
-                name: res["population_metrics"] for name, res in results.items()
-            },
+            "per_experiment": {name: res["population_metrics"] for name, res in results.items()},
         },
         "metrics": {name: res["metrics"] for name, res in results.items()},
         "latency": {name: res["latency"] for name, res in results.items()},
@@ -1358,12 +1357,8 @@ async def evaluate(args: argparse.Namespace) -> int:
             }
             for name, res in results.items()
         },
-        "failure_counts": {
-            name: res["failure_counts"] for name, res in results.items()
-        },
-        "failures_top": {
-            name: res["failures"][:50] for name, res in results.items()
-        },
+        "failure_counts": {name: res["failure_counts"] for name, res in results.items()},
+        "failures_top": {name: res["failures"][:50] for name, res in results.items()},
         "notes": [
             "warmup queries are discarded from formal statistics",
             "ablation overrides are instance/request-level inside this process; "
@@ -1380,7 +1375,8 @@ async def evaluate(args: argparse.Namespace) -> int:
             "evidence_validity.observed instead of trusting this label",
             "VERIFIED describes the validity of the evidence, not the exit status "
             "of this process; a valid run may still show poor retrieval metrics",
-        ] + status_notes,
+        ]
+        + status_notes,
         "evidence_validity": validity,
         "raw_results_sha256": _sha256_file(raw_path),
         "subset_run": subset_run,
@@ -1405,8 +1401,9 @@ async def evaluate(args: argparse.Namespace) -> int:
     print(f"  status: {status}")
     print(f"  evidence_validity: {validity['verdict']} ({validity['contract']})")
     for reason in validity["reasons"]:
-        print(f"    - {reason['code']} [{reason['group']}] {reason['scope']}: "
-              f"{reason['detail']}")
+        print(
+            f"    - {reason['code']} [{reason['group']}] {reason['scope']}: " f"{reason['detail']}"
+        )
     print(f"  report:   {report_path}")
     print(f"  failures: {failures_path}")
     print(f"  raw (local, sha256 recorded): {raw_path}")
@@ -1426,11 +1423,22 @@ async def _collect_corpus_ids(kb) -> set[str]:
         offset = None
         while True:
             result = kb._client.scroll(
-                collection_name=coll, limit=1000, offset=offset,
-                with_payload=True, with_vectors=False,
+                collection_name=coll,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
             )
-            points = list(result[0]) if isinstance(result, tuple) else list(getattr(result, "points", []) or [])
-            offset = result[1] if isinstance(result, tuple) else getattr(result, "next_page_offset", None)
+            points = (
+                list(result[0])
+                if isinstance(result, tuple)
+                else list(getattr(result, "points", []) or [])
+            )
+            offset = (
+                result[1]
+                if isinstance(result, tuple)
+                else getattr(result, "next_page_offset", None)
+            )
             for p in points:
                 payload = getattr(p, "payload", None) or {}
                 doc_id = payload.get("doc_id")
@@ -1519,7 +1527,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--top-k", type=int, default=8, help="检索 top-K（metrics 在 --ks 上计算）")
     parser.add_argument("--ks", default="1,3,5,8", help="逗号分隔的 K 值")
     parser.add_argument("--warmup", type=int, default=8, help="每实验 warmup 查询数（结果弃置）")
-    parser.add_argument("--limit", type=int, default=None, help="只跑前 N 条（冒烟，subset_run=true）")
+    parser.add_argument(
+        "--limit", type=int, default=None, help="只跑前 N 条（冒烟，subset_run=true）"
+    )
     parser.add_argument("--timeout", type=float, default=30.0, help="单查询检索超时（秒）")
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--preflight-only", action="store_true", help="只跑 preflight gate")
@@ -1529,9 +1539,7 @@ def build_parser() -> argparse.ArgumentParser:
 async def async_main() -> int:
     args = build_parser().parse_args()
     args.ks = tuple(int(k) for k in str(args.ks).split(",") if k.strip())
-    args.experiments = [
-        e.strip() for e in str(args.experiments).split(",") if e.strip()
-    ]
+    args.experiments = [e.strip() for e in str(args.experiments).split(",") if e.strip()]
     for e in args.experiments:
         if e not in EXPERIMENT_SPECS:
             print(f"[ERROR] 未知实验: {e}（可选: {','.join(EXPERIMENT_SPECS)}）")
@@ -1545,9 +1553,7 @@ async def async_main() -> int:
         if not kb.available:
             print("[FATAL] Qdrant 不可达")
             return 1
-        gates = preflight(
-            kb, rerank_probe=True, requested_experiments=tuple(args.experiments)
-        )
+        gates = preflight(kb, rerank_probe=True, requested_experiments=tuple(args.experiments))
         print(json.dumps(gates, ensure_ascii=False, indent=2))
         run_id = args.run_id or (
             "preflight-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1555,8 +1561,13 @@ async def async_main() -> int:
         out_dir = Path(args.output) / run_id
         benchmark = load_benchmark(Path(args.benchmark))
         _write_gate_report(
-            out_dir, run_id, _sha256_file(Path(args.benchmark)),
-            len(benchmark["queries"]), gates, benchmark["metadata"], args,
+            out_dir,
+            run_id,
+            _sha256_file(Path(args.benchmark)),
+            len(benchmark["queries"]),
+            gates,
+            benchmark["metadata"],
+            args,
         )
         return 0 if gates["status"] in ("OK", "PARTIAL") else 1
 

@@ -53,9 +53,10 @@ def test_business_exception_propagates_unchanged():
     """
     sentinel = ValueError("business failure must survive")
 
-    with pytest.raises(ValueError) as excinfo, span(
-        "csai.test", attributes={"csai.run_id": "r1"}
-    ) as s:
+    with (
+        pytest.raises(ValueError) as excinfo,
+        span("csai.test", attributes={"csai.run_id": "r1"}) as s,
+    ):
         s.set_attribute("csai.run_status", "RUNNING")
         raise sentinel
 
@@ -174,9 +175,7 @@ def test_no_allowed_key_contains_a_forbidden_substring() -> None:
     dropped at runtime, i.e. a documented attribute that never appears.
     """
     offenders = [
-        key
-        for key in ALLOWED_ATTRIBUTES
-        if any(bad in key.lower() for bad in FORBIDDEN_SUBSTRINGS)
+        key for key in ALLOWED_ATTRIBUTES if any(bad in key.lower() for bad in FORBIDDEN_SUBSTRINGS)
     ]
     assert offenders == [], f"whitelisted keys that the denylist would drop: {offenders}"
 
@@ -262,7 +261,11 @@ def test_facts_survive_a_broken_exporter(monkeypatch: pytest.MonkeyPatch) -> Non
         def add_event(self, *_a: object, **_k: object) -> None:
             raise RuntimeError("exporter is down")
 
-    monkeypatch.setattr(telemetry, "_tracer", lambda: type("T", (), {"start_as_current_span": staticmethod(lambda _n: _BrokenCM())})())
+    monkeypatch.setattr(
+        telemetry,
+        "_tracer",
+        lambda: type("T", (), {"start_as_current_span": staticmethod(lambda _n: _BrokenCM())})(),
+    )
     with span("csai.test", attributes={"csai.run_id": "r11"}) as s:
         s.set_attribute("csai.run_status", "SUCCEEDED")
     # The span object is the _SafeSpan wrapper; it must not have raised.
@@ -387,14 +390,20 @@ def _span_capture():
 
 def _result_with_rerank(status: StageStatus, reason: str) -> RetrievalResult:
     trace = RetrievalTrace()
-    trace.add(TraceStage(STAGE_RERANK, status, candidate_in=4, candidate_out=3,
-                         duration_ms=1.0, reason=reason))
+    trace.add(
+        TraceStage(
+            STAGE_RERANK, status, candidate_in=4, candidate_out=3, duration_ms=1.0, reason=reason
+        )
+    )
     trace.add(TraceStage(STAGE_FINAL, StageStatus.EXECUTED, candidate_out=3))
-    meta: dict = {"retrieval_degraded": False, "degraded_reason": "",
-                 "rerank_requested": True,
-                 "rerank_applied": status is StageStatus.EXECUTED,
-                 "rerank_degraded": status is StageStatus.DEGRADED,
-                 "rerank_reason": reason}
+    meta: dict = {
+        "retrieval_degraded": False,
+        "degraded_reason": "",
+        "rerank_requested": True,
+        "rerank_applied": status is StageStatus.EXECUTED,
+        "rerank_degraded": status is StageStatus.DEGRADED,
+        "rerank_reason": reason,
+    }
     if status is StageStatus.DEGRADED:
         meta["retrieval_degraded"] = True
         meta["degraded_reason"] = f"reranker_{reason}"
@@ -469,11 +478,20 @@ class TestRerankerTelemetryTruth:
     def test_outcome_reason_enum_cannot_smuggle_content(self):
         """Only enum values may be used as a stage reason."""
         assert {r.value for r in RerankReason} <= {
-            "", "unavailable", "timeout", "http_error",
-            "provider_error", "invalid_response",
+            "",
+            "unavailable",
+            "timeout",
+            "http_error",
+            "provider_error",
+            "invalid_response",
         }
-        out = RerankOutcome(results=[], applied=False, degraded=True,
-                            reason=RerankReason.HTTP_ERROR, http_status=401)
+        out = RerankOutcome(
+            results=[],
+            applied=False,
+            degraded=True,
+            reason=RerankReason.HTTP_ERROR,
+            http_status=401,
+        )
         assert scrub_attributes({"csai.stage.reason": out.reason_value}) == {
             "csai.stage.reason": "http_error"
         }

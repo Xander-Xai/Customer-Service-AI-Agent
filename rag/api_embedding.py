@@ -123,9 +123,9 @@ async def _get_async_client() -> httpx.AsyncClient:
     return client
 
 
-def async_client_registry_snapshot() -> tuple[
-    tuple[asyncio.AbstractEventLoop, httpx.AsyncClient], ...
-]:
+def async_client_registry_snapshot() -> (
+    tuple[tuple[asyncio.AbstractEventLoop, httpx.AsyncClient], ...]
+):
     """只读快照：分区表当前持有的 (归属 loop, client) 对。诊断与测试用。"""
     with _registry_lock:
         return tuple(_clients_by_loop.items())
@@ -187,9 +187,7 @@ class ApiEmbedding:
         self._model = model
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
-        logger.info(
-            f"API Embedding 客户端初始化: {model} @ {base_url} (timeout={timeout}s)"
-        )
+        logger.info(f"API Embedding 客户端初始化: {model} @ {base_url} (timeout={timeout}s)")
 
     @property
     def model(self) -> str:
@@ -230,19 +228,14 @@ class ApiEmbedding:
             logger.error(f"Embedding API 超时 ({self._timeout}s): {self._model}")
             raise
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}"
-            )
+            logger.error(f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}")
             raise
         except Exception as e:
             logger.error(f"Embedding API 调用失败: {e}")
             raise
 
         # 按 index 排序提取 embedding
-        embeddings = [
-            item["embedding"]
-            for item in sorted(data["data"], key=lambda x: x["index"])
-        ]
+        embeddings = [item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])]
 
         result = np.array(embeddings, dtype=np.float32)
         if single:
@@ -287,18 +280,13 @@ class ApiEmbedding:
             logger.error(f"Embedding API 超时 ({self._timeout}s): {self._model}")
             raise
         except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}"
-            )
+            logger.error(f"Embedding API HTTP {e.response.status_code}: {e.response.text[:200]}")
             raise
         except Exception as e:
             logger.error(f"Embedding API 调用失败: {e}")
             raise
 
-        embeddings = [
-            item["embedding"]
-            for item in sorted(data["data"], key=lambda x: x["index"])
-        ]
+        embeddings = [item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])]
 
         result = np.array(embeddings, dtype=np.float32)
         if single:

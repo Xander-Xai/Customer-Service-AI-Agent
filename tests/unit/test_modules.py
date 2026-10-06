@@ -17,6 +17,7 @@ import pytest
 _tiktoken_available = True
 try:
     import tiktoken
+
     tiktoken.get_encoding("cl100k_base")
 except Exception:
     _tiktoken_available = False
@@ -749,7 +750,6 @@ class TestCoreModule:
         # Reset context var
         set_blackboard_session_id(None)
 
-
     @pytest.mark.asyncio
     async def test_monitoring_record_request(self):
         from core.monitoring import MetricsCollector
@@ -1195,9 +1195,9 @@ class TestSecurityAudit:
                                 and "config" not in m.lower()
                                 and "sample" not in m.lower()
                             ]
-                            assert len(real_matches) == 0, (
-                                f"Hardcoded secret in {path}: {real_matches}"
-                            )
+                            assert (
+                                len(real_matches) == 0
+                            ), f"Hardcoded secret in {path}: {real_matches}"
                     except (PermissionError, UnicodeDecodeError) as e:
                         pytest.fail(f"Failed to read {path}: {e}")
 
@@ -1515,9 +1515,9 @@ class TestEvaluatorDeep:
         score = ev._score_conciseness(response, "产品介绍")
         from agents.evaluator import CONCISENESS_EXCESSIVE
 
-        assert score <= CONCISENESS_EXCESSIVE + 15, (
-            f"过长回答简洁性应<={CONCISENESS_EXCESSIVE + 15}, 实际={score}"
-        )
+        assert (
+            score <= CONCISENESS_EXCESSIVE + 15
+        ), f"过长回答简洁性应<={CONCISENESS_EXCESSIVE + 15}, 实际={score}"
 
     def test_politeness_score(self):
         """包含礼貌用语的回答加分"""
@@ -1567,9 +1567,9 @@ class TestEvaluatorDeep:
             + factors["relevance"] * WEIGHT_RELEVANCE
         )
         expected_score = round(min(100, max(0, expected_score)), 1)
-        assert result["score"] == expected_score, (
-            f"加权总分不匹配: 计算={expected_score}, 返回={result['score']}"
-        )
+        assert (
+            result["score"] == expected_score
+        ), f"加权总分不匹配: 计算={expected_score}, 返回={result['score']}"
 
     @pytest.mark.asyncio
     async def test_evaluate_with_llm_mock(self):
@@ -2742,9 +2742,15 @@ class TestResponseCacheFallback:
             webhook_configs = receiver.get("webhook_configs", [])
             for webhook in webhook_configs:
                 url = webhook.get("url", "")
-                assert "app:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
-                assert "localhost:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
-                assert "127.0.0.1:8000" not in url, f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+                assert (
+                    "app:8000" not in url
+                ), f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+                assert (
+                    "localhost:8000" not in url
+                ), f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
+                assert (
+                    "127.0.0.1:8000" not in url
+                ), f"发现自指地址 '{url}' 在接收者 '{receiver['name']}' 中，容易导致告警丢失"
 
     def test_secrets_rotation_script(self):
         """测试 scripts/rotate_secrets.py 能否正确轮换密钥并且不破坏其他配置"""
@@ -2764,13 +2770,12 @@ class TestResponseCacheFallback:
 
         try:
             # 运行 rotate_secrets.py 脚本
-            project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            project_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
             script_path = os.path.join(project_dir, "scripts", "rotate_secrets.py")
             res = subprocess.run(
-                ["python3", script_path, tmp_path],
-                capture_output=True,
-                text=True,
-                check=True
+                ["python3", script_path, tmp_path], capture_output=True, text=True, check=True
             )
             assert "密钥轮换成功完成" in res.stdout
 

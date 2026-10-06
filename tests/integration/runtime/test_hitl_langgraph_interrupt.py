@@ -318,9 +318,9 @@ class TestRealInterruptSemantics:
 
         assert first.get("approval_results")
         assert second is not None
-        assert staging_call_count(seen["order_id"]) == 1, (
-            f"重复恢复不得重复扣款，实际 {staging_call_count(seen['order_id'])} 次"
-        )
+        assert (
+            staging_call_count(seen["order_id"]) == 1
+        ), f"重复恢复不得重复扣款，实际 {staging_call_count(seen['order_id'])} 次"
 
     def test_completed_run_does_not_look_like_it_is_still_waiting(
         self, pg_url, approvals, container
@@ -355,9 +355,9 @@ class TestRealInterruptSemantics:
 
         resumed, state = _scenario(pg_url, approvals, container, None, _drive)
 
-        assert not resumed.get(INTERRUPT_KEY), (
-            "已完成的 run 不应再带 __interrupt__，否则 executor 会把它误判为仍在等待审批并重新挂起"
-        )
+        assert not resumed.get(
+            INTERRUPT_KEY
+        ), "已完成的 run 不应再带 __interrupt__，否则 executor 会把它误判为仍在等待审批并重新挂起"
         assert state.next == (), "图必须已推进到终点"
         assert state.interrupts == ()
         assert staging_call_count(seen["order_id"]) == 1

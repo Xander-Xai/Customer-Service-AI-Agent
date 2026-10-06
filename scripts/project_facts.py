@@ -94,7 +94,8 @@ def _agent_role_count() -> int:
     source = inspect.getsource(ServiceContainer._init_agents)
     dict_keys = [
         name
-        for name in inspect.getsource(ServiceContainer._init_agents).split("agent_classes = {")[1]
+        for name in inspect.getsource(ServiceContainer._init_agents)
+        .split("agent_classes = {")[1]
         .split("}")[0]
         .splitlines()
         if '"' in name
@@ -155,8 +156,16 @@ def collect(root: Path = PROJECT_ROOT) -> dict:
     facts["rag_benchmark_metadata_consistent"] = declared == actual
     facts.update(_evaluation_facts(root))
     facts["makefile_rag_eval_targets_present"] = sorted(
-        t for t in _makefile_targets()
-        if t in {"eval-rag", "rag-eval-649", "rag-eval-649-preflight", "rag-eval-649-smoke", "rag-eval-import"}
+        t
+        for t in _makefile_targets()
+        if t
+        in {
+            "eval-rag",
+            "rag-eval-649",
+            "rag-eval-649-preflight",
+            "rag-eval-649-smoke",
+            "rag-eval-import",
+        }
     )
     return facts
 
@@ -168,9 +177,7 @@ def collect(root: Path = PROJECT_ROOT) -> dict:
 # a runtime-derived number.
 CHECK_FIELDS: dict[str, dict[str, Any]] = {
     "runtime_version": {
-        "pattern": re.compile(
-            r"Runtime version \(`core/config\.py::VERSION`\): \*\*`([^`]+)`\*\*"
-        ),
+        "pattern": re.compile(r"Runtime version \(`core/config\.py::VERSION`\): \*\*`([^`]+)`\*\*"),
         "fact": "runtime_version",
     },
     "llm_model": {
@@ -192,9 +199,7 @@ CHECK_FIELDS: dict[str, dict[str, Any]] = {
         "fact": "reranker_model",
     },
     "vector_db_mode": {
-        "pattern": re.compile(
-            r"Vector DB \(`core/config\.py::VECTOR_DB_MODE`\): `([^`]+)`"
-        ),
+        "pattern": re.compile(r"Vector DB \(`core/config\.py::VECTOR_DB_MODE`\): `([^`]+)`"),
         "fact": "vector_db_mode",
     },
     "hybrid_search_enabled": {
@@ -204,9 +209,7 @@ CHECK_FIELDS: dict[str, dict[str, Any]] = {
         "fact": "hybrid_search_enabled",
     },
     "agent_role_count": {
-        "pattern": re.compile(
-            r"Agent roles \(`core/container\.py::_init_agents`\): \*\*(\d+)\*\*"
-        ),
+        "pattern": re.compile(r"Agent roles \(`core/container\.py::_init_agents`\): \*\*(\d+)\*\*"),
         "fact": "agent_role_count",
     },
     "openapi_path_count": {
@@ -237,9 +240,7 @@ def check_doc(doc_path: Path, root: Path = PROJECT_ROOT) -> int:
     for field, spec in CHECK_FIELDS.items():
         match = spec["pattern"].search(text)
         if match is None:
-            problems.append(
-                f"missing field marker `{field}` in {doc_path.name}"
-            )
+            problems.append(f"missing field marker `{field}` in {doc_path.name}")
             continue
         documented = match.group(1)
         expected = str(facts[spec["fact"]])
@@ -250,9 +251,7 @@ def check_doc(doc_path: Path, root: Path = PROJECT_ROOT) -> int:
             )
 
     # 2. LLM base URL + provider are documented on one line; validate both.
-    base_match = re.search(
-        r"Default LLM base URL: `([^`]+)`（provider: `([^`]+)`）", text
-    )
+    base_match = re.search(r"Default LLM base URL: `([^`]+)`（provider: `([^`]+)`）", text)
     if base_match is None:
         problems.append(f"missing field marker `llm_base_url` in {doc_path.name}")
     else:

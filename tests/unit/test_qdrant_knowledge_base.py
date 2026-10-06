@@ -50,7 +50,9 @@ class TestQdrantKnowledgeBase:
         """连接失败时 available 为 False"""
         with (
             patch("rag.qdrant_knowledge_base.QdrantClient") as mock_cls,
-            patch.object(QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()),
+            patch.object(
+                QdrantKnowledgeBase, "_create_embedding_function", return_value=MagicMock()
+            ),
         ):
             mock_cls.side_effect = Exception("connection refused")
             kb = QdrantKnowledgeBase(host="bad-host")
@@ -148,9 +150,7 @@ class TestQdrantKnowledgeBase:
         """已存在的 collection 不重复创建"""
         mock_collection = MagicMock()
         mock_collection.name = "existing"
-        mock_qdrant_client.get_collections.return_value = MagicMock(
-            collections=[mock_collection]
-        )
+        mock_qdrant_client.get_collections.return_value = MagicMock(collections=[mock_collection])
         kb._collection_cache["existing"] = True
         result2 = kb._ensure_collection("existing")
         assert result2 is True

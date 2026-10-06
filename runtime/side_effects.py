@@ -400,9 +400,7 @@ async def execute_idempotent_operation(
         metrics.record_tool_idempotency_hit()
         return claim.result
     if claim.state == CLAIM_CONFLICT:
-        raise PermanentError(
-            f"tool {tool_name} operation_key {operation_key} 已以不同参数执行过"
-        )
+        raise PermanentError(f"tool {tool_name} operation_key {operation_key} 已以不同参数执行过")
     if claim.state == CLAIM_IN_PROGRESS:
         raise TransientError(
             f"tool {tool_name} operation_key {operation_key} 正在被另一个执行者处理"

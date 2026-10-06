@@ -53,13 +53,17 @@ def summarize_latency(
     )
 
 
-def retrieval_metrics(expected_doc_ids: Sequence[str], ranked_doc_ids: Sequence[str], top_k: int) -> dict[str, Any]:
+def retrieval_metrics(
+    expected_doc_ids: Sequence[str], ranked_doc_ids: Sequence[str], top_k: int
+) -> dict[str, Any]:
     if top_k <= 0:
         raise ValueError("top_k must be positive")
     expected = set(expected_doc_ids)
     ranked = list(ranked_doc_ids[:top_k])
     hits = [doc_id for doc_id in ranked if doc_id in expected]
-    reciprocal_rank = next((1 / (index + 1) for index, doc_id in enumerate(ranked) if doc_id in expected), 0.0)
+    reciprocal_rank = next(
+        (1 / (index + 1) for index, doc_id in enumerate(ranked) if doc_id in expected), 0.0
+    )
     return {
         "sample_count": 1,
         "hit_at_k": int(bool(hits)),

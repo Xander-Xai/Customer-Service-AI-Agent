@@ -53,9 +53,9 @@ TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
 }
 
 #: 这些模块由仓库自身提供，不是第三方依赖。
-_LOCAL_ROOTS = {
-    p.name for p in ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")
-} | {p.stem for p in ROOT.glob("*.py")}
+_LOCAL_ROOTS = {p.name for p in ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")} | {
+    p.stem for p in ROOT.glob("*.py")
+}
 
 
 def _declared_names(*files: Path) -> set[str]:
@@ -147,9 +147,9 @@ def test_allowed_undeclared_entries_are_documented():
     declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
     for mod, reason in ALLOWED_UNDECLARED.items():
         assert reason.strip(), f"{mod} 的豁免必须写明理由"
-        assert not _is_declared(mod, declared), (
-            f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
-        )
+        assert not _is_declared(
+            mod, declared
+        ), f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
 
 
 @pytest.mark.unit
@@ -184,7 +184,5 @@ def test_repo_does_not_ship_a_venv():
 def subprocess_git_ls_files() -> list[str]:
     import subprocess
 
-    proc = subprocess.run(
-        ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=60
-    )
+    proc = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, timeout=60)
     return proc.stdout.splitlines()

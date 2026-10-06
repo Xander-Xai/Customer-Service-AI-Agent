@@ -53,7 +53,9 @@ class AlertNotifier:
         self.alert_history: list[dict[str, Any]] = []
 
         # v5.4: 告警升级跟踪
-        self.active_alerts: dict[str, dict[str, Any]] = {}  # alert_key -> {severity, timestamp, escalated}
+        self.active_alerts: dict[
+            str, dict[str, Any]
+        ] = {}  # alert_key -> {severity, timestamp, escalated}
         self.suppression_window: dict[str, float] = {}  # alert_key -> last_sent_time
 
         self._load_config()
@@ -186,7 +188,7 @@ class AlertNotifier:
                     await self.send_alert(
                         f"[升级] {title}",
                         f"此告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
-                        severity="emergency"
+                        severity="emergency",
                     )
                     alert_info["escalated"] = True
 
@@ -201,7 +203,7 @@ class AlertNotifier:
                 await self.send_alert(
                     f"[紧急] {title} - 持续未解决",
                     f"此emergency告警已持续{elapsed//60:.0f}分钟，请立即处理！",
-                    severity="emergency"
+                    severity="emergency",
                 )
                 alert_info["escalated"] = True
 
@@ -341,7 +343,7 @@ class AlertNotifier:
                         "to": phone,
                         "message": body,
                     },
-                    timeout=10
+                    timeout=10,
                 )
                 if response.status_code == 200:
                     logger.info(f"短信告警发送成功: {phone}")

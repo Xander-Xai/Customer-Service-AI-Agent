@@ -149,9 +149,9 @@ def test_runtime_metrics_forwarders_exist():
 
     for fn_name, metric_name in expected.items():
         assert hasattr(metrics, fn_name), f"runtime.metrics 缺少转发函数 {fn_name}"
-        assert hasattr(monitoring, metric_name), (
-            f"{fn_name} 指向的指标 {metric_name} 未在 core.monitoring 定义"
-        )
+        assert hasattr(
+            monitoring, metric_name
+        ), f"{fn_name} 指向的指标 {metric_name} 未在 core.monitoring 定义"
 
 
 @pytest.mark.unit
@@ -180,6 +180,7 @@ def test_forwarder_records_into_registry():
     before_ck = total("agent_checkpoint_recovery_total")
     metrics.record_checkpoint_recovery(True)
     assert total("agent_checkpoint_recovery_total") == before_ck + 1
+
 
 @pytest.mark.unit
 def test_scripts_dir_is_excluded_from_pytest_collection():

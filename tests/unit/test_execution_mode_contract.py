@@ -54,9 +54,9 @@ def test_execution_mode_values_are_valid():
 
     assert AGENT_EXECUTION_MODE in ("inline", "queued")
     assert AGENT_RUN_DISPATCH in ("celery", "inline")
-    assert (AGENT_EXECUTION_MODE == "queued") == (AGENT_RUN_DISPATCH == "celery"), (
-        "canonical 模式与实际派发方式必须一致"
-    )
+    assert (AGENT_EXECUTION_MODE == "queued") == (
+        AGENT_RUN_DISPATCH == "celery"
+    ), "canonical 模式与实际派发方式必须一致"
 
 
 @pytest.mark.unit
@@ -80,8 +80,7 @@ def test_fast_path_never_goes_through_worker():
     assert "ainvoke" in src, "快路径应直接执行图"
     for forbidden in ("dispatch_run", "apply_async", "execute_run", "celery"):
         assert forbidden not in src, (
-            f"快路径 /api/chat 不应触达 {forbidden}：它是兼容性 inline 路径，"
-            "不能宣称经过 Worker"
+            f"快路径 /api/chat 不应触达 {forbidden}：它是兼容性 inline 路径，" "不能宣称经过 Worker"
         )
 
 
@@ -108,9 +107,9 @@ def test_legacy_dispatch_var_still_works():
 def test_canonical_mode_wins_over_legacy_var():
     """canonical 旋钮优先：不应因为 .env 里留着旧变量就拒绝启动。"""
     out = _resolve({"AGENT_EXECUTION_MODE": "queued", "AGENT_RUN_DISPATCH": "inline"})
-    assert "mode=queued" in out and "dispatch=celery" in out, (
-        f"AGENT_EXECUTION_MODE 应覆盖 AGENT_RUN_DISPATCH: {out}"
-    )
+    assert (
+        "mode=queued" in out and "dispatch=celery" in out
+    ), f"AGENT_EXECUTION_MODE 应覆盖 AGENT_RUN_DISPATCH: {out}"
 
 
 @pytest.mark.unit

@@ -103,7 +103,9 @@ async def benchmark_cache():
     # ── Step 3: Test loop ──
     repeat = max(1, 1000 // warmup_count)
     total_queries = warmup_count * repeat
-    print(f"[3/5] Running {total_queries} queries ({warmup_count} queries x {repeat} iterations)...")
+    print(
+        f"[3/5] Running {total_queries} queries ({warmup_count} queries x {repeat} iterations)..."
+    )
 
     # Reset stats for clean measurement
     if hasattr(cache, "_stats"):

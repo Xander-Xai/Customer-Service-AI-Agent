@@ -152,6 +152,7 @@ def all_related_worker_processes() -> list[dict[str, Any]]:
     in the broker's shared unacked bookkeeping, so its presence (or absence) is
     directly relevant to cross-test interference.
     """
+
     def _scan() -> list[dict[str, Any]]:
         out = subprocess.run(
             ["ps", "-eo", "pid,ppid,pgid,etimes,args"],
@@ -182,6 +183,7 @@ def all_related_worker_processes() -> list[dict[str, Any]]:
 
 def broker_snapshot(redis_client, queue: str) -> dict[str, Any]:
     """Delivery-side state: is the message waiting, in flight, or gone?"""
+
     def _read() -> dict[str, Any]:
         out: dict[str, Any] = {
             "queue": queue,
@@ -206,26 +208,35 @@ def broker_snapshot(redis_client, queue: str) -> dict[str, Any]:
 
 def run_snapshot(engine, run_id: str) -> dict[str, Any]:
     """The ``agent_runs`` row plus the durable pieces of its state machine."""
+
     def _read() -> dict[str, Any]:
         from sqlalchemy import text
 
         with engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    "SELECT id, thread_id, session_id, status, attempt, max_attempts, "
-                    "worker_id, lease_expires_at, next_retry_at, error_type, error_code, "
-                    "queued_at, started_at, finished_at, updated_at, result "
-                    "FROM agent_runs WHERE id = :id"
-                ),
-                {"id": run_id},
-            ).mappings().first()
-            dl = conn.execute(
-                text(
-                    "SELECT run_id, attempts, error_type, error_code, created_at "
-                    "FROM agent_dead_letters WHERE run_id = :id"
-                ),
-                {"id": run_id},
-            ).mappings().all()
+            row = (
+                conn.execute(
+                    text(
+                        "SELECT id, thread_id, session_id, status, attempt, max_attempts, "
+                        "worker_id, lease_expires_at, next_retry_at, error_type, error_code, "
+                        "queued_at, started_at, finished_at, updated_at, result "
+                        "FROM agent_runs WHERE id = :id"
+                    ),
+                    {"id": run_id},
+                )
+                .mappings()
+                .first()
+            )
+            dl = (
+                conn.execute(
+                    text(
+                        "SELECT run_id, attempts, error_type, error_code, created_at "
+                        "FROM agent_dead_letters WHERE run_id = :id"
+                    ),
+                    {"id": run_id},
+                )
+                .mappings()
+                .all()
+            )
         out: dict[str, Any] = {"agent_run": dict(row) if row is not None else None}
         out["dead_letter"] = [dict(r) for r in dl]
         out["row_count"] = 1 if row is not None else 0
@@ -242,17 +253,22 @@ def checkpoint_snapshot(engine, thread_id: str) -> dict[str, Any]:
     a resume depends on. Counting rows cannot distinguish those two states;
     reading ``channel_values`` can.
     """
+
     def _read() -> dict[str, Any]:
         from sqlalchemy import text
 
         with engine.connect() as conn:
-            rows = conn.execute(
-                text(
-                    "SELECT checkpoint_id, parent_checkpoint_id, checkpoint "
-                    "FROM checkpoints WHERE thread_id = :t ORDER BY checkpoint_id"
-                ),
-                {"t": thread_id},
-            ).mappings().all()
+            rows = (
+                conn.execute(
+                    text(
+                        "SELECT checkpoint_id, parent_checkpoint_id, checkpoint "
+                        "FROM checkpoints WHERE thread_id = :t ORDER BY checkpoint_id"
+                    ),
+                    {"t": thread_id},
+                )
+                .mappings()
+                .all()
+            )
             writes = conn.execute(
                 text(
                     "SELECT checkpoint_id, task_id, channel, type "
@@ -531,13 +547,12 @@ def write_suite_snapshot(
 
     if redis_url:
         client = _safe(
-            lambda: redis_lib.Redis.from_url(
-                redis_url, decode_responses=True, socket_timeout=5
-            )
+            lambda: redis_lib.Redis.from_url(redis_url, decode_responses=True, socket_timeout=5)
         )
         if isinstance(client, str):
             payload["redis"] = client
         else:
+
             def _queues() -> dict[str, Any]:
                 found = sorted(
                     k.decode() if isinstance(k, bytes) else k
@@ -570,6 +585,7 @@ def write_suite_snapshot(
         if isinstance(engine, str):
             payload["postgres"] = engine
         else:
+
             def _tables() -> dict[str, Any]:
                 from sqlalchemy import text
 
@@ -580,19 +596,19 @@ def write_suite_snapshot(
                             "GROUP BY status ORDER BY status"
                         )
                     ).all()
-                    stale = conn.execute(
-                        text(
-                            "SELECT id, thread_id, status, attempt, worker_id, updated_at "
-                            "FROM agent_runs "
-                            "WHERE status NOT IN ('SUCCEEDED','FAILED','DEAD_LETTER','CANCELLED') "
-                            "ORDER BY updated_at"
+                    stale = (
+                        conn.execute(
+                            text(
+                                "SELECT id, thread_id, status, attempt, worker_id, updated_at "
+                                "FROM agent_runs "
+                                "WHERE status NOT IN ('SUCCEEDED','FAILED','DEAD_LETTER','CANCELLED') "
+                                "ORDER BY updated_at"
+                            )
                         )
-                    ).mappings().all()
-                    ckpt = conn.execute(
-                        text(
-                            "SELECT count(*) AS c FROM checkpoints"
-                        )
-                    ).scalar()
+                        .mappings()
+                        .all()
+                    )
+                    ckpt = conn.execute(text("SELECT count(*) AS c FROM checkpoints")).scalar()
                     writes = conn.execute(
                         text("SELECT count(*) AS c FROM checkpoint_writes")
                     ).scalar()

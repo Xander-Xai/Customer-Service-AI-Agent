@@ -128,9 +128,7 @@ class RunEventPublisher:
                 client.xadd, key, fields, maxlen=self._maxlen, approximate=True
             )
         except Exception as e:  # pragma: no cover - 观测通道不得影响业务
-            logger.debug(
-                "run 事件写入失败 run_id=%s event=%s: %s", run_id, event, type(e).__name__
-            )
+            logger.debug("run 事件写入失败 run_id=%s event=%s: %s", run_id, event, type(e).__name__)
             return None
 
     async def close(self) -> None:

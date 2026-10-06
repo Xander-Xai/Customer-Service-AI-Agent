@@ -121,7 +121,9 @@ def _redact_url(url: str) -> str:
 
 def _new_diagnostics() -> Path | None:
     """The directory the runtime suite writes failure diagnostics into."""
-    root = Path(os.getenv("RUNTIME_DIAGNOSTICS_DIR", REPO_ROOT / "artifacts" / "runtime-diagnostics"))
+    root = Path(
+        os.getenv("RUNTIME_DIAGNOSTICS_DIR", REPO_ROOT / "artifacts" / "runtime-diagnostics")
+    )
     root.mkdir(parents=True, exist_ok=True)
     return root
 

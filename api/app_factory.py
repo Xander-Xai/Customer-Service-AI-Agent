@@ -35,9 +35,14 @@ init_default_admin()
 # app_factory.py 仅记录非致命的开发环境安全警告
 if DEV_MODE:
     import core.config as _cfg
-    if not _cfg.JWT_SECRET or any(p in _cfg.JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+
+    if not _cfg.JWT_SECRET or any(
+        p in _cfg.JWT_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
+    ):
         logger.warning("⚠️ JWT_SECRET 未配置或使用默认值，生产环境必须设置")
-    if not _cfg.SESSION_TOKEN_SECRET or any(p in _cfg.SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")):
+    if not _cfg.SESSION_TOKEN_SECRET or any(
+        p in _cfg.SESSION_TOKEN_SECRET.lower() for p in ("change-me", "change_me", "your-", "dev-")
+    ):
         logger.warning("⚠️ SESSION_TOKEN_SECRET 未配置，生产环境必须设置")
 
 

@@ -26,7 +26,10 @@ from pathlib import Path
 import pytest
 
 _TEST_PATH = (
-    Path(__file__).resolve().parents[1] / "integration" / "runtime" / "test_worker_checkpoint_recovery.py"
+    Path(__file__).resolve().parents[1]
+    / "integration"
+    / "runtime"
+    / "test_worker_checkpoint_recovery.py"
 )
 
 

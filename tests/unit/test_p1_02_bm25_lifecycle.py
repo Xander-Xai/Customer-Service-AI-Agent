@@ -105,7 +105,10 @@ class _FakeQdrant:
             self.scroll_block_event.wait(timeout=5.0)
         out = []
         for pid, rec in captured:
-            if self.scroll_raises_after is not None and self._scroll_yielded >= self.scroll_raises_after:
+            if (
+                self.scroll_raises_after is not None
+                and self._scroll_yielded >= self.scroll_raises_after
+            ):
                 raise RuntimeError("injected mid-scroll failure")
             self._scroll_yielded += 1
             out.append(
@@ -152,7 +155,11 @@ class _FakeQdrant:
         for pid in ids:
             if pid in store:
                 out.append(
-                    _FakePoint(pid, dict(store[pid]["payload"]), vector=store[pid]["vector"] if with_vectors else None)
+                    _FakePoint(
+                        pid,
+                        dict(store[pid]["payload"]),
+                        vector=store[pid]["vector"] if with_vectors else None,
+                    )
                 )
         return out
 
@@ -172,8 +179,7 @@ class _FakeQdrant:
         scored.sort(reverse=True)
         return MagicMock(
             points=[
-                _FakePoint(pid, dict(rec["payload"]), score=sim)
-                for sim, pid, rec in scored[:limit]
+                _FakePoint(pid, dict(rec["payload"]), score=sim) for sim, pid, rec in scored[:limit]
             ]
         )
 
@@ -183,7 +189,9 @@ class _FakeQdrant:
     # code is unchanged (its real-server compatibility is out of scope for
     # P1-02, belongs to P1-01).
     def search(self, collection_name, query_vector, limit=10, with_payload=True, **kw):  # noqa: ARG002
-        return self.query_points(collection_name, query_vector, limit=limit, with_payload=with_payload).points
+        return self.query_points(
+            collection_name, query_vector, limit=limit, with_payload=with_payload
+        ).points
 
 
 # ---------------------------------------------------------------------------
@@ -198,8 +206,11 @@ class _WorkingReranker:
         from rag.reranker import RerankOutcome, RerankReason
 
         return RerankOutcome(
-            results=results[:top_k], applied=True, degraded=False,
-            reason=RerankReason.OK, provider_called=True,
+            results=results[:top_k],
+            applied=True,
+            degraded=False,
+            reason=RerankReason.OK,
+            provider_called=True,
         )
 
 
@@ -252,11 +263,18 @@ def _put(client, collection, doc_id, content, **extra):
     if collection not in client.collections:
         client.create_collection(
             collection,
-            vectors_config=models.VectorParams(size=_EMBEDDING_DIM, distance=models.Distance.COSINE),
+            vectors_config=models.VectorParams(
+                size=_EMBEDDING_DIM, distance=models.Distance.COSINE
+            ),
         )
     pid = document_id_to_point_id(collection, doc_id)
     payload = {"doc_id": doc_id, "content": content, **extra}
-    client.upsert(collection, points=[models.PointStruct(id=pid, vector=_deterministic_encode([content])[0], payload=payload)])
+    client.upsert(
+        collection,
+        points=[
+            models.PointStruct(id=pid, vector=_deterministic_encode([content])[0], payload=payload)
+        ],
+    )
     return pid
 
 
@@ -716,9 +734,9 @@ class TestTimeoutSupersede:
         assert not t.is_alive(), "rebuild thread did not complete"
 
         # The late rebuild MUST NOT have flipped DEGRADED back to READY.
-        assert kb.bm25_readiness() is BM25Readiness.DEGRADED, (
-            f"superseded rebuild published READY: readiness={kb.bm25_readiness()}"
-        )
+        assert (
+            kb.bm25_readiness() is BM25Readiness.DEGRADED
+        ), f"superseded rebuild published READY: readiness={kb.bm25_readiness()}"
         # The candidate was never swapped in: search returns nothing.
         assert kb._bm25_search("内容", ["c"], top_k=3) == []
 

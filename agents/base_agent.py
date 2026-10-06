@@ -189,11 +189,17 @@ class BaseAgent(ABC):
 
     @staticmethod
     def _tool_result_scope(state: dict[str, Any]) -> dict[str, str]:
-        return {key: str(state[key]) for key in ("user_id", "session_id") if state.get(key) not in (None, "")}
+        return {
+            key: str(state[key])
+            for key in ("user_id", "session_id")
+            if state.get(key) not in (None, "")
+        }
 
     async def recover_tool_result(self, reference_id: str, state: dict[str, Any]) -> Any | None:
         """Controlled application-layer recovery; models never access the store."""
-        return await self.tool_result_optimizer.recover(reference_id, scope=self._tool_result_scope(state))
+        return await self.tool_result_optimizer.recover(
+            reference_id, scope=self._tool_result_scope(state)
+        )
 
     def set_ab_test_manager(self, ab_manager):
         """v4.1: 注入 A/B 测试管理器"""
@@ -539,10 +545,12 @@ class BaseAgent(ABC):
 
         # v6.3: 事件发布 fire-and-forget，不阻塞主流程
         if self.bus:
-            asyncio.create_task(self._publish_event(
-                "agent.processing",
-                {"agent": self.name, "query_type": state.get("query_type", ""), "mode": mode},
-            ))
+            asyncio.create_task(
+                self._publish_event(
+                    "agent.processing",
+                    {"agent": self.name, "query_type": state.get("query_type", ""), "mode": mode},
+                )
+            )
 
         system_prompt_enhanced = self._enhance_system_prompt_with_context(system_prompt)
 
@@ -652,11 +660,13 @@ class BaseAgent(ABC):
         stream_callback = get_stream_callback(state)
         if stream_callback:
             with contextlib.suppress(Exception):
-                await stream_callback({
-                    "type": "thinking",
-                    "content": f"🤔 {self.name} Agent 正在分析中...",
-                    "agent": self.name,
-                })
+                await stream_callback(
+                    {
+                        "type": "thinking",
+                        "content": f"🤔 {self.name} Agent 正在分析中...",
+                        "agent": self.name,
+                    }
+                )
 
         # human-in-the-loop：本轮被摘出、等待人工审批的高风险动作。
         # 声明在循环**之外**：循环可能一次都不进 `if response.tool_calls:`
@@ -699,12 +709,14 @@ class BaseAgent(ABC):
                 if stream_callback:
                     for p in parsed_tcs:
                         with contextlib.suppress(Exception):
-                            await stream_callback({
-                                "type": "tool_call",
-                                "name": p["name"],
-                                "args": p["args"],
-                                "agent": self.name,
-                            })
+                            await stream_callback(
+                                {
+                                    "type": "tool_call",
+                                    "name": p["name"],
+                                    "args": p["args"],
+                                    "agent": self.name,
+                                }
+                            )
 
                 # 追加 assistant 消息（含 tool_calls）
                 messages.append(
@@ -742,7 +754,9 @@ class BaseAgent(ABC):
                     if cache_enabled:
                         cache_started = time.perf_counter()
                         try:
-                            result = await self.tool_result_cache.get(p["name"], p["args"], scope=cache_scope)
+                            result = await self.tool_result_cache.get(
+                                p["name"], p["args"], scope=cache_scope
+                            )
                             cache_hit = result is not None
                             record_tool_result_cache_event(
                                 p["name"],
@@ -814,7 +828,10 @@ class BaseAgent(ABC):
                         cache_started = time.perf_counter()
                         try:
                             await self.tool_result_cache.set(
-                                p["name"], p["args"], result, scope=cache_scope,
+                                p["name"],
+                                p["args"],
+                                result,
+                                scope=cache_scope,
                                 ttl_seconds=cache_policy.ttl_seconds,
                             )
                             record_tool_result_cache_event(
@@ -851,12 +868,14 @@ class BaseAgent(ABC):
                     # v6.0: emit tool_result event
                     if stream_callback:
                         with contextlib.suppress(Exception):
-                            await stream_callback({
-                                "type": "tool_result",
-                                "name": p["name"],
-                                "summary": result_content[:200] if result_content else "无结果",
-                                "agent": self.name,
-                            })
+                            await stream_callback(
+                                {
+                                    "type": "tool_result",
+                                    "name": p["name"],
+                                    "summary": result_content[:200] if result_content else "无结果",
+                                    "agent": self.name,
+                                }
+                            )
                     messages.append(ToolMessage(content=result_content, tool_call_id=p["id"]))
                     if self.tool_result_optimizer.enabled:
                         messages[:] = compact_old_tool_messages(
@@ -870,11 +889,13 @@ class BaseAgent(ABC):
                 # v6.0: 有流式回调时使用 async_invoke_stream 输出最终响应
                 if stream_callback:
                     with contextlib.suppress(Exception):
-                        await stream_callback({
-                            "type": "thinking",
-                            "content": "💡 正在生成回答...",
-                            "agent": self.name,
-                        })
+                        await stream_callback(
+                            {
+                                "type": "thinking",
+                                "content": "💡 正在生成回答...",
+                                "agent": self.name,
+                            }
+                        )
                     response_content = ""
                     try:
                         async for chunk in effective_llm.async_invoke_stream(messages):
@@ -888,7 +909,9 @@ class BaseAgent(ABC):
                             exc_info=not is_quota,
                         )
                         response_content = (
-                            "您的今日 Token 配额已用尽，请明日再试。" if is_quota else fallback_response
+                            "您的今日 Token 配额已用尽，请明日再试。"
+                            if is_quota
+                            else fallback_response
                         )
                         with contextlib.suppress(Exception):
                             await stream_callback({"type": "chunk", "content": response_content})
@@ -960,15 +983,17 @@ class BaseAgent(ABC):
 
         # v6.3: 事件发布 fire-and-forget
         if self.bus:
-            asyncio.create_task(self._publish_event(
-                "agent.completed",
-                {
-                    "agent": self.name,
-                    "response_length": len(response_content),
-                    "mode": "tools",
-                    "ab_variant": variant,
-                },
-            ))
+            asyncio.create_task(
+                self._publish_event(
+                    "agent.completed",
+                    {
+                        "agent": self.name,
+                        "response_length": len(response_content),
+                        "mode": "tools",
+                        "ab_variant": variant,
+                    },
+                )
+            )
 
         return state
 
@@ -1085,20 +1110,20 @@ class BaseAgent(ABC):
 
         # v6.3: 事件发布 fire-and-forget
         if self.bus:
-            asyncio.create_task(self._publish_event(
-                "agent.completed",
-                {
-                    "agent": self.name,
-                    "response_length": len(response_content),
-                    "ab_variant": variant,
-                },
-            ))
+            asyncio.create_task(
+                self._publish_event(
+                    "agent.completed",
+                    {
+                        "agent": self.name,
+                        "response_length": len(response_content),
+                        "ab_variant": variant,
+                    },
+                )
+            )
 
         return state
 
-    async def _try_rule_fallback(
-        self, messages: list, fallback_response: str
-    ) -> str | None:
+    async def _try_rule_fallback(self, messages: list, fallback_response: str) -> str | None:
         """v5.5: LLM 降级时尝试使用 RuleBasedLLM 生成有意义的回复。
 
         从 messages 中提取用户查询，使用 RuleBasedLLM 的关键词模板回复。

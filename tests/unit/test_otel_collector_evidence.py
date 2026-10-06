@@ -28,7 +28,9 @@ sys.modules["verify_otel_collector"] = verifier
 _spec.loader.exec_module(verifier)
 
 
-def _collector_log(*, spans: tuple[str, ...], service: str = "csai-otel-smoke", **extra: str) -> str:
+def _collector_log(
+    *, spans: tuple[str, ...], service: str = "csai-otel-smoke", **extra: str
+) -> str:
     """Render a collector `debug` exporter log the way the real one does.
 
     Reproduces the two shapes that actually matter and that previously broke the
@@ -39,7 +41,7 @@ def _collector_log(*, spans: tuple[str, ...], service: str = "csai-otel-smoke", 
     lines = [
         f"{prefix}2026-10-03T03:53:59.064Z\tinfo\tResourceSpans #0",
         f"{prefix}Resource attributes:",
-        f'{prefix}     -> telemetry.sdk.language: Str(python)',
+        f"{prefix}     -> telemetry.sdk.language: Str(python)",
         f"{prefix}     -> service.name: Str({service})",
     ]
     for span in spans:
@@ -52,9 +54,7 @@ def _collector_log(*, spans: tuple[str, ...], service: str = "csai-otel-smoke", 
         ]
     # The collector repeats service.name in its own JSON telemetry prefix; it
     # must not be mistaken for the client's resource.
-    lines.append(
-        '{"resource": {"service.name": "otelcol"}, "otelcol.component.id": "debug"}'
-    )
+    lines.append('{"resource": {"service.name": "otelcol"}, "otelcol.component.id": "debug"}')
     for line in extra.get("attr_lines", "").splitlines():
         lines.append(f"{prefix}     -> {line}")
     if extra.get("canary"):
@@ -217,11 +217,15 @@ def test_collector_config_is_traces_only_and_pinned():
     pipelines = re.search(r"traces:\s*\n\s*receivers: \[otlp\]\s*\n\s*exporters: \[debug\]", text)
     assert pipelines, "expected a single traces pipeline wired otlp -> debug"
     for forbidden in ("metrics:", "logs:", "prometheus", "jaeger", "langfuse", "tempo", "otlphttp"):
-        assert forbidden not in text, f"{forbidden} must not appear in a traces-only collector config"
+        assert (
+            forbidden not in text
+        ), f"{forbidden} must not appear in a traces-only collector config"
 
 
 def test_compose_pins_the_collector_image_version():
-    text = (REPO_ROOT / "deploy" / "compose" / "docker-compose.otel.yml").read_text(encoding="utf-8")
+    text = (REPO_ROOT / "deploy" / "compose" / "docker-compose.otel.yml").read_text(
+        encoding="utf-8"
+    )
     images = re.findall(r"^\s*image:\s*(\S+)", text, re.M)
     assert images, "expected an explicit image"
     for image in images:

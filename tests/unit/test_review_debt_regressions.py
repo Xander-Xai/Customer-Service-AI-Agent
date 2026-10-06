@@ -112,10 +112,16 @@ def _row(rank: float) -> dict[str, Any]:
 
 def _uplift(base_ranks: dict[str, float], target_ranks: dict[str, float]) -> dict[str, Any]:
     results = {
-        "hybrid_no_rerank": {"rows": [_row(r) | {"query_id": q} for q, r in base_ranks.items()],
-                             "metrics": {}, "latency": {"p95_ms": 0.0}},
-        "hybrid_rerank": {"rows": [_row(r) | {"query_id": q} for q, r in target_ranks.items()],
-                          "metrics": {}, "latency": {"p95_ms": 0.0}},
+        "hybrid_no_rerank": {
+            "rows": [_row(r) | {"query_id": q} for q, r in base_ranks.items()],
+            "metrics": {},
+            "latency": {"p95_ms": 0.0},
+        },
+        "hybrid_rerank": {
+            "rows": [_row(r) | {"query_id": q} for q, r in target_ranks.items()],
+            "metrics": {},
+            "latency": {"p95_ms": 0.0},
+        },
     }
     return ev.ablation_analysis(results)["reranker_uplift"]
 
@@ -270,7 +276,9 @@ def _failing_adapter() -> type:
 
     missing = EvidenceSource.NOT_AVAILABLE
     usage = NormalizedProviderUsage(
-        provider="t", model="m", request_id=None,
+        provider="t",
+        model="m",
+        request_id=None,
         input_tokens=Measurement.unavailable(missing),
         output_tokens=Measurement.unavailable(missing),
         cached_tokens=Measurement.unavailable(missing),
@@ -284,10 +292,18 @@ def _failing_adapter() -> type:
 
         def stream_chat(self, *_a, **_k):
             return ProviderCallResult(
-                usage=usage, ttft_ms=None, e2e_ms=1.0, network_ms=1.0,
-                attempt_count=1, retry_count=0, timeout_count=0,
-                final_status="FAILURE", response_nonempty=False,
-                error_code="HTTP_401", error_category="AUTH_FAILED", http_status=401,
+                usage=usage,
+                ttft_ms=None,
+                e2e_ms=1.0,
+                network_ms=1.0,
+                attempt_count=1,
+                retry_count=0,
+                timeout_count=0,
+                final_status="FAILURE",
+                response_nonempty=False,
+                error_code="HTTP_401",
+                error_category="AUTH_FAILED",
+                http_status=401,
             )
 
     return _Adapter
@@ -301,7 +317,9 @@ def test_warmup_authentication_failure_is_not_pass(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("EVAL_PROVIDER_MAX_ATTEMPTS", "1")
     monkeypatch.setattr("evaluation.provider_runner.ProviderAdapter", _failing_adapter())
     result = run_provider_staging(
-        repeat=1, warmup=1, max_requests=20,
+        repeat=1,
+        warmup=1,
+        max_requests=20,
         estimated_cost_cap=1.0,
         estimated_input_cost_per_1k=0.0015,
         estimated_output_cost_per_1k=0.006,
@@ -321,7 +339,9 @@ def test_cost_cap_counts_warmup_and_retries(monkeypatch: pytest.MonkeyPatch) -> 
     # and worst-case retries are accounted.
     with pytest.raises(RuntimeError, match="estimated cost cap"):
         run_provider_staging(
-            repeat=1, warmup=1, max_requests=60,
+            repeat=1,
+            warmup=1,
+            max_requests=60,
             estimated_cost_cap=0.02,
             estimated_input_cost_per_1k=0.5,
             estimated_output_cost_per_1k=0.5,
@@ -335,23 +355,32 @@ def test_render_markdown_status_and_provider_boundary_from_payload() -> None:
     from evaluation.runner import render_markdown
 
     base = {
-        "run_id": "r", "git_sha": "s", "workload_id": "w",
-        "request_count": 1, "success_count": 1,
+        "run_id": "r",
+        "git_sha": "s",
+        "workload_id": "w",
+        "request_count": 1,
+        "success_count": 1,
         "latency": {"source": "FIXTURE", "p50_ms": 1, "p95_ms": 2, "p99_ms": 3},
     }
     local = render_markdown({**base, "environment": "LOCAL_FIXTURE"})
     assert "- status: `LOCAL_ONLY`" in local
-    staging = render_markdown({
-        **base,
-        "environment": "CONTROLLED_STAGING",
-        "final_status": "PASS",
-        "provider_cost": {"source": "PROVIDER_REPORTED"},
-    })
+    staging = render_markdown(
+        {
+            **base,
+            "environment": "CONTROLLED_STAGING",
+            "final_status": "PASS",
+            "provider_cost": {"source": "PROVIDER_REPORTED"},
+        }
+    )
     assert "- status: `PASS`" in staging
     assert "Provider-reported" in staging
-    unverified = render_markdown({
-        **base, "environment": "NOT_VERIFIED", "final_status": None,
-    })
+    unverified = render_markdown(
+        {
+            **base,
+            "environment": "NOT_VERIFIED",
+            "final_status": None,
+        }
+    )
     assert "- status: `NOT_VERIFIED`" in unverified
 
 
@@ -530,7 +559,7 @@ def test_import_corpus_hash_mismatch_is_repaired() -> None:
 def test_import_eval_corpus_uses_configured_qdrant_endpoint() -> None:
     source = (PROJECT_ROOT / "scripts" / "import_eval_corpus.py").read_text(encoding="utf-8")
     assert "QDRANT_HOST" in source and "QDRANT_PORT" in source
-    assert "QdrantKnowledgeBase(host=\"localhost\", port=6333)" not in source
+    assert 'QdrantKnowledgeBase(host="localhost", port=6333)' not in source
 
 
 def test_migration_dry_run_matches_execute_deletion_filter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -609,7 +638,5 @@ def test_pre_commit_hook_pattern_catches_quoted_key(tmp_path: Path) -> None:
     pattern = match.group(1)
     sample = tmp_path / "sample.env"
     sample.write_text('api_key="abcdefghijklmnopqrstuv"\n', encoding="utf-8")
-    result = subprocess.run(
-        ["grep", "-Eiq", pattern, str(sample)], capture_output=True
-    )
+    result = subprocess.run(["grep", "-Eiq", pattern, str(sample)], capture_output=True)
     assert result.returncode == 0

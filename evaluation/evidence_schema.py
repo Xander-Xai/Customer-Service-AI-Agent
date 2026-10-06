@@ -151,7 +151,9 @@ class EvidenceRecord:
             "success_count": self.success_count,
             "failure_count": self.failure_count,
             "latency": self.latency.to_dict(),
-            "component_latency": {name: summary.to_dict() for name, summary in self.component_latency.items()},
+            "component_latency": {
+                name: summary.to_dict() for name, summary in self.component_latency.items()
+            },
             "estimated_tokens": self.estimated_tokens.to_dict(),
             "input_tokens": self.input_tokens.to_dict(),
             "output_tokens": self.output_tokens.to_dict(),

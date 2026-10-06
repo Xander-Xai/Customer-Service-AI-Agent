@@ -14,9 +14,11 @@ _blackboard_session_id: contextvars.ContextVar[Optional[str]] = contextvars.Cont
     "blackboard_session_id", default=None
 )
 
+
 def set_blackboard_session_id(session_id: str | None):
     """设置当前上下文的 blackboard session_id"""
     _blackboard_session_id.set(session_id)
+
 
 def get_blackboard_session_id() -> Optional[str]:
     """获取当前上下文的 blackboard session_id"""
@@ -43,7 +45,9 @@ class SharedBlackboard:
         ctx_sid = _blackboard_session_id.get()
         return ctx_sid if ctx_sid is not None else "default"
 
-    async def write(self, key: str, value: Any, ttl: float | None = None, session_id: str | None = None):
+    async def write(
+        self, key: str, value: Any, ttl: float | None = None, session_id: str | None = None
+    ):
         async with self._ensure_lock():
             sid = self._get_session_id(session_id)
             if sid not in self._session_data:

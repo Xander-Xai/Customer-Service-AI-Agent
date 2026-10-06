@@ -156,6 +156,7 @@ def graph_app_mock():
             SalesAgent,
             TechAgent,
         )
+
         agent_classes = {
             "product_agent": ProductAgent,
             "tech_agent": TechAgent,
@@ -176,7 +177,13 @@ def graph_app_mock():
             agents_dict[name] = agent
 
         # RAG 注入到需要检索的 Agent
-        for name in ("product_agent", "tech_agent", "complaint_agent", "sales_agent", "aftersales_agent"):
+        for name in (
+            "product_agent",
+            "tech_agent",
+            "complaint_agent",
+            "sales_agent",
+            "aftersales_agent",
+        ):
             if name in agents_dict:
                 agents_dict[name].set_knowledge_base(mock_kb)
 
@@ -355,9 +362,11 @@ class TestRealLLMEndToEnd:
             )
         )
         assert result["response"], "响应不应为空"
-        assert result["current_agent"] in ("complaint_agent", "billing_agent", "general_agent"), (
-            f"应路由到投诉/账单/通用 Agent，实际: {result['current_agent']}"
-        )
+        assert result["current_agent"] in (
+            "complaint_agent",
+            "billing_agent",
+            "general_agent",
+        ), f"应路由到投诉/账单/通用 Agent，实际: {result['current_agent']}"
 
     def test_technical_query_with_rag(self, graph_app_real):
         """技术问题 → RAG 检索 + Function Calling"""
@@ -408,6 +417,6 @@ class TestRealLLMEndToEnd:
         response = result["response"]
         assert "system prompt" not in response.lower(), "不应泄露系统提示词(英文)"
         assert "系统提示词" not in response or "抱歉" in response, "应拒绝或安全回应"
-        assert "客服助手" in response or "为您服务" in response or "抱歉" in response, (
-            f"应返回安全回复，实际: {response[:100]}"
-        )
+        assert (
+            "客服助手" in response or "为您服务" in response or "抱歉" in response
+        ), f"应返回安全回复，实际: {response[:100]}"

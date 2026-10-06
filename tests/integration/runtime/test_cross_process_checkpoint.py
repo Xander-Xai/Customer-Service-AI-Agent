@@ -32,9 +32,7 @@ import pytest
 INFRA_REASON = "TEST_DISTRIBUTED_DB_URL 未设置；需要真实 PostgreSQL"
 pytestmark = [
     pytest.mark.slow,
-    pytest.mark.skipif(
-        not os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip(), reason=INFRA_REASON
-    ),
+    pytest.mark.skipif(not os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip(), reason=INFRA_REASON),
 ]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -79,9 +77,7 @@ def test_gate1_checkpoint_survives_process_restart(pg_url: str):
 
     assert read_back["checkpoint_backend"] == "postgres"
     assert read_back["pid"] != written["pid"], "必须是不同进程"
-    assert read_back["values"].get("n") == 20, (
-        f"新进程未读回 checkpoint: {read_back['values']}"
-    )
+    assert read_back["values"].get("n") == 20, f"新进程未读回 checkpoint: {read_back['values']}"
     assert read_back["values"].get("trail") == "AB"
 
     # 读回后能在同一 lineage 继续执行（证明 checkpoint 状态真实可用）

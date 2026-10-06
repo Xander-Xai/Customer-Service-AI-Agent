@@ -167,7 +167,9 @@ class OpenAICompatibleClient:
             pass  # 追踪失败不影响主流程
 
     @staticmethod
-    def _retry_delay(attempt: int, base_delay: float = 1.0, backoff_factor: int = 2, max_delay: float = 30.0) -> float:
+    def _retry_delay(
+        attempt: int, base_delay: float = 1.0, backoff_factor: int = 2, max_delay: float = 30.0
+    ) -> float:
         """指数退避 + 全抖动（Full Jitter）"""
 
         delay = min(base_delay * (backoff_factor**attempt), max_delay)
@@ -325,7 +327,9 @@ class OpenAICompatibleClient:
                     continue
                 if attempt == self.max_retries - 1:
                     break
-                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
+                delay = self._retry_delay(
+                    attempt, self.base_delay, self.backoff_factor, self.max_delay
+                )
                 logger.warning(
                     f"[LLM-async] [{get_trace_id()}] retry {attempt + 1}/{self.max_retries}: {e}, wait {delay:.1f}s"
                 )
@@ -375,7 +379,9 @@ class OpenAICompatibleClient:
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
                 if attempt == self.max_retries - 1:
                     break
-                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
+                delay = self._retry_delay(
+                    attempt, self.base_delay, self.backoff_factor, self.max_delay
+                )
                 logger.warning(
                     f"[LLM-raw] retry {attempt + 1}/{self.max_retries}: {e}, wait {delay:.1f}s"
                 )
@@ -439,7 +445,9 @@ class OpenAICompatibleClient:
             except (httpx.HTTPStatusError, httpx.RequestError) as e:
                 if attempt == self.max_retries - 1:
                     break
-                delay = self._retry_delay(attempt, self.base_delay, self.backoff_factor, self.max_delay)
+                delay = self._retry_delay(
+                    attempt, self.base_delay, self.backoff_factor, self.max_delay
+                )
                 logger.warning(
                     f"[LLM-stream] [{get_trace_id()}] retry {attempt + 1}/{self.max_retries}: {e}, "
                     f"wait {delay:.1f}s"

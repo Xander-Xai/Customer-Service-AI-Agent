@@ -47,6 +47,7 @@ from core.logger import get_logger
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 logger = get_logger("api.approvals")
 
+
 #: 可审批的高级角色。customer / agent 永不在列。
 #:
 #: 唯一真相源是 ``core/config.py::HITL_REVIEWER_ROLES``（env ``HITL_REVIEWER_ROLES``，
@@ -83,10 +84,7 @@ def _require_reviewer(request: Request):
     if role not in _reviewer_roles():
         raise HTTPException(
             status_code=403,
-            detail=(
-                "需要管理员或主管权限"
-                f"（可审批角色：{' / '.join(_reviewer_roles())}）"
-            ),
+            detail=("需要管理员或主管权限" f"（可审批角色：{' / '.join(_reviewer_roles())}）"),
         )
     return user
 

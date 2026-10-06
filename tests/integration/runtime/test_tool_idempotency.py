@@ -180,9 +180,7 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
 
     from celery import Celery
 
-    Celery(broker=REDIS_URL).send_task(
-        "runtime.execute_agent_run", args=[run_id], queue=queue
-    )
+    Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
     def counter():
         return int(client.get(f"{key_prefix}:counter") or 0)
@@ -240,9 +238,7 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
 
         # 4) 关键断言：副作用只发生了一次
         final_counter = counter()
-        assert final_counter == 1, (
-            f"副作用被重复执行！counter={final_counter}（必须 == 1）"
-        )
+        assert final_counter == 1, f"副作用被重复执行！counter={final_counter}（必须 == 1）"
 
         # 5) 并且确实重投过（否则 counter==1 只是因为没重跑）
         # ``ledger_hits`` 由 provider 在**观测到副作用计数器没变**时递增，
@@ -275,15 +271,9 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
             _stop_worker(proc)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            conn.execute(
-                text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
-            )
-            conn.execute(
-                text("DELETE FROM tool_side_effects WHERE run_id=:id"), {"id": run_id}
-            )
-            conn.execute(
-                text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id}
-            )
+            conn.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
+            conn.execute(text("DELETE FROM tool_side_effects WHERE run_id=:id"), {"id": run_id})
+            conn.execute(text("DELETE FROM checkpoints WHERE thread_id = :t"), {"t": thread_id})
         client.delete(*redis_keys, queue, "unacked", "unacked_index")
         client.close()
 

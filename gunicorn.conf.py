@@ -29,6 +29,7 @@ preload_app = True  # 预加载应用（共享内存，减少 fork 开销）
 max_requests = 1000  # Worker 处理 N 个请求后重启（防内存泄漏）
 max_requests_jitter = 50  # 随机抖动，避免同时重启
 
+
 def post_fork(server, worker):
     """
     Worker 进程 fork 后执行。
@@ -38,6 +39,7 @@ def post_fork(server, worker):
     """
     try:
         from db.database import engine
+
         engine.dispose()
         server.log.info("Worker fork: SQLAlchemy engine disposed to prevent connection sharing")
     except ImportError:

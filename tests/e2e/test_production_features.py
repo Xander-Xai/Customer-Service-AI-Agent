@@ -226,9 +226,9 @@ class TestConfigValidation:
         ]
         for key, expected in test_cases:
             result = any(key.lower().startswith(p) for p in placeholder_prefixes)
-            assert result == expected, (
-                f"Key '{key}' should be detected as {'placeholder' if expected else 'valid'}"
-            )
+            assert (
+                result == expected
+            ), f"Key '{key}' should be detected as {'placeholder' if expected else 'valid'}"
 
 
 # ===== Refresh Token 测试（P2-3）=====

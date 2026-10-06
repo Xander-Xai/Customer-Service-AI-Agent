@@ -492,9 +492,7 @@ class ReActMode(SequentialMode):
                 timeout=self._REACT_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            logger.warning(
-                f"ReAct {agent_name} 超时 ({self._REACT_TIMEOUT}s)，返回降级回复"
-            )
+            logger.warning(f"ReAct {agent_name} 超时 ({self._REACT_TIMEOUT}s)，返回降级回复")
             return {
                 "response": "抱歉，推理过程耗时过长，请稍后重试或简化您的提问。",
                 "mode": "react",

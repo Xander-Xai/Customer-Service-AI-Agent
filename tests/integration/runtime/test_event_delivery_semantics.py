@@ -117,9 +117,9 @@ def test_reconnect_with_older_id_replays_already_seen_events(run_id):
 
     ids, replayed = asyncio.run(scenario())
 
-    assert ids[1] in replayed and ids[2] in replayed, (
-        "用较旧 Last-Event-ID 重连应重放已处理过的 entry（这正是重复投递的来源）"
-    )
+    assert (
+        ids[1] in replayed and ids[2] in replayed
+    ), "用较旧 Last-Event-ID 重连应重放已处理过的 entry（这正是重复投递的来源）"
     assert len(set(replayed)) == len(replayed), "单次 replay 内部不应自相重复"
 
 
@@ -205,9 +205,7 @@ def test_event_stream_is_not_the_source_of_truth(run_id):
             session_factory=sessionmaker(bind=engine, expire_on_commit=False)
         )
     )
-    run = svc.create_run(
-        query="evt-truth", session_id=f"T-evt-{_uuid.uuid4().hex[:8]}"
-    )
+    run = svc.create_run(query="evt-truth", session_id=f"T-evt-{_uuid.uuid4().hex[:8]}")
     svc.mark_running(run["id"], worker_id="w-evt", lease_seconds=60)
     svc.mark_succeeded(run["id"], {"response": "done"})
 

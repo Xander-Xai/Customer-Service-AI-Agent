@@ -257,9 +257,7 @@ def _expire_lease(repo: AgentRunRepository, run_id: str) -> None:
     try:
         from db.models import AgentRun
 
-        session.query(AgentRun).filter(AgentRun.id == run_id).update(
-            {"lease_expires_at": past}
-        )
+        session.query(AgentRun).filter(AgentRun.id == run_id).update({"lease_expires_at": past})
         session.commit()
     finally:
         session.close()
@@ -267,9 +265,7 @@ def _expire_lease(repo: AgentRunRepository, run_id: str) -> None:
 
 def _running_with_owner(svc: RunService, *, worker: str, lease_s: float = 60.0):
     run = svc.create_run(query="q", session_id="s1")
-    claimed = svc.mark_running(
-        run["id"], worker_id=worker, task_id="t-1", lease_seconds=lease_s
-    )
+    claimed = svc.mark_running(run["id"], worker_id=worker, task_id="t-1", lease_seconds=lease_s)
     assert claimed is not None
     return claimed
 
@@ -300,12 +296,12 @@ class TestOwnershipCASBlocksStaleWorker:
         [
             lambda s, rid: s.mark_succeeded(rid, {"r": 1}, expected_worker_id="A"),
             lambda s, rid: s.mark_failed(
-                rid, error_code="E", error_message="m",
+                rid,
+                error_code="E",
+                error_message="m",
                 expected_worker_id="A",
             ),
-            lambda s, rid: s.mark_retrying(
-                rid, delay_seconds=1, expected_worker_id="A"
-            ),
+            lambda s, rid: s.mark_retrying(rid, delay_seconds=1, expected_worker_id="A"),
             lambda s, rid: s.mark_waiting_approval(rid, expected_worker_id="A"),
             lambda s, rid: s.mark_dead_letter(
                 rid, error_code="E", error_message="m", expected_worker_id="A"
@@ -316,9 +312,10 @@ class TestOwnershipCASBlocksStaleWorker:
     def test_every_worker_owned_mutation_is_blocked(self, service, repo, mutation):
         run = _running_with_owner(service, worker="A")
         _expire_lease(repo, run["id"])
-        assert service.mark_running(
-            run["id"], worker_id="B", task_id="t2", lease_seconds=60
-        ) is not None
+        assert (
+            service.mark_running(run["id"], worker_id="B", task_id="t2", lease_seconds=60)
+            is not None
+        )
 
         with pytest.raises(RunOwnershipLost):
             mutation(service, run["id"])
@@ -364,9 +361,9 @@ class TestHeartbeatOwnershipCAS:
 
         after = service.get_run(run["id"])
         assert after["worker_id"] == "B", "stale heartbeat changed the owner"
-        assert after["lease_expires_at"] == before["lease_expires_at"], (
-            "stale heartbeat extended/replaced the new owner's lease"
-        )
+        assert (
+            after["lease_expires_at"] == before["lease_expires_at"]
+        ), "stale heartbeat extended/replaced the new owner's lease"
 
     def test_expired_owner_cannot_resurrect_its_lease(self, service, repo):
         """Strict lease expiry: nobody has taken over yet, and A is still out."""
@@ -397,16 +394,14 @@ class TestRunningTakeoverIsAtomic:
 
     def test_live_lease_blocks_takeover(self, service):
         run = _running_with_owner(service, worker="A", lease_s=300)
-        assert service.mark_running(
-            run["id"], worker_id="B", task_id="tB", lease_seconds=60
-        ) is None
+        assert (
+            service.mark_running(run["id"], worker_id="B", task_id="tB", lease_seconds=60) is None
+        )
         assert service.get_run(run["id"])["worker_id"] == "A"
 
     def test_same_owner_reclaim_renews(self, service):
         run = _running_with_owner(service, worker="A", lease_s=300)
-        again = service.mark_running(
-            run["id"], worker_id="A", task_id="t1", lease_seconds=300
-        )
+        again = service.mark_running(run["id"], worker_id="A", task_id="t1", lease_seconds=300)
         assert again is not None
         assert again["worker_id"] == "A"
 
@@ -478,9 +473,7 @@ class TestNonWorkerPathsStayUngated:
 
     def test_requeue_dead_letter_still_works(self, service):
         run = service.create_run(query="q", session_id="s1")
-        service.mark_dead_letter(
-            run["id"], error_code="X", error_message="y", error_type="timeout"
-        )
+        service.mark_dead_letter(run["id"], error_code="X", error_message="y", error_type="timeout")
         again = service.requeue_dead_letter(run["id"])
         assert again["status"] == RunStatus.QUEUED.value
 
@@ -554,8 +547,11 @@ class TestRepositoryOwnershipPrimitives:
         src = textwrap.dedent(inspect.getsource(ex))
         tree = ast.parse(src)
         owned = {
-            "mark_succeeded", "mark_failed", "mark_retrying",
-            "mark_waiting_approval", "mark_dead_letter",
+            "mark_succeeded",
+            "mark_failed",
+            "mark_retrying",
+            "mark_waiting_approval",
+            "mark_dead_letter",
         }
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):

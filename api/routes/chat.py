@@ -189,8 +189,14 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                     if event is None:
                         break
                     if isinstance(event, dict) and event.get("type") in (
-                        "chunk", "status", "thinking", "tool_call",
-                        "tool_result", "rag_status", "agent_switch", "content_complete",
+                        "chunk",
+                        "status",
+                        "thinking",
+                        "tool_call",
+                        "tool_result",
+                        "rag_status",
+                        "agent_switch",
+                        "content_complete",
                     ):
                         yield _sse_event(event)
                     if ctx.graph_task.done() and ctx.chunk_queue.empty():

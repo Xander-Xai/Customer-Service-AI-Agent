@@ -58,15 +58,18 @@ async def import_from_csv(path: str, scene: str) -> int:
         await kb.add_documents(
             collection_name=collection_name,
             documents=[d["content"] for d in docs],
-            metadatas=[{
-                "doc_id": d["id"],
-                "title": d["title"],
-                "category": d["category"],
-                "scene": _scene_to_str(d["scene"]),
-                "tags": ",".join(d["tags"]),
-                "source": d["source"],
-                "created_at": d["created_at"],
-            } for d in docs],
+            metadatas=[
+                {
+                    "doc_id": d["id"],
+                    "title": d["title"],
+                    "category": d["category"],
+                    "scene": _scene_to_str(d["scene"]),
+                    "tags": ",".join(d["tags"]),
+                    "source": d["source"],
+                    "created_at": d["created_at"],
+                }
+                for d in docs
+            ],
             ids=[d["id"] for d in docs],
         )
     return len(docs)
@@ -95,15 +98,18 @@ async def import_from_json(path: str, scene: str) -> int:
         await kb.add_documents(
             collection_name=collection_name,
             documents=[d["content"] for d in docs],
-            metadatas=[{
-                "doc_id": d["id"],
-                "title": d.get("title", ""),
-                "category": d.get("category", "unknown"),
-                "scene": _scene_to_str(d["scene"]),
-                "tags": ",".join(d.get("tags", [])),
-                "source": d["source"],
-                "created_at": d["created_at"],
-            } for d in docs],
+            metadatas=[
+                {
+                    "doc_id": d["id"],
+                    "title": d.get("title", ""),
+                    "category": d.get("category", "unknown"),
+                    "scene": _scene_to_str(d["scene"]),
+                    "tags": ",".join(d.get("tags", [])),
+                    "source": d["source"],
+                    "created_at": d["created_at"],
+                }
+                for d in docs
+            ],
             ids=[d["id"] for d in docs],
         )
     return len(docs)

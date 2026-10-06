@@ -35,11 +35,16 @@ class RoutingResult:
 
 # 完整意图分类列表
 INTENT_CLASSES = [
-    "product_info", "recommendation",       # 售前
-    "order_status", "return_policy",         # 售后
-    "technical_support", "usage_guide",      # 技术
-    "complaint", "negative_feedback",        # 投诉
-    "greeting", "general",                   # 通用
+    "product_info",
+    "recommendation",  # 售前
+    "order_status",
+    "return_policy",  # 售后
+    "technical_support",
+    "usage_guide",  # 技术
+    "complaint",
+    "negative_feedback",  # 投诉
+    "greeting",
+    "general",  # 通用
 ]
 
 # 场景映射
@@ -84,30 +89,26 @@ _RULE_PATTERNS = {
     "product_info": [
         re.compile(r"产品|商品|精华|面膜|洁面|面霜|化妆水|价格|多少钱|成分|功效|推荐")
     ],
-    "recommendation": [
-        re.compile(r"推荐|适合|建议|哪种|哪款|什么好")
-    ],
+    "recommendation": [re.compile(r"推荐|适合|建议|哪种|哪款|什么好")],
     "technical_support": [
-        re.compile(r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存|"
-                   r"A醇|刷酸|脱皮|避光|早C|晚A|建立耐受|禁忌|冲突|"
-                   r"分子量|成分.*冲突|一起用|搭配.*使用|叠加|先后"),
+        re.compile(
+            r"过敏|刺激|红肿|痒|使用方法|怎么用|用法|保质期|有效期|保存|"
+            r"A醇|刷酸|脱皮|避光|早C|晚A|建立耐受|禁忌|冲突|"
+            r"分子量|成分.*冲突|一起用|搭配.*使用|叠加|先后"
+        ),
     ],
-    "usage_guide": [
-        re.compile(r"怎么用|用法|步骤|顺序|使用|方法")
-    ],
+    "usage_guide": [re.compile(r"怎么用|用法|步骤|顺序|使用|方法")],
     "billing": [re.compile(r"退款|退货|发票|付款|支付|账单|费用|订单|物流|快递|发货")],
     "complaint": [
-        re.compile(r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|"
-                   r"质量.*问题|包装破损|发错货|虚假宣传|没有效果|"
-                   r"货不对板|以次充好"),
+        re.compile(
+            r"投诉|不满|差评|举报|客服|经理|领导|态度|服务差|"
+            r"质量.*问题|包装破损|发错货|虚假宣传|没有效果|"
+            r"货不对板|以次充好"
+        ),
     ],
-    "negative_feedback": [
-        re.compile(r"差劲|失望|太差|不好|垃圾|后悔")
-    ],
+    "negative_feedback": [re.compile(r"差劲|失望|太差|不好|垃圾|后悔")],
     "order_query": [re.compile(r"订单号|物流|快递|到货|发货|签收|运单")],
-    "order_status": [
-        re.compile(r"订单|物流|快递|发货|到哪|签收")
-    ],
+    "order_status": [re.compile(r"订单|物流|快递|发货|到哪|签收")],
     "return_policy": [
         re.compile(r"退货|退款|换货|退换|退钱|质量问题|质量.*问题"),
     ],

@@ -78,7 +78,9 @@ async def _llm_call_latency(llm, query: str) -> _LLMCallResult:
         _random.seed(hash(query) % (2**31))
         base_ms = 400 + len(query) * 2
         latency = abs(base_ms + _random.gauss(0, base_ms * 0.2))
-        return _LLMCallResult(latency, DEFAULT_INPUT_TOKENS_PER_QUERY, DEFAULT_OUTPUT_TOKENS_PER_QUERY)
+        return _LLMCallResult(
+            latency, DEFAULT_INPUT_TOKENS_PER_QUERY, DEFAULT_OUTPUT_TOKENS_PER_QUERY
+        )
 
 
 async def benchmark_ab_test():
@@ -121,7 +123,9 @@ async def benchmark_ab_test():
     print("[2/5] Warming up cache for Variant B...")
     warm_queries = BENCHMARK_QUERIES[:20]
     for _i, q in enumerate(warm_queries):
-        cache.set(q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"})
+        cache.set(
+            q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"}
+        )
     print(f"  Cached {len(warm_queries)} queries for Variant B")
     print()
 
@@ -160,8 +164,10 @@ async def benchmark_ab_test():
 
     a_elapsed = time.time() - a_start
     a_avg_latency = a_total_latency / a_llm_calls if a_llm_calls > 0 else 0
-    print(f"  Variant A done: {a_llm_calls} LLM calls, {a_elapsed:.2f}s total, "
-          f"avg {a_avg_latency:.0f}ms/call")
+    print(
+        f"  Variant A done: {a_llm_calls} LLM calls, {a_elapsed:.2f}s total, "
+        f"avg {a_avg_latency:.0f}ms/call"
+    )
     print()
 
     # ── Variant B: With cache ──
@@ -204,20 +210,28 @@ async def benchmark_ab_test():
             b_total_latency += latency_ms
 
             # Cache the result for future hits
-            cache.set(q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"})
+            cache.set(
+                q, f"回答：{q}", metadata={"intent_type": "knowledge_qa", "user_role": "customer"}
+            )
 
         if (i + 1) % 10 == 0:
-            print(f"    {i + 1}/{query_count} (cache_hits={b_cache_hits}, "
-                  f"llm_calls={b_llm_calls})")
+            print(
+                f"    {i + 1}/{query_count} (cache_hits={b_cache_hits}, "
+                f"llm_calls={b_llm_calls})"
+            )
 
     b_elapsed = time.time() - b_start
     b_avg_latency = b_total_latency / query_count if query_count > 0 else 0
 
     hit_rate = (b_cache_hits / query_count * 100) if query_count > 0 else 0
-    latency_reduction = ((a_avg_latency - b_avg_latency) / a_avg_latency * 100) if a_avg_latency > 0 else 0
+    latency_reduction = (
+        ((a_avg_latency - b_avg_latency) / a_avg_latency * 100) if a_avg_latency > 0 else 0
+    )
 
-    print(f"  Variant B done: {b_cache_hits} cache hits, {b_llm_calls} LLM calls, "
-          f"{b_elapsed:.2f}s total, avg {b_avg_latency:.0f}ms/query")
+    print(
+        f"  Variant B done: {b_cache_hits} cache hits, {b_llm_calls} LLM calls, "
+        f"{b_elapsed:.2f}s total, avg {b_avg_latency:.0f}ms/query"
+    )
     print()
 
     # ── Comparison Report ──
@@ -227,14 +241,21 @@ async def benchmark_ab_test():
     print("  ├────────────┬───────────┬───────────┬────────────────┤")
     print("  │ Metric     │ No Cache  │ With Cache│ Improvement     │")
     print("  ├────────────┼───────────┼───────────┼────────────────┤")
-    print(f"  │ LLM calls  │ {a_llm_calls:>9d} │ {b_llm_calls:>9d} │ "
-          f"{int((1 - b_llm_calls/max(a_llm_calls,1)) * 100):>13d}% reduction │")
-    print(f"  │ Cache hits │ {'N/A':>9s} │ {b_cache_hits:>9d} │ "
-          f"{int(hit_rate):>13d}% hit rate │")
-    print(f"  │ Avg latency│ {a_avg_latency:>9.0f}ms │ {b_avg_latency:>9.0f}ms │ "
-          f"{int(latency_reduction):>13d}% reduction │")
-    print(f"  │ Wall time  │ {a_elapsed:>9.2f}s │ {b_elapsed:>9.2f}s │ "
-          f"{int((1 - b_elapsed/max(a_elapsed,1)) * 100):>13d}% reduction │")
+    print(
+        f"  │ LLM calls  │ {a_llm_calls:>9d} │ {b_llm_calls:>9d} │ "
+        f"{int((1 - b_llm_calls/max(a_llm_calls,1)) * 100):>13d}% reduction │"
+    )
+    print(
+        f"  │ Cache hits │ {'N/A':>9s} │ {b_cache_hits:>9d} │ " f"{int(hit_rate):>13d}% hit rate │"
+    )
+    print(
+        f"  │ Avg latency│ {a_avg_latency:>9.0f}ms │ {b_avg_latency:>9.0f}ms │ "
+        f"{int(latency_reduction):>13d}% reduction │"
+    )
+    print(
+        f"  │ Wall time  │ {a_elapsed:>9.2f}s │ {b_elapsed:>9.2f}s │ "
+        f"{int((1 - b_elapsed/max(a_elapsed,1)) * 100):>13d}% reduction │"
+    )
     print("  └────────────┴───────────┴───────────┴────────────────┘")
     print()
 
@@ -253,7 +274,9 @@ async def benchmark_ab_test():
     print(f"    Input pricing:  ${COST_PER_1K_TOKENS['input']}/1K tokens")
     print(f"    Output pricing: ${COST_PER_1K_TOKENS['output']}/1K tokens")
     print(f"    Variant A (no cache):  {a_input_tokens} in + {a_output_tokens} out = ${a_cost:.4f}")
-    print(f"    Variant B (with cache): {b_input_tokens} in + {b_output_tokens} out = ${b_cost:.4f}")
+    print(
+        f"    Variant B (with cache): {b_input_tokens} in + {b_output_tokens} out = ${b_cost:.4f}"
+    )
     print(f"    Cost savings:           {cost_savings:.1f}%")
     print()
 

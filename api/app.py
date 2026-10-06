@@ -62,7 +62,9 @@ def _header_name_bytes(name: str | bytes) -> bytes:
     return name.lower().encode("latin-1") if isinstance(name, str) else name.lower()
 
 
-def _upsert_header(headers: list[tuple[bytes, bytes]], name: str | bytes, value: str | bytes) -> list[tuple[bytes, bytes]]:
+def _upsert_header(
+    headers: list[tuple[bytes, bytes]], name: str | bytes, value: str | bytes
+) -> list[tuple[bytes, bytes]]:
     name_bytes = _header_name_bytes(name)
     value_bytes = value.encode("latin-1") if isinstance(value, str) else value
     filtered = [(key, header_value) for key, header_value in headers if key.lower() != name_bytes]
@@ -90,7 +92,9 @@ def _should_append_utf8_charset(content_type: str) -> bool:
     return media_type.startswith("text/") or media_type in _UTF8_TEXT_CONTENT_TYPES
 
 
-def _make_cached_static(app: ASGIApp, max_age: int = 31536000, extra_headers: dict | None = None) -> ASGIApp:
+def _make_cached_static(
+    app: ASGIApp, max_age: int = 31536000, extra_headers: dict | None = None
+) -> ASGIApp:
     """包装 StaticFiles 子应用，为其所有响应添加缓存头。"""
     cc = f"public, max-age={max_age}, immutable"
     extras = list((extra_headers or {}).items())
@@ -111,7 +115,9 @@ def _make_cached_static(app: ASGIApp, max_age: int = 31536000, extra_headers: di
                 content_type = _get_header(headers, "content-type")
                 if _should_append_utf8_charset(content_type):
                     media_type = content_type.split(";", 1)[0].strip()
-                    headers = _upsert_header(headers, "content-type", f"{media_type}; charset=utf-8")
+                    headers = _upsert_header(
+                        headers, "content-type", f"{media_type}; charset=utf-8"
+                    )
 
                 for key, value in extras:
                     headers = _upsert_header(headers, key, value)
@@ -152,10 +158,10 @@ async def _run_graph(
 ) -> dict[str, Any]:
     """执行 LangGraph 图（原生异步 + SLA 告警 + 解决状态追踪）"""
     from core.shared_blackboard import set_blackboard_session_id
+
     set_blackboard_session_id(session_id)
 
     start = time.time()
-
 
     state = {
         "session_id": session_id,
@@ -195,9 +201,7 @@ async def _run_graph(
         # 走正常分支，多轮对话语义不变。
         pending = await _pending_steps(_graph_app, graph_config)
         if pending:
-            logger.info(
-                "从 checkpoint 续跑 session=%s pending=%s", session_id, pending
-            )
+            logger.info("从 checkpoint 续跑 session=%s pending=%s", session_id, pending)
             graph_input = None
         else:
             graph_input = state
@@ -398,9 +402,7 @@ def create_app(
         from fastapi.responses import JSONResponse
 
         assert isinstance(exc, ThreadBusyError)
-        logger.info(
-            "THREAD_BUSY thread=%s request=%s", exc.thread_id, request.url.path
-        )
+        logger.info("THREAD_BUSY thread=%s request=%s", exc.thread_id, request.url.path)
         return JSONResponse(thread_busy_payload(exc), status_code=409)
 
     async def _thread_lock_unavailable_handler(request: Request, exc: Exception):
@@ -469,7 +471,9 @@ def create_app(
                 content = f.read()
             if nonce:
                 content = content.replace("<script", f'<script nonce="{nonce}"')
-            return HTMLResponse(content=content, headers={"Content-Type": "text/html; charset=utf-8"})
+            return HTMLResponse(
+                content=content, headers={"Content-Type": "text/html; charset=utf-8"}
+            )
         return HTMLResponse(f"<h1>{fallback_msg}</h1>", status_code=404)
 
     def _html_path(filename: str) -> str:

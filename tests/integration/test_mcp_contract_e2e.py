@@ -836,9 +836,9 @@ class TestTimeoutTeardownBound:
         assert result.saw("timeout_observed"), result.events
         assert result.reported_servers(), f"子进程没自报任何 server：{result.events}"
         assert result.saw("closed_cleanly"), result.events
-        assert result.survivors == frozenset(), (
-            f"干净收尾后仍残留 fake MCP server: {sorted(result.survivors)}"
-        )
+        assert (
+            result.survivors == frozenset()
+        ), f"干净收尾后仍残留 fake MCP server: {sorted(result.survivors)}"
 
     def test_close_hang_cannot_stall_the_suite(self):
         """**回归用例**：close 永不返回时，硬上限照样让套件结束，且不留子进程。
@@ -865,9 +865,9 @@ class TestTimeoutTeardownBound:
         assert result.reported_servers(), f"回归没构造出泄漏场景：{result.events}"
         assert not result.saw("closed_cleanly"), "close 不该返回"
         # 3) 硬上限必须把子进程连同它的 fake MCP server 一起带走。
-        assert result.survivors == frozenset(), (
-            f"超时后残留 fake MCP server: {sorted(result.survivors)}"
-        )
+        assert (
+            result.survivors == frozenset()
+        ), f"超时后残留 fake MCP server: {sorted(result.survivors)}"
 
     async def test_in_process_watchdog_unblocks_a_close_stuck_on_its_server(
         self, adapter_factory, monkeypatch
@@ -1180,9 +1180,9 @@ class TestServerAnnotationsAreNotTrusted:
         # 没有这一步，"风险没被降低"可能只是因为 annotations 根本没送到，
         # 测试就变成一条永远为真的空断言。
         raw = await adapter._require_client().list_tools()
-        assert any(getattr(t, "annotations", None) for t in raw), (
-            "fake server 未发出 annotations：req-6 断言会变成空断言"
-        )
+        assert any(
+            getattr(t, "annotations", None) for t in raw
+        ), "fake server 未发出 annotations：req-6 断言会变成空断言"
         # server 即使自述只读，本地判定仍是 HIGH。
         assert all(s.risk_level is RiskLevel.HIGH for s in specs)
         assert await register_mcp_tools(registry, adapter) == []

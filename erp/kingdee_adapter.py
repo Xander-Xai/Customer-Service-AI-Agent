@@ -189,9 +189,13 @@ class KingdeeMockAdapter(KingdeeAdapterBase):
             ]
         return [{**v, "order_id": k} for k, v in self._orders.items()]
 
-    async def query_order_page(self, *, limit: int = 50, cursor: str | None = None, customer_id: str = "") -> ERPPage:
+    async def query_order_page(
+        self, *, limit: int = 50, cursor: str | None = None, customer_id: str = ""
+    ) -> ERPPage:
         """Deterministic mock pagination; real ERP pagination remains adapter-specific."""
-        return paginate_records(await self.query_order(customer_id=customer_id), limit=limit, cursor=cursor)
+        return paginate_records(
+            await self.query_order(customer_id=customer_id), limit=limit, cursor=cursor
+        )
 
     async def query_customer(self, customer_id: str) -> dict[str, Any] | None:
         await asyncio.sleep(0.1)

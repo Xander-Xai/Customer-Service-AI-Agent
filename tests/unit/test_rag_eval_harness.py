@@ -52,12 +52,14 @@ def _trace(stages: list[tuple[str, str, int, float]]) -> RetrievalTrace:
     for name, status, cand_out, ms in stages:
         from rag.retrieval_contract import StageStatus
 
-        trace.add(TraceStage(
-            name=name,
-            status=StageStatus(status),
-            candidate_out=cand_out,
-            duration_ms=ms,
-        ))
+        trace.add(
+            TraceStage(
+                name=name,
+                status=StageStatus(status),
+                candidate_out=cand_out,
+                duration_ms=ms,
+            )
+        )
     return trace
 
 
@@ -77,10 +79,16 @@ class FakeKB:
             raise RuntimeError("provider exploded")
         if spec == "timeout":
             raise TimeoutError("wall clock timeout")
-        staged = spec if isinstance(spec, list) else [
-            ("VECTOR", "executed", 32, 10.0), ("BM25", "executed", 16, 2.0),
-            ("FUSION_RRF", "executed", 40, 0.5), ("RERANK", "skipped", 40, 0.0),
-        ]
+        staged = (
+            spec
+            if isinstance(spec, list)
+            else [
+                ("VECTOR", "executed", 32, 10.0),
+                ("BM25", "executed", 16, 2.0),
+                ("FUSION_RRF", "executed", 40, 0.5),
+                ("RERANK", "skipped", 40, 0.0),
+            ]
+        )
         ids = [f"doc_{i}" for i in range(request.top_k)]
         if spec == "rerank_flipped":
             ids = list(reversed(ids))  # scripted rerank changes the order
@@ -168,10 +176,15 @@ def test_percentile_linear_interpolation() -> None:
 
 def test_benchmark_metadata_mismatch_fails(tmp_path: Path) -> None:
     bad = tmp_path / "bench.json"
-    bad.write_text(json.dumps({
-        "metadata": {"total_queries": 10, "version": "1.0"},
-        "queries": [{"query_id": "q0", "query": "x", "expected_doc_ids": ["d"]}],
-    }), encoding="utf-8")
+    bad.write_text(
+        json.dumps(
+            {
+                "metadata": {"total_queries": 10, "version": "1.0"},
+                "queries": [{"query_id": "q0", "query": "x", "expected_doc_ids": ["d"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(SystemExit):
         ev.load_benchmark(bad)
 
@@ -224,8 +237,10 @@ def test_warmup_discarded_and_not_counted() -> None:
 
 def test_stage_latency_recorded_not_derived() -> None:
     staged = [
-        ("VECTOR", "executed", 32, 11.0), ("BM25", "executed", 16, 3.0),
-        ("FUSION_RRF", "executed", 40, 1.0), ("RERANK", "executed", 40, 25.0),
+        ("VECTOR", "executed", 32, 11.0),
+        ("BM25", "executed", 16, 3.0),
+        ("FUSION_RRF", "executed", 40, 1.0),
+        ("RERANK", "executed", 40, 25.0),
     ]
     kb = FakeKB({q["query"]: staged for q in _queries(2)})
     res = _run(kb, _queries(2))
@@ -311,9 +326,7 @@ def _blocker_codes(result: dict[str, Any]) -> list[str]:
 
 def test_embedding_auth_fail_is_primary_and_empty_index_downstream() -> None:
     """embedding 401 + 空索引：primary=PROVIDER_AUTH，空索引是 downstream 症状。"""
-    out = _derive(
-        embedding_probe="failed", embedding_http_status=401, qdrant_total_points=0
-    )
+    out = _derive(embedding_probe="failed", embedding_http_status=401, qdrant_total_points=0)
     assert out["status"] == "BLOCKED"
     assert out["primary_blocker"] == "EMBEDDING_PROVIDER_AUTH"
     codes = _blocker_codes(out)
@@ -347,9 +360,7 @@ def test_reranker_auth_only_blocks_hybrid_rerank() -> None:
     assert rer["blocking"] is False
     assert rer["blocks_experiments"] == ["hybrid_rerank"]
     # 其他三个实验不在任何 blocker 的 blocks_experiments 中
-    blocked_all = {
-        e for b in out["blockers"] for e in b.get("blocks_experiments", [])
-    }
+    blocked_all = {e for b in out["blockers"] for e in b.get("blocks_experiments", [])}
     assert blocked_all == {"hybrid_rerank"}
     assert not (blocked_all & {"vector_only", "bm25_only", "hybrid_no_rerank"})
 
@@ -467,8 +478,9 @@ def test_report_schema_shape() -> None:
     res = _run(FakeKB(), queries)
     results = {"hybrid_rerank": res}
     rows_payload = {
-        name: [{k: r[k] for k in r if k not in ("expected_ids", "retrieved_ids")}
-               for r in r0["rows"]]
+        name: [
+            {k: r[k] for k in r if k not in ("expected_ids", "retrieved_ids")} for r in r0["rows"]
+        ]
         for name, r0 in results.items()
     }
     assert "hybrid_rerank" in rows_payload
@@ -505,10 +517,19 @@ def test_ablation_override_restored_even_on_exception() -> None:
 def test_run_experiment_restores_state_on_provider_error() -> None:
     queries = _queries(2)
     kb = FakeKB({q["query"]: "raise" for q in queries})
-    asyncio.run(ev.run_experiment(
-        kb, "bm25_only", ev.Override(disable_embedding=True), queries,
-        corpus_ids={"doc_0"}, top_k=8, ks=(1, 3, 5, 8), timeout_s=30.0, warmup_n=0,
-    ))
+    asyncio.run(
+        ev.run_experiment(
+            kb,
+            "bm25_only",
+            ev.Override(disable_embedding=True),
+            queries,
+            corpus_ids={"doc_0"},
+            top_k=8,
+            ks=(1, 3, 5, 8),
+            timeout_s=30.0,
+            warmup_n=0,
+        )
+    )
     # the embed_fn object must be restored after the experiment
     assert kb._embed_fn is not None
 
@@ -576,9 +597,9 @@ def _derive_typed(
         embedding_probe=embedding_probe,
         embedding_http_status=None,
         reranker_configured=configured,
-        reranker_probe="ok" if (applied and not degraded) else (
-            None if applied is None else "degraded"
-        ),
+        reranker_probe="ok"
+        if (applied and not degraded)
+        else (None if applied is None else "degraded"),
         reranker_http_status=http_status,
         reranker_applied=applied,
         reranker_degraded=degraded,
@@ -603,8 +624,11 @@ def test_typed_success_produces_no_reranker_blocker() -> None:
 def test_http_401_from_typed_outcome_yields_auth_blocker() -> None:
     """§15: the AUTH blocker must follow from the typed outcome alone."""
     out = _derive_typed(
-        applied=False, degraded=True, reason="http_error",
-        http_status=401, provider_called=True,
+        applied=False,
+        degraded=True,
+        reason="http_error",
+        http_status=401,
+        provider_called=True,
     )
     rer = _rer(out, "RERANKER_PROVIDER_AUTH")
     assert rer["blocking"] is False
@@ -615,16 +639,22 @@ def test_http_401_from_typed_outcome_yields_auth_blocker() -> None:
 
 def test_http_403_also_auth() -> None:
     out = _derive_typed(
-        applied=False, degraded=True, reason="http_error",
-        http_status=403, provider_called=True,
+        applied=False,
+        degraded=True,
+        reason="http_error",
+        http_status=403,
+        provider_called=True,
     )
     assert "RERANKER_PROVIDER_AUTH" in _blocker_codes(out)
 
 
 def test_timeout_yields_degraded_not_auth() -> None:
     out = _derive_typed(
-        applied=False, degraded=True, reason="timeout",
-        http_status=None, provider_called=True,
+        applied=False,
+        degraded=True,
+        reason="timeout",
+        http_status=None,
+        provider_called=True,
     )
     codes = _blocker_codes(out)
     assert "RERANKER_PROVIDER_DEGRADED" in codes
@@ -636,17 +666,18 @@ def test_timeout_yields_degraded_not_auth() -> None:
 
 
 def test_provider_error_yields_degraded() -> None:
-    out = _derive_typed(
-        applied=False, degraded=True, reason="provider_error", provider_called=True
-    )
+    out = _derive_typed(applied=False, degraded=True, reason="provider_error", provider_called=True)
     assert "RERANKER_PROVIDER_DEGRADED" in _blocker_codes(out)
 
 
 def test_invalid_response_is_degraded_not_ok_and_not_auth() -> None:
     """§20: HTTP 200 must not make a malformed response look healthy."""
     out = _derive_typed(
-        applied=False, degraded=True, reason="invalid_response",
-        http_status=200, provider_called=True,
+        applied=False,
+        degraded=True,
+        reason="invalid_response",
+        http_status=200,
+        provider_called=True,
     )
     codes = _blocker_codes(out)
     assert "RERANKER_PROVIDER_DEGRADED" in codes
@@ -670,7 +701,10 @@ def test_poisoned_shared_status_is_ignored_by_typed_verdict() -> None:
     """
     poisoned = 401
     out = _derive_typed(
-        applied=True, degraded=False, reason="", http_status=200,
+        applied=True,
+        degraded=False,
+        reason="",
+        http_status=200,
     )
     assert poisoned not in (out.get("primary_blocker"),)
     assert "RERANKER_PROVIDER_AUTH" not in _blocker_codes(out)
@@ -680,7 +714,10 @@ def test_poisoned_shared_status_is_ignored_by_typed_verdict() -> None:
 def test_hybrid_rerank_not_requested_leaves_other_experiments_alone() -> None:
     """§21: without hybrid_rerank there is no reranker blocker at all."""
     out = _derive_typed(
-        applied=False, degraded=True, reason="http_error", http_status=401,
+        applied=False,
+        degraded=True,
+        reason="http_error",
+        http_status=401,
         provider_called=True,
         requested=("vector_only", "bm25_only", "hybrid_no_rerank"),
     )
@@ -697,7 +734,7 @@ def test_typed_facts_take_priority_over_probe_string() -> None:
         embedding_probe="ok",
         embedding_http_status=None,
         reranker_configured=True,
-        reranker_probe="ok",                 # stale / optimistic
+        reranker_probe="ok",  # stale / optimistic
         reranker_http_status=None,
         reranker_applied=False,
         reranker_degraded=True,
@@ -745,16 +782,17 @@ def _string_literals_in_code(func) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
             body = getattr(node, "body", None)
-            if (body and isinstance(body[0], ast.Expr)
-                    and isinstance(body[0].value, ast.Constant)
-                    and isinstance(body[0].value.value, str)):
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
                 docstrings.add(id(body[0].value))
     return [
         n.value
         for n in ast.walk(tree)
-        if isinstance(n, ast.Constant)
-        and isinstance(n.value, str)
-        and id(n) not in docstrings
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings
     ]
 
 
@@ -765,11 +803,7 @@ def _attribute_names_in_code(func) -> list[str]:
     import textwrap
 
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
-    return [
-        n.attr
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Attribute)
-    ]
+    return [n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)]
 
 
 def test_preflight_source_no_longer_infers_from_list_shape() -> None:
@@ -792,12 +826,23 @@ def test_preflight_source_no_longer_reads_shared_last_error_status() -> None:
 def test_blocker_detail_carries_no_sensitive_material() -> None:
     """§14: only bounded reason / status / model may appear."""
     out = _derive_typed(
-        applied=False, degraded=True, reason="http_error", http_status=401,
+        applied=False,
+        degraded=True,
+        reason="http_error",
+        http_status=401,
         provider_called=True,
     )
     dumped = json.dumps(out, ensure_ascii=False)
-    for forbidden in ("api_key", "apikey", "authorization", "bearer", "sk-",
-                      "透明质酸", "透明质酸保湿", "response.text"):
+    for forbidden in (
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer",
+        "sk-",
+        "透明质酸",
+        "透明质酸保湿",
+        "response.text",
+    ):
         assert forbidden not in dumped.lower()
 
 
@@ -841,33 +886,45 @@ def _outcome(*, applied, degraded, reason, http_status=None, provider_called=Tru
     from rag.reranker import RerankOutcome, RerankReason
 
     return RerankOutcome(
-        results=[], applied=applied, degraded=degraded,
-        reason=RerankReason(reason), http_status=http_status,
+        results=[],
+        applied=applied,
+        degraded=degraded,
+        reason=RerankReason(reason),
+        http_status=http_status,
         provider_called=provider_called,
     )
 
 
 def _gate_via_real_probe(monkeypatch, stub) -> dict[str, Any]:
     """Run the REAL probe_reranker() with a stubbed reranker factory."""
-    monkeypatch.setattr(
-        "rag.reranker.create_reranker", lambda: stub, raising=True
-    )
+    monkeypatch.setattr("rag.reranker.create_reranker", lambda: stub, raising=True)
     return ev.probe_reranker(rerank_probe=True)
 
 
 @pytest.mark.parametrize(
     ("kwargs", "expect_probe", "expect_blocker"),
     [
-        ({"applied": True, "degraded": False, "reason": "", "http_status": 200},
-         "ok", None),
-        ({"applied": False, "degraded": True, "reason": "http_error",
-          "http_status": 401}, "degraded", "RERANKER_PROVIDER_AUTH"),
-        ({"applied": False, "degraded": True, "reason": "timeout"},
-         "degraded", "RERANKER_PROVIDER_DEGRADED"),
-        ({"applied": False, "degraded": True, "reason": "invalid_response",
-          "http_status": 200}, "degraded", "RERANKER_PROVIDER_DEGRADED"),
-        ({"applied": False, "degraded": True, "reason": "provider_error"},
-         "degraded", "RERANKER_PROVIDER_DEGRADED"),
+        ({"applied": True, "degraded": False, "reason": "", "http_status": 200}, "ok", None),
+        (
+            {"applied": False, "degraded": True, "reason": "http_error", "http_status": 401},
+            "degraded",
+            "RERANKER_PROVIDER_AUTH",
+        ),
+        (
+            {"applied": False, "degraded": True, "reason": "timeout"},
+            "degraded",
+            "RERANKER_PROVIDER_DEGRADED",
+        ),
+        (
+            {"applied": False, "degraded": True, "reason": "invalid_response", "http_status": 200},
+            "degraded",
+            "RERANKER_PROVIDER_DEGRADED",
+        ),
+        (
+            {"applied": False, "degraded": True, "reason": "provider_error"},
+            "degraded",
+            "RERANKER_PROVIDER_DEGRADED",
+        ),
     ],
 )
 def test_real_probe_records_the_typed_facts(
@@ -911,33 +968,30 @@ def test_real_probe_records_the_typed_facts(
 
 def test_real_probe_ignores_poisoned_shared_status_on_success(monkeypatch) -> None:
     """§16: shared previous status must not flip a real success into an auth block."""
-    stub = _StubRerankerProbe(
-        _outcome(applied=True, degraded=False, reason="", http_status=200)
-    )
+    stub = _StubRerankerProbe(_outcome(applied=True, degraded=False, reason="", http_status=200))
     assert stub.last_error_status == 401
     gate = _gate_via_real_probe(monkeypatch, stub)
     assert gate["probe"] == "ok"
     assert gate["http_status"] == 200
     out = _derive_typed(
-        applied=gate["applied"], degraded=gate["degraded"],
-        reason=gate["reason"], http_status=gate["http_status"],
+        applied=gate["applied"],
+        degraded=gate["degraded"],
+        reason=gate["reason"],
+        http_status=gate["http_status"],
     )
     assert "RERANKER_PROVIDER_AUTH" not in _blocker_codes(out)
 
 
 def test_real_probe_does_not_call_legacy_rerank(monkeypatch) -> None:
     """§2/§13: legacy rerank() must not be on the probe path at all."""
-    stub = _StubRerankerProbe(
-        _outcome(applied=True, degraded=False, reason="", http_status=200)
-    )
+    stub = _StubRerankerProbe(_outcome(applied=True, degraded=False, reason="", http_status=200))
     _gate_via_real_probe(monkeypatch, stub)  # would raise if rerank() were used
 
 
 def test_unavailable_reranker_is_never_probed(monkeypatch) -> None:
     """§18: no key => zero provider calls and no typed facts."""
     stub = _StubRerankerProbe(
-        _outcome(applied=False, degraded=True, reason="unavailable",
-                 provider_called=False),
+        _outcome(applied=False, degraded=True, reason="unavailable", provider_called=False),
         available=False,
     )
     gate = _gate_via_real_probe(monkeypatch, stub)
@@ -972,6 +1026,13 @@ def test_probe_gate_detail_has_no_sensitive_material(monkeypatch) -> None:
     )
     gate = _gate_via_real_probe(monkeypatch, stub)
     dumped = json.dumps(gate, ensure_ascii=False).lower()
-    for forbidden in ("api_key", "apikey", "authorization", "bearer", "sk-",
-                      "透明质酸", "response.text"):
+    for forbidden in (
+        "api_key",
+        "apikey",
+        "authorization",
+        "bearer",
+        "sk-",
+        "透明质酸",
+        "response.text",
+    ):
         assert forbidden not in dumped

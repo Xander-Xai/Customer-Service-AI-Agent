@@ -144,9 +144,9 @@ def test_gate6_api_enqueues_and_worker_executes():
         enqueued = json.loads(
             [ln for ln in proc.stdout.strip().splitlines() if ln.startswith("{")][-1]
         )
-        assert enqueued["mode"] == "celery", (
-            f"API 进程必须处于 celery 模式，实际 {enqueued['mode']}"
-        )
+        assert (
+            enqueued["mode"] == "celery"
+        ), f"API 进程必须处于 celery 模式，实际 {enqueued['mode']}"
         assert enqueued["task_id"], "未拿到 Celery task_id"
 
         # 消息确实在 broker 队列里
@@ -159,9 +159,7 @@ def test_gate6_api_enqueues_and_worker_executes():
         assert row[0] == "QUEUED", f"无 worker 时 run 不应被执行，实际 {row}"
         assert row[1] == 0, f"attempt 不应增长，实际 {row}"
         assert row[2] is None, f"started_at 不应被写入（说明确实没执行），实际 {row}"
-        assert int(client.get("crash-test:executions") or 0) == 0, (
-            "无 worker 时不应发生任何图执行"
-        )
+        assert int(client.get("crash-test:executions") or 0) == 0, "无 worker 时不应发生任何图执行"
 
         # --- 启动 worker：任务应被消费并完成 --------------------------
         worker = _start_worker(_worker_env(queue, 1.0), "/tmp/csai-decouple-worker.log")
@@ -176,9 +174,7 @@ def test_gate6_api_enqueues_and_worker_executes():
             _stop_worker(worker)
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            conn.execute(
-                text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id}
-            )
+            conn.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
         client.delete("crash-test:executions", queue, "unacked", "unacked_index")
         client.close()
 
@@ -197,7 +193,6 @@ def _row(engine, run_id: str):
 
 
 def _wait_terminal(engine, run_id: str, timeout: float):
-
     terminal = ("SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELLED")
     deadline = time.time() + timeout
     row = _row(engine, run_id)

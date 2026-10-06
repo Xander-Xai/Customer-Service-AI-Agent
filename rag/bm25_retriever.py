@@ -102,9 +102,7 @@ class BM25Retriever:
         # 更新总量统计
         self._total_docs[collection] = len(self._docs[collection])
         total_terms = sum(self._doc_term_count[collection])
-        self._avg_dl[collection] = (
-            total_terms / max(self._total_docs[collection], 1)
-        )
+        self._avg_dl[collection] = total_terms / max(self._total_docs[collection], 1)
 
         logger.debug(
             f"BM25 索引更新: collection={collection} "
@@ -147,9 +145,7 @@ class BM25Retriever:
 
         all_results: list[dict[str, Any]] = []
         for coll in collections:
-            results = self._search_collection(
-                query_tokens, coll, top_k, metadata_filter
-            )
+            results = self._search_collection(query_tokens, coll, top_k, metadata_filter)
             # 标记来源 collection
             for r in results:
                 r["_collection"] = coll
@@ -226,9 +222,7 @@ class BM25Retriever:
         for term in set(query_tokens):
             doc_freq = df.get(term, 0)
             # BM25 IDF 公式（平滑版）
-            idf_cache[term] = math.log(
-                (n_docs - doc_freq + 0.5) / (doc_freq + 0.5) + 1
-            )
+            idf_cache[term] = math.log((n_docs - doc_freq + 0.5) / (doc_freq + 0.5) + 1)
 
         scored: list[tuple[float, int]] = []  # (score, doc_idx)
 
@@ -265,12 +259,14 @@ class BM25Retriever:
         results = []
         for score, idx in scored:
             doc_id, content, meta = self._docs[collection][idx]
-            results.append({
-                "id": doc_id,
-                "content": content,
-                "metadata": meta,
-                "bm25_score": round(score, 4),
-            })
+            results.append(
+                {
+                    "id": doc_id,
+                    "content": content,
+                    "metadata": meta,
+                    "bm25_score": round(score, 4),
+                }
+            )
         return results
 
     # ---- 分词 ----

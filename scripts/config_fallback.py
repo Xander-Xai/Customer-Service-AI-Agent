@@ -135,7 +135,5 @@ def extract_fallback_defaults(config_path: Path) -> dict[str, str]:
         value = _resolve(node.value)
         if value is None:
             continue
-        out[target.id] = (
-            str(value).lower() if isinstance(value, bool) else str(value)
-        )
+        out[target.id] = str(value).lower() if isinstance(value, bool) else str(value)
     return out

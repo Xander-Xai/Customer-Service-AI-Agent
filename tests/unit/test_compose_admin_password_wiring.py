@@ -194,12 +194,12 @@ class TestCanaryServiceDeclaresAdminPassword:
             "canary shares the app image and runs api.app_factory:app, so it "
             "needs the same ADMIN_PASSWORD contract as app"
         )
-        assert ":?" in env["ADMIN_PASSWORD"], (
-            f"canary ADMIN_PASSWORD must be fail-fast; got: {env['ADMIN_PASSWORD']!r}"
-        )
-        assert ":-" not in env["ADMIN_PASSWORD"], (
-            f"canary ADMIN_PASSWORD must not default; got: {env['ADMIN_PASSWORD']!r}"
-        )
+        assert (
+            ":?" in env["ADMIN_PASSWORD"]
+        ), f"canary ADMIN_PASSWORD must be fail-fast; got: {env['ADMIN_PASSWORD']!r}"
+        assert (
+            ":-" not in env["ADMIN_PASSWORD"]
+        ), f"canary ADMIN_PASSWORD must not default; got: {env['ADMIN_PASSWORD']!r}"
 
 
 class TestOverrideFilesDoNotDropTheContract:
@@ -257,9 +257,9 @@ class TestOperatorDocsDeclareAdminPassword:
         ]
         assert lines, ".env.example must declare ADMIN_PASSWORD with a placeholder"
         _, _, value = lines[0].partition("=")
-        assert "your" in value.lower() or not value.strip(), (
-            f".env.example is committed and must not carry a real password: {lines[0]!r}"
-        )
+        assert (
+            "your" in value.lower() or not value.strip()
+        ), f".env.example is committed and must not carry a real password: {lines[0]!r}"
 
 
 class TestDocumentedProdSetupPathCanSupplyTheVariable:
@@ -297,9 +297,9 @@ class TestDocumentedProdSetupPathCanSupplyTheVariable:
         line = next(row for row in generated.splitlines() if row.startswith("ADMIN_PASSWORD="))
         _, _, value = line.partition("=")
         assert value.strip(), "ADMIN_PASSWORD must be generated, not left empty"
-        assert "CHANGE_ME" not in value, (
-            f"the CHANGE_ME placeholder must be substituted; got: {line!r}"
-        )
+        assert (
+            "CHANGE_ME" not in value
+        ), f"the CHANGE_ME placeholder must be substituted; got: {line!r}"
         assert value.strip() != "CHANGE_ME_TO_SECURE_PASSWORD"
 
 
@@ -480,9 +480,9 @@ class TestFreshDatabaseBootstrapRequiresTheVariable:
             tmp_path,
             {"ADMIN_PASSWORD": "probe_admin_secret"},
         )
-        assert result.returncode == 0, (
-            f"importing api.app_factory must succeed once ADMIN_PASSWORD is set:\n{result.stderr}"
-        )
+        assert (
+            result.returncode == 0
+        ), f"importing api.app_factory must succeed once ADMIN_PASSWORD is set:\n{result.stderr}"
         assert "APP_IMPORT_OK" in result.stdout
 
 
@@ -503,9 +503,9 @@ class TestWorkerImportChainNeverReachesInitDefaultAdmin:
             "the worker chain must not import api.app_factory, otherwise the worker "
             f"would need ADMIN_PASSWORD too; got:\n{result.stdout}"
         )
-        assert "AUTH_SERVICE_IMPORTED False" in result.stdout, (
-            f"the worker chain must not import auth.service; got:\n{result.stdout}"
-        )
+        assert (
+            "AUTH_SERVICE_IMPORTED False" in result.stdout
+        ), f"the worker chain must not import auth.service; got:\n{result.stdout}"
 
     @pytest.mark.unit
     def test_worker_import_succeeds_without_the_variable(self, tmp_path: Path) -> None:
