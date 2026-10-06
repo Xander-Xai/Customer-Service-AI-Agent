@@ -48,6 +48,69 @@ jobs:
           # requirements-dev.txt).
           pip install pytest==7.4.4 pytest-asyncio==0.21.1 pytest-cov==5.0.0 coverage==7.4.4
 
+      # ===== MCP end-to-end contract gate =====
+      #
+      # The official `mcp` SDK stays an OPTIONAL runtime dependency
+      # (requirements-optional.txt, `MCP_ENABLED` off by default, delayed
+      # import) — that app policy is deliberately unchanged.
+      #
+      # But the MCP e2e contract suite is a BLOCKING gate in this lane, and its
+      # client side is the real official SDK: `pytest.importorskip("mcp", …)` in
+      # tests/integration/test_mcp_contract_e2e.py. Without the SDK the whole
+      # suite SKIPS, and this lane reports PASS having verified nothing at all
+      # about MCP — a false green of exactly the class this workflow's other
+      # contract tests exist to prevent. So the SDK is installed for the gate,
+      # and its absence must FAIL rather than skip.
+      - name: Install MCP contract-test dependency (official SDK)
+        # Constraint is kept identical to requirements-optional.txt; a contract
+        # test (test_mcp_contract_wiring_matches_optional_policy) fails if the
+        # two drift apart.
+        run: pip install "mcp>=2.0.0"
+
+      - name: Verify MCP SDK importable (contract suite must not skip)
+        # This is the step that converts "silent skip" into "hard fail". Once
+        # this passes, importorskip cannot skip: the only way it skips is an
+        # ImportError, which is exactly what this step turns into a red build.
+        run: |
+          python - <<'PY'
+          import sys
+
+          try:
+              from importlib.metadata import version
+
+              import mcp  # noqa: F401
+          except ImportError as exc:
+              print(
+                  f"FATAL: official mcp SDK is not importable ({exc}).\n"
+                  "tests/integration/test_mcp_contract_e2e.py does "
+                  "pytest.importorskip(\"mcp\"), so without the SDK the whole "
+                  "MCP contract suite SKIPS and this lane would go green "
+                  "without verifying a single MCP behaviour.\n"
+                  "Install the optional runtime dependency declared in "
+                  "requirements-optional.txt before running the gate.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+
+          print("mcp SDK present:", version("mcp"))
+          PY
+
+      - name: MCP end-to-end contract evidence (no silent skip)
+        # scripts/verify_mcp_contract.py exits non-zero if ANY test in the suite
+        # is skipped or any required scenario is uncovered, and writes
+        # artifacts/mcp/<ts>/report.json. Same entry point as `make mcp-verify`,
+        # so CI and local cannot disagree about whether the contract was
+        # actually verified. Skips are treated as FAIL, not as partial success.
+        run: python3 scripts/verify_mcp_contract.py
+
+      - name: Upload MCP contract evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-contract-evidence
+          path: artifacts/mcp/
+          if-no-files-found: error
+
       - name: Debug - Check Python and packages
         run: |
           python --version

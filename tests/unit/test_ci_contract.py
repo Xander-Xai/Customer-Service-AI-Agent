@@ -12,6 +12,10 @@ workflow (`.github/workflows/ci.yml`) and the coverage configuration
 - The ``real_llm`` lane must stay informational (excluded from blocking runs).
 - Steps that execute pytest (not ``--co`` collection) must not be softened with
   ``continue-on-error: true``.
+- The MCP end-to-end contract suite must be a real gate, not a silent skip:
+  the blocking lane installs the official ``mcp`` SDK, fails hard when it is
+  absent, and keeps the SDK an *optional* runtime dependency
+  (``TestMcpContractWiring``).
 
 Parsing is stdlib-only (no PyYAML dependency) so the ``test`` CI job — which
 installs only ``requirements.txt`` plus pytest plugins — can run these checks
@@ -648,3 +652,147 @@ class TestToolchainReproducibility:
             "Coverage step uses --cov=. which measures the whole tree incl. "
             "tests/. Use explicit --cov=<dir> for each source directory."
         )
+
+
+class TestMcpContractWiring:
+    """The MCP e2e contract suite must be a real gate in the blocking `test`
+    job, not a silent skip.
+
+    ``tests/integration/test_mcp_contract_e2e.py`` does
+    ``pytest.importorskip("mcp", …)``. The official SDK is an *optional*
+    runtime dependency (requirements-optional.txt, ``MCP_ENABLED`` off by
+    default), so the test is legitimately skippable for a local developer. But
+    the `test` job is a blocking lane: if the SDK is absent there, the suite
+    skips and the lane reports PASS having verified nothing about MCP. These
+    tests lock the three properties that prevent that false green:
+
+    1. the blocking lane installs the official SDK;
+    2. its absence is a hard FAIL (preflight import), not a skip;
+    3. the CI constraint matches the declared optional policy (no drift).
+
+    They deliberately do NOT require `mcp` in requirements.txt: the app's
+    runtime dependency policy must stay unchanged and optional.
+    """
+
+    CI_MCP_STEP = "Install MCP contract-test dependency (official SDK)"
+    PREFLIGHT_STEP = "Verify MCP SDK importable (contract suite must not skip)"
+    GATE_STEP = "MCP end-to-end contract evidence (no silent skip)"
+    REQ_OPT = REPO_ROOT / "requirements-optional.txt"
+    REQ = REPO_ROOT / "requirements.txt"
+
+    def _declared_mcp_spec(self, path: Path) -> str | None:
+        """Return the version specifier declared for the ``mcp`` distribution
+        in a requirements file (e.g. ``mcp>=2.0.0``), or ``None`` if absent."""
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if not line or line.startswith("-"):
+                continue
+            if re.match(r"^mcp\s*(?:\[.*\])?\s*(?:[<>!=~]=?|===)", line):
+                return re.sub(r"\s+", " ", line)
+        return None
+
+    def test_blocking_lane_installs_official_mcp_sdk(self):
+        """The blocking `test` job must install the official `mcp` SDK, because
+        it is the client side of the MCP end-to-end contract."""
+        run = _step_run_exact(self.CI_MCP_STEP)
+        assert re.search(r"pip install\s+[\"']?mcp\b", run), (
+            f"The '{self.CI_MCP_STEP}' step does not install the official mcp "
+            f"SDK:\n{run}\nWithout it the MCP contract suite importorskips and "
+            "this blocking lane goes green without verifying any MCP behaviour."
+        )
+
+    def test_mcp_contract_wiring_matches_optional_policy(self):
+        """The constraint CI installs must equal the one declared in
+        requirements-optional.txt. Duplicated constraints drift silently, and
+        the drift is invisible until the blocking lane starts failing (or,
+        worse, starts skipping) on an unrelated change."""
+        run = _step_run_exact(self.CI_MCP_STEP)
+        ci_specs = {
+            re.sub(r"\s+", " ", m.replace('"', "").replace("'", "").strip())
+            for m in re.findall(r"[\"']mcp[^\"']*[\"']", run)
+        }
+        assert ci_specs, (
+            f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
+        )
+        declared = self._declared_mcp_spec(self.REQ_OPT)
+        assert declared is not None, (
+            "requirements-optional.txt no longer declares the official mcp SDK. "
+            "It is an optional runtime dependency with a delayed import in "
+            "tools/mcp_adapter.py; removing the declaration would let the "
+            "dependency go undeclared and silently degrade."
+        )
+        drift = sorted(s for s in ci_specs if s.lower() != declared.lower())
+        assert not drift, (
+            f"The mcp constraint installed in CI {sorted(ci_specs)} has drifted "
+            f"from the declared optional policy '{declared}' in "
+            "requirements-optional.txt. They must be identical."
+        )
+
+    def test_mcp_stays_an_optional_runtime_dependency(self):
+        """The CI fix must not promote `mcp` into the runtime requirements.
+        `MCP_ENABLED` is off by default and the adapter imports the SDK lazily,
+        so making it mandatory would change the app's dependency policy."""
+        assert self._declared_mcp_spec(self.REQ) is None, (
+            "requirements.txt now declares the official mcp SDK. The MCP tool "
+            "adapter is an off-by-default read-only capability whose SDK import "
+            "is delayed; requiring it at runtime would change the app dependency "
+            "policy. It belongs in requirements-optional.txt."
+        )
+
+    def test_missing_sdk_fails_the_blocking_lane(self):
+        """A preflight step must import the SDK and exit non-zero when it is
+        missing, so the missing dependency surfaces as a FAIL with a
+        self-explanatory message instead of a skip."""
+        run = _step_run_exact(self.PREFLIGHT_STEP)
+        assert "import mcp" in run, (
+            f"The '{self.PREFLIGHT_STEP}' step does not import the mcp SDK, so it "
+            f"cannot detect its absence:\n{run}"
+        )
+        assert re.search(r"SystemExit\(1\)|sys\.exit\(1\)|exit 1", run), (
+            f"The '{self.PREFLIGHT_STEP}' step does not fail on a missing SDK "
+            f"(no non-zero exit):\n{run}\nA missing SDK must FAIL the job; "
+            "returning 0 would re-open the silent-skip false green."
+        )
+        assert "|| true" not in run, (
+            f"The '{self.PREFLIGHT_STEP}' step swallows failure with `|| true`, "
+            "which would turn a missing SDK into a green build."
+        )
+        block = _step_block_exact(self.PREFLIGHT_STEP)
+        assert "continue-on-error" not in block, (
+            f"The '{self.PREFLIGHT_STEP}' step sets continue-on-error, so a "
+            "missing SDK would no longer fail the job."
+        )
+
+    def test_contract_gate_fails_on_any_skip(self):
+        """The blocking gate must reuse scripts/verify_mcp_contract.py, which
+        treats skipped tests and uncovered required scenarios as FAIL. A bare
+        `pytest` invocation cannot express that: its exit code is 0 when the
+        whole module importorskips."""
+        run = _step_run_exact(self.GATE_STEP)
+        assert "verify_mcp_contract.py" in run, (
+            f"The '{self.GATE_STEP}' step does not run the MCP contract evidence "
+            f"entry point:\n{run}\nThat script is what turns a skip into a FAIL; "
+            "a plain pytest run reports success when the suite never ran."
+        )
+        assert "continue-on-error" not in _step_block_exact(self.GATE_STEP), (
+            f"The '{self.GATE_STEP}' step sets continue-on-error, so a skipped or "
+            "uncovered contract would not fail the job."
+        )
+
+    def test_mcp_gate_runs_before_the_pytest_lanes(self):
+        """The SDK install / preflight must precede the pytest steps. If the
+        preflight runs last, the coverage and integration lanes have already
+        reported green with the MCP suite silently skipped."""
+        names = [n for n, _run, _b in _steps()]
+        pre_idx = names.index(self.PREFLIGHT_STEP)
+        for earlier_step in ("Run integration tests", "Run coverage report"):
+            assert earlier_step in names, (
+                f"Expected a '{earlier_step}' step in the blocking lane; the MCP "
+                "wiring contract cannot be verified against a workflow that does "
+                "not run it."
+            )
+            assert pre_idx < names.index(earlier_step), (
+                f"'{self.PREFLIGHT_STEP}' runs after '{earlier_step}'. The SDK "
+                "preflight must run first, otherwise those lanes already reported "
+                "green with the MCP contract suite skipped."
+            )

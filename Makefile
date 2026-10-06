@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -44,6 +44,13 @@ test-real-providers: ## 真实 provider 验证（issue #52：默认不执行，�
 		echo "❌ RERANKER_API_KEY 未设置。默认离线 lane 请用 'make test'。"; exit 1; }
 	EMBEDDING_PROVIDER=remote RERANKER_PROVIDER=remote STT_PROVIDER=remote TTS_PROVIDER=remote \
 		python3 -m pytest tests/ -v --tb=short -m "real_provider or real_llm"
+
+test-mcp: env-test ## MCP 工具适配验证（本地 fake MCP server 真实子进程端到端契约）
+	@echo "🔌 MCP 工具适配测试..."
+	# `-rs` 会把 skip 原因打出来：官方 mcp SDK 未装时这里会 SKIPPED 而不是静默
+	# 通过 —— 「没跑」不能被读成「跑过了」。fake MCP server 是本地子进程，不依赖
+	# 任何外部公开 MCP 服务。
+	python3 -m pytest tests/integration/test_mcp_contract_e2e.py -v --tb=short -rs -p no:cacheprovider
 
 # ===== 代码质量 =====
 lint: ## 代码检查（ruff）
@@ -102,7 +109,7 @@ facts: ## 输出当前 runtime 事实 JSON（版本/模型/路径数/基准查�
 # TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 覆盖（CI 里指向 service container）。
 # 环境缺失时目标会 FAIL 而不是静默 skip —— 免得"没跑"被当成"通过"。
 
-.PHONY: runtime-e2e runtime-chaos runtime-verify runtime-replay-help
+.PHONY: runtime-e2e runtime-chaos runtime-verify runtime-replay-help mcp-verify
 
 RUNTIME_DB_URL ?= postgresql://postgres:postgres@localhost:5432/csai_runtime_test
 RUNTIME_REDIS_URL ?= redis://localhost:6379
@@ -128,6 +135,10 @@ runtime-verify: ## 生成 runtime 能力证据报告（结构化 JSON）
 
 runtime-replay-help: ## 查看 DLQ 重放用法
 	@python3 scripts/replay_dead_run.py --help
+
+mcp-verify: ## 生成 MCP 端到端契约证据报告（结构化 JSON，本地 fake server）
+	@echo "🧾 MCP 端到端契约验证..."
+	@python3 scripts/verify_mcp_contract.py
 
 # ===== 知识库 & 基准测试 =====
 .PHONY: benchmark generate-knowledge-base component-count
