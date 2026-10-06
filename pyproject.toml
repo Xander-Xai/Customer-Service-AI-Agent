@@ -3,7 +3,12 @@ name = "customer-service-ai-agent"
 version = "6.3"
 description = "药妆智多星多智能体客服系统"
 requires-python = ">=3.10"
-license = {text = "AGPL-3.0"}
+# SPDX license expression (PEP 639), aligned with the canonical LICENSE file
+# (Apache License 2.0) that GitHub license detection also resolves.
+# `license-files` pins the metadata to that same file so the grant and the
+# packaged license text cannot drift apart again (issue #63).
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 
 [tool.ruff]
 target-version = "py310"

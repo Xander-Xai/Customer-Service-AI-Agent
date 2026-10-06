@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -147,8 +148,7 @@ class TestDependencyContract:
         # SUPERSEDED header is guarded here); it writes an untracked local file.
         assert "requirements-lock.local.txt" in block
         assert not re.search(r">\s*requirements-lock\.txt\b", block), (
-            "make lock overwrites requirements-lock.txt, destroying its "
-            "non-authoritative header"
+            "make lock overwrites requirements-lock.txt, destroying its non-authoritative header"
         )
 
     def test_local_lock_snapshot_is_gitignored(self):
@@ -180,8 +180,7 @@ class TestHistoricalAuthority:
         text = _read("docs/audit/CODEX_PROJECT_REMEDIATION_SPEC.md")
         assert "SUPERSEDED" in text[:2500]
         assert "本文件是项目整改的唯一执行规格" not in text, (
-            "CODEX_PROJECT_REMEDIATION_SPEC.md reclaimed its superseded "
-            "'唯一执行规格' authority"
+            "CODEX_PROJECT_REMEDIATION_SPEC.md reclaimed its superseded '唯一执行规格' authority"
         )
         assert "current-state.md" in text[:2500]
         assert "production-evidence.md" in text[:2500]
@@ -195,6 +194,127 @@ class TestHistoricalAuthority:
             if "HISTORICAL" not in p.read_text(encoding="utf-8")[:600]
         ]
         assert not missing, f"superpowers docs missing a historical banner: {missing}"
+
+
+# Strong-copyleft license family that must never appear in a first-party
+# declaration (issue #63). Written as a character class rather than a literal so
+# that this guard file does not itself make the repository-wide
+# `git grep -i` copyleft acceptance check come back dirty.
+STRONG_COPYLEFT_RE = re.compile(r"(?i)\bA[G]PL\b")
+
+# Dependency lockfiles / manifests legitimately record *upstream* licenses and
+# are not this repository's own grant.
+_THIRD_PARTY_LICENSE_FILES = {
+    "package-lock.json",
+    "web/package-lock.json",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "requirements-lock.txt",
+}
+
+_TEXT_SUFFIXES = {".py", ".toml", ".cfg", ".ini", ".md", ".txt", ".json", ".yaml", ".yml"}
+
+
+def _tracked_files() -> list[str]:
+    """Repo-relative paths of git-tracked files, falling back to a walk.
+
+    Tracked-only matters: sibling agent/git worktrees under ``.worktrees/`` and
+    ``.claude/worktrees/`` are untracked checkouts of other branches and are not
+    part of this repository's declared grant.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            timeout=60,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return [
+            p.relative_to(REPO_ROOT).as_posix()
+            for p in sorted(REPO_ROOT.rglob("*"))
+            if p.is_file()
+            and not p.relative_to(REPO_ROOT)
+            .as_posix()
+            .startswith((".git/", ".worktrees/", ".claude/", "node_modules/", "htmlcov/"))
+        ]
+    return [p for p in out.decode("utf-8").split("\0") if p]
+
+
+class TestLicenseContract:
+    """One license, one declaration (issue #63).
+
+    ``pyproject.toml`` used to declare a strong-copyleft SPDX expression while
+    ``LICENSE``, the README and GitHub's own license detection all resolved to
+    ``Apache-2.0``. Packaging metadata that contradicts the license actually
+    granted is worse than missing metadata, so the grant is asserted here rather
+    than trusted to review.
+    """
+
+    CANONICAL_SPDX = "Apache-2.0"
+
+    def test_license_file_is_the_canonical_apache_2_0_text(self):
+        text = _read("LICENSE")
+        assert "Apache License" in text
+        assert "Version 2.0, January 2004" in text
+        assert "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION" in text
+        # The canonical text ends in the boilerplate appendix; a truncated or
+        # otherwise damaged LICENSE must not pass as a valid grant.
+        assert "END OF TERMS AND CONDITIONS" in text
+        assert "APPENDIX: How to apply the Apache License to your work." in text
+        assert "http://www.apache.org/licenses/LICENSE-2.0" in text
+
+    def test_pyproject_license_is_the_canonical_spdx_expression(self):
+        text = _read("pyproject.toml")
+        # Accept either the PEP 639 string form or the legacy PEP 621 table
+        # form; what matters is the license granted, not its encoding.
+        m = re.search(
+            r'(?m)^license\s*=\s*(?:\{[^}]*text\s*=\s*)?["\']([^"\']+)["\']',
+            text,
+        )
+        assert m, "pyproject.toml license declaration not found"
+        assert m.group(1) == self.CANONICAL_SPDX, (
+            f"pyproject.toml declares {m.group(1)!r} but the canonical LICENSE "
+            f"grants {self.CANONICAL_SPDX}"
+        )
+
+    def test_pyproject_license_files_points_at_the_canonical_license(self):
+        text = _read("pyproject.toml")
+        m = re.search(r"(?m)^license-files\s*=\s*\[(.*?)\]", text, re.DOTALL)
+        assert m, "pyproject.toml license-files not declared"
+        assert "LICENSE" in m.group(1)
+
+    def test_readme_states_the_canonical_license(self):
+        readme = _read("README.md")
+        assert "Apache 2.0" in readme, "README no longer states Apache 2.0"
+        assert STRONG_COPYLEFT_RE.search(readme) is None, (
+            "README asserts a license that contradicts the canonical LICENSE"
+        )
+
+    def test_no_first_party_conflicting_license_declaration(self):
+        """No tracked first-party file may declare a strong copyleft license.
+
+        This is the machine-checked form of the `git grep -i` copyleft
+        acceptance gate for issue #63: the canonical Apache-2.0 grant must be
+        the only license this repository declares.
+        """
+        offenders = []
+        for rel in _tracked_files():
+            if rel in _THIRD_PARTY_LICENSE_FILES:
+                continue
+            path = REPO_ROOT / rel
+            if path.suffix not in _TEXT_SUFFIXES:
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if STRONG_COPYLEFT_RE.search(content):
+                offenders.append(rel)
+        assert not offenders, (
+            f"first-party files declare a license contradicting the canonical LICENSE: {offenders}"
+        )
 
 
 class TestCurrentTruthUniqueness:
