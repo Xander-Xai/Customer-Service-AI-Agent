@@ -88,6 +88,8 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 | Qdrant不可用 | 容器故障/磁盘满/配置错误 | 重启容器，重建 Qdrant 集合 | P0 |
 | 会话数据丢失 | Session过期/Redis故障 | 检查TTL配置，验证Redis | P1 |
 | 请求返回 409 THREAD_BUSY | 同一 thread 有正在执行的 Run（分布式锁未释放/长请求） | 检查 `agent:thread-lock:{thread_id}` TTL 与慢请求；客户端稍后重试 | P1 |
+| nginx 不启动 / `cannot load certificate` | `deploy/nginx/ssl` 无 cert.pem+key.pem（缺失目录被 Docker 自动建成空目录，容器能起但 nginx 读不到证书） | 运维提供证书对后 `make tls-check`；见 TLS runbook §TLS-1 | P0 |
+| 证书在但报 `key values mismatch` | cert.pem 与 key.pem 不是同一次签发 | `make tls-check` 会直接检出配对不一致 | P0 |
 | 启动失败：SESSION_STORAGE_BACKEND | 生产配了 memory（fail-fast） | 改为 `SESSION_STORAGE_BACKEND=redis` 并确保 Redis 可用 | P0 |
 | 启动失败：GUNICORN_WORKERS gate | 多 worker 但 checkpoint/session/lock 非分布式 | 配 postgres checkpoint + redis session + redis lock | P0 |
 | Run 长期 QUEUED / 无 worker 消费 | worker 未启动、broker 不可达，或 `AGENT_RUN_DISPATCH=inline` | 检查 worker 进程与 `celery inspect active`；见 runtime runbook §3.1 | P0 |
@@ -99,6 +101,51 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 | 告警频繁触发 | 阈值过低/真实故障 | 调整阈值，排查根因 | P1 |
 
 ---
+
+### TLS-1: nginx TLS 物料（证书由运维提供）
+
+**契约**：生产 TLS 物料**不由仓库提供，也不提交私钥**。`deploy/nginx/ssl/` 已被
+`.gitignore` 排除，由运维/CA 填充 `cert.pem` 与 `key.pem`。
+
+**为什么需要专门的检查**：证书是**文件**而非环境变量，无法用 compose 的
+`${VAR:?}` 在 `docker compose config` 阶段拦下——那个阶段只校验 schema 与插值，
+不看文件系统。而 bind mount 的源目录不存在时，Docker 会**自动创建一个空目录**，
+于是容器照常启动，直到 nginx 读证书才崩。所以有两道门：
+
+| 门 | 时机 | 覆盖范围 |
+|----|------|---------|
+| `make tls-check` | `docker compose up` **之前** | 存在 / 非空 / 可解析 / **证书私钥配对** / 有效期（临期 21 天告警）/ 自签名策略 |
+| compose `tls-check` 一次性服务 | `docker compose up` 期间，nginx `depends_on` | 仅存在且非空（必须能在无 openssl 的最小镜像里跑完） |
+
+```bash
+# 完整校验（缺什么会直接说明）
+make tls-check
+
+# 只看结论与关键项
+python3 scripts/check_tls_material.py --ssl-dir deploy/nginx/ssl
+```
+
+失败时的典型输出与处置：
+
+| 报错 | 含义 | 处置 |
+|------|------|------|
+| `TLS 目录不存在` | bind mount 源缺失（Docker 会自动建空目录） | 由运维放入证书对 |
+| `0 字节` | 文件存在但为空 | 与不存在等价，重新拷贝 |
+| `证书与私钥不匹配` | 两份材料来自不同次签发 | 确认同一次签发；nginx 自身的 `key values mismatch` 在启动日志里极易漏看 |
+| `已过期` | 证书不在有效期内 | 续期后重新提供 |
+| `拒绝自签名证书` | 自签名证书不是生产可用的信任锚 | 换成受信任证书；本地开发见下 |
+
+**关于自签名证书**：它能让服务"跑起来"，但客户端不信任，故障表现为
+**端口通、健康检查绿、浏览器报错** —— 比启动失败难查得多。所以预检**默认拒绝**，
+而不是 warn 一下放行。
+
+**仅本地开发**：`make tls-local-cert` 生成本地自签证书，主题写明
+`LOCAL DEVELOPMENT ONLY`、SAN 只有 localhost、有效期 30 天，且默认会被预检拦下。
+`make dev-https` 走的是另一条路径（uvicorn 直接读 `.certs/`），用
+`python3 scripts/generate_local_selfsigned_cert.py --target dev-https` 生成。
+
+**已知边界**：即使 TLS 物料齐备，nginx 仍可能因自身配置问题起不来（与本节无关）。
+先看 `docker compose logs nginx | grep emerg`——缺证书与配置错误的报错形态不同。
 
 ### Q0: 分布式 Agent Runtime 排障入口
 

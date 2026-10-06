@@ -41,6 +41,27 @@ vim .env.prod
 - [ ] `RERANKER_API_KEY` — 独立重排凭据（**不会**回退到 OPENAI_API_KEY）；未配置时
       reranker 不可用、检索按原始顺序返回，preflight 会显式报告
 
+### 1.1 TLS 物料（生产 Blocking Gate）
+
+> **证书是文件，不是环境变量**，所以无法用 compose 的 `${VAR:?}` 在
+> `docker compose config` 阶段拦下——而 bind mount 的源目录不存在时 Docker 会
+> **自动创建一个空目录**，容器照样启动，直到 nginx 读证书才崩。这一层由两道门补上：
+> `make tls-check`（宿主机，完整校验）与 compose 里的 `tls-check` 一次性服务
+> （`docker compose up` 阶段的存在性门禁，nginx `depends_on` 它）。
+
+- [ ] `deploy/nginx/ssl/cert.pem` 与 `deploy/nginx/ssl/key.pem` 已由运维/CA 提供
+      （目录已被 `.gitignore` 排除，**仓库不提供也不提交私钥**）
+- [ ] `make tls-check` 通过。它会校验：文件存在且非空、两者均可解析、
+      **证书与私钥配对一致**（最常见的真实故障）、证书未过期（临期 21 天内告警）、
+      且**不是自签名证书**
+- [ ] 仅本地开发时可用 `make tls-local-cert` 生成本地自签证书。
+      ⚠️ 该证书主题写明 `LOCAL DEVELOPMENT ONLY`、SAN 只有 localhost、有效期 30 天，
+      且默认会被 `make tls-check` 以「拒绝自签名证书」拦下 —— **禁止用于生产**
+
+本地开发的 HTTPS 入口另有一条路径：`make dev-https`（uvicorn 直接读 `.certs/`，
+与 `deploy/nginx/ssl/` 无关），可用
+`python3 scripts/generate_local_selfsigned_cert.py --target dev-https` 生成。
+
 ### 1.2 分布式 Agent Runtime（生产 Blocking Gate）
 
 > **这一节是硬门禁，不是建议。** `core/config.py::validate_distributed_runtime_settings`

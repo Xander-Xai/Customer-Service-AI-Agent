@@ -72,7 +72,17 @@ rag-eval-import: ## 导入评测语料（幂等）并重建 BM25（写入 import
 	python3 scripts/import_eval_corpus.py
 
 # ===== 文档/运行时事实工具 =====
-.PHONY: audit-docs openapi-check facts
+.PHONY: audit-docs openapi-check facts tls-check tls-local-cert
+
+# ===== TLS 物料（issue #57）=====
+# 证书是**文件**不是环境变量，无法用 compose 的 `${VAR:?}` 在 config 阶段拦下，
+# 所以这一层由宿主机脚本承担：存在 / 非空 / 可解析 / 证书私钥配对 / 有效期 /
+# 自签名策略。缺失时在 `docker compose up` **之前**失败并说明需要提供什么。
+tls-check: ## 校验生产 TLS 物料（deploy/nginx/ssl），缺失/不匹配/过期即 fail fast
+	@python3 scripts/check_tls_material.py
+
+tls-local-cert: ## 生成本地自签证书（LOCAL DEVELOPMENT ONLY，禁止用于生产）
+	@python3 scripts/generate_local_selfsigned_cert.py --target nginx --force
 
 audit-docs: ## 文档一致性审计（链接/引用/配置/OpenAPI/基准）
 	@echo "🔍 文档一致性审计..."
@@ -145,7 +155,7 @@ component-count:
 	@python3 scripts/_component_count.py 2>&1 | grep -v "WARNING\|INFO\|DEBUG\|^$$" || echo "  ⚠️ 容器不可用"
 
 # ===== 生产环境 =====
-prod: env-prod ## 生产部署
+prod: env-prod tls-check ## 生产部署（先校验 TLS 物料，缺失即 fail fast，不拉起容器）
 	@echo "🚀 启动生产环境..."
 	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --build
 

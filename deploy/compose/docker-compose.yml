@@ -1,6 +1,51 @@
 version: '3.8'
 
 services:
+  # ===== TLS 物料门禁（一次性，issue #57）=====
+  # 为什么需要它：证书是**文件**，不是环境变量，所以无法用 `${VAR:?}` 在
+  # `docker compose config` 阶段 fail fast —— config 校验 schema 与插值，
+  # 不看文件系统。而 bind mount 的源目录不存在时 Docker 会**自动创建一个
+  # 空目录**，于是容器照样启动，直到 nginx 读证书才崩：
+  #     nginx: [emerg] cannot load certificate "/etc/nginx/ssl/cert.pem"
+  # 这个一次性服务把该失败提前到 `docker compose up` 阶段，并给出可执行提示。
+  #
+  # 这里只做"存在且非空"这一层 —— 它必须能在没有 openssl、没有宿主依赖的
+  # 最小镜像里跑完。完整校验（可解析 / 证书私钥配对 / 有效期 / 自签名策略）
+  # 由宿主机脚本承担，见 pre_deploy_tls_check。
+  #
+  # 用上游 nginx 镜像而不是本项目 build 出来的那个：本服务只做文件存在性检查，
+  # 不需要本项目的配置；而 build 产物带 TLS 配置，缺失证书时反而会被自己的
+  # 配置挡住，掩盖这里要报的信息。
+  tls-check:
+    image: nginx:1.27-alpine
+    container_name: customer-service-tls-check
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        missing=""
+        [ -s /etc/nginx/ssl/cert.pem ] || missing="$$missing /etc/nginx/ssl/cert.pem"
+        [ -s /etc/nginx/ssl/key.pem ] || missing="$$missing /etc/nginx/ssl/key.pem"
+        if [ -n "$$missing" ]; then
+          echo "❌ 缺少 TLS 物料（nginx 无法启动）：" >&2
+          echo "$$missing" >&2
+          echo "" >&2
+          echo "需要在宿主机提供（目录已被 .gitignore 排除，不会误提交）：" >&2
+          echo "    deploy/nginx/ssl/cert.pem   证书" >&2
+          echo "    deploy/nginx/ssl/key.pem    私钥（建议 chmod 600）" >&2
+          echo "" >&2
+          echo "生产环境请用证书机构/ACME 签发的证书。" >&2
+          echo "仅本地开发可执行 make tls-local-cert 生成本地自签证书（LOCAL DEVELOPMENT ONLY）。" >&2
+          echo "完整校验（含配对/有效期/自签名）：make tls-check" >&2
+          exit 1
+        fi
+        echo "✅ TLS 物料存在：/etc/nginx/ssl/{cert.pem,key.pem}"
+    volumes:
+      - ../../deploy/nginx/ssl:/etc/nginx/ssl:ro
+    restart: "no"
+    networks:
+      - cs-network
+
   # ===== Nginx 反向代理（v3.9）=====
   nginx:
     # 构建上下文 = deploy/nginx/（含 Dockerfile + nginx.conf）。
@@ -20,7 +65,11 @@ services:
     volumes:
       - ../nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
-      - app
+      app:
+        condition: service_started
+      # 缺证书时先在这里失败，nginx 不会被拉起（#57）
+      tls-check:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - cs-network
