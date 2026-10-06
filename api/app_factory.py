@@ -18,7 +18,7 @@ from core.config import (
     MONITORING_ADMIN_TOKEN,
     SESSION_TOKEN_SECRET,
 )
-from core.logger import get_logger
+from core.logger import get_logger, log_startup_failure
 
 logger = get_logger("app_factory")
 
@@ -48,31 +48,66 @@ _container = ServiceContainer()
 
 
 # ===== 应用生命周期（异步初始化容器中的 LLM/Agents/Router 等）=====
+# 启动失败时随 CRITICAL 日志一起落盘的处置建议。只写可核对的具体项
+# （配置项名 / 校验命令），不写「请检查配置」这类无法据以行动的措辞。
+_STARTUP_REMEDIATION = (
+    "按下方 traceback 定位根因后修复并重启进程 —— 本阶段 fail-closed，"
+    "不会降级启动，也不会以半初始化状态对外服务。生产必查项："
+    "LANGGRAPH_CHECKPOINT_BACKEND / LANGGRAPH_CHECKPOINT_DATABASE_URL 的 PostgreSQL 连通性、"
+    "SESSION_STORAGE_BACKEND=redis、AGENT_RUN_DISPATCH=celery、"
+    "JWT_SECRET / SESSION_TOKEN_SECRET / API_KEY 的强度与长度；"
+    "可用 `make env-check` 与 `make runtime-verify` 复核。"
+)
+
+
 @asynccontextmanager
 async def lifespan(app):
-    """应用生命周期：异步初始化 ServiceContainer + 构建 LangGraph 图"""
-    # 异步初始化（LLM、Agents、Router、RAG、Tools）
-    await _container.initialize()
+    """应用生命周期：异步初始化 ServiceContainer + 构建 LangGraph 图
 
-    # v5.1: 将容器中的服务注入到 app.state（统一访问路径，消除模块级全局变量依赖）
-    app.state.graph_app = _container.graph_app
-    app.state.session_manager = _container.session_mgr
-    app.state.response_cache = _container.cache
-    app.state.metrics = _container.metrics
-    app.state.message_bus = _container.bus
-    app.state.sla_alert_mgr = _container.sla_alert_mgr
-    app.state.circuit_breaker = _container.circuit_breaker
+    启动失败契约（fail closed）：任何异常都先落一条带完整 traceback、根因类型
+    与处置建议的 CRITICAL 日志（凭据值已脱敏），再原样向上抛给 ASGI 服务器，
+    **绝不吞异常**。进程即将退出时这条日志是唯一的取证入口，因此不能省。
+    """
+    try:
+        # 异步初始化（LLM、Agents、Router、RAG、Tools）
+        await _container.initialize()
+    except BaseException as exc:
+        log_startup_failure(
+            "container.initialize",
+            exc,
+            _STARTUP_REMEDIATION,
+            logger=logger,
+        )
+        raise
 
-    # 同步更新模块级引用（向后兼容：_run_graph() 仍通过闭包引用这些变量）
-    import api.app as _app_module
+    try:
+        # v5.1: 将容器中的服务注入到 app.state（统一访问路径，消除模块级全局变量依赖）
+        app.state.graph_app = _container.graph_app
+        app.state.session_manager = _container.session_mgr
+        app.state.response_cache = _container.cache
+        app.state.metrics = _container.metrics
+        app.state.message_bus = _container.bus
+        app.state.sla_alert_mgr = _container.sla_alert_mgr
+        app.state.circuit_breaker = _container.circuit_breaker
 
-    _app_module._graph_app = _container.graph_app
-    _app_module._session_manager = _container.session_mgr
-    _app_module._response_cache = _container.cache
-    _app_module._metrics = _container.metrics
-    _app_module._bus = _container.bus
-    _app_module._sla_alert_mgr = _container.sla_alert_mgr
-    _app_module._circuit_breaker_ref = _container.circuit_breaker
+        # 同步更新模块级引用（向后兼容：_run_graph() 仍通过闭包引用这些变量）
+        import api.app as _app_module
+
+        _app_module._graph_app = _container.graph_app
+        _app_module._session_manager = _container.session_mgr
+        _app_module._response_cache = _container.cache
+        _app_module._metrics = _container.metrics
+        _app_module._bus = _container.bus
+        _app_module._sla_alert_mgr = _container.sla_alert_mgr
+        _app_module._circuit_breaker_ref = _container.circuit_breaker
+    except BaseException as exc:
+        log_startup_failure(
+            "app_state_injection",
+            exc,
+            _STARTUP_REMEDIATION,
+            logger=logger,
+        )
+        raise
 
     logger.info("✅ ServiceContainer 初始化完成，所有服务就绪")
 
