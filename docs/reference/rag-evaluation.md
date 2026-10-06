@@ -141,8 +141,9 @@ preflight 复合判定遵循 **primary cause != downstream symptom** 原则，
 
 - `status`：BLOCKED（存在阻塞管线的 blocker）/ PARTIAL（仅局部阻塞）/
   OK。
-- `primary_blocker`：根因（当前已知根因代码：`EMBEDDING_PROVIDER_AUTH` /
-  `EMBEDDING_PROVIDER_UNAVAILABLE` / `VECTOR_INDEX_EMPTY`）。
+- `primary_blocker`：该次 preflight artifact 的根因字段；允许的根因 code 包括
+  `EMBEDDING_PROVIDER_AUTH` / `EMBEDDING_PROVIDER_UNAVAILABLE` /
+  `VECTOR_INDEX_EMPTY`。它描述**一次运行的诊断**，不是跨版本永久根因声明。
 - `caused_by`：downstream 症状与根因的因果链接。索引为空且 embedding
   认证失败时，`VECTOR_INDEX_EMPTY.caused_by = EMBEDDING_PROVIDER_AUTH`；
   embedding 健康而索引为空时，`VECTOR_INDEX_EMPTY` 本身即根因（待导入），
@@ -275,22 +276,28 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > 判定规则本身在 `rag_evidence_status.formal_status_agreement_problems`，
 > audit 与 `project_facts --check` 共用同一份，不会各自漂移。
 >
-> **最新已提交的 preflight evidence**：
+> **当前 root blocker：UNRESOLVED / NOT_VERIFIED。** Issue #99 记录了较新的
+> 静态诊断：遗留复合分支上的 artifact 暗示 benchmark / gold-label provenance
+> 可能存在 `INVALID_GOLD_LABELS`。但该 artifact 来自 dirty / unmerged branch，
+> 尚未在当前 `main` 复现，因此不能把它当作当前根因；本轮也不具备真实 provider
+> 环境，不做伪验证。
+>
+> **2026-10-02 preflight 仅作为历史运行证据保留**：
 > `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
 > （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
-> `status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`）。该 artifact
-> 直接使用 §3.3.1 的结构化 blocker 语义，三个 blocker **必须分开表述**：
+> `status: BLOCKED`，`primary_blocker: EMBEDDING_PROVIDER_AUTH`）。对**该次运行**
+> 而言，三个 blocker 的结构化语义仍必须分开：
 >
-> | blocker code | stage | blocking | 影响范围 |
+> | blocker code | stage | blocking | 该次 artifact 的含义 |
 > |---|---|---|---|
-> | `EMBEDDING_PROVIDER_AUTH` | embedding | `true` | 根因；`blocks_corpus_import: true`，阻塞 `vector_only` / `hybrid_no_rerank` / `hybrid_rerank`（HTTP 401） |
-> | `VECTOR_INDEX_EMPTY` | qdrant | `true` | downstream 症状，`caused_by: EMBEDDING_PROVIDER_AUTH`；集合 0 points，且 BM25 索引由 Qdrant 重建，故 `bm25_only` 也被阻塞 |
-> | `RERANKER_PROVIDER_AUTH` | reranker | **`false`** | 只阻塞 `hybrid_rerank`，**不得**据此声称其余实验也被 reranker 阻塞（HTTP 401，`silent_fallback`） |
+> | `EMBEDDING_PROVIDER_AUTH` | embedding | `true` | 当次 primary blocker；`blocks_corpus_import: true`，HTTP 401 |
+> | `VECTOR_INDEX_EMPTY` | qdrant | `true` | 当次 downstream symptom，`caused_by: EMBEDDING_PROVIDER_AUTH` |
+> | `RERANKER_PROVIDER_AUTH` | reranker | **`false`** | 当次只阻塞 `hybrid_rerank`，不能外推为其它实验 blocker |
 >
 > 该 artifact 的 notes 明写 `formal evaluation not run; no metrics generated`。
-> `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
-> **不等于** 649-query 正式评测已完成；正式指标仍为 `NOT_VERIFIED`。
->
+> `declared_queries: 649` / `executed_queries: 649` 是 preflight 探针计数，
+> **不等于**正式评测完成，更不能证明今天仍由同一个 blocker 阻塞。
+> 正式指标保持 `NOT_VERIFIED`。
 > 历史尝试（保留不改）：2026-09-30 的评测尝试在 preflight gate 被阻塞
 > （evidence artifact：`artifacts/evaluation/rag-649/preflight-20260929T191128Z/report.json`，
 > v1 schema，顶层 `status: BLOCKED_VECTOR_INDEX`，原样保留不回填）。按 v2 口径
@@ -308,8 +315,9 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > `scripts/evaluate_rag.py` 在运行时对索引 corpus 动态计算（§3.3.2），
 > 上述 manifest 数字仅为语料文件口径的参考，不作为评测分母硬编码。
 >
-> 待 provider 凭据恢复后，按 §3.1 复现：`make rag-eval-import` →
-> `make rag-eval-649-preflight` → `make rag-eval-649`。
+> 后续顺序：先按 Issue #99 审计 benchmark / gold-label provenance；数据契约可用后，
+> 再在真实 provider 与完整索引环境按 §3.1 复现 `make rag-eval-import` →
+> `make rag-eval-649-preflight` → `make rag-eval-649`。在此之前不生成或引用正式指标。
 
 ### 3.5 历史评估结果
 

@@ -34,23 +34,22 @@
 - Metric family：Hit@K、Recall@K、Precision@K、NDCG@K、MRR@K（multi-K：1/3/5/8）。
 - Evaluation populations（全部运行时动态计算，禁止硬编码分母）：
   `all_queries`（主口径，end-to-end）/ `retrieval_eligible` / `full_gold_covered`。
-- **最新已提交的 preflight evidence**：
+- **当前 blocker 结论：UNRESOLVED / NOT_VERIFIED。** 正式 649-query 指标仍未取得
+  provenance-bearing full-run evidence，当前不得把任何单一 blocker 写成已确认根因。
+- **2026-10-02 preflight 是历史证据，不是当前 root-cause verdict**：
   `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`
-  （`schema_version: rag-eval-evidence/v2`，`timestamp 2026-10-02T19:42:09Z`，
-  `status: BLOCKED`）。blocker 语义按 v2 结构化记录，**必须分开表述**：
-  - `primary_blocker: EMBEDDING_PROVIDER_AUTH`（embedding 探针 HTTP 401，
-    `blocks_corpus_import: true`）是**根因**；
-  - `VECTOR_INDEX_EMPTY`（评测集合 0 points）是 **downstream 症状**，
-    `caused_by: EMBEDDING_PROVIDER_AUTH`；因 BM25 索引由 Qdrant 重建，
-    连 `bm25_only` 也被它阻塞；
-  - `RERANKER_PROVIDER_AUTH`（reranker 探针 HTTP 401，`silent_fallback`）是
-    **`blocking: false`**，只阻塞 `hybrid_rerank`，**不得**据此声称其它实验
-    也被 reranker 阻塞。
-  该 artifact 自述 `formal evaluation not run; no metrics generated`——
-  `declared_queries: 649` / `executed_queries: 649` 是 preflight 的探针计数，
-  **不是** 649-query 正式评测完成，正式指标仍为 `NOT_VERIFIED`。
-  上一版 artifact（`preflight-20260929T191128Z`，v1 schema，顶层
-  `status: BLOCKED_VECTOR_INDEX`）作为历史记录原样保留，不回填。
+  （`schema_version: rag-eval-evidence/v2`，`status: BLOCKED`）当时记录
+  `EMBEDDING_PROVIDER_AUTH`（HTTP 401）为 primary blocker、
+  `VECTOR_INDEX_EMPTY` 为 downstream symptom，reranker auth 只阻塞
+  `hybrid_rerank`。这些语义对**该次 artifact**仍然成立，但不能自动外推到当前
+  `main`。
+- **Issue #99 是当前需要先解决的静态证据缺口**：较新的诊断来自遗留复合分支，
+  指向 benchmark / gold-label provenance 可能存在 `INVALID_GOLD_LABELS`。
+  但该 artifact 来自 dirty / unmerged branch，尚未在当前 `main` 复现，所以它同样
+  不能升级成当前根因结论。先审计 `tests/eval/rag_benchmark.json` 的
+  `expected_doc_ids` provenance；真实 provider / 全量运行等环境依赖证据后补。
+- 更早的 `preflight-20260929T191128Z`（v1 schema，
+  `status: BLOCKED_VECTOR_INDEX`）继续作为历史记录原样保留，不回填。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、
   blocker 语义与评测状态：[docs/reference/rag-evaluation.md](rag-evaluation.md)。
   canonical 命令链：`make rag-eval-import` → `make rag-eval-649-preflight` →

@@ -343,7 +343,7 @@ CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `
 
 | 限制 | 状态 |
 |---|---|
-| RAG 正式 649-query 指标（Hit@K / Recall / NDCG / MRR） | `NOT_VERIFIED` — 需真实 provider + 已索引语料 |
+| RAG 正式 649-query 指标（Hit@K / Recall / NDCG / MRR） | `NOT_VERIFIED` — 当前 root blocker 未定；Issue #99 先审计 benchmark gold-label provenance，真实 provider / full-run 证据后补 |
 | 生产集群 / 多副本长期稳定性 / K8s autoscaling / 跨区域 | `NOT_VERIFIED` |
 | 真实 ERP 写操作（退款、改单） | `NOT_VERIFIED` — 只在 `tools/hitl_staging_tools.py` 上验证治理机制 |
 | 生产 QPS / P95 / P99 / Token 成本 / 真实用户 FCR 与满意度 | `NOT_MEASURED` |
@@ -351,7 +351,7 @@ CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `
 | Nginx 横向扩容 | 多副本可渲染，但 upstream 分发到多副本**未验证** |
 | 真实 trace 后端（Jaeger / Langfuse / Tempo） | `NOT_VERIFIED` — 已验证的 Collector 只有 `debug` exporter |
 | 无审批主动通知链路 | 需轮询待审批队列 |
-| MCP 适配器 | **默认关闭**的只读能力，未合并前不存在于 `main` |
+| MCP 适配器 | **已进入 `main`，默认关闭 / read-only-first**；PR #61 + #64 提供 deterministic fake-server 契约，真实第三方 server / 生产网络与鉴权 / 多副本 / 写工具仍 `NOT_VERIFIED` |
 
 完整证据边界见 [docs/evaluation/production-evidence.md](docs/evaluation/production-evidence.md) 与 [Issue #7](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/7)。
 
