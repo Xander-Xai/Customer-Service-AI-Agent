@@ -404,6 +404,7 @@ jobs:
             DC="docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml"
             $DC pull
             $DC up -d --build
+            # ===== app readiness 门禁（容器内探针）=====
             # 健康检查走**容器内**地址：生产栈里 app 只有 expose: 8000，不对宿主机
             # 发布（唯一发布应用端口的是 nginx 的 80/443），所以宿主机 curl :8000
             # 永远连不上 —— 旧写法在拓扑修正后是一条必然失败的探针。
@@ -419,9 +420,37 @@ jobs:
               $DC logs --tail 100 app
               exit 1
             fi
-            # 分布式 Runtime 门禁：worker 必须真的起来，否则异步 Run 会永久停在 QUEUED。
-            # 这里只做最低限度的存活/连通性确认；正确性由 runtime-e2e / runtime-chaos 证明。
-            $DC ps worker
+
+            # ===== worker readiness 门禁（本 PR 的根因修复）=====
+            # 旧写法 `docker compose ps worker` **永远返回 0** —— 它只是打印一张表，
+            # 不是断言：worker 崩了、或者 health 是 unhealthy，job 照样绿。
+            #
+            # 现在断言容器 health **确实变成 healthy**。worker 的 healthcheck 是
+            # Celery-native 的（经 broker 向本节点 inspect ping 并要求 pong，见
+            # deploy/compose/docker-compose.yml），所以 healthy 的含义是
+            # 「worker 节点在 broker 上活着并应答」，而不只是「容器在跑」。
+            # 这正是异步 Run 的前提：worker 不应答 → agent_runs 永久停在 QUEUED。
+            #
+            # 有界轮询而非固定 sleep：worker 冷启动约 25s（建 checkpoint pool +
+            # 连 broker），start_period 45s，间隔 30s，因此给足 ~5 分钟窗口；
+            # 每 15s 查一次真实状态，超时打印日志并 fail。
+            worker_health=""
+            for i in $(seq 1 20); do
+              worker_health=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+                "$($DC ps -q worker)" 2>/dev/null || echo none)
+              [ "$worker_health" = "healthy" ] && break
+              [ "$worker_health" = "unhealthy" ] && echo "::warning::worker health=unhealthy（仍在重试，容器未退出时可能自愈）"
+              sleep 15
+            done
+            if [ "$worker_health" != "healthy" ]; then
+              echo "::error::worker 未在窗口内变为 healthy（最后状态：${worker_health:-unknown}）"
+              $DC logs --tail 150 worker
+              exit 1
+            fi
+            echo "worker readiness OK（Celery-native healthcheck = healthy）"
+
+            # DLQ 端点连通性确认。同样走容器内地址：app 不发布 8000。
+            # 存活由上面的 readiness 门禁断言；正确性由 runtime-e2e / runtime-chaos 证明。
             $DC exec -T app curl -sf 'http://localhost:8000/api/runs/dead' -H "X-API-Key: $API_KEY" >/dev/null \
               || echo "::warning::DLQ 端点不可达（可能缺少 API_KEY 或未启动 worker）"
             echo "✅ 部署完成"

@@ -242,6 +242,36 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+    # Celery-native liveness。
+    #
+    # 本服务在 compose 里原本**没有** healthcheck，于是继承镜像级 HEALTHCHECK
+    # （Dockerfile: `curl -f http://localhost:8000/api/health`）。但 worker 跑
+    # `celery ... worker`，不监听任何 HTTP 端口，该探针结构上不可能通过：
+    # curl 连不上 8000，容器恒为 unhealthy，而 celery 自身是
+    # `celery@<host> ready.`。这正是 CI 把 worker 存活当异步 Run 门禁时
+    # 永远转绿不了的原因。
+    #
+    # 改为经 broker 向**本节点**发 ping 并要求 pong。这样既覆盖「进程在但节点
+    # 已不再消费」，也覆盖「broker 不可达」——后者正是异步 Run 会永久停在
+    # QUEUED 的故障（agent_runs 落库成功但没人取）。
+    #
+    # 节点名取 Celery 默认的 `celery@$HOSTNAME`（compose 未覆盖 --hostname）。
+    # 语义边界：ping 走 Celery 控制通道，反映**节点控制面可达**；
+    # 它不等价于「任务执行器没有卡死」——那由 task_time_limit 与
+    # runtime 的 lease/heartbeat 负责，不由容器 healthcheck 断言。
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          celery -A runtime.celery_app:celery_app inspect ping
+          -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong
+      interval: 30s
+      # 探针本身约 2s（要导入 app 配置并往返 broker）。沿用被替换探针的 10s
+      # 预算，不因换探针而放宽。
+      timeout: 10s
+      retries: 3
+      # worker 冷启动约 25s（建 checkpoint pool + 连 broker），启动期不判 liveness
+      start_period: 45s
     restart: unless-stopped
     networks:
       - cs-network
@@ -354,11 +384,31 @@ services:
     networks:
       - cs-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      # `qdrant/qdrant:v1.12.0` 里**没有** curl / wget / nc / python / qdrant
+      # （逐个枚举镜像内 PATH 确认过），所以原来的
+      #   test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      # 结构上不可能通过，容器恒为 unhealthy：
+      #   exec: "curl": executable file not found in $PATH
+      # 不为此安装探针工具（镜像保持官方原样），改用镜像**已有**的能力：
+      # bash 的 /dev/tcp + printf + read 足以完成一次真实 HTTP 请求。
+      #
+      # 必须显式 `bash -c`：本镜像的 /bin/sh 是 dash，没有 /dev/tcp。
+      #
+      # 语义边界：这个探针证明 **/healthz 返回 200**（readiness）。
+      # 它**不**证明集合/索引可用——那属于应用侧 readiness，
+      # 见 GET /api/health 的 components.qdrant。
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 &&
+          printf "GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 &&
+          read -r line <&3 &&
+          case "$$line" in *" 200 "*) exit 0;; *) exit 1;; esac'
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      # 冷启动期间不判定 liveness，避免把「还没起来」误报成「不健康」
+      start_period: 15s
 
 volumes:
   redis-data:
