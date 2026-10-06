@@ -111,6 +111,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 - 项目介绍 → [design/interview-intro.md](design/interview-intro.md)
 - 深入 Q&A → [design/interview-deep-dive.md](design/interview-deep-dive.md)
 - 面试题集 → [interview-questions-final.md](interview-questions-final.md)
+- **五个可复现演示场景（场景/执行链/源码锚点/测试锚点/命令/实际结果/讲解/追问/边界/证据等级）** → [interview/demo-scenarios.md](interview/demo-scenarios.md)
 - **源码溯源地图（问题 → 源码 → 测试 → 证据）** → [interview/source-map.md](interview/source-map.md)
 - 架构逐问（15 问 + 证据分级 + 不宣称清单） → [interview/architecture-walkthrough.md](interview/architecture-walkthrough.md)
 - Runtime 深入（Celery/ACK/租约/崩溃恢复 + flaky 根因） → [interview/runtime-deep-dive.md](interview/runtime-deep-dive.md)
