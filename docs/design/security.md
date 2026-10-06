@@ -165,8 +165,8 @@ LLM 输出处理链路：`marked.parse()` → `DOMPurify.sanitize()` → 插入 
 
 ## 报告安全漏洞
 
-如发现安全漏洞，请通过以下方式报告：
-- 提交 GitHub Issue（标记 `security` 标签）
-- 或发送邮件至项目维护者
+本项目的 responsible-disclosure 渠道以 canonical 政策为准：
+[`.github/SECURITY.md`](../../.github/SECURITY.md)（GitHub 私有漏洞报告）。
 
-请**不要**通过公开 Issue 报告未修复的漏洞。
+**请通过 GitHub 私有漏洞报告提交，不要通过公开 Issue 报告未修复的漏洞。**
+本文件不再单独提供报告方式，避免与 canonical 政策产生矛盾。
