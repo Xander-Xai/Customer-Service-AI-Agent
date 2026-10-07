@@ -94,6 +94,52 @@ def should_propose_approval(
     return requires_approval(classify_risk(tool_name, explicit=explicit, arguments=arguments))
 
 
+def is_ungoverned_side_effect(
+    tool_name: str,
+    arguments: dict[str, Any] | None,
+    registry: Any = None,
+) -> bool:
+    """该调用是否是「没有治理边界的写操作」——必须在执行前 fail closed。
+
+    ``should_propose_approval`` 只回答「要不要把这笔写操作挂起等人工」；它在
+    ``/api/chat`` 快路径上**故意**返回 ``False``（没有 durable run 上下文，
+    interrupt 挂了也无法恢复）。但「不挂起」不等于「可以执行」：实时快路径
+    没有 run 上下文，因而既没有审批、也没有 ``runtime.side_effects`` 幂等 ledger
+    的保护。此函数把这个缺口显式化，供统一工具执行边界（``ToolRegistry``）
+    在任何 transport（REST / SSE / WS / 多模态）调用写工具前判定。
+
+    判定（strict fail-closed）：
+      - 非副作用工具：不拦（只读查询照常执行）。
+      - 有 durable run 上下文：不拦——异步 Run 路径由 ledger（+ 可选 HITL）
+        治理，保持既有语义不变。
+      - 无 run 上下文的**已声明副作用工具**：拒绝。没有 ledger 就没有幂等保护，
+        没有 run 就无法走到审批，任何写操作都属于未治理边界。
+    """
+    try:
+        is_side_effect = bool(registry is not None and registry.is_side_effect(tool_name))
+    except Exception:
+        return False
+    if not is_side_effect:
+        return False
+
+    try:
+        from runtime.context import get_current_run_id
+
+        return not get_current_run_id()
+    except Exception:
+        # 无法证明存在 run 上下文时按最保守方向处理（拒绝）。
+        return True
+
+
+def ungoverned_side_effect_message(tool_name: str) -> str:
+    """被阻断调用的明确、可解释错误语义（供 ToolRegistry 直接返回）。"""
+    return (
+        f"错误：写操作工具 '{tool_name}' 需要持久化 Run 上下文（人工审批 + 幂等 ledger），"
+        "实时快路径（无 run 上下文）拒绝执行。请改用异步 Run 接口 "
+        "POST /api/runs。"
+    )
+
+
 def proposal_to_pending_action(
     action: str, arguments: dict[str, Any] | None, **extra: Any
 ) -> dict[str, Any]:
@@ -298,7 +344,9 @@ __all__ = [
     "collect_pending_actions",
     "execute_approved_actions",
     "has_pending_interrupt",
+    "is_ungoverned_side_effect",
     "proposal_to_pending_action",
     "run_approval_gate",
     "should_propose_approval",
+    "ungoverned_side_effect_message",
 ]

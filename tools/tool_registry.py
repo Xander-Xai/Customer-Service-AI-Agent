@@ -147,6 +147,21 @@ class ToolRegistry:
         if not tool:
             return f"错误：工具 '{name}' 不存在"
 
+        # Fail-closed governance boundary (Issue #123). This is the single choke
+        # point every realtime transport (REST / SSE / WS / multimodal) and the
+        # async worker funnel through for tool execution. A declared side-effect
+        # tool with no durable Run context has neither human approval nor the
+        # side-effect idempotency ledger, so it must be refused *before* the
+        # handler runs — not merely discouraged via prompt text.
+        refusal = self._ungoverned_side_effect_refusal(tool, name, arguments)
+        if refusal is not None:
+            logger.warning(
+                "拒绝无治理边界的写操作工具调用 tool=%s side_effect=%s",
+                name,
+                tool.side_effect,
+            )
+            return refusal
+
         # Lightweight tracing: one span per tool execution. Records the tool NAME,
         # whether it is a declared side effect, and its risk level — never
         # ``arguments``. This system's tool arguments include order numbers, refund
@@ -173,6 +188,31 @@ class ToolRegistry:
             return await self._execute_raw_inner(
                 tool, name, arguments, stream_callback, tool_call_id
             )
+
+    def _ungoverned_side_effect_refusal(
+        self, tool: ToolDefinition, name: str, arguments: dict[str, Any]
+    ) -> str | None:
+        """写操作无治理边界时返回错误文案；否则返回 None 放行。
+
+        fail-closed：治理模块不可导入、run 上下文不可判定、风险不可分级，任一
+        「无法确认安全」的情况都对**已声明副作用**的工具拒绝执行；只读工具不受影响。
+        """
+        if not tool.side_effect:
+            return None
+        try:
+            from core.hitl.gate import (
+                is_ungoverned_side_effect,
+                ungoverned_side_effect_message,
+            )
+        except Exception:
+            # Governance unavailable -> cannot prove safety for a write op.
+            return f"错误：写操作工具 '{name}' 无法确认安全治理边界，已拒绝执行（治理模块不可用）。"
+        try:
+            if is_ungoverned_side_effect(name, arguments, self):
+                return ungoverned_side_effect_message(name)
+        except Exception:
+            return f"错误：写操作工具 '{name}' 无法确认安全治理边界，已拒绝执行（治理判定失败）。"
+        return None
 
     async def _execute_raw_inner(
         self,
