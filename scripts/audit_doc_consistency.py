@@ -55,6 +55,12 @@ Checks:
   AE. real ERP writes must not be claimed VERIFIED
   AF. when the approval router is mounted, its endpoints must exist in
       docs/openapi.json and be documented in the API reference
+  AG. a CURRENT doc must not claim the MCP adapter is absent from main
+  AH. a CURRENT doc must not present provider auth / HTTP 401 as the
+      definitive current RAG blocker
+  AI. a CURRENT doc must not revive the superseded 'RAG blocker unresolved /
+      Issue #99 still pending or unreproduced' framing (the #99 provenance
+      audit is complete on main; the current blocker is DATASET_DEFECT)
 
 Historical docs (with an explicit HISTORICAL banner) are excluded from
 terminology checks but still pass through link/reference checks unless they
@@ -1574,6 +1580,58 @@ def check_rag_current_blocker_drift(docs: list[Path], errors: list[str], root: P
             )
 
 
+# ---- Guard AI: stale RAG "blocker unresolved / #99 still pending" drift.
+# Guard AH stops provider 401 from being re-promoted to the CURRENT blocker.
+# This guard stops the older, now-superseded framing that the RAG blocker is
+# still UNRESOLVED, or that the #99 gold-label provenance audit still needs to
+# happen / has not been reproduced on main. The #99 static audit is complete on
+# current main (#105) and the current blocker is the DATASET_DEFECT it found.
+# Historical snapshots (docs/reports/**, docs/archive/**) are out of scope by
+# construction; explicitly historical lines stay allowed.
+RAG_STALE_BLOCKER_UNRESOLVED_RE = re.compile(
+    r"(?:root\s*blocker|primary\s*blocker|根因|blocker)\s*(?:[:：=]|\s)*"
+    r"(?:unresolved|未解决|尚未确认|未确认|待确认|待定|unknown|unclear)",
+    re.IGNORECASE,
+)
+RAG_STALE_ISSUE99_RE = re.compile(
+    r"(?:issue\s*#?\s*|#\s*)99\b[^\n]{0,80}?"
+    r"(?:尚未在[^\n]{0,10}?main|未在[^\n]{0,10}?main\s*复现|尚未复现|尚未审计|"
+    r"待\s*审计|尚需审计|尚待审计|需要先审计|unmerged|"
+    r"not\s+(?:yet\s+)?reproduc|needs?\s+(?:to\s+be\s+)?audit)",
+    re.IGNORECASE,
+)
+RAG_STALE_BLOCKER_HISTORICAL_RE = re.compile(
+    r"历史|historical|快照|snapshot|复盘|当次|该次|当时|曾经|早期|"
+    r"已解决|已完成|\bcompleted\b|\bresolved\b|superseded|2026-10-0|artifact",
+    re.IGNORECASE,
+)
+
+
+def check_rag_unresolved_blocker_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Guard AI: an active CURRENT doc must not revive the superseded
+    'RAG blocker unresolved / Issue #99 still pending or unreproduced' framing.
+    The #99 gold-label provenance audit is complete on current main and the
+    current blocker is the dataset defect it found; historical snapshots and
+    explicitly historical lines stay allowed."""
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if not (
+                RAG_STALE_BLOCKER_UNRESOLVED_RE.search(line)
+                or RAG_STALE_ISSUE99_RE.search(line)
+            ):
+                continue
+            if RAG_STALE_BLOCKER_HISTORICAL_RE.search(line):
+                continue
+            errors.append(
+                f"RAG unresolved-blocker drift: {rel}:{line_no} revives the superseded "
+                f"'blocker unresolved / Issue #99 pending' framing — the #99 gold-label "
+                f"provenance audit is complete on current main (#105) and the current "
+                f"blocker is the DATASET_DEFECT it found (shipped gold has no relevance "
+                f"semantics); cite docs/reference/rag-gold-label-provenance.md"
+            )
+
+
 # ---- No accidental product-version promotion. Runtime VERSION is 6.3; a
 # `v6.4`/`6.4` claim in an active doc (outside historical context) would be a
 # release that was never made.
@@ -2543,6 +2601,7 @@ def main() -> int:
     # MCP main-state and RAG current-blocker drift guards (issue #103).
     check_mcp_main_state_drift(docs, errors)
     check_rag_current_blocker_drift(docs, errors)
+    check_rag_unresolved_blocker_drift(docs, errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -2567,7 +2626,8 @@ def main() -> int:
         f"multi-worker deployment truth, root-level snapshot hygiene, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
-        f"approval API surface, MCP main-state drift, RAG current-blocker drift"
+        f"approval API surface, MCP main-state drift, RAG current-blocker drift, "
+        f"RAG unresolved-blocker drift"
     )
     return 0
 

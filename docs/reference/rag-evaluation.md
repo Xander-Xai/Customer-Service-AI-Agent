@@ -276,11 +276,12 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > 判定规则本身在 `rag_evidence_status.formal_status_agreement_problems`，
 > audit 与 `project_facts --check` 共用同一份，不会各自漂移。
 >
-> **当前 root blocker：UNRESOLVED / NOT_VERIFIED。** Issue #99 记录了较新的
-> 静态诊断：遗留复合分支上的 artifact 暗示 benchmark / gold-label provenance
-> 可能存在 `INVALID_GOLD_LABELS`。但该 artifact 来自 dirty / unmerged branch，
-> 尚未在当前 `main` 复现，因此不能把它当作当前根因；本轮也不具备真实 provider
-> 环境，不做伪验证。
+> **当前 root blocker：`DATASET_DEFECT`。** shipped benchmark 的
+> `expected_doc_ids` 不具备 relevance judgement 语义，因此正式检索指标用当前
+> benchmark **当前不可测**（`FORMAL_RETRIEVAL_METRICS_NOT_MEASURABLE_FROM_CURRENT_GOLD`）。
+> Issue #99 的静态 provenance 审计已在当前 `main` 完成（#105），见
+> [rag-gold-label-provenance.md](rag-gold-label-provenance.md)。该结论是**数据契约缺陷**，
+> 与凭据可用性无关；替换为 relevance-judged gold 集是解除阻塞的前置条件。
 >
 > **2026-10-02 preflight 仅作为历史运行证据保留**：
 > `artifacts/evaluation/rag-649/preflight-20261002T194209Z/report.json`

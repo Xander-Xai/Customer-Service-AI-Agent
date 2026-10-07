@@ -2883,3 +2883,47 @@ def test_guard_ah_real_repo_has_no_current_provider_auth_blocker():
     errors: list[str] = []
     audit.check_rag_current_blocker_drift(docs, errors, root=REAL_ROOT)
     assert errors == []
+
+
+# ------------------------------------------------------------- Guard AI
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "> **当前 root blocker：UNRESOLVED / NOT_VERIFIED。**",
+        "RAG 649 正式评测当前状态为 NOT_VERIFIED，root blocker 尚未确认。",
+        "Issue #99 需要先审计 benchmark / gold-label provenance。",
+        "Issue #99 尚未在当前 main 复现，不能当作当前根因。",
+        "current root blocker unresolved; see Issue #99",
+    ],
+)
+def test_guard_ai_stale_unresolved_blocker_is_detected(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_rag_unresolved_blocker_drift([doc], errors, root=tmp_repo)
+    assert errors, f"stale unresolved-blocker claim escaped Guard AI: {line}"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "当前 root blocker = DATASET_DEFECT：shipped gold 无 relevance 语义（Issue #99 已完成）。",
+        "2026-10-02 preflight artifact recorded EMBEDDING_PROVIDER_AUTH as that run's blocker; "
+        "the current blocker is a dataset defect (Issue #99).",
+        "Issue #99 provenance 审计已在当前 main 完成（见 rag-gold-label-provenance.md）。",
+        "> 复盘该 v1 artifact：primary blocker = EMBEDDING_PROVIDER_AUTH（根因）。",
+    ],
+)
+def test_guard_ai_current_or_historical_framing_is_allowed(tmp_repo: Path, line: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{line}\n")
+    errors: list[str] = []
+    audit.check_rag_unresolved_blocker_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_ai_real_repo_has_no_unresolved_blocker_framing():
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_rag_unresolved_blocker_drift(docs, errors, root=REAL_ROOT)
+    assert errors == []
