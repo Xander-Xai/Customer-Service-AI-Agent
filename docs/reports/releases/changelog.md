@@ -20,10 +20,10 @@
 
 ---
 
-## v6.3 — Interview Reference Release (2026-10-07)
+## v6.3 — Engineering Reference Release (2026-10-07)
 
-> Git tag `v6.3` points at the latest green `main`. This is an **interview-reference
-> snapshot of accumulated engineering evidence**, not a production GA. Formal RAG
+> Git tag `v6.3` points at the latest green `main`. This is an **engineering-reference
+> snapshot of accumulated evidence**, not a production GA. Formal RAG
 > metrics, production QPS/P95/P99, real ERP writes and multi-replica production
 > behavior remain `NOT_VERIFIED` / `NOT_MEASURED`. Full evidence-layered notes are
 > in the GitHub Release; deferred evidence is tracked in Issue #7.
