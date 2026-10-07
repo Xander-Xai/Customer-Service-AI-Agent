@@ -76,9 +76,9 @@ def test_dead_letter_alert_uses_increase_on_real_metric():
 @pytest.mark.unit
 def test_dead_letter_alert_does_not_latch_on_historical_counter():
     expr = str(_dead_letter_rule().get("expr", ""))
-    assert f"{DEAD_LETTER_METRIC} > 0" not in expr, (
-        "不得使用裸 counter > 0（首次 dead-letter 后会永久报警）"
-    )
+    assert (
+        f"{DEAD_LETTER_METRIC} > 0" not in expr
+    ), "不得使用裸 counter > 0（首次 dead-letter 后会永久报警）"
 
 
 @pytest.mark.unit
@@ -114,15 +114,11 @@ def test_dead_letter_metric_name_matches_runtime_forwarder():
     from runtime import metrics
 
     source = Path(metrics.__file__).read_text(encoding="utf-8")
-    assert DEAD_LETTER_METRIC in source, (
-        f"runtime/metrics.py 未引用 {DEAD_LETTER_METRIC}"
-    )
+    assert DEAD_LETTER_METRIC in source, f"runtime/metrics.py 未引用 {DEAD_LETTER_METRIC}"
 
 
 @pytest.mark.unit
 def test_dead_letter_metric_is_registered_in_monitoring():
     from core import monitoring
 
-    assert hasattr(monitoring, DEAD_LETTER_METRIC), (
-        f"core.monitoring 未注册 {DEAD_LETTER_METRIC}"
-    )
+    assert hasattr(monitoring, DEAD_LETTER_METRIC), f"core.monitoring 未注册 {DEAD_LETTER_METRIC}"

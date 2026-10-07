@@ -89,9 +89,9 @@ class TestEgressGuard:
 class TestSingleCommandWiring:
     def test_makefile_defines_demo_offline(self):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-        assert re.search(r"^demo-offline:", makefile, re.MULTILINE), (
-            "Makefile must define the demo-offline target"
-        )
+        assert re.search(
+            r"^demo-offline:", makefile, re.MULTILINE
+        ), "Makefile must define the demo-offline target"
         assert "demo-offline" in makefile.splitlines()[0], "demo-offline must be declared .PHONY"
 
     def test_failing_selection_exits_nonzero_and_reports_fail(self, tmp_path):

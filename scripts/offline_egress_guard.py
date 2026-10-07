@@ -26,7 +26,7 @@ _EGRESS_MESSAGE = (
 
 def _is_loopback(address: Any) -> bool:
     host = None
-    if isinstance(address, (tuple, list)) and address:
+    if isinstance(address, tuple | list) and address:
         host = address[0]
     elif isinstance(address, str):
         host = address
