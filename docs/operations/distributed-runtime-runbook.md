@@ -119,27 +119,58 @@ FROM agent_runs WHERE status = 'RUNNING';
 
 ### 3.3 `DEAD_LETTER` 堆积
 
-```sql
-SELECT run_id, thread_id, attempt_count, error_type, error_code, entered_at
-FROM agent_dead_letters ORDER BY entered_at DESC LIMIT 50;
-```
+**告警**：`AgentRunDeadLetterDetected`（`increase(agent_run_dead_letter_total[5m]) > 0`，
+`severity: critical`，见 `monitoring/alert_rules.yml`）。用 `increase()` 而非
+`agent_run_dead_letter_total > 0`，避免历史一次失败后永久报警。
 
-按 `error_type` 区分：
-- `timeout` / `transient` → 基础设施抖动，考虑提高 `AGENT_RUN_MAX_ATTEMPTS`；
-- `permanent` → 代码/契约问题，重放前先修。
+1. **查看待处置队列**：
 
-重放：
+   ```bash
+   curl -s "$BASE_URL/api/runs/dead" -H "Authorization: Bearer $TOKEN"
+   ```
 
-```bash
-python scripts/replay_dead_run.py <run_id>          # 交互确认
-python scripts/replay_dead_run.py <run_id> --yes    # 非交互（CI / 自动化）
-```
+   或直接查表：
 
-重放**复用原 `run_id`**（只产生新的队列投递），原始 DLQ 历史不被改写。不要通过
-"新建一个 run"来重放——那会绕过工具幂等键，导致已成功的退款/改单再执行一次。
+   ```sql
+   SELECT run_id, thread_id, attempt_count, error_type, error_code, entered_at
+   FROM agent_dead_letters ORDER BY entered_at DESC LIMIT 50;
+   ```
 
-> 目前**没有** dead-letter 告警，只有 `agent_run_dead_letter_total` 计数；需要告警时
-> 自行加基于该指标的规则。
+2. **按 `error_type` / `error_code` / `attempt_count` / `entered_at` 分类**：
+   - `timeout` / `transient` → 基础设施抖动，可重放；若反复出现，考虑提高
+     `AGENT_RUN_MAX_ATTEMPTS`；
+   - `permanent` → 代码/契约问题，**先修再重放**；
+   - downstream 不可用（ERP / provider / Redis）→ 等下游恢复；
+   - config defect / code defect → 修配置或代码。
+
+3. **确认 side-effect / 幂等状态**：
+
+   ```sql
+   SELECT run_id, tool_name, operation_key, status, created_at, finished_at
+   FROM tool_side_effects WHERE run_id = '<run_id>';
+   ```
+
+4. **重放**（仅在确认可重放后）：
+
+   ```bash
+   python scripts/replay_dead_run.py <run_id>          # 交互确认
+   python scripts/replay_dead_run.py <run_id> --yes    # 非交互（CI / 自动化）
+   ```
+
+   重放**复用原 `run_id`**（只产生新的队列投递），原始 DLQ 历史不被改写。不要通过
+   "新建一个 run"来重放——`operation_key = run_id:tool_call_id`（审批执行时为
+   `run_id:approval:{approval_id}`）在任意次重试中恒定，正是它保证已成功的
+   退款/改单**恰好一次**；换 `run_id` 会绕过这个幂等键，导致副作用重做。
+
+**何时不要直接重放**：
+
+- `permanent` 业务拒绝（如订单状态不允许）——重放只会再次失败；
+- 外部副作用的真实状态未知（无法确认第一次是否已生效）；
+- 配置仍然损坏（如缺少凭据 / 依赖不可达）；
+- 下游仍然不可用；
+- 无法建立幂等保证（`operation_key` 缺失或 ledger 状态不可信）。
+
+在这些情况下，先修复根因或人工核对副作用，再决定是否重放。
 
 ### 3.4 线程一直 `THREAD_BUSY`（HTTP 409）
 

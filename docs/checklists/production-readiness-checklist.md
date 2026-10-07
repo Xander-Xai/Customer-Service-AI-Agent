@@ -37,8 +37,9 @@
       （未配置基础设施时退出码 2，不会把"没跑"记成"通过"）
 - [ ] DLQ 处置流程已演练：`GET /api/runs/dead` →
       `python scripts/replay_dead_run.py <run_id>` 确认重放复用原 run_id
-- [ ] 确认无 dead-letter 堆积：`agent_run_dead_letter_total` 无异常增长
-      （注意：**目前没有 dead-letter 告警**，需自行加基于该指标的告警规则）
+- [ ] 确认无 dead-letter 堆积：`AgentRunDeadLetterDetected` 告警
+      （`increase(agent_run_dead_letter_total[5m]) > 0`）未触发；规则见
+      `monitoring/alert_rules.yml`
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
       `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
       artifact 显示 provider auth blocker，见
@@ -165,7 +166,8 @@
 - [ ] LangGraph checkpoint 的多副本共享/进程重启恢复尚未在真实生产环境验证
       （本地 + CI 已用**真实跨进程**测试验证，但不等于生产验证）
 - [ ] Worker Pool 无自动扩缩、无 backpressure/admission control
-- [ ] DLQ **无告警**（只有计数指标），人工发现依赖值班巡检
+- [ ] DLQ 告警规则已定义（`AgentRunDeadLetterDetected`），但生产外部通知通道
+      （PagerDuty / Slack / 邮件）未接入验证，当前 Alertmanager 接收方指向内部网关
 - [ ] 事件流仅 best-effort 可续读（**非** exactly-once）：较旧 `Last-Event-ID`
       重连会重放已处理事件（重复）；`replay=false` 与 idle 超时造成缺口；
       `MAXLEN` 为近似裁剪（非硬上界），被裁历史不可恢复；不承诺跨进程 SSE 断线续传

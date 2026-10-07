@@ -36,3 +36,16 @@ groups:
           severity: warning
         annotations:
           summary: "SLA 违约率过高: {{ $value }}%"
+
+      # 新 dead-letter（重试耗尽）检测。`agent_run_dead_letter_total` 是单调
+      # counter，用 `increase()` 只看最近窗口的**新增**，不会因历史一次失败永久
+      # 报警。不要写成 `agent_run_dead_letter_total > 0`（首次出错后永不恢复）。
+      - alert: AgentRunDeadLetterDetected
+        expr: increase(agent_run_dead_letter_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "检测到新的 AgentRun dead-letter"
+          description: "过去 5 分钟新增 {{ $value | humanize }} 个 dead-letter（重试耗尽）。检查 GET /api/runs/dead 与 agent_dead_letters 表，判断是否可重放。"
+          runbook_url: "https://github.com/Xander-Xai/Customer-Service-AI-Agent/blob/main/docs/operations/distributed-runtime-runbook.md#33-dead_letter-堆积"
