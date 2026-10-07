@@ -22,9 +22,9 @@
 
 **入口文档**：[docs/reference/current-state.md](docs/reference/current-state.md)。历史版本变更在 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)，本 README 不展开逐版本历史。
 
-> **关于证据**：本仓库区分「代码存在」与「证据支持」。正式 RAG 指标、生产 QPS/P95、真实 ERP 写操作、真实用户业务指标一律标记 `NOT_VERIFIED` / `NOT_MEASURED`，并登记在 [Issue #7](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/7)。任何未经 provenance 支撑的数字都不应从这里、README 或面试材料中被引用为当前结果。
+> **关于证据**：本仓库区分「代码存在」与「证据支持」。正式 RAG 指标、生产 QPS/P95、真实 ERP 写操作、真实用户业务指标一律标记 `NOT_VERIFIED` / `NOT_MEASURED`，并登记在 [Issue #7](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/7)。任何未经 provenance 支撑的数字都不应从这里、README 或任何对外材料中被引用为当前结果。
 
-## 30 秒看懂
+## Key Features
 
 | 维度 | 是什么 | 证据等级 |
 |---|---|---|
@@ -33,21 +33,34 @@
 | **Durable 分布式 Runtime** | PostgreSQL checkpoint + Redis per-thread 锁 + Celery worker + 崩溃恢复 + 工具幂等 ledger + DLQ 重放 | CI VERIFIED（真实 PG + Redis） |
 | **HITL 高风险审批** | 风险分级 + 执行前拦截 + durable 审批表 + TTL + 职责分离 | CI VERIFIED（确定性 staging 工具） |
 | **MCP 工具集成** | read-only-first adapter + deterministic fake-server 契约 | 已进 `main`，默认关闭 |
+| **Observability** | OpenTelemetry 语义 span → OTLP；Prometheus / Grafana / Alertmanager / Loki | 本地验证；可查询 trace 后端 `NOT_VERIFIED` |
 | **Evidence-driven evaluation** | 证据有效性判定（不看指标大小）+ 文档一致性守卫 | CI VERIFIED |
 
-## 3 分钟 Reviewer Path
+## Reproducible Offline Demo
+
+一条命令，离线、确定性地跑通「正常客服路由」，并输出可审计的证据卡（Mock LLM、无 API Key、无出网）：
+
+```bash
+make demo-offline
+```
+
+证据卡包含 scenario / `MOCK/OFFLINE` / verdict（`PASS` / `FAIL` / `NOT_RUN`）/ Git SHA / UTC 时间戳 / 命令 / 源码与测试锚点 / 环境边界。退出码即底层检查的退出码；**「没跑」或「跑挂」永远不会被输出成 `PASS`**。完整说明见 [docs/guides/offline-demo.md](docs/guides/offline-demo.md)。
+
+## Start here
 
 1. [当前事实入口](docs/reference/current-state.md) — 不硬编码数字，从代码/配置推导
-2. [可复现 demo 场景](docs/interview/demo-scenarios.md) — 每条命令产出真实证据
-3. [源码 → 面试问题映射](docs/interview/source-map.md) — 每个能力都有源码/测试锚点
-4. [证据边界](docs/evaluation/production-evidence.md) — 哪些是 `NOT_VERIFIED` / `NOT_MEASURED`
+2. [架构设计](docs/design/architecture-design.md) · [分布式 Runtime](docs/design/agent-runtime.md) · [HITL 审批治理](docs/design/human-in-the-loop.md)
+3. [证据边界](docs/evaluation/production-evidence.md) — 哪些是 `NOT_VERIFIED` / `NOT_MEASURED`
+4. [文档索引](docs/README.md)
 
-架构、运行时、RAG、HITL 深潜见 [docs/interview/](docs/interview/)；完整导航见下方[文档导航](#文档导航)。
+完整导航见下方[文档导航](#文档导航)。
 
 ---
 
 ## 目录
 
+- [Key Features](#key-features)
+- [Reproducible Offline Demo](#reproducible-offline-demo)
 - [架构](#架构)
 - [四层状态机](#四层状态机)
 - [五种协作模式](#五种协作模式)
@@ -339,7 +352,7 @@ CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `
 - TTL 到期落 `EXPIRED`，**按拒绝处理，绝不默认放行**。
 - 幂等双防线：审批防「不该做的被做了」，side-effect ledger 防「做了一次被重做」。已批准执行走 `operation_key = run_id:approval:{approval_id}`，在任意次重试中恒定。
 
-设计：[docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md) · 深潜：[docs/interview/hitl-deep-dive.md](docs/interview/hitl-deep-dive.md)
+设计：[docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md)
 
 ### 评测的真实性
 
@@ -396,7 +409,7 @@ CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `
 | 分布式运行时代运维 | [docs/operations/distributed-runtime-runbook.md](docs/operations/distributed-runtime-runbook.md) |
 | 生产部署与上线前检查 | [docs/operations/production-operations-guide.md](docs/operations/production-operations-guide.md) · [检查清单](docs/checklists/production-readiness-checklist.md) |
 | RAG 方法论与评测口径 | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
-| 面试深潜（架构/运行时/RAG/HITL/取舍） | [docs/interview/](docs/interview/) |
+| 分布式 Runtime 设计（架构/幂等/崩溃恢复/取舍） | [docs/design/agent-runtime.md](docs/design/agent-runtime.md) · [ADR-009](docs/decisions/009-distributed-agent-runtime.md) |
 | 历史版本与审计快照 | [docs/reports/](docs/reports/)（**历史快照，非当前事实**） |
 | 文档总索引 | [docs/README.md](docs/README.md) |
 
