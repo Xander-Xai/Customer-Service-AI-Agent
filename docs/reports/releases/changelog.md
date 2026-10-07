@@ -22,8 +22,12 @@
 
 ## v6.3 — Engineering Reference Release (2026-10-07)
 
-> Git tag `v6.3` points at the latest green `main`. This is an **engineering-reference
-> snapshot of accumulated evidence**, not a production GA. Formal RAG
+> Git tag `v6.3` is an immutable Engineering Reference Release snapshot pinned at
+> commit `cbd74807d31472df5a602f4e18d9a20352721654` (the then-latest green `main`).
+> Current `main` has since advanced with later correctness / documentation /
+> repository-readiness / maintenance changes; the runtime version remains `6.3`.
+> This is an engineering-reference snapshot of accumulated evidence, **not** a
+> production GA. Formal RAG
 > metrics, production QPS/P95/P99, real ERP writes and multi-replica production
 > behavior remain `NOT_VERIFIED` / `NOT_MEASURED`. Full evidence-layered notes are
 > in the GitHub Release; deferred evidence is tracked in Issue #7.
