@@ -1,6 +1,6 @@
 # 多智能体客服系统 — 架构设计文档
 
-> 本文档面向技术面试场景，系统阐述项目的核心设计决策、技术选型理由与权衡取舍。
+> 本文档面向工程与架构评审，系统阐述项目的核心设计决策、技术选型理由与权衡取舍。
 
 > **Current HEAD addendum (2026-09-29)**: runtime version remains 6.3. Historical
 > percentages/P99 and production outcomes are not current facts without a
@@ -83,7 +83,7 @@ Layer 3: 响应处理 ──→ 解决状态评估 + 缓存写入 + SLA 监控
 **设计决策：为什么用 LangGraph 而不是自己写状态机？**
 - LangGraph 的 `StateGraph` 提供声明式的节点和条件边定义，代码可读性高
 - 内置状态序列化 + 官方 checkpointer（`MemorySaver` / `AsyncPostgresSaver`）支持持久化检查点（checkpoint）和时间回溯；生产用 PostgreSQL 后端跨 worker/副本共享
-- 社区生态好，面试官认知度高
+- 社区生态好，工程团队认知度高
 
 **设计决策：为什么缓存前置到 Layer 0？**
 - 化妆品客服场景存在大量高频重复问题（"你们有什么产品？""精华液多少钱？"）——设计目标是让重复查询命中缓存后跳过整个 LLM 路由 + Agent 处理链路（预估重复占比 60-70%、未命中时端到端 5-15s 延迟会降为毫秒级，此为**设计目标估算，当前生产命中率/延迟未测量**）

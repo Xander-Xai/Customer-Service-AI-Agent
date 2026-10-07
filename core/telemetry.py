@@ -4,10 +4,10 @@ Positioning
 -----------
 ``core/tracing.py`` is **infrastructure** only: it installs a TracerProvider and
 auto-instruments FastAPI / httpx / SQLAlchemy. That tells you an HTTP request
-happened. It cannot answer the questions an interviewer actually asks about this
-system: which agent ran, how many documents were retrieved, how many survived
-reranking, which tool, where a human approval parked the run, and what the
-``error_type`` was on failure.
+happened. It cannot answer the questions an operator or reviewer actually asks
+about this system: which agent ran, how many documents were retrieved, how many
+survived reranking, which tool, where a human approval parked the run, and what
+the ``error_type`` was on failure.
 
 This module adds the **application semantics**, under three hard constraints:
 
@@ -415,7 +415,7 @@ def run_correlation_attributes() -> dict[str, Any]:
 
     Populated on the worker path; usually empty on the HTTP fast path, which has
     no ``run_id`` (that is one of the reasons the fast path is not inside the
-    durable HITL boundary — see ``docs/interview/hitl-deep-dive.md``).
+    durable HITL boundary — see ``docs/design/human-in-the-loop.md``).
     """
     attrs: dict[str, Any] = {}
     try:

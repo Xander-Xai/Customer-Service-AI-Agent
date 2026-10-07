@@ -189,7 +189,7 @@ make db-downgrade # 回滚迁移
 | **Level 2 — CI VERIFIED** | 真实基础设施 + 命令 + artifact | `make runtime-e2e`（真实 PG + Redis + 多进程 Celery）、`make runtime-chaos`（SIGKILL worker 恢复）、`make runtime-verify`（`artifacts/distributed-runtime/<ts>/report.json`，schema `distributed-runtime-evidence/v2`，带 `tested_code_sha` + `generated_at`） |
 | **Level 3 — 未生产验证** | `NOT_VERIFIED` | 真实生产集群 / 多副本长期稳定 / 真实用户流量 / 真实 ERP 写操作 / 大规模 queue backlog / K8s autoscaling / multi-region |
 
-> **Level 2 ≠ 生产验证。** 文档、简历、面试材料都不得把 Level 2 表述为
+> **Level 2 ≠ 生产验证。** 本仓库文档与任何对外表述都不得把 Level 2 表述为
 > "生产集群已验证"。
 
 ### Human-in-the-Loop 高风险审批治理（已实现，非计划）

@@ -9,19 +9,19 @@
 > 文中所有具体指标数字均标注了生成日期与数据集，属于对应日期的报告快照；
 > 当前值必须用 `python3 scripts/evaluate_rag.py` 重新生成 artifact 后引用。
 >
-> 本文档解决"RAG 无评估指标"缺口，提供评估方法论、执行脚本和面试话术。
+> 本文档解决"RAG 无评估指标"缺口，提供评估方法论与执行脚本。
 
 ---
 
-## 1. 为什么面试会被追问 RAG？
+## 1. 为什么需要评估 RAG？
 
-RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考点**。面试官常问：
+RAG（Retrieval-Augmented Generation）的检索质量不能靠"看起来还行"判断。工程评审中围绕它反复出现的三个问题是：
 
 - "你怎么评估 RAG 的检索质量？"
 - "怎么证明 RAG 比不用 RAG 效果好？"
 - "RAG 检索不到相关内容时怎么办？"
 
-如果答不上来，说明对 RAG 的理解停留在"调 API"层面，缺乏工程化思维。
+无法回答这些问题，说明对 RAG 的工程化只停留在"调 API"层面。
 
 ---
 
@@ -29,7 +29,7 @@ RAG（Retrieval-Augmented Generation）是 AI 应用开发岗位的**核心考�
 
 ### 2.1 核心指标
 
-| 指标 | 含义 | 计算方式 | 面试怎么说 |
+| 指标 | 含义 | 计算方式 | 工程表述 |
 |------|------|---------|-----------|
 | **Hit Rate@K** | Top-K 结果中是否包含正确答案 | 命中数 / 总查询数 | "X% 的问题能在前 K 条结果中找到答案" |
 | **Precision@K** | Top-K 结果中有多少是相关的 | 相关文档数 / K | "平均每次检索有 Y 条是真正相关的" |
@@ -358,7 +358,7 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 > 报告快照：[docs/reference/rag-evaluation-report.json](rag-evaluation-report.json)
 > （自动生成，2026-06，30 条查询口径）
 
-> **面试话术**：63.3% 是改进前的历史基线（英文 embedding，30 条查询集）。
+> **表述要点**：63.3% 是改进前的历史基线（英文 embedding，30 条查询集）。
 > 当时的改进（中文 embedding + query rewriting + reranker）把 Hit Rate@3 提到
 > 80.0%、MRR 提到 0.778（历史报告值，30 条查询口径）。当前实现已升级为
 > Qdrant + bge-large-zh-v1.5 + BM25 混合检索 + 649 条基准评估集，
@@ -366,9 +366,9 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 
 ---
 
-## 4. 改进方向（面试加分项）
+## 4. 改进方向
 
-当面试官问"怎么改进 RAG"时，展示你对进阶技术的理解：
+若要继续提升检索质量，可沿以下方向推进：
 
 ### 4.1 短期改进（成本低）
 
@@ -396,7 +396,7 @@ preflight artifact）结构上无法认证，正式指标保持 NOT_VERIFIED。
 
 ---
 
-## 5. 面试 Q&A 准备
+## 5. 常见工程问题（Q&A）
 
 ### Q: "你怎么评估 RAG 检索质量？"
 

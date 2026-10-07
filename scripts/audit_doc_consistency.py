@@ -109,7 +109,6 @@ HISTORICAL_DIRS = (
 # Small explicit exclude list for files that are snapshots by convention.
 EXCLUDE_FILES = {
     Path("docs/reports/releases/changelog.md"),  # release history, snapshot per section
-    Path("docs/reports/resume-description.md"),  # has its own evidence-freeze header
 }
 HISTORICAL_MARKER = "HISTORICAL AUDIT SNAPSHOT"
 # A banner is a document *declaring itself* historical, so it must be a
@@ -1607,7 +1606,9 @@ RAG_STALE_BLOCKER_HISTORICAL_RE = re.compile(
 )
 
 
-def check_rag_unresolved_blocker_drift(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+def check_rag_unresolved_blocker_drift(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
     """Guard AI: an active CURRENT doc must not revive the superseded
     'RAG blocker unresolved / Issue #99 still pending or unreproduced' framing.
     The #99 gold-label provenance audit is complete on current main and the
@@ -1617,8 +1618,7 @@ def check_rag_unresolved_blocker_drift(docs: list[Path], errors: list[str], root
         rel = path.relative_to(root)
         for line_no, line in enumerate(text_lines(path), 1):
             if not (
-                RAG_STALE_BLOCKER_UNRESOLVED_RE.search(line)
-                or RAG_STALE_ISSUE99_RE.search(line)
+                RAG_STALE_BLOCKER_UNRESOLVED_RE.search(line) or RAG_STALE_ISSUE99_RE.search(line)
             ):
                 continue
             if RAG_STALE_BLOCKER_HISTORICAL_RE.search(line):
@@ -1784,7 +1784,7 @@ RUNTIME_NEGATION_RE = re.compile(
     r"尚未在真实|未在真实|尚未.{0,20}验证|不等同于生产|不等于生产|"
     r"假设|假想|设想场景|如果将来|即便将来|"
     r"反例|反面|错误(?:的)?(?:说法|示例)|不要说|不能说|不得(?:说|写)|"
-    r"面试话术|追问|反问|not\s+implemented|no\s+longer|never\s+implemented|"
+    r"追问|反问|not\s+implemented|no\s+longer|never\s+implemented|"
     r"下一阶段设计",
     re.IGNORECASE,
 )
@@ -1803,8 +1803,8 @@ MULTI_WORKER_DEPLOY_RE = re.compile(
 )
 # Guard Y is deliberately an explicit allowlist rather than pattern inference.
 # "Does this sentence sound like deployment guidance?" is not decidable by
-# regex and produced heavy false positives (interview scripts, API tables, ADRs
-# about unrelated topics). Naming the deployment-facing CURRENT documents makes
+# regex and produced heavy false positives (narrative walkthroughs, API tables,
+# ADRs about unrelated topics). Naming the deployment-facing CURRENT documents makes
 # the requirement explicit, auditable, and impossible to evade by rewording.
 # These are the docs an operator or new engineer reads to configure a deployment.
 MULTI_WORKER_DEPLOY_DOCS: frozenset[str] = frozenset(
@@ -2166,8 +2166,8 @@ def check_rag_preflight_pointer_drift(
 
 
 # ---------------------------------------------------------------------------
-# Guard AB: interview docs must not upgrade a non-blocking RAG blocker into a
-# global one.
+# Guard AB: no CURRENT engineering doc may upgrade a non-blocking RAG blocker
+# into a global one.
 #
 # Truth source: the ``blockers[]`` entries of the latest committed preflight
 # (same discovery as Guard AA). The verdict is read from the artifact — this
@@ -2176,10 +2176,12 @@ def check_rag_preflight_pointer_drift(
 # a doc edit.
 # ---------------------------------------------------------------------------
 
-#: Blocker code whose reported scope the interview docs are held to.
+#: Blocker code whose reported scope the canonical RAG-evaluation doc is held to.
 RERANKER_BLOCKER_CODE = "RERANKER_PROVIDER_AUTH"
-#: Docs whose CURRENT claims about that code are guarded.
-RERANKER_SEMANTICS_DOCS: frozenset[str] = frozenset({"docs/interview/rag-deep-dive.md"})
+#: Docs whose CURRENT claims about that code are guarded. The canonical
+#: engineering source is the RAG evaluation reference (the narrative deep-dives
+#: were removed from this public repository).
+RERANKER_SEMANTICS_DOCS: frozenset[str] = frozenset({"docs/reference/rag-evaluation.md"})
 #: How many lines either side of a hit still count as the same claim.
 _SEMANTICS_WINDOW = 2
 #: Wording that promotes the code to a global blocker, or asserts it is a
@@ -2205,6 +2207,36 @@ _BLOCKER_CLAIM_NEGATION_RE = re.compile(
     r"\bnot\b|\bnever\b|\bno longer\b|rather than|previous|legacy|historical|must not",
     re.IGNORECASE,
 )
+#: Sentence terminators used to scope a finding to the sentence that names the
+#: blocker code. Newlines are deliberately *not* boundaries: markdown soft-wraps
+#: a sentence across lines, and the dense canonical RAG doc lists several
+#: blocker codes on adjacent lines, so a fixed +/-N line window would attribute
+#: another blocker's "primary blocker" wording to this code (a false positive
+#: that would force a truthful doc edit).
+_BLOCKER_SENTENCE_BOUNDARY = "。！？!?；;"
+
+
+def _sentences_naming(text: str, needle: str) -> list[str]:
+    """Return the sentence spans of ``text`` that contain ``needle``.
+
+    Each span runs from the nearest preceding terminator to the nearest
+    following terminator, so a wrong claim is attributed only to the sentence
+    that actually names the blocker code.
+    """
+    spans: list[str] = []
+    cursor = 0
+    while True:
+        idx = text.find(needle, cursor)
+        if idx == -1:
+            return spans
+        left = idx
+        while left > 0 and text[left - 1] not in _BLOCKER_SENTENCE_BOUNDARY:
+            left -= 1
+        right = idx + len(needle)
+        while right < len(text) and text[right] not in _BLOCKER_SENTENCE_BOUNDARY:
+            right += 1
+        spans.append(text[left:right])
+        cursor = idx + len(needle)
 
 
 def latest_blocker_semantics(root: Path = ROOT) -> dict[str, dict] | None:
@@ -2260,9 +2292,15 @@ def check_reranker_blocker_semantics(errors: list[str], root: Path = ROOT) -> No
             lo = max(0, line_no - 1 - _SEMANTICS_WINDOW)
             hi = min(len(lines), line_no + _SEMANTICS_WINDOW)
             window = "\n".join(lines[lo:hi])
-            if not _BLOCKER_GLOBAL_CLAIM_RE.search(window):
-                continue
-            if _BLOCKER_CLAIM_NEGATION_RE.search(window):
+            claimed = False
+            for sentence in _sentences_naming(window, RERANKER_BLOCKER_CODE):
+                if not _BLOCKER_GLOBAL_CLAIM_RE.search(sentence):
+                    continue
+                if _BLOCKER_CLAIM_NEGATION_RE.search(sentence):
+                    continue
+                claimed = True
+                break
+            if not claimed:
                 continue
             errors.append(
                 f"reranker blocker semantics drift in {rel_str}:{line_no} — "

@@ -20,7 +20,6 @@
 | 部署、切换、运维排障 | → [operations/](#operationsoperations) |
 | 发布前/部署前逐项检查 | → [checklists/](#checklistschecklists) |
 | provider/生产/Runtime 证据边界 | → [evaluation/](#evaluationevaluation)、[evaluation/distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md) |
-| 面试介绍、深入问答、题集 | → [design/interview-intro.md](design/interview-intro.md)、[design/interview-deep-dive.md](design/interview-deep-dive.md)、[interview-questions-final.md](interview-questions-final.md) |
 | 整改规格、完成报告（历史） | → [audit/](#auditaudit) |
 | 历史设计与实施计划（2026-06） | → [superpowers/](#superpowerssuperpowers) |
 | 阶段完成报告、版本发布说明 | → [reports/](#reportsreports) |
@@ -56,7 +55,7 @@
 - 公共仓库密钥策略 → [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
-### 👑 管理者
+### 👑 维护者
 - 版本变更日志 → [reports/releases/changelog.md](reports/releases/changelog.md)
 - 历史发布说明 → [reports/releases/release-notes-v6.0.md](reports/releases/release-notes-v6.0.md)（不是当前状态入口）
 - 阶段改进报告 → [reports/milestone/](reports/milestone/)
@@ -111,18 +110,8 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 - 项目总览 → [../README.md](../README.md)
 - 架构设计 → [design/architecture-design.md](design/architecture-design.md)
 - 编码规范 → [standards/conventions.md](standards/conventions.md)
-- 项目介绍 → [design/interview-intro.md](design/interview-intro.md)
-- 深入 Q&A → [design/interview-deep-dive.md](design/interview-deep-dive.md)
-- 面试题集 → [interview-questions-final.md](interview-questions-final.md)
-- **五个可复现演示场景（场景/执行链/源码锚点/测试锚点/命令/实际结果/讲解/追问/边界/证据等级）** → [interview/demo-scenarios.md](interview/demo-scenarios.md)
-- **源码溯源地图（问题 → 源码 → 测试 → 证据）** → [interview/source-map.md](interview/source-map.md)
-- 架构逐问（15 问 + 证据分级 + 不宣称清单） → [interview/architecture-walkthrough.md](interview/architecture-walkthrough.md)
-- Runtime 深入（Celery/ACK/租约/崩溃恢复 + flaky 根因） → [interview/runtime-deep-dive.md](interview/runtime-deep-dive.md)
-- RAG 深入（检索链路、评测口径、失败分析；指标 NOT_VERIFIED） → [interview/rag-deep-dive.md](interview/rag-deep-dive.md)
-- HITL 深入（风险分级、执行前拦截、TTL、职责分离、approval ≠ idempotency） → [interview/hitl-deep-dive.md](interview/hitl-deep-dive.md)
-- 失败模式与取舍（为什么不做 / 代价 / 我们犯过的错） → [interview/failure-and-tradeoffs.md](interview/failure-and-tradeoffs.md)
-- Tool Result 面试材料 → [interview/context-engineering-interview.md](interview/context-engineering-interview.md)
-- 简历描述（证据冻结） → [reports/resume-description.md](reports/resume-description.md)
+- 当前事实入口 → [reference/current-state.md](reference/current-state.md)
+- 一键离线可复现 demo（Mock LLM / 无 API Key / 无出网） → [guides/offline-demo.md](guides/offline-demo.md)
 
 ---
 
@@ -135,7 +124,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | 文件 | 说明 | 读者 |
 |---|---|---|
 | [architecture-design.md](design/architecture-design.md) | 四层状态机、9 个 Agent、5 种协作模式 | 开发者、新人 |
-| [agent-runtime.md](design/agent-runtime.md) | 分布式 Agent Runtime 完整设计（状态机 / 锁 / 幂等 / DLQ） | 开发者、面试者 |
+| [agent-runtime.md](design/agent-runtime.md) | 分布式 Agent Runtime 完整设计（状态机 / 锁 / 幂等 / DLQ） | 开发者 |
 | [distributed-agent-runtime.md](design/distributed-agent-runtime.md) | 分布式 Runtime 架构与可靠性边界（能力/非能力） | 开发者、审计者 |
 | [human-in-the-loop.md](design/human-in-the-loop.md) | 高风险工具副作用的人工审批治理（风险模型 / 职责分离 / TTL / 幂等双防线 / 证据边界） | 开发者、审计者 |
 | [runtime-state-ownership.md](design/runtime-state-ownership.md) | 四类状态归属表（checkpoint / session / cache / tool store） | 开发者、审计者 |
@@ -143,8 +132,6 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [context-engineering.md](design/context-engineering.md) | Tool Result / Session Context Engineering | 开发者 |
 | [security.md](design/security.md) | 安全架构、威胁模型、认证方案 | 开发者、审计者 |
 | [prompt-engineering.md](design/prompt-engineering.md) | Prompt 策略和模式 | 开发者 |
-| [interview-intro.md](design/interview-intro.md) | 项目介绍（面试用，60s / 2min / 3min 三档） | 新人 |
-| [interview-deep-dive.md](design/interview-deep-dive.md) | 深入 Q&A（面试用） | 新人 |
 
 ---
 
@@ -374,4 +361,4 @@ CURRENT  DESIGN/ADR  ARCHIVE
 
 ---
 
-*最后更新：2026-10-02（Repository Truth Convergence：新增分布式 Agent Runtime 文档索引 — ADR-009 / agent-runtime / runtime-state-ownership / async-agent-worker-architecture / distributed-runtime-runbook / distributed-runtime-interview-evidence，并修正 lifecycle 标注）*
+*最后更新：2026-10-07（Public repository finalization：移除公开仓中的非工程资产，读者模型收敛为 Newcomer / Developer / Operator / Auditor / Maintainer；索引指向 canonical 工程文档）*

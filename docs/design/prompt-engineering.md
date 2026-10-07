@@ -1,6 +1,6 @@
 # Prompt Engineering 设计文档
 
-> 本文档记录系统中所有 Prompt 的设计思路、技术选型和迭代演进。面试时可按需引用对应章节。
+> 本文档记录系统中所有 Prompt 的设计思路、技术选型和迭代演进。
 
 ---
 
@@ -279,7 +279,7 @@ variant = cumulative_distribution[bucket_normalized]
 
 ---
 
-## 7. 面试话术
+## 7. 常见工程问题（Q&A）
 
 ### Q: "你是怎么做 Prompt 优化的？"
 

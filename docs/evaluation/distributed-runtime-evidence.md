@@ -102,7 +102,7 @@ multi-region、cross-process SSE replay。
 **Not claimed（HITL）**：真实 ERP 写操作（`NOT_VERIFIED`）、审批 SLA
 （`NOT_MEASURED`）、主动通知（TODO）、快路径覆盖（设计上不覆盖）。
 
-## Interview Questions
+## 设计问答（Design Q&A）
 
 ### Q1 为什么 Postgres Checkpoint，而不是 Redis？
 Postgres 有事务/唯一约束/持久化，checkpoint 是 canonical durable state，必须跨

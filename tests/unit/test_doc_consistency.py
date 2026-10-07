@@ -553,9 +553,9 @@ def test_metric_check_uses_artifact_state_not_doc_state(tmp_repo: Path, monkeypa
     assert audit.formal_rag_metrics(root=tmp_repo) == "NOT_VERIFIED"
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any("unproven current RAG metric claim" in e for e in errors), (
-        "docs cannot own/promote the evidence state — guard must still fire"
-    )
+    assert any(
+        "unproven current RAG metric claim" in e for e in errors
+    ), "docs cannot own/promote the evidence state — guard must still fire"
 
 
 # ------------------------------------------- artifact-driven governance
@@ -812,9 +812,9 @@ def test_metric_claim_guard_uses_artifact_state_not_doc_state(tmp_repo: Path):
     doc = write(tmp_repo, "README.md", "current Hit@3 82%")  # no provenance binding
     errors: list[str] = []
     audit.check_unproven_current_metrics([doc], errors, root=tmp_repo)
-    assert any("bind the number to provenance" in e for e in errors), (
-        "VERIFIED artifacts allow claims but provenance binding stays required"
-    )
+    assert any(
+        "bind the number to provenance" in e for e in errors
+    ), "VERIFIED artifacts allow claims but provenance binding stays required"
     qualified = write(tmp_repo, "README.md", "current Hit@3 82% (artifact: rag-649 run)")
     errors2: list[str] = []
     audit.check_unproven_current_metrics([qualified], errors2, root=tmp_repo)
@@ -872,9 +872,9 @@ def test_stale_not_verified_doc_against_derived_verified_fails(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any("stale formal-status claim" in e and rel in e for e in errors), (
-            f"{rel} must be reported as stale: {errors}"
-        )
+        assert any(
+            "stale formal-status claim" in e and rel in e for e in errors
+        ), f"{rel} must be reported as stale: {errors}"
 
 
 def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
@@ -886,9 +886,9 @@ def test_doc_self_promoting_to_verified_fails(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo, **promoted)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any("must not self-promote" in e and rel in e for e in errors), (
-            f"{rel} must be reported as self-promotion: {errors}"
-        )
+        assert any(
+            "must not self-promote" in e and rel in e for e in errors
+        ), f"{rel} must be reported as self-promotion: {errors}"
 
 
 def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
@@ -901,9 +901,9 @@ def test_restoring_agreement_turns_the_guard_green(tmp_repo: Path):
     _write_artifact(tmp_repo, _formal_shaped_report(sha, 16))
     artifact_rel = "artifacts/evaluation/rag-649/run-20261001T000000Z/report.json"
 
-    assert _status_agreement_after_writing(tmp_repo), (
-        "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
-    )
+    assert _status_agreement_after_writing(
+        tmp_repo
+    ), "stale NOT_VERIFIED docs must fail while a formal artifact derives VERIFIED"
 
     rendered = {
         rel: body.replace("NOT_VERIFIED", "VERIFIED").replace(
@@ -1007,9 +1007,9 @@ def test_doc_claiming_both_states_is_a_conflict(tmp_repo: Path):
     errors = _status_agreement_after_writing(tmp_repo, **conflicting)
     assert len(errors) == 5, errors
     for rel in STATUS_AGREEMENT_DOCS:
-        assert any("status conflict" in e and rel in e for e in errors), (
-            f"{rel} must be reported as CONFLICT: {errors}"
-        )
+        assert any(
+            "status conflict" in e and rel in e for e in errors
+        ), f"{rel} must be reported as CONFLICT: {errors}"
 
 
 def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
@@ -1033,9 +1033,9 @@ def test_status_agreement_rule_is_shared_between_audit_and_project_facts():
     assert formal_status_agreement_problems(None, "NOT_VERIFIED", "d.md") == []
 
     src = (REAL_ROOT / "scripts" / "project_facts.py").read_text(encoding="utf-8")
-    assert "formal_status_agreement_problems" in src, (
-        "project_facts must delegate to the shared rule, not reimplement it"
-    )
+    assert (
+        "formal_status_agreement_problems" in src
+    ), "project_facts must delegate to the shared rule, not reimplement it"
 
 
 def test_real_repo_status_agreement_is_clean_and_status_stays_not_verified():
@@ -1470,7 +1470,7 @@ def test_zero_latency_in_decision_doc_is_tolerated(tmp_repo: Path):
 
 
 def test_production_grade_claim_is_rejected(tmp_repo: Path):
-    doc = write(tmp_repo, "docs/design/interview.md", "我把这个系统做到了生产级。\n")
+    doc = write(tmp_repo, "docs/reference/current-claims.md", "我把这个系统做到了生产级。\n")
     errors: list[str] = []
     audit.check_production_claims([doc], errors, root=tmp_repo)
     assert any("production" in e.lower() for e in errors)
@@ -1479,7 +1479,7 @@ def test_production_grade_claim_is_rejected(tmp_repo: Path):
 def test_production_oriented_framing_passes(tmp_repo: Path):
     doc = write(
         tmp_repo,
-        "docs/design/interview.md",
+        "docs/reference/current-claims.md",
         "这是生产化架构/面向生产的工程设计；生产验收级证据尚未完成。\n"
         "| **v4.3** | 2026-06-07 | 生产验收 8.1/10 记录 |\n",
     )
@@ -2141,7 +2141,7 @@ def test_reranker_blocker_scope_correct_wording_passes(tmp_repo: Path):
     _write_preflight_with_reranker(tmp_repo, blocking=False)
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         "最新 v2 preflight 检测到 `probe: silent_fallback`，对应条目 "
         "`RERANKER_PROVIDER_AUTH` 是 **non-blocking**（`blocking: false`，"
         '`blocks_experiments: ["hybrid_rerank"]`），因此它**不是**整个 preflight '
@@ -2158,7 +2158,7 @@ def test_reranker_blocker_described_as_blocking_is_detected(tmp_repo: Path):
     _write_preflight_with_reranker(tmp_repo, blocking=False)
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         "preflight 已经把它列为 **blocker** 而不是 warning"
         "（`RERANKER_PROVIDER_AUTH`，`probe: silent_fallback`）。\n",
     )
@@ -2171,7 +2171,7 @@ def test_reranker_blocker_described_as_global_blocker_is_detected(tmp_repo: Path
     _write_preflight_with_reranker(tmp_repo, blocking=False)
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         "`RERANKER_PROVIDER_AUTH` 是整个 preflight 的 global blocker，阻塞所有实验。\n",
     )
     errors: list[str] = []
@@ -2185,7 +2185,7 @@ def test_reranker_blocker_historical_quoting_is_not_flagged(tmp_repo: Path):
     _write_preflight_with_reranker(tmp_repo, blocking=False)
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         '正确说法不是"preflight 已经把它列为 blocker 而不是 warning"'
         "（那是 v1 之前的旧口径遗留）；v2 记录的是 `blocking: false`。\n",
     )
@@ -2200,7 +2200,7 @@ def test_reranker_guard_is_silent_when_artifact_says_blocking(tmp_repo: Path):
     _write_preflight_with_reranker(tmp_repo, blocking=True)
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         "`RERANKER_PROVIDER_AUTH` 是 global blocker，阻塞所有实验。\n",
     )
     errors: list[str] = []
@@ -2211,7 +2211,7 @@ def test_reranker_guard_is_silent_when_artifact_says_blocking(tmp_repo: Path):
 def test_reranker_guard_fails_open_without_committed_preflight(tmp_repo: Path):
     write(
         tmp_repo,
-        "docs/interview/rag-deep-dive.md",
+        "docs/reference/rag-evaluation.md",
         "`RERANKER_PROVIDER_AUTH` 是 global blocker。\n",
     )
     errors: list[str] = []
@@ -2228,9 +2228,10 @@ def test_real_repo_reranker_blocker_is_non_blocking_and_doc_says_so():
     entry = semantics["RERANKER_PROVIDER_AUTH"]
     assert entry["blocking"] is False
     assert entry["blocks_experiments"] == ["hybrid_rerank"]
-    doc = (REAL_ROOT / "docs/interview/rag-deep-dive.md").read_text(encoding="utf-8")
+    doc = (REAL_ROOT / "docs/reference/rag-evaluation.md").read_text(encoding="utf-8")
+    assert "RERANKER_PROVIDER_AUTH" in doc
     assert "`blocking: false`" in doc
-    assert "工程债" in doc  # runtime silent-fallback debt retained
+    assert "hybrid_rerank" in doc  # scope: only the rerank experiment
 
 
 # ------------------------------------------------------------- Guard W
@@ -2432,9 +2433,9 @@ def test_real_repo_declares_all_runtime_capabilities_implemented():
     """Guards V are fail-open when code is absent; assert the shipped code really
     satisfies every marker set so the guard cannot be silently disabled."""
     for capability, (markers, _pattern) in audit.RUNTIME_CAPABILITIES.items():
-        assert audit._capability_is_implemented(REAL_ROOT, markers), (
-            f"{capability} marker set is not fully present in the repository"
-        )
+        assert audit._capability_is_implemented(
+            REAL_ROOT, markers
+        ), f"{capability} marker set is not fully present in the repository"
 
 
 # ===========================================================================

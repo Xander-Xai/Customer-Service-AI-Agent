@@ -30,8 +30,8 @@ because "the runtime behaved correctly against real PostgreSQL + Redis" and
 | **Level 3 — PRODUCTION VERIFIED** | Real production cluster, sustained multi-replica operation, real user traffic, **real ERP write operations**, large queue backlogs, K8s autoscaling, multi-region. | **`NOT_VERIFIED`** |
 
 **`LOCALLY_VERIFIED != PRODUCTION_VERIFIED`.** Level 2 must never be reported as
-"production cluster verified" in documentation, résumés, or interview answers. The
-specific gaps that Level 2 does **not** close:
+"production cluster verified" in this repository's documentation or any external
+claim. The specific gaps that Level 2 does **not** close:
 
 - Single-Redis mutual exclusion is proven; **Redis failover / Redlock-cluster behaviour is not**.
 - Lease renewal during execution is proven; **worker-owned AgentRun state commits
@@ -182,7 +182,7 @@ This is the current evidence contract, not a claim that production has been vali
 | Production latency/P99 | `NOT_MEASURED` | Local processing time is not provider or production latency |
 | RAG quality (649-query formal metrics) | `NOT_VERIFIED` (current blocker = dataset defect: shipped gold labels lack relevance semantics) | Must name dataset, code, model, K, population, and artifact; never conflate Hit@K with Recall@K |
 | **Distributed runtime correctness** (checkpoint / locking / crash recovery / idempotency) | **Level 2 — CI VERIFIED** via `make runtime-e2e` / `runtime-chaos` / `runtime-verify` against real PostgreSQL + Redis + multi-process Celery | Proves the listed dimensions against real infrastructure; **never** report this as production-cluster validation |
-| **Distributed runtime in production** (real cluster, sustained multi-replica, real ERP writes, backlog, autoscaling) | **Level 3 — `NOT_VERIFIED`** | Must not be claimed in docs, résumés, or interview answers |
+| **Distributed runtime in production** (real cluster, sustained multi-replica, real ERP writes, backlog, autoscaling) | **Level 3 — `NOT_VERIFIED`** | Must not be claimed as a verified capability anywhere in this repository |
 | **Human-in-the-loop governance** (`WAITING_APPROVAL`, `core/hitl/`, `/api/approvals`) | **Level 2 — CI VERIFIED** via `pytest tests/unit/test_hitl_*` and `pytest tests/integration/runtime/test_hitl_*` against real PostgreSQL + Redis (deterministic staging tools) | Proves the governance contract (pre-execution gating, separation of duties, TTL fail-closed, single-consumption resume, ledger-protected approved side effects) — **not** real ERP writes |
 | **HITL against a real ERP** (real refund/order-write behind approval) | **Level 3 — `NOT_VERIFIED`** | No enterprise staging artifact exists; verification used deterministic staging tools (`tools/hitl_staging_tools.py`), which is a different claim |
 | **Realtime fast path (`/api/chat`) under HITL** | **Not covered by design** | The fast path has no run context, so `core/hitl/gate.py` does not gate it and no approval record is produced. Never describe `/api/chat` as HITL-protected |

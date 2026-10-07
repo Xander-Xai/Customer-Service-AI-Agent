@@ -32,8 +32,7 @@ server 侧协议对端              本仓 ``tests/integration/fake_mcp_server.p
 一部分，不是装饰：``adapter.close()`` 自身没有超时，fixture teardown 若裸
 ``await close()``，一次 close 回归就会让整套 CI 永远跑不完。
 
-证据边界见 ``docs/reference/current-state.md`` 的 MCP 段落与
-``docs/interview/failure-and-tradeoffs.md`` §7。**真实第三方 MCP server、生产连通性
+证据边界见 ``docs/reference/current-state.md`` 的 MCP 段落。**真实第三方 MCP server、生产连通性
 与写操作 MCP 工具都是 ``NOT_VERIFIED`` / ``NOT_IMPLEMENTED``**，本文件不声称覆盖。
 """
 
