@@ -316,6 +316,7 @@ npm run build      # 前端产物构建
 
 | 门禁 | 命令 | 需要的环境 |
 |---|---|---|
+| 代码规范（Ruff check + format） | `make lint` | 无 |
 | 文档事实一致性 | `make audit-docs` | 无 |
 | OpenAPI 快照一致 | `make openapi-check` | 无 |
 | 分布式运行时验收 | `make runtime-e2e` | 真实 PostgreSQL + Redis + 多进程 Celery |
@@ -324,7 +325,7 @@ npm run build      # 前端产物构建
 | DLQ 人工重放 | `make runtime-replay-help` | 同上 |
 | RAG 正式 649-query 评测 | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649` | 真实 provider + 已索引语料（**当前 NOT_VERIFIED**，见 Issue #7） |
 
-CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `dev-compat`（pytest 8 兼容）、`runtime-e2e`（真实 PG + Redis）、`security`（mypy 严格档 + bandit + secret guard）三条独立 lane。
+CI 在 Python 3.10 / 3.11 / 3.12 上跑同一套单测与集成测试，另有 `lint`（Ruff check + format，blocking）、`dev-compat`（pytest 8 兼容）、`runtime-e2e`（真实 PG + Redis）、`security`（mypy 严格档 + bandit + secret guard）四条独立 lane。
 
 评测与证据的完整口径见 [docs/evaluation/](docs/evaluation/) 与 [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md)。
 

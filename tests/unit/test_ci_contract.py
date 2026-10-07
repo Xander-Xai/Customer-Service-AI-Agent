@@ -654,6 +654,87 @@ class TestToolchainReproducibility:
         )
 
 
+class TestRuffGate:
+    """The canonical Ruff pin must be a BLOCKING CI gate.
+
+    `make lint` runs `ruff check .` + `ruff format --check .`, and the version
+    pin lives exactly once in requirements-dev.txt
+    (``test_repository_contract.py::TestDependencyContract``). But no CI step
+    used to run ruff at all — the standard existed only locally / in pre-commit,
+    so committed files could drift from the canonical pin while every lane
+    stayed green. This class locks the CI gate that closes that gap:
+
+    1. both canonical commands run, in their own steps;
+    2. neither is softened (``continue-on-error`` / ``|| true``);
+    3. the toolchain is installed from the single-source requirements-dev.txt,
+       never a hardcoded ``ruff==`` that could drift from ``make lint``.
+
+    Removing or weakening the gate fails these tests.
+    """
+
+    INSTALL_STEP = "Install canonical lint toolchain"
+    LINT_STEP = "Ruff lint (blocking)"
+    FORMAT_STEP = "Ruff format check (blocking)"
+
+    def test_ruff_lint_is_a_blocking_step(self):
+        run = _step_run_exact(self.LINT_STEP)
+        assert (
+            "ruff check ." in run
+        ), f"The '{self.LINT_STEP}' step no longer runs `ruff check .`:\n{run}"
+        assert "|| true" not in run, (
+            f"The '{self.LINT_STEP}' step fakes a green exit with `|| true`; Ruff "
+            "must be blocking."
+        )
+        assert "continue-on-error" not in _step_block_exact(self.LINT_STEP), (
+            f"The '{self.LINT_STEP}' step is softened with continue-on-error; Ruff "
+            "lint must fail the job."
+        )
+
+    def test_ruff_format_check_is_a_blocking_step(self):
+        run = _step_run_exact(self.FORMAT_STEP)
+        assert (
+            "ruff format --check ." in run
+        ), f"The '{self.FORMAT_STEP}' step no longer runs `ruff format --check .`:\n{run}"
+        assert "|| true" not in run, (
+            f"The '{self.FORMAT_STEP}' step fakes a green exit with `|| true`; Ruff "
+            "format must be blocking."
+        )
+        assert "continue-on-error" not in _step_block_exact(self.FORMAT_STEP), (
+            f"The '{self.FORMAT_STEP}' step is softened with continue-on-error; "
+            "Ruff format check must fail the job."
+        )
+
+    def test_lint_toolchain_comes_from_canonical_requirements(self):
+        """The gate must install Ruff from requirements-dev.txt — the single
+        source of the canonical pin — so CI cannot run a different Ruff than
+        ``make lint`` does."""
+        run = _step_run_exact(self.INSTALL_STEP)
+        assert "-r requirements-dev.txt" in run, (
+            f"The '{self.INSTALL_STEP}' step does not install requirements-dev.txt, "
+            f"so the canonical Ruff pin is not guaranteed:\n{run}"
+        )
+        assert "ruff==" not in run, (
+            f"The '{self.INSTALL_STEP}' step hardcodes a Ruff version instead of "
+            "using the canonical requirements-dev.txt pin; the two can drift."
+        )
+
+    def test_no_hardcoded_ruff_pin_anywhere_in_ci(self):
+        """No CI ``run:`` step may hardcode a Ruff version specifier. A second
+        pin in the workflow can silently disagree with requirements-dev.txt,
+        which is exactly the "two rule sets under one command" drift the pin
+        exists to prevent. Comments are not ``run:`` scripts, so documenting the
+        pin in a comment is fine; installing from a literal is not."""
+        offenders = [
+            name
+            for name, run, _block in _steps()
+            if run is not None and re.search(r"\bruff\s*(?:==|>=|<=|~=|!=|>|<)", run)
+        ]
+        assert not offenders, (
+            "These CI steps hardcode a Ruff version specifier instead of using "
+            f"the canonical requirements-dev.txt pin: {offenders}"
+        )
+
+
 class TestMcpContractWiring:
     """The MCP e2e contract suite must be a real gate in the blocking `test`
     job, not a silent skip.

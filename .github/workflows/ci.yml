@@ -7,6 +7,42 @@ on:
     branches: [main]
 
 jobs:
+  # ===== Canonical Ruff gate (blocking) =====
+  #
+  # The repository declares `ruff==0.4.0` as the canonical lint/format
+  # toolchain (requirements-dev.txt + .pre-commit-config.yaml), and `make lint`
+  # runs exactly `ruff check .` + `ruff format --check .`. Before this job, NO
+  # CI step ran ruff at all: the standard only existed locally / in pre-commit,
+  # so committed files could drift from the canonical pin while every lane
+  # stayed green. This job turns the canonical pin into a hard gate.
+  #
+  # The toolchain is installed from requirements-dev.txt — the single source of
+  # truth for the pin — NOT a hardcoded `ruff==X` here. A contract test
+  # (tests/unit/test_ci_contract.py::TestRuffGate) fails if this job is ever
+  # softened (continue-on-error / `|| true`), removed, or made to pin a second,
+  # divergent Ruff version.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install canonical lint toolchain
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff lint (blocking)
+        run: ruff check .
+
+      - name: Ruff format check (blocking)
+        run: ruff format --check .
+
   test:
     runs-on: ubuntu-latest
     strategy:
