@@ -1,6 +1,12 @@
 # 药妆智多星 · LangGraph 多智能体客服系统
 
+> **Production-oriented LangGraph multi-agent customer-service runtime** — hybrid RAG, durable distributed execution, HITL approval governance, and evidence-driven evaluation.
+
 面向化妆品生产/销售企业的 **LangGraph 多 Agent 客服运行时**：四层状态机动态路由（缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理），叠加分布式执行底座（PostgreSQL checkpoint + Redis 锁 + Celery worker + 工具副作用幂等 ledger）与高风险操作的人工审批治理。
+
+[![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
 不是 demo：`make test` 默认**离线**可跑（无 API Key、不出公网），CI 在 3 个 Python 版本 + 真实 PostgreSQL/Redis 上跑同一套用例。
 
@@ -17,6 +23,26 @@
 **入口文档**：[docs/reference/current-state.md](docs/reference/current-state.md)。历史版本变更在 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)，本 README 不展开逐版本历史。
 
 > **关于证据**：本仓库区分「代码存在」与「证据支持」。正式 RAG 指标、生产 QPS/P95、真实 ERP 写操作、真实用户业务指标一律标记 `NOT_VERIFIED` / `NOT_MEASURED`，并登记在 [Issue #7](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/7)。任何未经 provenance 支撑的数字都不应从这里、README 或面试材料中被引用为当前结果。
+
+## 30 秒看懂
+
+| 维度 | 是什么 | 证据等级 |
+|---|---|---|
+| **LangGraph 多 Agent 编排** | 四层状态机（缓存 → 路由 → 协作 → 后处理）+ 9 个 Agent + 5 种协作模式 | CI VERIFIED |
+| **Hybrid RAG** | Qdrant 向量 + BM25 → RRF 融合 → reranker + retrieval contract + 证据有效性 gate | 实现 + 本地验证；正式 649 指标 `NOT_VERIFIED` |
+| **Durable 分布式 Runtime** | PostgreSQL checkpoint + Redis per-thread 锁 + Celery worker + 崩溃恢复 + 工具幂等 ledger + DLQ 重放 | CI VERIFIED（真实 PG + Redis） |
+| **HITL 高风险审批** | 风险分级 + 执行前拦截 + durable 审批表 + TTL + 职责分离 | CI VERIFIED（确定性 staging 工具） |
+| **MCP 工具集成** | read-only-first adapter + deterministic fake-server 契约 | 已进 `main`，默认关闭 |
+| **Evidence-driven evaluation** | 证据有效性判定（不看指标大小）+ 文档一致性守卫 | CI VERIFIED |
+
+## 3 分钟 Reviewer Path
+
+1. [当前事实入口](docs/reference/current-state.md) — 不硬编码数字，从代码/配置推导
+2. [可复现 demo 场景](docs/interview/demo-scenarios.md) — 每条命令产出真实证据
+3. [源码 → 面试问题映射](docs/interview/source-map.md) — 每个能力都有源码/测试锚点
+4. [证据边界](docs/evaluation/production-evidence.md) — 哪些是 `NOT_VERIFIED` / `NOT_MEASURED`
+
+架构、运行时、RAG、HITL 深潜见 [docs/interview/](docs/interview/)；完整导航见下方[文档导航](#文档导航)。
 
 ---
 
@@ -38,7 +64,7 @@
 
 ## 架构
 
-```
+```mermaid
 graph TB
     subgraph Input["接入层"]
         WS[WebSocket /ws/chat]
