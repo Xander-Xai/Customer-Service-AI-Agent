@@ -69,6 +69,8 @@
 - 治理审计 → [reports/audit/governance-audit.md](reports/audit/governance-audit.md)（历史快照）
 - 模型对比分析 → [reference/model-comparison.md](reference/model-comparison.md)
 - RAG 评估（canonical） → [reference/rag-evaluation.md](reference/rag-evaluation.md)
+- RAG Gold 标注契约与离线校验（#119） → [reference/rag-gold-label-contract.md](reference/rag-gold-label-contract.md)
+- RAG Gold 静态 provenance 审计（#99） → [reference/rag-gold-label-provenance.md](reference/rag-gold-label-provenance.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
 
 ### 真相层级（-current truth 速查）
@@ -188,6 +190,8 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 | 🟡 HISTORICAL AUDIT（含 CURRENT 配置小结） |
 | [project-structure.md](reference/project-structure.md) | 仓库目录与职责 | 开发者 | 🟢 CURRENT / REFERENCE |
 | [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 | 🟢 CURRENT（历史小节单独标注） |
+| [rag-gold-label-contract.md](reference/rag-gold-label-contract.md) | RAG gold 标注契约（`rag-gold-label/v1`）+ 离线校验器（#119） | 开发者、标注者 | 🟢 CURRENT / CONTRACT |
+| [rag-gold-label-provenance.md](reference/rag-gold-label-provenance.md) | 旧 gold 静态 provenance 审计（#99） | 开发者、审计者 | 🟣 EVIDENCE |
 | [testing-guide.md](reference/testing-guide.md) | 测试分层、运行方式与新增测试落位约定 | 开发者 | 🟢 CURRENT / REFERENCE |
 
 ---

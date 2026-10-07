@@ -135,6 +135,7 @@ python3 -m pytest tests/unit/test_rag_gold_label_provenance.py -q
 ## 相关
 
 - [rag-evaluation.md](rag-evaluation.md) — 评测方法论与 canonical 执行链
+- [rag-gold-label-contract.md](rag-gold-label-contract.md) — 修复路径的标注契约 + 离线校验器（#119）
 - [current-state.md](current-state.md) — 当前事实入口
 - `scripts/rag_evidence_validity.py` — 执行/corpus evidence-validity 判定（#93）
 - Issue #99 — 本审计的 tracking issue

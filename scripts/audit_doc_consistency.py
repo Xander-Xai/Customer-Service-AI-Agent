@@ -388,7 +388,7 @@ def check_file_refs_line_aware(path: Path, text: str, errors: list[str], root: P
     context (修复方案 / 已移除 / 已删除 / 历史) are tolerated."""
     for line_no, line in enumerate(text.splitlines(), 1):
         refs = re.findall(
-            r"(?:scripts|tests|rag|core|cache|agents|api|llm|web/src)/[A-Za-z0-9_./-]+\.(?:json|yml|yaml|py|js)",
+            r"(?:scripts|tests|rag|core|cache|agents|api|llm|web/src)/[A-Za-z0-9_./-]+\.(?:jsonl|json|yml|yaml|py|js)",
             line,
         )
         if not refs:
