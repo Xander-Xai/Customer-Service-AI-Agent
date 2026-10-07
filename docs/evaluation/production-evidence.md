@@ -34,10 +34,17 @@ because "the runtime behaved correctly against real PostgreSQL + Redis" and
 specific gaps that Level 2 does **not** close:
 
 - Single-Redis mutual exclusion is proven; **Redis failover / Redlock-cluster behaviour is not**.
-- Lease renewal during execution is proven; **fencing token is not implemented** (a worker
-  paused longer than the lock TTL can resume concurrently with the new owner; terminal
-  writes are rejected by the `from_statuses={RUNNING}` conditional update, but
-  node-level side effects still rely on the tool idempotency ledger).
+- Lease renewal during execution is proven; **worker-owned AgentRun state commits
+  are protected by Owner CAS**, not merely by a `from_statuses={RUNNING}` check:
+  `runtime/repository.py::transition_owned` atomically requires the expected
+  `worker_id` and an unexpired lease as well as the run status; `renew_lease_owned`
+  and `takeover_running` apply atomic ownership predicates. An expired or replaced
+  worker therefore cannot commit worker-owned AgentRun state. **A full fencing token
+  and forced cancellation of stale execution are still not implemented**: a worker
+  paused longer than the lock TTL may resume running concurrently with its successor,
+  and external/node-level side effects are not fenced by Owner CAS (the tool
+  idempotency ledger mitigates repeats, but does not guarantee exactly-once effects).
+  See `docs/reference/current-state.md` for the current boundary.
 - Correctness against real infrastructure is proven; **production throughput, P99 latency,
   and queue backlog behaviour are `NOT_MEASURED`**.
 - Simulated failures and process kills are proven; **real ERP write operations are
