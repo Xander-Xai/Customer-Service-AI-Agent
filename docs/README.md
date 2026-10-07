@@ -19,7 +19,7 @@
 | 编码规范、项目约定、AI 助手指令 | → [standards/](#standardsstandards) |
 | 部署、切换、运维排障 | → [operations/](#operationsoperations) |
 | 发布前/部署前逐项检查 | → [checklists/](#checklistschecklists) |
-| provider/生产/Runtime 证据边界 | → [evaluation/](#evaluationevaluation)、[reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) |
+| provider/生产/Runtime 证据边界 | → [evaluation/](#evaluationevaluation)、[evaluation/distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md) |
 | 面试介绍、深入问答、题集 | → [design/interview-intro.md](design/interview-intro.md)、[design/interview-deep-dive.md](design/interview-deep-dive.md)、[interview-questions-final.md](interview-questions-final.md) |
 | 整改规格、完成报告（历史） | → [audit/](#auditaudit) |
 | 历史设计与实施计划（2026-06） | → [superpowers/](#superpowerssuperpowers) |
@@ -51,7 +51,7 @@
 - 事实驱动工程标准 → [standards/evidence-driven-engineering-loop.md](standards/evidence-driven-engineering-loop.md)
 - Agent Context Engineering → [design/context-engineering.md](design/context-engineering.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
-- 分布式 Runtime 证据边界 → [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md)
+- 分布式 Runtime 证据边界 → [evaluation/distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md)
 - 一键离线可复现 demo（Mock LLM / 无 API Key / 无出网 / 证据卡） → [guides/offline-demo.md](guides/offline-demo.md)
 - 公共仓库密钥策略 → [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
@@ -83,7 +83,7 @@
 | 分布式 Runtime 为什么这么设计 | [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009-distributed-agent-runtime.md](decisions/009-distributed-agent-runtime.md) | 🔵 DESIGN / ADR |
 | 高风险副作用的审批治理与证据边界 | [design/human-in-the-loop.md](design/human-in-the-loop.md) | 🔵 DESIGN |
 | 分布式 Runtime 运维操作 | [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) | 🟠 RUNBOOK |
-| 分布式 Runtime 能宣称到什么程度 | [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) | 🟣 EVIDENCE |
+| 分布式 Runtime 能宣称到什么程度 | [evaluation/distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md) | 🟣 EVIDENCE |
 | 历史审计输出 | [reports/audit/](reports/audit/)、[reports/plans/](reports/plans/) | 🟡 HISTORICAL SNAPSHOT（按日期，仅执行时点有效） |
 | 版本历史 | [reports/releases/](reports/releases/) | 🟡 SNAPSHOT（旧版本章节永不重写） |
 
@@ -186,7 +186,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [api-reference.md](reference/api-reference.md) | API 端点速查（数量由生成工具校验，不手工维护） | 开发者 | 🟢 CURRENT / REFERENCE |
 | [configuration.md](reference/configuration.md) | 配置项全表（默认值的真相源是 `core/config.py`） | 开发者、运维 | 🟢 CURRENT / REFERENCE |
 | [current-state.md](reference/current-state.md) | 当前事实入口（版本/模型/验证命令） | 开发者、审计者 | 🟢 CURRENT |
-| [distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md) | 分布式 Runtime 面试证据边界（Level 1/2/3 与不宣称项） | 面试者、审计者 | 🟣 EVIDENCE |
+| [distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md) | 分布式 Runtime 证据边界（Level 1/2/3 与不宣称项） | 开发者、审计者 | 🟣 EVIDENCE |
 | [model-comparison.md](reference/model-comparison.md) | 模型配置 + 历史估算口径 | 开发者、审计者 | 🟡 HISTORICAL AUDIT（含 CURRENT 配置小结） |
 | [project-structure.md](reference/project-structure.md) | 仓库目录与职责 | 开发者 | 🟢 CURRENT / REFERENCE |
 | [rag-evaluation.md](reference/rag-evaluation.md) | RAG 检索质量评估 | 开发者 | 🟢 CURRENT（历史小节单独标注） |

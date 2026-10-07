@@ -1872,7 +1872,7 @@ REQUIRED_INDEX_ENTRIES: tuple[tuple[str, str], ...] = (
         "worker architecture (implemented vs design)",
     ),
     ("docs/operations/distributed-runtime-runbook.md", "distributed runtime runbook"),
-    ("docs/reference/distributed-runtime-interview-evidence.md", "runtime evidence boundary"),
+    ("docs/evaluation/distributed-runtime-evidence.md", "runtime evidence boundary"),
 )
 
 # Machine-checkable anchor in docs/reference/api-reference.md. The numbers in
