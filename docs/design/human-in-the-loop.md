@@ -213,6 +213,13 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 传确定性 `tool_call_id`，并对"未声明 `side_effect`"的审批工具**显式拒绝执行**
 （否则没有 ledger 保护，等于放行了一个不可去重的写操作）。
 
+> **Issue #130（纵深防御）**：静默降级路径已从根上移除。对于处于异步 Run 上下文
+> 的 `side_effect=True` 工具，只要无法构造可靠的持久化幂等保护——缺
+> `tool_call_id`、`runtime.side_effects` 不可用、操作键 helper 失败，或 ledger
+> 持久化失败——`ToolRegistry.execute_raw` 一律 **fail closed**（返回明确拒绝或让
+> 异常冒泡），handler 保持零调用；它不再退化为非幂等直调。回归测试：
+> `tests/unit/test_async_side_effect_preconditions.py`。
+
 ### 三重消费保护
 
 | 保护 | 作用 |

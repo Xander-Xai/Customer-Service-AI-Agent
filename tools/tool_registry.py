@@ -223,9 +223,14 @@ class ToolRegistry:
         tool_call_id: str | None,
     ) -> Any:
         """``execute_raw`` proper, with the span wrapper peeled off."""
-        idempotent_op = self._idempotent_operation(
+        idempotent_op, refusal = self._idempotent_operation(
             tool, arguments, tool_call_id, stream_callback=stream_callback
         )
+        if refusal is not None:
+            # 异步 Run 中的写操作无法构造可靠的持久化幂等保护 -> FAIL CLOSED。
+            # 绝不退化成裸 handler 执行：at-least-once 重投会重复副作用。
+            logger.warning("异步 Run 副作用前置条件缺失，拒绝执行 tool=%s", name)
+            return refusal
         if idempotent_op is not None:
             # 副作用工具的失败必须冒泡：吞掉异常会把「写操作失败」伪装成成功 run，
             # 让上层 retry/DLQ 完全失效。
@@ -253,36 +258,56 @@ class ToolRegistry:
         tool_call_id: str | None,
         *,
         stream_callback: Callable | None = None,
-    ):
-        """为副作用工具构造幂等执行闭包；不满足条件时返回 None（直接执行）。
+    ) -> tuple[Callable[[], Any] | None, str | None]:
+        """为副作用工具构造幂等执行闭包；返回 ``(operation, refusal)``。
 
-        需要同时具备：
-          - 工具声明 ``side_effect=True``；
-          - 处于异步 Run 执行上下文（``run_id`` 来自 contextvar，worker 路径注入）；
-          - 有稳定的 ``tool_call_id``（LLM Function Calling 的 tool_call id）。
+        判定（Issue #130，异步 Run 前置条件 fail-closed）：
 
-        快路径（``/api/chat`` 等进程内同步执行）没有 run 上下文，返回 None，
-        行为与改造前完全一致。
+          - **只读工具**：``(None, None)``，直接走 handler。
+          - **已声明副作用 + 无 Run 上下文**（实时快路径）：``(None, None)``。
+            该路径的治理由 ``ToolRegistry.execute_raw`` 的统一边界负责
+            （Issue #123），本函数不在此扩张职责。
+          - **已声明副作用 + Run 上下文 + 幂等前置条件齐备**：``(_run, None)``，
+            经 ``runtime.side_effects`` ledger 执行，重投递去重。
+          - **已声明副作用 + Run 上下文 + 前置条件缺失**：``(None, refusal)``。
+            缺少 ``tool_call_id``、Run 上下文模块不可用、幂等 ledger 模块不可用、
+            操作键无法构造——任一情况都**拒绝执行**。
+
+        为什么缺失前置条件必须 fail-closed
+        ---------------------------------
+        异步 Run 是 at-least-once：worker 崩溃/重投会重放同一逻辑步骤。写操作一旦
+        在没有操作键或没有 ledger 的情况下裸执行，就无法证明「做了一次不会被重做」。
+        历史上的实现在这些情况下 ``return None`` 静默退化成非幂等直调，等于把
+        「保护不可用」伪装成「无需保护」。宁可让调用方看到明确拒绝/失败，也不能
+        产生未被记录、可能重复的副作用。
         """
-        if not tool.side_effect or not tool_call_id:
-            return None
+        if not tool.side_effect:
+            return None, None
         try:
             from runtime.context import get_current_run_id, get_current_thread_id
         except Exception:
-            return None
+            # Run 上下文模块不可用：无法证明处于受治理的 Run 中，保守拒绝写操作。
+            return None, self._missing_precondition_refusal(tool.name, "Run 上下文模块不可用")
         run_id = get_current_run_id()
         if not run_id:
-            return None
+            # 实时快路径：由统一执行边界的治理判定处理（Issue #123）。
+            return None, None
+        if not tool_call_id:
+            return None, self._missing_precondition_refusal(tool.name, "缺少 tool_call_id")
         try:
             from runtime.side_effects import (
                 build_tool_idempotency_key,
                 execute_idempotent_operation,
             )
-        except Exception:  # pragma: no cover - ledger 模块不可用时不做幂等包装
-            logger.warning("side-effect ledger 不可用，工具将以非幂等方式执行: %s", tool.name)
-            return None
-
-        operation_key = build_tool_idempotency_key(run_id, tool_call_id)
+        except Exception:
+            logger.error(
+                "side-effect ledger 不可用，拒绝在 Run 上下文中裸执行副作用: %s", tool.name
+            )
+            return None, self._missing_precondition_refusal(tool.name, "幂等 ledger 不可用")
+        try:
+            operation_key = build_tool_idempotency_key(run_id, tool_call_id)
+        except Exception:
+            return None, self._missing_precondition_refusal(tool.name, "幂等操作键构造失败")
         thread_id = get_current_thread_id()
 
         async def _run():
@@ -301,7 +326,15 @@ class ToolRegistry:
                 operation=lambda: self._call_handler(tool, arguments, stream_callback),
             )
 
-        return _run
+        return _run, None
+
+    @staticmethod
+    def _missing_precondition_refusal(tool_name: str, reason: str) -> str:
+        """异步 Run 写操作缺少可靠幂等保护时的明确拒绝语义。"""
+        return (
+            f"错误：写操作工具 '{tool_name}' 在异步 Run 中缺少可靠的幂等保护"
+            f"（{reason}），已拒绝执行以保持 at-least-once 下的副作用安全。"
+        )
 
     @staticmethod
     async def _call_handler(
