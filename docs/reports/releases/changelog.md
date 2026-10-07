@@ -20,6 +20,28 @@
 
 ---
 
+## v6.3 — Interview Reference Release (2026-10-07)
+
+> Git tag `v6.3` points at the latest green `main`. This is an **interview-reference
+> snapshot of accumulated engineering evidence**, not a production GA. Formal RAG
+> metrics, production QPS/P95/P99, real ERP writes and multi-replica production
+> behavior remain `NOT_VERIFIED` / `NOT_MEASURED`. Full evidence-layered notes are
+> in the GitHub Release; deferred evidence is tracked in Issue #7.
+
+Highlights: LangGraph four-layer multi-agent state machine; hybrid RAG
+(Qdrant + BM25 + RRF + reranker + evidence-validity gate); durable distributed
+AgentRun runtime (PostgreSQL checkpoint, Redis per-thread lock, Celery worker,
+crash recovery, retry, DLQ + replay, tool side-effect idempotency); HITL
+high-risk approval governance; off-by-default read-only-first MCP adapter with a
+deterministic fake-server contract; Prometheus/Grafana/Alertmanager/Loki +
+OpenTelemetry semantic spans; and documentation/evidence consistency guards.
+
+Current RAG blocker is `DATASET_DEFECT` (shipped benchmark gold lacks relevance
+semantics; Issue #99 static provenance audit completed on `main`); the
+2026-10-02 provider HTTP 401 is retained as historical preflight evidence.
+
+---
+
 ## v6.3 (2026-06-25) — 前后端联调 + 生产就绪加固 + 文档同步
 
 ### 前后端联调修复

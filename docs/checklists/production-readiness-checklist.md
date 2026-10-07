@@ -41,9 +41,11 @@
       （`increase(agent_run_dead_letter_total[5m]) > 0`）未触发；规则见
       `monitoring/alert_rules.yml`
 - [ ] **RAG evidence pipeline preflight 已通过**（`make rag-eval-import` →
-      `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——已提交的 preflight
-      artifact 显示 provider auth blocker，见
+      `make rag-eval-649-preflight`；当前状态 NOT_VERIFIED——当前 root blocker 是
+      `DATASET_DEFECT`（shipped benchmark gold 无 relevance 语义，Issue #99 静态
+      provenance 审计已在 main 完成），见
       [docs/reference/rag-evaluation.md](../reference/rag-evaluation.md) §3.4；
+      2026-10-02 的 provider HTTP 401 是历史 preflight 证据，不是当前根因；
       smoke run 不是正式证据）
 - [ ] production evidence harness 已生成脱敏且带 provenance 的 artifact
 - [ ] provider auth/staging 已验证；HTTP 401、token usage/billing unavailable 仍是 **NOT_VERIFIED**
