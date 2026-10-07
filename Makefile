@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -51,6 +51,10 @@ test-mcp: env-test ## MCP 工具适配验证（本地 fake MCP server 真实子�
 	# 通过 —— 「没跑」不能被读成「跑过了」。fake MCP server 是本地子进程，不依赖
 	# 任何外部公开 MCP 服务。
 	python3 -m pytest tests/integration/test_mcp_contract_e2e.py -v --tb=short -rs -p no:cacheprovider
+
+demo-offline: env-test ## 一键离线演示（Mock LLM / 无 API Key / 输出可审计证据卡）
+	@echo "🎬 一键离线演示（离线上网守卫；无需 API Key）..."
+	@python3 scripts/demo_offline.py
 
 # ===== 代码质量 =====
 lint: ## 代码检查（ruff）

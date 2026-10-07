@@ -52,6 +52,7 @@
 - Agent Context Engineering → [design/context-engineering.md](design/context-engineering.md)
 - 生产证据边界 → [evaluation/production-evidence.md](evaluation/production-evidence.md)
 - 分布式 Runtime 证据边界 → [reference/distributed-runtime-interview-evidence.md](reference/distributed-runtime-interview-evidence.md)
+- 一键离线可复现 demo（Mock LLM / 无 API Key / 无出网 / 证据卡） → [guides/offline-demo.md](guides/offline-demo.md)
 - 公共仓库密钥策略 → [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)
 - 快速启动检查 → [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md)
 
