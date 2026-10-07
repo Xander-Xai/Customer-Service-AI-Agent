@@ -51,11 +51,22 @@
   `VECTOR_INDEX_EMPTY` 为 downstream symptom，reranker auth 只阻塞
   `hybrid_rerank`。这些语义对**该次 artifact**仍然成立，但不能自动外推到当前
   `main`。
-- **Issue #99（静态审计已完成，留作 gold 替换的 tracking）**：仓库需要一份
-  relevance-judged gold 集（人工标注，或 LLM-judge + 人工抽检），并保留 40 条
-  全 gold 缺失的 query 作为显式 excluded/undeterminable population。在替换之前，
-  `rag_formal_metrics_status` 保持 `NOT_VERIFIED`，不得生成或引用正式指标。
-  真实 provider / 全量运行等环境依赖证据后补。
+- **gold 替换路径：两条已完成的审计/契约 + 一条待完成的人工标注**
+  - **Issue #99（已完成）**：静态 provenance / root-cause 审计已在当前 `main`
+    完成（`scripts/rag_gold_label_provenance.py`，
+    [rag-gold-label-provenance.md](rag-gold-label-provenance.md)），结论即上面的
+    `DATASET_DEFECT`。它是一条**已关闭**的审计，不作为持续 tracking。
+  - **Issue #119（已完成，PR #128）**：版本化、provenance-enforced 的 gold-label
+    契约 `rag-gold-label/v1` 与确定性离线校验器已落地
+    （`scripts/gold_label_contract.py`、`scripts/validate_gold_labels.py`，
+    [rag-gold-label-contract.md](rag-gold-label-contract.md)）。它**不修改**现有
+    649 benchmark、也不产生任何检索指标。
+  - **仍待完成**：按该契约产出一份 relevance-judged gold 集（人工标注，或
+    LLM-judge + 人工抽检），并保留 40 条全 gold 缺失的 query 作为显式
+    excluded/undeterminable population。真实 provider / 全量运行属环境依赖证据
+    （Issue #7）。
+  在替换完成之前，`rag_formal_metrics_status` 保持 `NOT_VERIFIED`，不得生成或
+  引用正式指标。
 - 更早的 `preflight-20260929T191128Z`（v1 schema，
   `status: BLOCKED_VECTOR_INDEX`）继续作为历史记录原样保留，不回填。
 - 详细流程（import → preflight → smoke → formal）、artifact schema、
