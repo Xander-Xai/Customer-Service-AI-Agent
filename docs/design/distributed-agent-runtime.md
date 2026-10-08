@@ -23,18 +23,28 @@ Saga / Outbox / Event Sourcing / CQRS / 全量微服务拆分 / fencing token。
 
 ```mermaid
 flowchart TD
+    Client
+    FastAPI
+    LangGraphA[LangGraph]
+    CkptA[(PostgreSQL Checkpoint)]
+    RunRecord[(AgentRun: QUEUED)]
+    RedisBroker[[Redis / Celery broker]]
+    Worker[Celery Worker]
+    ThreadLock{{Redis thread lock<br/>agent:thread-lock:thread_id}}
+    LangGraphB[LangGraph]
+    CkptB[(PostgreSQL Checkpoint)]
+    RunResult[(AgentRun: result + status)]
+
     Client --> FastAPI
-
-    FastAPI -->|Fast Path /api/chat, /api/chat/stream| LangGraphA[LangGraph]
-    LangGraphA --> CkptA[(PostgreSQL Checkpoint)]
-
-    FastAPI -->|Async Path POST /api/runs| RunRecord[(AgentRun: QUEUED)]
-    RunRecord --> RedisBroker[[Redis / Celery broker]]
-    RedisBroker --> Worker[Celery Worker]
-    Worker --> ThreadLock{{Redis thread lock<br/>agent:thread-lock:thread_id}}
-    ThreadLock --> LangGraphB[LangGraph]
-    LangGraphB --> CkptB[(PostgreSQL Checkpoint)]
-    LangGraphB --> RunResult[(AgentRun: result + status)]
+    FastAPI -->|Fast Path /api/chat, /api/chat/stream| LangGraphA
+    LangGraphA --> CkptA
+    FastAPI -->|Async Path POST /api/runs| RunRecord
+    RunRecord --> RedisBroker
+    RedisBroker --> Worker
+    Worker --> ThreadLock
+    ThreadLock --> LangGraphB
+    LangGraphB --> CkptB
+    LangGraphB --> RunResult
     RunResult -->|GET /api/runs/run_id| Client
 ```
 

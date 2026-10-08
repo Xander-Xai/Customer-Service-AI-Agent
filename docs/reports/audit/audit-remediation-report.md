@@ -88,10 +88,15 @@ receivers:
 针对大文件重构（如 `session_manager.py` 795行、`base_agent.py` 720行），我们在下个迭代 Sprint 启动以下**单一职责 (SRP) 重构规约**：
 
 ```mermaid
-graph TD
-    SM[session_manager.py 795行] --> SM_Store[session_store.py: 持久化存储库]
-    SM --> SM_Crypto[session_crypto.py: AES/Fernet 加密]
-    SM --> SM_Logic[session_manager_core.py: 核心控制流]
+flowchart TD
+    SM["session_manager.py 795行"]
+    SM_Store["session_store.py: 持久化存储库"]
+    SM_Crypto["session_crypto.py: AES/Fernet 加密"]
+    SM_Logic["session_manager_core.py: 核心控制流"]
+
+    SM --> SM_Store
+    SM --> SM_Crypto
+    SM --> SM_Logic
 ```
 
 - **重构准则**: 

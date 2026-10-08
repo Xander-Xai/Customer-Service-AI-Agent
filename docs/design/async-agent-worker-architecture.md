@@ -24,19 +24,36 @@
 
 ```mermaid
 flowchart TD
-    C[Client] --> API[FastAPI]
-    API -->|Fast Path| LG1[LangGraph] --> CP[(PostgreSQL Checkpoint)]
-    API -->|POST /api/runs| RUN[(AgentRun QUEUED)]
-    RUN --> Q[[Redis / Celery broker]]
-    Q --> POOL[Agent Worker Pool]
-    POOL --> LOCK{{Redis thread lock}}
-    LOCK --> LG2[LangGraph] --> CP
-    LG2 --> RES[(AgentRun result)]
-    POOL -->|XADD agent:run:id:events| BUS[[Redis Streams]]
-    BUS --> API -->|SSE| C
-    POOL -->|failure| RETRY[retry backoff]
+    C[Client]
+    API[FastAPI]
+    LG1[LangGraph]
+    CP[(PostgreSQL Checkpoint)]
+    RUN[(AgentRun QUEUED)]
+    Q[[Redis / Celery broker]]
+    POOL[Agent Worker Pool]
+    LOCK{{Redis thread lock}}
+    LG2[LangGraph]
+    RES[(AgentRun result)]
+    BUS[[Redis Streams]]
+    RETRY[retry backoff]
+    DLQ[(application DLQ)]
+
+    C --> API
+    API -->|Fast Path| LG1
+    LG1 --> CP
+    API -->|POST /api/runs| RUN
+    RUN --> Q
+    Q --> POOL
+    POOL --> LOCK
+    LOCK --> LG2
+    LG2 --> CP
+    LG2 --> RES
+    POOL -->|XADD agent:run:id:events| BUS
+    BUS --> API
+    API -->|SSE| C
+    POOL -->|failure| RETRY
     RETRY --> Q
-    RETRY -->|exhausted| DLQ[(application DLQ)]
+    RETRY -->|exhausted| DLQ
 ```
 
 ## ID 语义

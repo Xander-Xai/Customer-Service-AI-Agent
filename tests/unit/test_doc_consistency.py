@@ -2928,3 +2928,69 @@ def test_guard_ai_real_repo_has_no_unresolved_blocker_framing():
     errors: list[str] = []
     audit.check_rag_unresolved_blocker_drift(docs, errors, root=REAL_ROOT)
     assert errors == []
+
+
+# ------------------------------------------------------------- Guard AJ (mermaid)
+
+
+def test_guard_aj_same_line_multi_node_declaration_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/architecture.md",
+        "```mermaid\ngraph TB\n    PA[ProductAgent] TA[TechAgent]\n```\n",
+    )
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure([doc], errors, root=tmp_repo)
+    assert any("multi-node" in e for e in errors)
+
+
+def test_guard_aj_inline_node_declaration_on_edge_is_detected(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/architecture.md",
+        '```mermaid\nflowchart TD\n    A["start"] --> B["end"]\n```\n',
+    )
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure([doc], errors, root=tmp_repo)
+    assert any("inline" in e for e in errors)
+
+
+def test_guard_aj_separate_declarations_pass(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/architecture.md",
+        '```mermaid\nflowchart TD\n    A["start"]\n    B["end"]\n    A --> B\n```\n',
+    )
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_aj_quoted_label_with_call_does_not_false_positive(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/architecture.md",
+        '```mermaid\nflowchart TD\n    W["worker: execute_run(run_id)"]\n'
+        '    X["done"]\n    W --> X\n```\n',
+    )
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_aj_sequence_diagram_is_ignored(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/design/hitl.md",
+        "```mermaid\nsequenceDiagram\n    A->>B: run(a)\n    B-->>A: done\n```\n",
+    )
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_aj_real_repo_mermaid_is_renderable():
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_mermaid_diagram_structure(docs, errors, root=REAL_ROOT)
+    assert errors == []

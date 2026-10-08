@@ -415,7 +415,7 @@ web/src/
 |------|------|------|------|
 | LLM 框架 | LangGraph | LangChain Agent / AutoGen | LangGraph 状态机更清晰，可控性更强 |
 | Web 框架 | FastAPI | Flask / Django | 原生 async + WebSocket + 自动文档 |
-| 向量库 | Qdrant（v6.0 从 ChromaDB 迁移，v6.3 起完全替代 ChromaDB） | FAISS / Pinecone | Rust 原生，Docker 部署，生产就绪，高并发 |
+| 向量库 | Qdrant（v6.0 从 ChromaDB 迁移，v6.3 起完全替代 ChromaDB） | FAISS / Pinecone | Rust 原生，Docker 部署，（Qdrant 自身）生产就绪，高并发 |
 | 缓存 | 自研三层（L1 Redis + L2 Qdrant + L3 Jaccard） | Redis 单层 | 三级缓存（精确+向量+分词），Redis 无法实现语义缓存 |
 | 中文分词 | jieba | HanLP / LAC | 轻量、成熟、社区大 |
 | 部署 | Docker Compose | K8s | 项目规模适中，K8s 过重 |

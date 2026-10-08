@@ -58,9 +58,12 @@ Checks:
   AG. a CURRENT doc must not claim the MCP adapter is absent from main
   AH. a CURRENT doc must not present provider auth / HTTP 401 as the
       definitive current RAG blocker
-  AI. a CURRENT doc must not revive the superseded 'RAG blocker unresolved /
-      Issue #99 still pending or unreproduced' framing (the #99 provenance
-      audit is complete on main; the current blocker is DATASET_DEFECT)
+   AI. a CURRENT doc must not revive the superseded 'RAG blocker unresolved /
+       Issue #99 still pending or unreproduced' framing (the #99 provenance
+       audit is complete on main; the current blocker is DATASET_DEFECT)
+   AJ. every Mermaid node declaration must sit on its own line (no same-line
+       ``A[x] B[y]`` and no node declared inline on an edge), the form GitHub's
+       Mermaid parser reliably renders
 
 Historical docs (with an explicit HISTORICAL banner) are excluded from
 terminology checks but still pass through link/reference checks unless they
@@ -1671,6 +1674,69 @@ def check_lifecycle_vocabulary(docs: list[Path], errors: list[str], root: Path =
                 )
 
 
+# --- Mermaid structural guard (GitHub must render every diagram) -----------
+_MERMAID_FENCE_RE = re.compile(r"```mermaid[ \t]*\n(.*?)```", re.DOTALL)
+_MERMAID_FLOW_HEADER_RE = re.compile(r"^\s*(?:flowchart|graph)\b")
+# Any link operator that separates two nodes.
+_MERMAID_LINK_RE = re.compile(r"-->|---|==>|-\.->|~~~|--o|--x|<-->|<--")
+# Edge labels live between pipes; their text may contain brackets and must not
+# be mistaken for a node declaration.
+_MERMAID_EDGE_LABEL_RE = re.compile(r"\|[^|\n]*\|")
+# Node label text is quoted; it may contain identifiers, brackets or calls
+# (e.g. `execute_run(run_id)`) that must not be mistaken for declarations.
+_MERMAID_QUOTED_RE = re.compile(r'"[^"\n]*"')
+# `id` immediately followed by a shape opener. Covers [ ], ( ), { }, [[ ]],
+# (( )), {{ }}, ([ ]) stadium and [( )] cylinder/node forms.
+_MERMAID_NODE_DECL_RE = re.compile(
+    r"(?:^|[\s(,;])([A-Za-z_][A-Za-z0-9_-]*)"
+    r"(\[\(|\[\[|\[/|\[\\|\[|\(\(|\(\{|\(\[|\{\{|\(|\[|\{)"
+)
+
+
+def _mermaid_node_declaration_count(line: str) -> int:
+    without_labels = _MERMAID_EDGE_LABEL_RE.sub("", line)
+    without_labels = _MERMAID_QUOTED_RE.sub('""', without_labels)
+    return len(_MERMAID_NODE_DECL_RE.findall(without_labels))
+
+
+def check_mermaid_diagram_structure(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """Rule: every Mermaid node declaration sits on its own line.
+
+    The historical rendering failure (README architecture diagram) was a
+    same-line declaration — ``PA[ProductAgent] TA[TechAgent] ...`` — which the
+    GitHub Mermaid parser rejects with "Unable to render rich display". We also
+    flag a node declared inline on an edge (``A[x] --> B``) so diagrams stay in
+    the one-declaration-per-line form known to render on GitHub.
+    """
+    skip_prefix = re.compile(r"(?:subgraph|end|direction|style|classDef|class|linkStyle)\b")
+    for path in docs:
+        rel = path.relative_to(root)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for block in _MERMAID_FENCE_RE.findall(text):
+            lines = block.splitlines()
+            if not lines or not _MERMAID_FLOW_HEADER_RE.match(lines[0]):
+                continue
+            for line in lines:
+                stripped = line.strip()
+                if not stripped or stripped.startswith("%%"):
+                    continue
+                if skip_prefix.match(stripped):
+                    continue
+                count = _mermaid_node_declaration_count(line)
+                if count == 0:
+                    continue
+                if count >= 2 and not _MERMAID_LINK_RE.search(line):
+                    errors.append(
+                        f"illegal mermaid multi-node line in {rel}: declare each "
+                        f"node on its own line — {stripped!r}"
+                    )
+                elif _MERMAID_LINK_RE.search(line):
+                    errors.append(
+                        f"mermaid node declared inline with an edge in {rel}: move "
+                        f"the declaration to its own line — {stripped!r}"
+                    )
+
+
 def v64_claim_is_negated(line: str) -> bool:
     """True when every `v6.4` mention on `line` is grammatically negated.
 
@@ -2597,6 +2663,7 @@ def main() -> int:
         check_links(path, text, errors)
         check_file_refs_line_aware(path, text, errors)
 
+    check_mermaid_diagram_structure(docs, errors)
     check_env_coverage(errors)
     check_canonical_config(errors)
     check_openapi_snapshot(errors)
@@ -2662,6 +2729,7 @@ def main() -> int:
         "docs-index coverage, "
         "API-reference surface, "
         f"multi-worker deployment truth, root-level snapshot hygiene, "
+        f"mermaid diagram structure, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
         f"approval API surface, MCP main-state drift, RAG current-blocker drift, "

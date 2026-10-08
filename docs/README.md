@@ -11,7 +11,11 @@
 
 | 你在找什么？ | 去这里 |
 |---|---|
-| 系统架构、技术设计 | → [design/](#designdesign) |
+| **先读这五个（架构 / Agent 设计 / 评测 / 部署 / 限制）** | → [architecture.md](architecture.md) · [agent-design.md](agent-design.md) · [evaluation.md](evaluation.md) · [deployment.md](deployment.md) · [limitations.md](limitations.md) |
+| **这个项目不宣称什么（最重要）** | → [limitations.md](limitations.md) |
+| **能宣称到什么程度 / 离上线还缺什么** | → [production-readiness.md](production-readiness.md) |
+| **为什么这样设计（LangGraph / Human fallback / 不用裸 Chain）** | → [agent-design.md](agent-design.md) |
+| 系统架构、技术设计 | → [architecture.md](architecture.md)、[design/](#designdesign) |
 | **分布式 Agent Runtime（Celery worker / checkpoint / 幂等 / DLQ）** | → [design/agent-runtime.md](design/agent-runtime.md)、[decisions/009](decisions/009-distributed-agent-runtime.md)、[operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) |
 | **高风险工具为什么要人工审批（退款/改单）** | → [design/human-in-the-loop.md](design/human-in-the-loop.md) |
 | API 接口、模型参数、配置速查 | → [reference/](#referencereference) |
@@ -76,6 +80,12 @@
 
 | 想知道 | 看 | 生命周期 |
 |---|---|---|
+| **架构入口（结构 + 设计理由）** | [architecture.md](architecture.md) | 🟢 CURRENT |
+| **Agent 设计理由（为什么 LangGraph / 为什么 Human fallback）** | [agent-design.md](agent-design.md) | 🟢 CURRENT |
+| **效果怎么衡量（评测与证据）** | [evaluation.md](evaluation.md) | 🟢 CURRENT |
+| **怎么部署（配置理由 + 上线检查）** | [deployment.md](deployment.md) | 🟢 CURRENT |
+| **不宣称什么（不宣称清单）** | [limitations.md](limitations.md) | 🟢 CURRENT |
+| **能力分级与上线差距（能宣称到什么程度）** | [production-readiness.md](production-readiness.md) | 🟢 CURRENT |
 | 当前 runtime 事实 + 验证命令 | [reference/current-state.md](reference/current-state.md) | 🟢 CURRENT（随代码/命令同步） |
 | RAG 评估方法/口径/当前评测状态 | [reference/rag-evaluation.md](reference/rag-evaluation.md) | 🟢 CURRENT（评测实现变更时更新；历史小节单独标注） |
 | provider/生产证据语义 | [evaluation/production-evidence.md](evaluation/production-evidence.md) | 🟣 EVIDENCE |
@@ -120,6 +130,9 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 ### `design/` — 系统设计文档
 
 > 🔵 DESIGN / ADR — 活的设计文档，随代码同步更新
+>
+> **前置阅读**：[architecture.md](architecture.md) 是架构入口与理由层，
+> [agent-design.md](agent-design.md) 是 Agent 设计理由层。本文目录下是更细的专项设计。
 
 | 文件 | 说明 | 读者 |
 |---|---|---|

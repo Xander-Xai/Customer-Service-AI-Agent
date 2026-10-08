@@ -42,16 +42,28 @@ Client → FastAPI → /api/chat (SSE) → LangGraph → (MemorySaver | AsyncPos
 
 ```mermaid
 flowchart TD
+    Client
+    FastAPI
+    LG1[LangGraph]
+    CK1[(PostgreSQL Checkpoint)]
+    Run[(AgentRun QUEUED)]
+    Redis[[Redis / Celery]]
+    W[Celery Worker]
+    Lock{{Redis thread lock}}
+    LG2[LangGraph]
+    CK2[(PostgreSQL Checkpoint)]
+    Res[(AgentRun result/status)]
+
     Client --> FastAPI
-    FastAPI -->|Fast Path /api/chat, /api/chat/stream| LG1[LangGraph]
-    LG1 --> CK1[(PostgreSQL Checkpoint)]
-    FastAPI -->|Async POST /api/runs| Run[(AgentRun QUEUED)]
-    Run --> Redis[[Redis / Celery]]
-    Redis --> W[Celery Worker]
-    W --> Lock{{Redis thread lock}}
-    Lock --> LG2[LangGraph]
-    LG2 --> CK2[(PostgreSQL Checkpoint)]
-    LG2 --> Res[(AgentRun result/status)]
+    FastAPI -->|Fast Path /api/chat, /api/chat/stream| LG1
+    LG1 --> CK1
+    FastAPI -->|Async POST /api/runs| Run
+    Run --> Redis
+    Redis --> W
+    W --> Lock
+    Lock --> LG2
+    LG2 --> CK2
+    LG2 --> Res
     Res -->|GET /api/runs/id| Client
 ```
 

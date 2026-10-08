@@ -22,18 +22,32 @@ Gunicorn 多 worker + 进程内运行时状态不一致：checkpoint 不共享�
 
 ```mermaid
 flowchart LR
-    C[Client] --> A1[FastAPI/Gunicorn W1]
-    C --> A2[FastAPI/Gunicorn W2]
-    A1 --> L{{Redis thread lock}}
+    C[Client]
+    A1[FastAPI/Gunicorn W1]
+    A2[FastAPI/Gunicorn W2]
+    L{{Redis thread lock}}
+    LG[LangGraph]
+    CP[(PostgreSQL Checkpoint)]
+    S[(Redis Session)]
+    RUN[(AgentRun)]
+    IDEM[(Tool Idempotency)]
+    Q[[Redis/Celery]]
+    W[Agent Worker]
+
+    C --> A1
+    C --> A2
+    A1 --> L
     A2 --> L
-    A1 --> LG[LangGraph]
+    A1 --> LG
     A2 --> LG
-    LG --> CP[(PostgreSQL Checkpoint)]
-    A1 --> S[(Redis Session)]
+    LG --> CP
+    A1 --> S
     A2 --> S
-    LG --> RUN[(AgentRun)]
-    LG --> IDEM[(Tool Idempotency)]
-    RUN --> Q[[Redis/Celery]] --> W[Agent Worker] --> L
+    LG --> RUN
+    LG --> IDEM
+    RUN --> Q
+    Q --> W
+    W --> L
     W --> LG
 ```
 
