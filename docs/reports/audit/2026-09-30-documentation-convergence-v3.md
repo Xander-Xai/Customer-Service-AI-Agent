@@ -33,8 +33,6 @@
 - 活文档：README、CLAUDE.md、docs/reference/current-state.md、docs/reference/rag-evaluation.md、
   docs/evaluation/production-evidence.md、docs/design/architecture-design.md、
   docs/operations/e2e-verification-guide.md、docs/checklists/*、docs/README.md、changelog
-- 面试材料：interview-intro / interview-deep-dive / interview-questions-final /
-  interview/context-engineering-interview / reports/resume-description（最后一份冻结，未改）
 - 仓库卫生：git 跟踪 × .gitignore 冲突、SQLite sidecar 文件
 
 ## 3. Fact matrix 摘要
@@ -89,7 +87,7 @@
    NOT_MEASURED；补 RAG evaluation architecture 小节（ablation + evidence chain，
    未与 production request path 混写）。
 6. **e2e-verification-guide.md**：2026-06-20"与当前代码一致"复审口径、固定 5 PASSED
-   输出、1352 collected、"可直接用于面试展示"→ 全部改为动态口径 + 显式
+   输出、1352 collected、"可直接用于对外评审展示"→ 全部改为动态口径 + 显式
    **Historical Evidence** 区（§8 重命名），价格标注历史估计，加入 provider 先探针
    （`probe_provider_auth.py`）与 rag preflight 指引。
 
@@ -102,11 +100,7 @@
 9. **production-evidence.md**：明确两类证据族（provider/production vs RAG retrieval
    evaluation）、metric contract 扩为 multi-K + populations + taxonomy + stage latency、
    local benchmark ≠ production outcome、RAG 行标注 NOT_VERIFIED。
-10. **面试材料**：interview-intro（部署架构措辞、缓存 Q2 改估算口径、新增 Q8 RAG 证据
-    口径）；interview-deep-dive（新增 Q10：ablation/为什么不能只报 Recall/populations/
-    fail-closed/reranker silent fallback/provenance，两处 <10ms 移除）；interview-questions-
-    final（口径头、Q4/Q5 追问弹药、Q9 SLA 配置口径、准备表更新）；
-    context-engineering-interview（与 RAG 评测链的边界小节）。
+10. **内部说明材料**：相关内部说明材料已从公开仓库移除，不再维护。
 11. **changelog**：Unreleased 补 PR #19（完整性描述 + NOT_VERIFIED 状态 + hygiene）与本轮
     convergence v3；未创建 v6.4。
 12. **docs/README.md**：新增"真相层级速查"表（current-state = current facts 入口、
@@ -133,10 +127,6 @@
 - docs/operations/e2e-verification-guide.md
 - docs/checklists/production-readiness-checklist.md
 - docs/checklists/quick-launch-checklist.md
-- docs/design/interview-intro.md
-- docs/design/interview-deep-dive.md
-- docs/interview-questions-final.md
-- docs/interview/context-engineering-interview.md
 - docs/reports/releases/changelog.md（Unreleased）
 - docs/README.md
 - docs/reports/audit/2026-09-30-documentation-convergence-v3.md（本文件）
@@ -153,7 +143,6 @@
 - `docs/reference/rag-evaluation-report.json`（2026-06 30-query 快照）
 - `docs/archive/**`、`docs/reports/milestone/**`、`docs/reports/plans/**`
 - 旧 release notes（release-notes-v5.x/v6.0）与 changelog 的旧版本章节
-- `docs/reports/resume-description.md`（evidence freeze 标注，按任务规则不重写历史证据）
 - `docs/superpowers/**` specs（历史工作单）
 
 ## 7. 基线验证结果（修改前）
@@ -195,7 +184,7 @@
 
 - 当前 649-query 正式 RAG 指标（Hit@K/Recall@K/Precision@K/NDCG@K/MRR@K）：**NOT_VERIFIED**
   ——provider 凭据恢复并按 `make rag-eval-import` → `make rag-eval-649-preflight` →
-  `make rag-eval-649` 产生正式 artifact 前，任何文档/面试材料不得出现"当前"百分比。
+  `make rag-eval-649` 产生正式 artifact 前，任何文档/对外说明材料不得出现"当前"百分比。
 - 历史指标（2026-06 30-query：Hit@3 80% / MRR 0.778）只能以历史口径引用，不能作为当前结果。
 - Provider auth / billing / 生产延迟 / FCR / 人效：NOT_VERIFIED / NOT_AVAILABLE / NOT_MEASURED。
 - 缓存命中率与 LLM 调用节省：机制存在、观测端点存在，生产数值 NOT_MEASURED。
@@ -235,7 +224,7 @@ recover 路径 = 凭据 → `make rag-eval-import` → `make rag-eval-649-prefli
 1. provider 凭据恢复后走 §11 复现路径；正式 artifact 产生后**无需改 Python 代码**——
    `scripts/rag_evidence_status.py` 会从 artifact 推导 VERIFIED，只需按 guard 提示
    把 current-state/rag-evaluation 文档行重渲染并绑定 artifact provenance
-   （`project_facts.py --check` / `audit_doc_consistency.py` 双向强制），同时刷新面试材料中的指标引用。
+   （`project_facts.py --check` / `audit_doc_consistency.py` 双向强制），同时刷新对外说明材料中的指标引用。
 2. 为 `scripts/import_eval_corpus.py` 补 30 个 `scene_0008xx` gold 文档（影响 80 条查询、
    主口径 GOLD_NOT_INDEXED 记账），或在 benchmark 备注该 gap 后再做正式评测。
 3. 后续轮次可考虑把 `evaluation_populations` 的动态计数也纳入 project_facts
@@ -306,11 +295,10 @@ artifact/evidence
 
 | 既有结论 | 复核证据 | 结论 |
 |---|---|---|
-| Cache「本地/进程内/亚毫秒」表述已修正 | grep 全部 active docs：`亚毫秒/进程内读/本地读` 仅存于历史 snapshot 与 ADR 正文；`architecture-design.md`/`interview-deep-dive.md` 已改为「跳过 Router/Agent/LLM 链路 + Redis/Qdrant 网络存储 + 延迟未测量」 | VERIFIED |
+| Cache「本地/进程内/亚毫秒」表述已修正 | grep 全部 active docs：`亚毫秒/进程内读/本地读` 仅存于历史 snapshot 与 ADR 正文；`architecture-design.md` 已改为「跳过 Router/Agent/LLM 链路 + Redis/Qdrant 网络存储 + 延迟未测量」 | VERIFIED |
 | `cache/response_cache.py` 无随机向量 fail-open docstring | module/class/Args docstring（L233-234）与实现一致：`EmbeddingUnavailableError -> skip L2`（L710-722, L760, L824）；Guard P + 回归测试在位 | VERIFIED |
 | `production-operations-guide.md` 引用的脚本/负向声明与仓库一致 | `scripts/probe_provider_auth.py`、`scripts/run_production_evidence.py` 存在；`scripts/restore.sh`/`smoke_test.sh`/`analyze_query_diversity.py`/`cleanup_expired_sessions.py` 确实不存在；负向 env 声明（`CACHE_TTL_PRODUCT` 等）与 `core/config.py` 一致 | VERIFIED |
-| E2E 文档 CURRENT/HISTORICAL 分离 | `e2e-verification-guide.md` L95-105（当前无「5 个全部 PASS」证据声明）+ L240-251（历史 58.28s 快照标注）+ L295-303（面试话术：401/BLOCKED_BY_AUTHENTICATION 为当前 blocker） | VERIFIED |
-| 面试材料量化 claim | Argon2id「100 倍+」已删（改为 memory-hard 定性）；WCAG 表述为「按 AA/AAA 对比度要求设计，完整合规认证未单独完成」；「生产级」均改为 production-oriented 框架；`resume-description.md` evidence-freeze 未触碰 | VERIFIED |
+| E2E 文档 CURRENT/HISTORICAL 分离 | `e2e-verification-guide.md` L95-105（当前无「5 个全部 PASS」证据声明）+ L240-251（历史 58.28s 快照标注）+ L295-303（对外评审话术：401/BLOCKED_BY_AUTHENTICATION 为当前 blocker） | VERIFIED |
 
 ### 15.2 本轮新发现的 drift（修复）
 

@@ -208,7 +208,7 @@ docker compose config                  → exit 0
 - 更强的 tool-side 幂等（下游 idempotency key / operation ledger 对账）。
 - 未来规模需要时再考虑 broker 升级。
 
-## 10. Interview Talking Points（60–90 秒）
+## 10. Engineering Talking Points（60–90 秒）
 
 > 我们的 LangGraph 多 Agent 采用 Hybrid 架构：实时问答继续走
 > `POST /api/chat` + SSE，延迟不变；长任务走 `POST /api/runs`，API 只负责创建

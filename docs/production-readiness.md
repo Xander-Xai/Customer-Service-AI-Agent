@@ -125,4 +125,4 @@ Agent 行为评测 harness · LLM-as-judge · 坐席工作台/转人工闭环 ·
 ## 一句话结论
 
 **代码能力范围 = Implemented；关键基础设施 = Verified (Local/CI)；生产上线能力 =
-`PRODUCTION NOT_VERIFIED`。** 面试或对外表述应停在这条线上，不得再往前一步。
+`PRODUCTION NOT_VERIFIED`。** 对外评审或对外表述应停在这条线上，不得再往前一步。

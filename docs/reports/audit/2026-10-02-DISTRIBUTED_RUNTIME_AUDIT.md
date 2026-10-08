@@ -148,7 +148,7 @@ lock、tool ledger + idempotency helper、Prometheus metrics。
    dispatch；lock TTL > task time limit）。
 4. **缺失的可运营 metrics** 与统一 trace/run/request/thread 日志字段。
 5. **通用 tool 幂等执行 helper**（ledger 已有，补包裹执行 + 测试）。
-6. **文档/ADR/ownership/async 设计/README Mermaid/面试 evidence + 可复现脚本**。
+6. **文档/ADR/ownership/async 设计/README Mermaid/对外评审 evidence + 可复现脚本**。
 
 已具备、无需重做的：Celery 异步链路、Postgres checkpointer、Run 模型/迁移、worker
 侧 thread lock、side-effect ledger、fresh-DB migration 修复。

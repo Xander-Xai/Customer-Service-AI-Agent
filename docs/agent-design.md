@@ -1,7 +1,8 @@
 # Agent Design
 
-> 🟢 CURRENT — 本文回答一个面试官最常问的问题：
-> **"为什么用 LangGraph？为什么不用裸 Chain？为什么需要 Human fallback？"**
+> 🟢 CURRENT — 本文描述本项目的**技术设计目标与关键取舍**：
+> 为什么采用 LangGraph 图状态机、为什么不用裸 Chain、以及为什么需要
+> Human fallback 治理边界。
 >
 > 代码事实见 [architecture.md](architecture.md)；本文专注**设计理由与取舍**。
 

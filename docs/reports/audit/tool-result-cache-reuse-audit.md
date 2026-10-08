@@ -122,7 +122,7 @@ definitions, and a cache lookup immediately before `execute_raw()`. Cache hits
 return raw structured data to the existing V2 optimizer, so compression/offload
 still runs on every result. Add feature flags, bounded metrics, exact-key tests,
 scope/TTL/failure tests, Agent integration, deterministic execution-avoidance
-benchmark, and documentation/interview updates.
+benchmark, and documentation/engineering updates.
 
 ## NON_GOALS
 

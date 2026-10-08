@@ -7,7 +7,7 @@
 
 > 规划范围：仅基于当前 main 分支代码、测试、配置和 CI 做 Remediation Planning。  
 > 本文不实施任何 Issue，不修改业务源码、测试源码或 CI 配置。  
-> 事实优先级：当前代码与可复现验证结果 > 当前配置与测试 > 历史审计文档、README、简历和面试材料。
+> 事实优先级：当前代码与可复现验证结果 > 当前配置与测试 > 历史审计文档、README、对外工程材料。
 
 ## 0. 规划边界与验证方法
 
@@ -19,7 +19,7 @@
 - 新增规划文件：docs/audit/CODEX_REMEDIATION_PLAN.md
 - 审计规格：docs/audit/CODEX_PROJECT_REMEDIATION_SPEC.md
 
-本次只验证和规划，不执行修复、不重构 RAG、不调整路由、不修改认证和缓存行为，也不更新简历或对外材料。
+本次只验证和规划，不执行修复、不重构 RAG、不调整路由、不修改认证和缓存行为，也不更新对外材料。
 
 ### 0.2 已执行的验证
 
@@ -433,7 +433,6 @@
 - core/config.py
 - tests/unit/test_query_router_coverage.py
 - tests/unit/test_core_modules.py
-- docs/interview/、README 或其他描述 Router/CircuitBreaker 的材料
 
 预计新增/修改测试：
 
@@ -450,7 +449,7 @@
 - 修改规则和 LLM gate 会直接改变延迟、成本和分类结果。
 - breaker 统计口径改变会影响生产告警和恢复行为。
 
-实施边界：第一阶段只对齐文档、注释、测试命名和面试材料；算法改动必须另立变更。
+实施边界：第一阶段只对齐文档、注释、测试命名和对外说明材料；算法改动必须另立变更。
 
 #### P2-01 FCR Definition
 
@@ -504,7 +503,7 @@
 
 风险：
 
-- 把 handled rate 当 savings 会产生无法辩护的简历/面试数字。
+- 把 handled rate 当 savings 会产生无法辩护的对外数字。
 - 缺少真实人工 baseline 时只能输出估算，不应输出事实性收益。
 - 数据脱敏、采样偏差和场景分布会影响结论。
 
@@ -606,14 +605,13 @@
 
 #### P2-06 Claim Evidence Matrix
 
-当前状态：CONFIRMED 为治理缺口。当前没有 docs/audit/CLAIM_EVIDENCE_MATRIX.md；README、架构文档、benchmark、简历和面试材料缺少一处统一映射到代码、测试、运行产物和证据等级。
+当前状态：CONFIRMED 为治理缺口。当前没有 docs/audit/CLAIM_EVIDENCE_MATRIX.md；README、架构文档、benchmark、对外工程材料缺少一处统一映射到代码、测试、运行产物和证据等级。
 
 涉及文件：
 
 - docs/audit/CLAIM_EVIDENCE_MATRIX.md（计划新增）
 - README.md
 - docs/design/architecture-design.md
-- docs/interview/
 - docs/reports/
 - scripts/benchmark_*.py
 - tests/eval/
@@ -624,7 +622,7 @@
 - test_claim_matrix_references_existing_files
 - test_claim_matrix_labels_implemented_vs_planned
 - test_claim_matrix_labels_estimate_vs_measured
-- test_resume_and_interview_claims_have_evidence_level
+- test_project_claims_have_evidence_level
 - test_benchmark_links_are_reproducible
 
 风险：
@@ -633,7 +631,7 @@
 - 过度依赖矩阵会把旧审计结论再次当成圣旨。
 - 证据随代码变化，需要在 CI 或 release gate 中防止静默漂移。
 
-实施边界：只建立证据索引和 claim governance；不替用户编写新的简历成果数字。
+实施边界：只建立证据索引和 claim governance；不替用户编写新的对外描述成果数字。
 
 ## 2. ISSUE_DEPENDENCY_GRAPH
 
@@ -672,7 +670,7 @@ P2-05 dataset proof ──┘
 1. P0-03 不得在没有 P0-04 的身份上下文契约时宣称“已完成授权”。
 2. P0-02 不得只改 L1；L1/L2/L3 必须共享同一 scope policy。
 3. P1-02 不得在 P1-03 的 ID 契约未确定前做不可逆数据迁移。
-4. P2-03/P2-04/P2-05 的结果不得在 P2-06 之前升级为简历或面试中的事实性成果。
+4. P2-03/P2-04/P2-05 的结果不得在 P2-06 之前升级为对外描述或对外评审中的事实性成果。
 5. P0-01 是所有实现 Phase 的 gate，但不能以“CI 变红”作为跳过安全修复的理由。
 
 ## 3. IMPLEMENTATION_ORDER
@@ -788,7 +786,7 @@ Gate：
 
 ### Phase 5：Documentation Alignment
 
-目标：只在 P0/P1/P2 对应 gate 通过后同步 README、架构说明、简历 claim 和面试 Q&A。
+目标：只在 P0/P1/P2 对应 gate 通过后同步 README、架构说明、对外 claim 和工程问答口径。
 
 Gate：
 

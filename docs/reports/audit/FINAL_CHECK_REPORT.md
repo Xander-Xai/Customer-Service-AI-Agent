@@ -159,7 +159,7 @@ Runtime version：`6.3`（`core/config.py::VERSION`）
   Test & Evidence → Tech Stack → Project Structure → Business Scenarios → Docs`，
   同步更新 mermaid 架构图（补 `/api/runs` 与 MCP 节点），
   **并把三条功能断链写进 Limitations 置顶**。
-  **未包含面试 Q&A。**
+  **未包含工程问答口径。**
 
 ### 4.3 索引更新
 
@@ -339,13 +339,13 @@ cat artifacts/evaluation/rag-gold-provenance/20261006T223528Z/report.json
 
 ## 10. 附录：同日第二轮（图示补全与两处修正）
 
-第一轮之后补了**面试必需、但仓库确实缺失的图示**，并修正两处问题。
+第一轮之后补了**对外评审必需、但仓库确实缺失的图示**，并修正两处问题。
 
 ### 10.1 新增图示（Phase 4 必做项）
 
 | 图 | 位置 | 为什么必须有 |
 |---|---|---|
-| **一次请求的时序图** | `README.md` Architecture 节 | 面试官最常问"一次对话到底走了哪些组件"。原先只有静态拓扑，没有时序 |
+| **一次请求的时序图** | `README.md` Architecture 节 | 评审者最常问"一次对话到底走了哪些组件"。原先只有静态拓扑，没有时序 |
 | **Agent 工具循环流程图** | `docs/agent-design.md` §2.0 | **原先全仓没有任何 Agent 流程图**。含工具循环、缓存前置、HIGH 风险分流、幂等 claim、上下文工程五段 |
 | **异步执行与崩溃恢复图** | `docs/architecture.md` §2.1 | 本项目最大差异化点（checkpoint 续跑 + lease 接管）原先只有散文 |
 

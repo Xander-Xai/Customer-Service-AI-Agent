@@ -21,16 +21,16 @@
 [`docs/reference/current-state.md`](../reference/current-state.md)（当前事实入口）与 evidence pipeline
 （[`docs/evaluation/production-evidence.md`](../evaluation/production-evidence.md)、
 [`docs/reference/rag-evaluation.md`](../reference/rag-evaluation.md)）**supersede**，
-不再是"唯一执行规格"。目标不是继续扩充模拟题，而是完成一次 Project Truth Alignment：
+不再是"唯一执行规格"。目标不是继续扩充演示场景，而是完成一次 Project Truth Alignment：
 
-    代码事实 → 整改 → 真实测试 → Benchmark Artifact → Claim Matrix → 简历 → 面试 Q&A
+    代码事实 → 整改 → 真实测试 → Benchmark Artifact → Claim Matrix → 对外描述 → 工程问答口径
 
 本文件用于：
 
 1. 固化 P0/P1/P2 问题的边界、证据、预期架构和验收标准。
 2. 防止修复单个 Bug 时顺便重构无关模块。
 3. 区分当前代码事实、历史文档、外部业务数据和未验证假设。
-4. 规定什么时候可以更新简历数字和面试答案。
+4. 规定什么时候可以更新对外指标数字和对外说明。
 5. 为后续 Codex 执行提供阶段门禁和 Definition of Done。
 
 ### 事实优先级
@@ -39,7 +39,7 @@
 2. 带 git SHA、数据集哈希、配置和运行时间的真实 Benchmark Artifact。
 3. 活文档和当前设计文档。
 4. 历史审计、里程碑和发布说明。
-5. 简历草稿、面试答案和模拟题。
+5. 未经验证的草稿与演示材料。
 
 ### Claim 状态
 
@@ -55,7 +55,7 @@
 
 ### 1.1 总体判断
 
-代码事实、历史文档、简历描述和面试答案已经演化成不同版本。整改顺序必须是：先建立唯一事实源，再修复安全与正确性问题，再跑真实测试和 Benchmark，最后更新简历与面试资料。
+代码事实、历史文档、对外描述和对外说明已经演化成不同版本。整改顺序必须是：先建立唯一事实源，再修复安全与正确性问题，再跑真实测试和 Benchmark，最后更新对外工程资料。
 
 ### 1.2 审计快照中的关键事实
 
@@ -79,7 +79,7 @@
 - Agent 带 scene 的搜索：Agent 进入带 Qdrant Filter 的 knowledge_base.search；可能绕开 query_multiple，因此不保证进入 BM25 + RRF。
 - Hybrid query_multiple：Query Expansion → Vector + BM25 → RRF → Reranker；当前 Agent 并不总是进入这条路径。
 
-因此，简历中的“场景过滤 → Query Rewrite → Vector + BM25 → RRF → Rerank”必须在统一入口和 Trace 验证完成后才能恢复为主链路描述。
+因此，对外描述中的“场景过滤 → Query Rewrite → Vector + BM25 → RRF → Rerank”必须在统一入口和 Trace 验证完成后才能恢复为主链路描述。
 
 ### 1.4 当前 Agent、Router 和可靠性基线
 
@@ -100,7 +100,7 @@
 5. LLM 只能提出 Tool Call；Schema、AuthZ、风险和资源归属必须在 Tool/Service 层执行。
 6. 指标先定义再计算；每个数字必须有输入、公式、脚本和 Artifact。
 7. 历史文档是快照，不自动代表当前事实。
-8. 未通过 Phase Gate 前，简历和面试答案不得使用对应的生产化表述。
+8. 未通过 Phase Gate 前，对外宣称口径不得使用对应的生产化表述。
 
 ## 3. P0 Critical Issues
 
@@ -427,7 +427,7 @@ Agent 只能调用 retrieve。Prefetch 预取 query/rewrite/embedding/context，
 
 - 业务 Agent 只使用一个 retrieval API。
 - 每个查询有 rewrite、scene、vector、BM25、RRF、rerank Trace。
-- 主链路与简历描述一致，或 Claim Matrix 标 partial。
+- 主链路与对外描述一致，或 Claim Matrix 标 partial。
 - Prefetch 不绕过权限、scene、版本过滤。
 
 #### Out of Scope
@@ -621,7 +621,7 @@ ToolResult 至少包含 status、data、error_code、retryable。
 - 非法参数在 handler 前拒绝。
 - 未授权调用不能产生业务副作用。
 - timeout/retry/breaker/result 可观测可测试。
-- 面试答案不把设计目标写成已实现能力。
+- 对外说明不把设计目标写成已实现能力。
 
 #### Out of Scope
 
@@ -639,7 +639,6 @@ RESPONSE_TIME_TARGET_MAX 更像执行后记录超时，不等于包住整个 Gra
 - collaboration timeout configuration
 - LLM/Tool retry paths
 - current Graph recursion configuration
-- docs/interview-questions-final.md 中旧 termination 描述
 
 #### Expected Architecture
 
@@ -659,7 +658,7 @@ Graph 显式 recursion limit；所有重试受 request-level budget 约束。
 3. 显式配置 LangGraph recursion limit，并处理 GraphRecursionError。
 4. 定义全局、组件级和 mode-upgrade retry budget。
 5. 到达上限时执行 fallback/escalation。
-6. 更新面试文档，只描述已实现数值。
+6. 更新对外说明文档，只描述已实现数值。
 
 #### Required Tests
 
@@ -684,14 +683,13 @@ Graph 显式 recursion limit；所有重试受 request-level budget 约束。
 
 #### Problem
 
-历史答案声称“规则与 LLM 并发”和“窗口失败率 >50% 熔断”，而当前代码更接近 Rule cheap gate + LLM fallback，以及连续失败后 OPEN。代码、文档和面试口径不一致。
+历史答案声称“规则与 LLM 并发”和“窗口失败率 >50% 熔断”，而当前代码更接近 Rule cheap gate + LLM fallback，以及连续失败后 OPEN。代码、文档和对外口径不一致。
 
 #### Evidence
 
 - Router implementation and confidence threshold
 - core/monitoring.py CircuitBreaker
 - router/circuit breaker tests
-- docs/interview-questions-final.md
 
 #### Expected Architecture
 
@@ -702,7 +700,7 @@ CircuitBreaker：连续失败 N 次 → OPEN → recovery time → HALF_OPEN pro
 
 1. 固化 Router shortcut、LLM fallback、conflict policy。
 2. 固化 CircuitBreaker consecutive failure、recovery time、probe 语义。
-3. 统一 metrics、日志、活文档和面试术语。
+3. 统一 metrics、日志、活文档和对外术语。
 4. 若未来改 rolling-window，另开 ADR/Issue。
 
 #### Required Tests
@@ -716,7 +714,7 @@ CircuitBreaker：连续失败 N 次 → OPEN → recovery time → HALF_OPEN pro
 
 #### Acceptance Criteria
 
-- 代码、metrics、活文档和面试材料使用同一定义。
+- 代码、metrics、活文档和对外说明材料使用同一定义。
 - 不把执行后超时写成全局 timeout。
 - 不把连续失败熔断写成失败率窗口熔断。
 
@@ -794,7 +792,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 - labor_savings_estimate
 - monitoring/benchmark metric implementation
 - 缺少 before/after AHT 或 throughput Artifact
-- resume/release 中的 2x/3x claims
+- 对外发布材料中的 2x/3x claims
 
 #### Expected Architecture
 
@@ -811,7 +809,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 2. 定义 AHT、throughput、assisted rate、AI handled rate、efficiency multiple。
 3. 保存 before/after、样本窗口、分组、统计方法。
 4. 合成数据标记 synthetic/unverified。
-5. 更新简历和面试口径。
+5. 更新对外口径。
 
 #### Required Tests
 
@@ -852,7 +850,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 
     --mode simulated
       evidence_level = synthetic
-      never enters Resume Metrics
+      never enters Project Metrics
 
 每个 Artifact 至少含 git_sha、dataset_sha256、run_at、mode、provider、model、embedding_model、reranker、query_count、environment、config、metrics。
 
@@ -864,7 +862,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 4. 禁止单条真实请求异常自动替换模拟值。
 5. 保存 git SHA、数据集 SHA-256、provider/model、embedding/reranker、环境和配置。
 6. 统一产出 reports/latest/manifest.json 和各 Benchmark Artifact。
-7. Resume Claim 读取 evidence level，不人工复制未验证数字。
+7. Project Claim 读取 evidence level，不人工复制未验证数字。
 
 #### Required Tests
 
@@ -896,7 +894,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 - scripts/evaluate_rag.py
 - tests/eval/rag_benchmark.json
 - docs/reference/rag-evaluation.md
-- historical resume descriptions
+- historical project descriptions
 
 #### Expected Architecture
 
@@ -907,7 +905,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 1. 评测代码和报告使用完整指标名称。
 2. 校验 649 query 的 dataset metadata、类别分布和 expected docs。
 3. 用示例测试证明 Hit@3 与 Recall@3 差异。
-4. 简历不再使用模糊 Top-3 召回率。
+4. 对外描述不再使用模糊 Top-3 召回率。
 
 #### Required Tests
 
@@ -938,7 +936,6 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 - scripts/import_real_docs.py
 - data/knowledge_base/
 - tests/eval/rag_benchmark.json
-- docs/reports/resume-description.md
 - reports and data manifests
 
 #### Expected Architecture
@@ -977,12 +974,10 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 
 #### Problem
 
-简历、README、发布说明和面试答案存在冲突的数字和实现描述：9 个垂直 Agent、Top-3 85%、FCR 78%、人效 2/3 倍、P99 <2s、Coverage >80% 和完整 RAG 链路。没有矩阵时，旧 Claim 会继续传播。
+对外描述、README、发布说明和对外说明存在冲突的数字和实现描述：9 个垂直 Agent、Top-3 85%、FCR 78%、人效 2/3 倍、P99 <2s、Coverage >80% 和完整 RAG 链路。没有矩阵时，旧 Claim 会继续传播。
 
 #### Evidence
 
-- docs/reports/resume-description.md
-- docs/interview-questions-final.md
 - README.md
 - docs/reference/rag-evaluation.md
 - docs/reports/releases/changelog.md
@@ -998,7 +993,7 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 1. 新增 docs/audit/CLAIM_EVIDENCE_MATRIX.md，或建立等价活文档。
 2. 每个数字和架构描述标 PROVEN/PARTIAL/EXTERNAL/UNVERIFIED/FALSE。
 3. 记录代码路径、测试命令、Artifact 路径和最后验证时间。
-4. 简历和面试更新前先更新矩阵。
+4. 对外口径更新前先更新矩阵。
 5. 旧文档保留为 archive snapshot，不继续命名为 current final。
 
 #### Required Tests
@@ -1012,7 +1007,7 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 
 - 每个 Claim 可定位到证据，或明确说明不能证明。
 - PROVEN 不依赖历史文档或“合理假设”。
-- 面试 Q&A 只解释已证明实现，未来设计标 proposed。
+- 工程问答口径 只解释已证明实现，未来设计标 proposed。
 
 #### Out of Scope
 
@@ -1037,21 +1032,20 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 
 - README.md、docs/README.md、docs/reference/*、生产清单和当前架构文档属于活文档。
 - docs/reports/milestone/*、旧 release notes、旧 audit report 属于历史快照，保留但不作为当前事实源。
-- docs/interview-questions-final.md 含旧版本内容，建议归档，并建立 docs/interview/00_PROJECT_TRUTH.md、01_ARCHITECTURE.md、02_RAG.md、03_AGENT_ROUTING.md、04_TOOL_CALLING.md、05_CACHE_RELIABILITY.md、06_EVALUATION_METRICS.md、07_FAILURE_CASES.md、08_INTERVIEW_QA.md。
 - 活文档更新必须以当前代码和 Artifact 为准；历史文档应通过新的对齐记录纠正，不直接改写历史快照。
 
 ### 6.3 文档更新规则
 
 1. 先更新代码、测试、Artifact，再更新 Claim Matrix。
-2. Claim Matrix 变绿后才更新简历和面试答案。
+2. Claim Matrix 变绿后才更新对外宣称口径。
 3. “已实现”必须指向当前代码；“计划”必须写 Proposed。
-4. 不使用“合理假设，所以可写进简历”的状态。
+4. 不使用“合理假设，所以可写进对外描述”的状态。
 
-## 7. Resume Claim Matrix
+## 7. Project Claim Matrix
 
 这是整改完成前的保守口径，最终状态必须由当前验证结果更新。
 
-| Resume claim | Current status | Safe interim wording | Evidence before PROVEN |
+| Project claim | Current status | Safe interim wording | Evidence before PROVEN |
 |---|---|---|---|
 | 9 个垂直 Agent | PARTIAL | 7 个业务域 + ReAct + Response，共 9 个角色 | registry、reachability tests、活文档 |
 | 500+ 真实业务文档 | EXTERNAL/UNVERIFIED | 支持真实文档导入，并提供 5000+ 合成数据用于测试/演示 | 脱敏 manifest 或外部证据 |
@@ -1066,11 +1060,11 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 | Coverage >80% | FALSE against audit snapshot | 暂不写；快照为 77.79% | CI Gate 真实通过 |
 | 完整多阶段 RAG | PARTIAL | 统一 retrieve 后再写完整链路 | unified retrieval tests + trace |
 
-### Resume Freeze
+### Claim Freeze
 
-Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结简历数字。冻结不是删除历史材料，而是阻止继续优化未经证据支持的措辞。
+Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结对外指标数字。冻结不是删除历史材料，而是阻止继续优化未经证据支持的措辞。
 
-## 8. Interview Q&A Alignment
+## 8. Engineering Q&A Alignment
 
 ### 8.1 六张母卡
 
@@ -1108,7 +1102,7 @@ Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结简历数字。冻�
 11. 水平扩容后 L3 内存缓存如何一致？
 12. 为什么选择 RRF，做过哪些 ablation？
 13. Embedding 不可用时为什么不能生成随机向量？
-14. 每个简历指标对应哪个 commit、dataset、config？
+14. 每个对外指标对应哪个 commit、dataset、config？
 
 ## 9. Phase Gates
 
@@ -1159,13 +1153,13 @@ Required outputs：
     ├── cost.json
     └── test_summary.json
 
-**Gate：** FCR、人效、RAG 指标定义明确；Real/Simulated 严格隔离；每个数字有 provenance；合成数据不进入 Resume Metrics。
+**Gate：** FCR、人效、RAG 指标定义明确；Real/Simulated 严格隔离；每个数字有 provenance；合成数据不进入 Project Metrics。
 
 ### Phase 5 — CI & Documentation
 
-范围：P2-06 及活文档、简历、面试材料。
+范围：P2-06 及活文档、对外描述、对外说明材料。
 
-**Gate：** Coverage gate 真实有效；blocking/informational 语义明确；Claim Matrix 更新后才解除 Resume Freeze。
+**Gate：** Coverage gate 真实有效；blocking/informational 语义明确；Claim Matrix 更新后才解除 Claim Freeze。
 
 ### 推荐执行顺序
 
@@ -1173,7 +1167,7 @@ Required outputs：
 2. 修缓存跨用户、ERP 越权和 SSE 身份上下文。
 3. 统一 RAG retrieve，消灭 Prefetch/Scene/Hybrid 绕开路径。
 4. 移除随机 Embedding fallback，重建 BM25，使用稳定 Qdrant ID。
-5. 重做 Benchmark provenance 和 FCR，再决定简历最终数字。
+5. 重做 Benchmark provenance 和 FCR，再决定对外描述最终数字。
 
 ## 10. Final Definition of Done
 
@@ -1211,15 +1205,15 @@ Required outputs：
 - 活文档与当前代码一致，历史文档保留为 snapshot。
 - 每条 PROVEN Claim 都能定位到代码、测试、Artifact。
 - 外部业务数字标 EXTERNAL，未验证数字标 UNVERIFIED，错误表述标 FALSE。
-- Resume Freeze 解除前，不更新 FCR、人效、P99、成本、调用下降和完整 RAG 数字。
-- 面试 Q&A 只解释已证明实现；未来设计标 Proposed。
+- Claim Freeze 解除前，不更新 FCR、人效、P99、成本、调用下降和完整 RAG 数字。
+- 工程问答口径 只解释已证明实现；未来设计标 Proposed。
 
 最终事实闭环：
 
     Code + Tests + Benchmarks → Project Truth → Claim Matrix
                                       ├── current docs
-                                      ├── Resume
-                                      └── Interview Q&A
+                                      ├── project descriptions
+                                      └── Engineering Q&A
 
-代码是实现事实，测试证明行为，Benchmark 证明数字，Claim Matrix 决定简历能写什么，Interview Q&A 只解释已经被证明的事实。
+代码是实现事实，测试证明行为，Benchmark 证明数字，Claim Matrix 决定对外描述能写什么，Engineering Q&A 只解释已经被证明的事实。
 

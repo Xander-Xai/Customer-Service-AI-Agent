@@ -40,8 +40,6 @@ stashed, or overwritten. The V2 worktree is clean apart from this audit report.
 - Feature flags default to disabled and existing Prometheus metrics cover raw /
   optimized size, estimated tokens, processed results, and truncation.
 - Unit/integration coverage and a deterministic local benchmark exist.
-- Design and interview documents explicitly state that V1 has no result store,
-  recovery path, or semantic summarizer.
 
 ## V1_GAPS
 
@@ -92,7 +90,7 @@ stashed, or overwritten. The V2 worktree is clean apart from this audit report.
    deterministic fallback.
 5. Define and test a deterministic ERP pagination contract in the mock layer;
    do not claim real ERP pagination without backend evidence.
-6. Extend metrics, benchmark, tests, design docs, README, and interview material.
+6. Extend metrics, benchmark, tests, design docs, README, and engineering material.
 
 ## NON_GOALS
 

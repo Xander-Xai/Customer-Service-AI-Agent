@@ -41,6 +41,6 @@
 
 ## C. 本轮收口范围
 
-**补齐/收紧**：事实口径、能力层级、evidence schema v2、retry/DLQ 措辞、Worker Pool 措辞、架构一致性测试、锁 TTL 配置 gate、面试 evidence 页面、README 事实边界。
+**补齐/收紧**：事实口径、能力层级、evidence schema v2、retry/DLQ 措辞、Worker Pool 措辞、架构一致性测试、锁 TTL 配置 gate、对外评审 evidence 页面、README 事实边界。
 
 **不新增**：Redis Streams SSE bridge、完整 DLQ 运维闭环、Worker Pool autoscaling、backpressure/admission control、Kubernetes/HPA、multi-region、Kafka/Temporal/Saga/Outbox、新 Agent/RAG/模型/前端功能。

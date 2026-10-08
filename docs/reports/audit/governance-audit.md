@@ -13,8 +13,6 @@
 > **⚠️ 2026-06-21 更新说明**：本报告中评估的 `active/` 目录（位于 `docs/active/`）后续已被移除，其内容已重新组织到 `docs/design/`、`docs/reference/`、`docs/operations/` 和 `docs/checklists/` 目录中。以下评估中提到的 `active/` 目录下的文档现在位于以下路径：
 > - SECURITY.md → `docs/design/security.md`
 > - architecture-design.md → `docs/design/architecture-design.md`
-> - interview-intro.md → `docs/design/interview-intro.md`
-> - interview-deep-dive.md → `docs/design/interview-deep-dive.md`
 > - prompt-engineering.md → `docs/design/prompt-engineering.md`
 > - model-comparison.md → `docs/reference/model-comparison.md`
 > - rag-evaluation.md → `docs/reference/rag-evaluation.md`
@@ -46,8 +44,6 @@
 |------|---------|---------|-----------|---------|---------|------|
 | **SECURITY.md** | ✅ | ✅ | ❌ | ✅ | ✅ | **核心资产** — 安全权威文档 |
 | **architecture-design.md** | ✅ | ✅ | ⚠️ 部分 | ✅ | ✅ | **核心资产** — 架构全景图 |
-| **interview-intro.md** | ✅ | ✅ | ❌ | ✅ | ✅ | **核心资产** — 面试脚本 |
-| **interview-deep-dive.md** | ✅ | ✅ | ❌ | ✅ | ✅ | **核心资产** — 深挖 Q&A |
 | **prompt-engineering.md** | ✅ | ✅ | ❌ | ✅ | ✅ | **核心资产** — Prompt 设计 |
 | **model-comparison.md** | ✅ | ✅ | ❌ | ✅ | ✅ | **核心资产** — 模型/成本 |
 | **rag-evaluation.md** | ✅ | ✅ | ⚠️ 部分 | ✅ | ✅ | **核心资产** — RAG 评估 |
@@ -180,7 +176,7 @@
               │                 │                 │
               │ SECURITY.md     │ fix-plan.md     │
               │ architecture.md │ plan.md         │
-              │ interview-*.md  │ plan-phase2.md  │
+              │ reference docs  │ plan-phase2.md  │
               │ prompt-eng.md   │ superpowers/    │
               │ model-comp.md   │ miniapp模板     │
               │ rag-eval.md     │                 │

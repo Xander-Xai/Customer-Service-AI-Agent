@@ -85,8 +85,6 @@
 | api-reference.md | API 路由 | ✅ 一致 |
 | architecture-design.md | 架构图 | ✅ 一致 |
 | e2e-verification-guide.md | E2E 测试 | ✅ 一致 |
-| interview-deep-dive.md | 面试题 | ✅ 一致 |
-| interview-intro.md | 项目介绍 | ✅ 一致 |
 | model-comparison.md | 模型对比 | ✅ 一致 |
 | prompt-engineering.md | Prompt 工程 | ✅ 一致 |
 | rag-evaluation.md | RAG 评估 | ✅ 一致 |
