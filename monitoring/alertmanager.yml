@@ -41,7 +41,7 @@ receivers:
         max_alerts: 5
     # Slack 告警配置模板
     # slack_configs:
-    #   - api_url: 'https://hooks.slack.com/services/REDACTED'
+    #   - api_url: 'https://hooks.slack.com/services/<REDACTED>'
     #     channel: '#ops-alerts'
     #     send_resolved: true
 
