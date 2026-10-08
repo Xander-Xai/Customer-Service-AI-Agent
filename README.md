@@ -41,13 +41,16 @@
 - [Problem](#problem) — 客服场景为什么难
 - [Solution](#solution) — 这套架构怎么解决
 - [Architecture](#architecture) — 图、状态机、协作模式
-- [Engineering Highlights](#engineering-highlights) — 企业级能力的源码锚点
+- [Key Features](#key-features) — 企业级能力的源码锚点
+- [Demo](#demo) — 一键可审计的离线演示
+- [Quick Start](#quick-start) — 最小可跑路径与部署变量
+- [Tech Stack](#tech-stack) — 选型一览
+- [Evaluation](#evaluation) — 测过什么、怎么复核
 - [Limitations](#limitations) — **先读这一节**
-- [Quick Start](#quick-start)
-- [Test & Evidence](#test--evidence)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Docs](#docs)
+- [Roadmap](#roadmap) — P0 / P1 / P2
+- [Project Structure](#project-structure) — 目录
+- [Business Scenarios](#business-scenarios) — 业务场景映射
+- [Docs](#docs) — 文档入口
 
 ---
 
@@ -328,7 +331,7 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 
 ---
 
-## Engineering Highlights
+## Key Features
 
 每一项都有源码锚点。这一节是本项目与「会调 LangChain」的差别。
 
@@ -420,6 +423,122 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 
 ---
 
+## Demo
+
+```bash
+make demo-offline
+```
+
+离线、确定性地跑通「正常客服路由」，并输出证据卡（Mock LLM、无 API Key、无出网）：
+包含 scenario / `MOCK/OFFLINE` / verdict（`PASS` / `FAIL` / `NOT_RUN`）/ Git SHA /
+UTC 时间戳 / 源码与测试锚点。退出码即底层检查退出码——
+**「没跑」或「跑挂」永远不会被输出成 `PASS`**。
+详见 [docs/guides/offline-demo.md](docs/guides/offline-demo.md)。
+
+---
+
+## Quick Start
+
+### 最小可跑路径（默认离线，不需要任何 API Key）
+
+```bash
+# 1) 环境
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+
+# 2) 跑测试（默认离线：不发起公网请求，Mock 一切外部依赖）
+make test
+
+# 3) 读当前事实（不硬编码任何数字，全部从代码/配置推导）
+make facts
+make audit-docs        # 文档一致性守卫
+```
+
+### 起服务
+
+```bash
+make dev               # → http://localhost:8000（热重载）
+make prod              # 生产栈（Docker Compose + Nginx + TLS），缺 TLS 物料会 fail fast
+make tls-local-cert    # 仅本地开发：生成本地自签证书
+```
+
+### 部署前必须设置的变量
+
+| 变量 | 为什么 | 缺了会怎样 |
+|---|---|---|
+| `ADMIN_PASSWORD` | app 首次启动用它引导 admin 账号 | `docker compose config` 直接失败并提示 |
+| `POSTGRES_PASSWORD` / `JWT_SECRET` / `SESSION_TOKEN_SECRET` / `API_KEY` | 生产凭据 | 启动校验 **fail-fast，不降级** |
+| `LLM_PROVIDER` 对应凭据 | LLM 调用 | 熔断器连续失败后降级到规则引擎 |
+| `HITL_HIGH_RISK_TOOLS` 或 `HITL_HIGH_AMOUNT_THRESHOLD` | 让审批开关真的生效 | **静默什么都不拦**（见 [Limitations](#limitations)） |
+
+配置全表见 [docs/reference/configuration.md](docs/reference/configuration.md)，
+模板见 [`.env.example`](.env.example)（提交的是占位符，不是密钥），
+部署细节见 [docs/deployment.md](docs/deployment.md)。
+
+### 端口语义
+
+| 场景 | 地址 | 说明 |
+|---|---|---|
+| 开发（`make dev`） | `localhost:8000` | dev override **确实**发布 app:8000 |
+| 生产 | nginx `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`（默认 80 / 443） | app 只 `expose: 8000`、**不对宿主机发布** |
+
+生产栈唯一发布应用端口的是 nginx——TLS、安全响应头、灰度流量分割都在它那里。
+**8000 不是生产可达地址。**
+
+---
+
+## Tech Stack
+
+| 层 | 选型 |
+|---|---|
+| 编排 | LangGraph（`StateGraph` + PostgreSQL checkpointer + `interrupt()`） |
+| 服务 | Python 3.10+ · FastAPI · SSE · WebSocket · Uvicorn/Gunicorn |
+| 检索 | Qdrant（4+1 collection）· BM25 · RRF 融合 · `bge-reranker-v2-m3` |
+| 异步 | Celery（Redis broker）· `acks_late` · `visibility_timeout` · DLQ |
+| 状态 | PostgreSQL 15（`agent_runs` / `agent_dead_letters` / `tool_side_effects` / `human_approvals`）+ Redis 7（Session / Cache / JWT 黑名单 / per-thread 锁） |
+| 观测 | OpenTelemetry 语义 span + Prometheus + Grafana + Alertmanager + Loki |
+| 安全 | Argon2id · JWT（access + refresh + Redis 黑名单）· 4 级 RBAC · CSRF 双提交 · CSP nonce · SSRF 防护 · 限流 |
+| 部署 | Docker Compose 6 变体（base / prod / override / canary / scale / monitoring）+ Nginx + TLS |
+| 工具 | OpenAI Function Calling · MCP（read-only-first，默认关闭）· 金蝶 ERP 适配器（Mock/Real + HMAC + 重试 + 分页） |
+| 前端 | 原生 JS + Vite 8 · Vitest（可嵌入 widget） |
+
+---
+
+## Evaluation
+
+```bash
+make test          # 默认离线：无 API Key、无公网访问
+make test-fast     # 跳过 stress 标记的慢测试
+make test-cov      # 覆盖率报告（门槛 80%）
+npm test           # 前端 Vitest
+```
+
+测试数量以 `pytest --collect-only -q` / `npm test` 的当前输出为准，不在文档里硬编码。
+
+| 门禁 | 命令 | 需要的环境 |
+|---|---|---|
+| 代码规范（Ruff check + format，**阻塞**） | `make lint` | 无 |
+| 文档事实一致性（`make audit-docs` 守卫） | `make audit-docs` | 无 |
+| OpenAPI 快照一致 | `make openapi-check` | 无 |
+| 分布式运行时验收 | `make runtime-e2e` | 真实 PostgreSQL + Redis + 多进程 Celery（**缺失时硬 FAIL**） |
+| worker 崩溃恢复（SIGKILL） | `make runtime-chaos` | 同上 |
+| 运行时证据报告 | `make runtime-verify` | 同上 → `artifacts/distributed-runtime/<ts>/report.json` |
+| DLQ 人工重放 | `make runtime-replay-help` | 同上 |
+| RAG 正式 649-query 评测 | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649` | 真实 provider + 已索引语料（**当前 NOT_VERIFIED**） |
+
+CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 + MCP 契约
+**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + Redis + chaos）、
+`security`（严格 mypy + bandit + secret guard）、`build-and-push`、`deploy`
+（容器内健康探测 + Celery 原生 worker 就绪断言）。
+
+> **为什么有些测试"不允许 skip"？** 一个会因为"依赖没装 / 环境没配"而变绿的测试
+> 证明了不了任何事，却会给人"已验证"的错觉。分布式 Runtime 验收的
+> `TEST_DISTRIBUTED_DB_URL` 缺失时是**硬 FAIL**。
+
+评测与证据的完整口径见 [docs/evaluation.md](docs/evaluation.md)。
+
+---
+
 ## Limitations
 
 > **这一节是本 README 里最重要的一节。**
@@ -485,117 +604,32 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 
 ---
 
-## Quick Start
+## Roadmap
 
-### 最小可跑路径（默认离线，不需要任何 API Key）
+按「上线可信度 → 工程纵深 → 未来扩展」排序。完整规格与验收方式见
+[PROJECT_FINALIZATION_PLAN.md](docs/reports/audit/PROJECT_FINALIZATION_PLAN.md) 与
+[production-readiness.md](docs/production-readiness.md#production-upgrade-roadmap)。
 
-```bash
-# 1) 环境
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
+### P0 — 上线前必须闭环（否则存在静默故障/安全边界缺口）
 
-# 2) 跑测试（默认离线：不发起公网请求，Mock 一切外部依赖）
-make test
+- **监控序列化闭环**：`GET /metrics/prometheus` 改用 `prometheus_client.generate_latest`，
+  让 DLQ 告警规则真正可触发。
+- **HITL 配置 fail-closed**：`HITL_ENABLED=true` 但风险规则为空时拒绝启动。
+- **生产凭据/证书/ERP/CORS**：替换全部占位符，接入真实 TLS、金蝶 ERP 与 `CORS_ORIGINS`。
+- **告警可执行性契约测试**：每个 `expr` 的指标名必须真实可得。
 
-# 3) 读当前事实（不硬编码任何数字，全部从代码/配置推导）
-make facts
-make audit-docs        # 文档一致性守卫
-```
+### P1 — 工程纵深（让「企业级」从设计变成可验证）
 
-### 一键可审计 demo
+- 原生工具超时 / 并行调用 / 工具级熔断与重试（读可重试、写不重试）。
+- `reconcile_stuck_runs` 接入调度（beat / CronJob），卡死 run 兜底从文档变为运行。
+- Grafana 面板对齐实际指标；补齐 language / observability 契约测试。
+- 持久化 trace 后端（Jaeger / Tempo）接入，tracing 从本地验证升级为可查询。
 
-```bash
-make demo-offline
-```
+### P2 — 路线图（不在本次收尾范围）
 
-离线、确定性地跑通「正常客服路由」，并输出证据卡（Mock LLM、无 API Key、无出网）：
-包含 scenario / `MOCK/OFFLINE` / verdict（`PASS` / `FAIL` / `NOT_RUN`）/ Git SHA /
-UTC 时间戳 / 源码与测试锚点。退出码即底层检查退出码——
-**「没跑」或「跑挂」永远不会被输出成 `PASS`**。
-详见 [docs/guides/offline-demo.md](docs/guides/offline-demo.md)。
-
-### 起服务
-
-```bash
-make dev               # → http://localhost:8000（热重载）
-make prod              # 生产栈（Docker Compose + Nginx + TLS），缺 TLS 物料会 fail fast
-make tls-local-cert    # 仅本地开发：生成本地自签证书
-```
-
-### 部署前必须设置的变量
-
-| 变量 | 为什么 | 缺了会怎样 |
-|---|---|---|
-| `ADMIN_PASSWORD` | app 首次启动用它引导 admin 账号 | `docker compose config` 直接失败并提示 |
-| `POSTGRES_PASSWORD` / `JWT_SECRET` / `SESSION_TOKEN_SECRET` / `API_KEY` | 生产凭据 | 启动校验 **fail-fast，不降级** |
-| `LLM_PROVIDER` 对应凭据 | LLM 调用 | 熔断器连续失败后降级到规则引擎 |
-| `HITL_HIGH_RISK_TOOLS` 或 `HITL_HIGH_AMOUNT_THRESHOLD` | 让审批开关真的生效 | **静默什么都不拦**（见 [Limitations](#limitations)） |
-
-配置全表见 [docs/reference/configuration.md](docs/reference/configuration.md)，
-模板见 [`.env.example`](.env.example)（提交的是占位符，不是密钥），
-部署细节见 [docs/deployment.md](docs/deployment.md)。
-
-### 端口语义
-
-| 场景 | 地址 | 说明 |
-|---|---|---|
-| 开发（`make dev`） | `localhost:8000` | dev override **确实**发布 app:8000 |
-| 生产 | nginx `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`（默认 80 / 443） | app 只 `expose: 8000`、**不对宿主机发布** |
-
-生产栈唯一发布应用端口的是 nginx——TLS、安全响应头、灰度流量分割都在它那里。
-**8000 不是生产可达地址。**
-
----
-
-## Test & Evidence
-
-```bash
-make test          # 默认离线：无 API Key、无公网访问
-make test-fast     # 跳过 stress 标记的慢测试
-make test-cov      # 覆盖率报告（门槛 80%）
-npm test           # 前端 Vitest
-```
-
-测试数量以 `pytest --collect-only -q` / `npm test` 的当前输出为准，不在文档里硬编码。
-
-| 门禁 | 命令 | 需要的环境 |
-|---|---|---|
-| 代码规范（Ruff check + format，**阻塞**） | `make lint` | 无 |
-| 文档事实一致性（`make audit-docs` 守卫） | `make audit-docs` | 无 |
-| OpenAPI 快照一致 | `make openapi-check` | 无 |
-| 分布式运行时验收 | `make runtime-e2e` | 真实 PostgreSQL + Redis + 多进程 Celery（**缺失时硬 FAIL**） |
-| worker 崩溃恢复（SIGKILL） | `make runtime-chaos` | 同上 |
-| 运行时证据报告 | `make runtime-verify` | 同上 → `artifacts/distributed-runtime/<ts>/report.json` |
-| DLQ 人工重放 | `make runtime-replay-help` | 同上 |
-| RAG 正式 649-query 评测 | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649` | 真实 provider + 已索引语料（**当前 NOT_VERIFIED**） |
-
-CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 + MCP 契约
-**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + Redis + chaos）、
-`security`（严格 mypy + bandit + secret guard）、`build-and-push`、`deploy`
-（容器内健康探测 + Celery 原生 worker 就绪断言）。
-
-> **为什么有些测试"不允许 skip"？** 一个会因为"依赖没装 / 环境没配"而变绿的测试
-> 证明了不了任何事，却会给人"已验证"的错觉。分布式 Runtime 验收的
-> `TEST_DISTRIBUTED_DB_URL` 缺失时是**硬 FAIL**。
-
-评测与证据的完整口径见 [docs/evaluation.md](docs/evaluation.md)。
-
----
-
-## Tech Stack
-
-| 层 | 选型 |
-|---|---|
-| 编排 | LangGraph（`StateGraph` + PostgreSQL checkpointer + `interrupt()`） |
-| 服务 | Python 3.10+ · FastAPI · SSE · WebSocket · Uvicorn/Gunicorn |
-| 检索 | Qdrant（4+1 collection）· BM25 · RRF 融合 · `bge-reranker-v2-m3` |
-| 异步 | Celery（Redis broker）· `acks_late` · `visibility_timeout` · DLQ |
-| 状态 | PostgreSQL 15（`agent_runs` / `agent_dead_letters` / `tool_side_effects` / `human_approvals`）+ Redis 7（Session / Cache / JWT 黑名单 / per-thread 锁） |
-| 观测 | OpenTelemetry 语义 span + Prometheus + Grafana + Alertmanager + Loki |
-| 安全 | Argon2id · JWT（access + refresh + Redis 黑名单）· 4 级 RBAC · CSRF 双提交 · CSP nonce · SSRF 防护 · 限流 |
-| 部署 | Docker Compose 6 变体（base / prod / override / canary / scale / monitoring）+ Nginx + TLS |
-| 工具 | OpenAI Function Calling · MCP（read-only-first，默认关闭）· 金蝶 ERP 适配器（Mock/Real + HMAC + 重试 + 分页） |
-| 前端 | 原生 JS + Vite 8 · Vitest（可嵌入 widget） |
+Agent 行为评测 harness · LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
+长期记忆 · 真实 ERP 写操作验证 · RAG gold relevance 人工标注 · Kubernetes
+部署与多副本一致性 · 压测与容量基线 · MCP 写操作工具 · 多 LLM 供应商容灾。
 
 ---
 
