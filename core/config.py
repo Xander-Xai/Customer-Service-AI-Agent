@@ -338,6 +338,10 @@ SESSION_IDLE_TTL = _int_env("SESSION_IDLE_TTL", 3600)
 # ===== v3.7: 安全加固配置 =====
 # 监控端点管理 Token（/api/metrics, /api/kpi 等敏感端点需要此 Token）
 MONITORING_ADMIN_TOKEN = os.getenv("MONITORING_ADMIN_TOKEN", "")
+#: 监控 token 的最小长度。**唯一真相源**：应用启动诊断（api/app_factory.py）与
+#: 生成器（scripts/generate_monitoring_token.py）共用它，避免「生成器拒绝、
+#: 运行时照收」的不一致。
+MONITORING_ADMIN_TOKEN_MIN_LENGTH = 16
 # WebSocket 连接限制
 WS_MAX_CONNECTIONS_PER_IP = _int_env("WS_MAX_CONNECTIONS_PER_IP", 5)
 WS_MESSAGE_RATE_LIMIT = _int_env("WS_MESSAGE_RATE_LIMIT", 10)
@@ -553,6 +557,18 @@ TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED = (
     os.getenv("TOOL_RESULT_SEMANTIC_SUMMARY_ENABLED", "false").lower() == "true"
 )
 TOOL_RESULT_CACHE_ENABLED = os.getenv("TOOL_RESULT_CACHE_ENABLED", "false").lower() == "true"
+
+# 原生工具的单次执行超时（秒）。0 = 不限制（不建议）。
+#
+# 为什么需要它：此前**只有** MCP 工具有 per-call timeout（tools/mcp_adapter.py），
+# 原生工具（ERP / 内部查询）完全没有超时边界。一个卡住的 ERP 连接会一直占着
+# Agent 的工具循环、run 的租约与 thread lock，直到 Celery 的 task time limit
+# 把整个 run 掐掉 —— 单个慢工具升级成「整条 run 失败 + 重投」。
+#
+# 取值应当显著小于 AGENT_RUN_TASK_TIME_LIMIT：工具超时是**局部**降级（返回一条
+# 可解释的错误，让 Agent 换策略或如实告知用户），而 task time limit 是**整体**失败。
+# 校验见 validate_tool_settings。
+TOOL_EXECUTION_TIMEOUT_SECONDS = _float_env("TOOL_EXECUTION_TIMEOUT_SECONDS", 30.0)
 
 # ===== MCP（Model Context Protocol）外部工具接入 =====
 # 默认**关闭**。MCP 工具是来自外部进程（可能是第三方）的不可信输入源，
@@ -1013,10 +1029,108 @@ def _validate_mcp_risk_level(item: dict) -> list[str]:
     return []
 
 
+def validate_tool_settings(
+    *,
+    tool_timeout_seconds: float = TOOL_EXECUTION_TIMEOUT_SECONDS,
+    task_time_limit_seconds: float = float(AGENT_RUN_TASK_TIME_LIMIT),
+) -> list[str]:
+    """校验工具执行配置（纯函数，无 IO），返回错误信息列表（空 = 通过）。
+
+    只做**关系校验**，不检查单个值的合法性 —— 负数在下面被单独当作「显式关闭」。
+
+    唯一的不变量：工具超时必须**小于** run 的 task time limit。否则工具超时形同
+    虚设 —— 局部降级永远不会先发生，每次都是等 run 被整体掐断，那等于没有超时。
+    """
+    if tool_timeout_seconds <= 0:
+        return []
+    if task_time_limit_seconds <= 0:
+        return []
+    if tool_timeout_seconds >= task_time_limit_seconds:
+        return [
+            f"TOOL_EXECUTION_TIMEOUT_SECONDS({tool_timeout_seconds}) 必须小于 "
+            f"AGENT_RUN_TASK_TIME_LIMIT({task_time_limit_seconds}) —— 否则工具超时会先被 "
+            "run 级 time limit 抢先，局部降级退化为整体失败；"
+            "如确实不需要工具超时，请显式设为 0"
+        ]
+    return []
+
+
+def validate_hitl_settings(
+    *,
+    enabled: bool = HITL_ENABLED,
+    high_risk_tools: str = HITL_HIGH_RISK_TOOLS,
+    medium_risk_tools: str = HITL_MEDIUM_RISK_TOOLS,
+    high_amount_threshold: float = HITL_HIGH_AMOUNT_THRESHOLD,
+    ttl_seconds: float = HITL_APPROVAL_TTL_SECONDS,
+) -> list[str]:
+    """校验 human-in-the-loop 配置（纯函数，无 IO），返回错误信息列表（空 = 通过）。
+
+    为什么 HITL 需要像 MCP 一样的 fail-closed 校验
+    ---------------------------------------------
+    ``HITL_ENABLED=true`` 只表示「打开审批治理」。若**没有任何规则能命中 HIGH**
+    （``HITL_HIGH_RISK_TOOLS`` 为空 **且** 金额阈值 <= 0），那么
+    ``core.hitl.risk.classify_risk`` 的判定链会一路落到默认值，所有工具都判为
+    LOW，审批闸门**什么都不拦**，而且没有任何日志、指标或告警。
+
+    那是一次典型的「声称与事实不符」：配置里写着审批已启用，运行时却没有审批。
+    且它发生在最常见的运维事故形态下——开了开关、忘了配规则。因此这里选择
+    **拒绝启动**：治理边界要么真的生效，要么就别声称生效。
+
+    与 ``classify_risk`` 的 side-effect 兜底是两层互补的防线，不要互相替代：
+      - 本校验回答「你的配置**根本不可能**产生任何 HIGH 判定」；
+      - ``classify_risk`` 的 ``side_effect`` 兜底回答「个别工具**没有被任何规则
+        覆盖**」。
+
+    只在显式开启时校验：默认 ``false`` 时治理边界本就不在承诺范围内，
+    不该因为「没配规则」而阻止服务启动。
+    """
+    if not enabled:
+        return []
+
+    errors: list[str] = []
+    has_high_names = any(t.strip() for t in (high_risk_tools or "").split(","))
+    has_amount_rule = high_amount_threshold > 0
+    if not has_high_names and not has_amount_rule:
+        errors.append(
+            "HITL_ENABLED=true 但没有任何规则会产生 HIGH 风险判定"
+            "（HITL_HIGH_RISK_TOOLS 为空 且 HITL_HIGH_AMOUNT_THRESHOLD<=0）"
+            "—— 所有工具都将被判为 LOW，审批闸门形同虚设且不会报错。"
+            "请至少配置 HITL_HIGH_RISK_TOOLS（逗号分隔的工具名）或设置金额阈值；"
+            "若确实不需要该治理，请显式设置 HITL_ENABLED=false。"
+        )
+    if ttl_seconds <= 0:
+        errors.append(
+            f"HITL_APPROVAL_TTL_SECONDS 必须为正数（当前 {ttl_seconds}）"
+            "—— 否则审批会立即过期且按拒绝处理，治理变成「一律拒绝」"
+        )
+    if medium_risk_tools.strip() and high_risk_tools.strip() == medium_risk_tools.strip():
+        errors.append(
+            "HITL_HIGH_RISK_TOOLS 与 HITL_MEDIUM_RISK_TOOLS 完全相同"
+            " —— 同一批工具既要求审批又声明为免审批，配置自相矛盾"
+        )
+    return errors
+
+
 # ===== P0-3: 生产环境关键配置启动校验 =====
 def validate_required_config():
     """生产环境启动时校验关键配置项非空非占位符"""
-    warnings = []
+    # ---- HITL 治理有效性（**先于** DEV_MODE 早退）----
+    # 它与「是不是生产」无关：``HITL_ENABLED=true`` 却配不出任何 HIGH 判定，
+    # 在开发机上同样会让集成测试与本地验收拿到虚假的安全感。因此这里刻意放在
+    # DEV_MODE 早退之前 —— 治理要么真的生效，要么拒绝声称生效。
+    hitl_errors = validate_hitl_settings(
+        enabled=HITL_ENABLED,
+        high_risk_tools=HITL_HIGH_RISK_TOOLS,
+        medium_risk_tools=HITL_MEDIUM_RISK_TOOLS,
+        high_amount_threshold=HITL_HIGH_AMOUNT_THRESHOLD,
+        ttl_seconds=HITL_APPROVAL_TTL_SECONDS,
+    )
+    if hitl_errors:
+        for err in hitl_errors:
+            print(f"🚨 HITL 配置校验失败: {err}", file=sys.stderr)
+        raise ConfigurationError(
+            f"HITL 治理配置无效（{len(hitl_errors)} 项）：审批开关已开启但配置无法产生任何治理效果"
+        )
 
     # v4.3 安全加固：生产环境禁止 DEV_MODE
     if _DEV_MODE:
@@ -1109,6 +1223,14 @@ def validate_required_config():
         )
     )
 
+    # 工具执行超时必须真的早于 run 级 time limit 触发，否则局部降级形同虚设。
+    errors.extend(
+        validate_tool_settings(
+            tool_timeout_seconds=TOOL_EXECUTION_TIMEOUT_SECONDS,
+            task_time_limit_seconds=float(AGENT_RUN_TASK_TIME_LIMIT),
+        )
+    )
+
     # P0-2 / P0-6: 生产 session + dispatch + gunicorn 多 worker + lock TTL（纯函数）
     errors.extend(
         validate_distributed_runtime_settings(
@@ -1132,6 +1254,7 @@ def validate_required_config():
         )
 
     # Non-fatal warnings for missing optional-but-recommended config
+    warnings: list[str] = []
     if not _DEV_MODE and not RAG_PERSIST_DIRECTORY:
         warnings.append("RAG_PERSIST_DIRECTORY not set, vector DB will run in-memory")
     if not _DEV_MODE and not ALERT_WEBHOOKS and not SMTP_HOST:

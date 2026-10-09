@@ -16,6 +16,7 @@ from core.config import (
     CORS_ORIGINS,
     DEV_MODE,
     MONITORING_ADMIN_TOKEN,
+    MONITORING_ADMIN_TOKEN_MIN_LENGTH,
     SESSION_TOKEN_SECRET,
 )
 from core.logger import get_logger, log_startup_failure
@@ -199,6 +200,15 @@ if API_KEY_ENABLED and (not API_KEY or API_KEY in ("", "change-me-in-production"
 
 if not MONITORING_ADMIN_TOKEN or MONITORING_ADMIN_TOKEN in ("", "change-me-monitoring-token"):
     _security_warnings.append("MONITORING_ADMIN_TOKEN 未设置或使用默认值，监控端点安全受限。")
+elif len(MONITORING_ADMIN_TOKEN) < MONITORING_ADMIN_TOKEN_MIN_LENGTH:
+    # 与 ``scripts/generate_monitoring_token.py`` 的判据保持一致：生成器对过短的
+    # token 直接失败（fail-closed），应用侧则至少要**说出来**。两边用同一个阈值，
+    # 否则会出现「生成器拒绝、运行时照收」的不一致 —— 运维会以为配置通过了。
+    _security_warnings.append(
+        f"MONITORING_ADMIN_TOKEN 长度不足（{len(MONITORING_ADMIN_TOKEN)} < "
+        f"{MONITORING_ADMIN_TOKEN_MIN_LENGTH}）：Prometheus 抓取凭据将是弱口令，"
+        "请重新生成（make monitoring-token）。"
+    )
 
 if not SESSION_TOKEN_SECRET or SESSION_TOKEN_SECRET in (
     "",

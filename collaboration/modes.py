@@ -126,6 +126,12 @@ class SequentialMode(CollaborationMode):
             "mode": "sequential",
             "agents_used": [agent_name],
             "elapsed": elapsed,
+            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
+            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
+            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
+            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
+            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
+            "pending_actions": list(result.get("pending_actions") or []),
         }
 
 
@@ -182,7 +188,7 @@ class ParallelMode(CollaborationMode):
                     {"agent": name, "mode": "parallel", "elapsed": elapsed},
                 )
 
-                return name, result.get("response", ""), elapsed
+                return name, result.get("response", ""), result
 
         tasks = [run_agent(n) for n in agent_names if n in agents]
         try:
@@ -196,13 +202,15 @@ class ParallelMode(CollaborationMode):
 
         responses = []
         agents_used = []
+        collected_pending: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 responses.append(f"[error] {r}")
             else:
-                name, resp, _ = r
+                name, resp, agent_result = r
                 responses.append(f"【{name}】\n{resp}")
                 agents_used.append(name)
+                collected_pending.extend(agent_result.get("pending_actions") or [])
 
         aggregated = "\n\n---\n\n".join(responses) if responses else "无可用 Agent 响应"
         elapsed = time.time() - start
@@ -217,6 +225,12 @@ class ParallelMode(CollaborationMode):
             "mode": "parallel",
             "agents_used": agents_used,
             "elapsed": elapsed,
+            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
+            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
+            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
+            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
+            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
+            "pending_actions": collected_pending,
         }
 
 
@@ -357,6 +371,12 @@ class ConsultationMode(CollaborationMode):
             "mode": "consultation",
             "agents_used": [primary] + [n for n, _ in consult_results],
             "elapsed": elapsed,
+            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
+            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
+            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
+            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
+            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
+            "pending_actions": list(result.get("pending_actions") or []),
         }
 
 
@@ -415,7 +435,7 @@ class HierarchicalMode(CollaborationMode):
                 "hierarchical.subtask.complete", "hierarchical_mode", {"agent": name}
             )
 
-            return name, response
+            return name, response, result
 
         tasks = [run_subtask(n, q) for n, q in sub_tasks.items() if n in agents and q.strip()]
         try:
@@ -429,12 +449,14 @@ class HierarchicalMode(CollaborationMode):
 
         sub_responses = []
         agents_used = []
+        collected_pending: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 continue
-            name, resp = r
+            name, resp, agent_result = r
             sub_responses.append(f"[{name}] {resp}")
             agents_used.append(name)
+            collected_pending.extend(agent_result.get("pending_actions") or [])
 
         # 从 Blackboard 读取所有子任务结果作为汇总补充
         bb_subtask_data = await self._safe_bb_read_prefix("hierarchical.subtask.")
@@ -457,6 +479,12 @@ class HierarchicalMode(CollaborationMode):
             "mode": "hierarchical",
             "agents_used": [coordinator_name] + agents_used,
             "elapsed": elapsed,
+            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
+            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
+            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
+            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
+            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
+            "pending_actions": collected_pending + list(final.get("pending_actions") or []),
         }
 
 
@@ -511,4 +539,16 @@ class ReActMode(SequentialMode):
             "mode": "react",
             "agents_used": [agent_name],
             "elapsed": elapsed,
+            # human-in-the-loop：把 Agent 工具循环摘出的 HIGH 风险动作透传出去。
+            #
+            # 少了这一行，``core/graph_builder.py`` 里的
+            # ``pending = result.get("pending_actions") or []`` 恒为 []，
+            # ``human_approval_gate`` 节点永远是 no-op，被摘出的退款/改单会被
+            # **静默丢弃** —— 既没执行、也没审批，而 run 照常报告成功。
+            #
+            # 之所以能漏这么久：Agent 写的是**自己那份** state 副本（``dict(state)``），
+            # 本地原地修改不会回传；同步返回只挑了 response/mode/agents_used/
+            # elapsed 四个字段。仓库里唯一验证 HITL 的集成测试是**自己搭的最小图**
+            # 直接驱动 gate 节点，因此完全覆盖不到真实图上的这条接缝。
+            "pending_actions": list(result.get("pending_actions") or []),
         }

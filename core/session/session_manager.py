@@ -553,6 +553,21 @@ class EnhancedSessionManager:
     ) -> list[dict[str, Any]]:
         """获取带滑动窗口 + 摘要的对话上下文（v3.4: 异步摘要生成，不阻塞事件循环）"""
         session = await self.get_session(session_id)
+        # 会话不存在时返回空上下文，而不是让 ``session["messages"]`` 抛
+        # ``TypeError: 'NoneType' object is not subscriptable``。
+        #
+        # 为什么会走到这里：``get_session`` 对**格式非法**的 session_id
+        # （非 ASCII、超长等）会生成一个新的 UUID，而它与调用方手上的那个
+        # 旧 id 对不上 —— 于是随后的查询必然落空。API 层在进图前用
+        # ``api.utils.validate_session_id`` 规范化过，所以正常 HTTP 路径不会
+        # 触发；但图的**其它**调用方（worker / 评测 harness / 直接调用
+        # ``graph_app``）并没有这道规范化。
+        #
+        # 调用方 ``core/graph_builder.py::_classify_query_node`` 本来就写了
+        # ``if context else ""`` 的空值分支，说明"没有历史上下文"是预期内的
+        # 状态 —— 崩在这里让那个分支永远走不到。
+        if session is None:
+            return []
         messages = session["messages"]
 
         if max_messages is None:
