@@ -47,31 +47,49 @@ preflight gate），**缺的是人工相关度标注**。
 
 → 详见 [evaluation.md](evaluation.md) §3、[reference/rag-evaluation.md](reference/rag-evaluation.md)
 
-### 1.2 DLQ 告警规则当前**不可能触发**
+### 1.2 DLQ 告警：指标暴露链已修复，通知投递仍未端到端验证
 
-**状态：Partial（断链）**
+**状态：Partial（暴露链 ✅ VERIFIED_LOCAL / 通知链 ❌ NOT_VERIFIED）**
 
-| 环节 | 事实 |
-|---|---|
-| 指标注册 | `core/monitoring.py` 用 `prometheus_client` 注册了约 70 个，含 `agent_run_dead_letter_total` |
-| HTTP 暴露 | 唯一端点 `GET /metrics/prometheus`（`api/routes/monitoring.py:332`）**手工拼接** 10 个 `csai_*` 聚合行 |
-| 序列化 | 全仓 `generate_latest` / `make_asgi_app` → **0 命中**，即 `REGISTRY` 从未被输出 |
-| 抓取配置 | `monitoring/prometheus.yml:17` 正是抓该端点 |
-| 告警规则 | `AgentRunDeadLetterDetected` 用 `increase(agent_run_dead_letter_total[5m])` |
-| 测试 | `tests/unit/test_alert_rules_contract.py` 只做 YAML 结构断言，明确不跑 `promtool` |
+这一节曾经是「告警规则**永远不可能触发**」。断链有两半，**两半都已修复**，
+但只有一半拿到了真实 Prometheus 的取证。
 
-**结论：DLQ 目前只能靠人看或主动查询，没有自动通知。**
-Grafana `csai-overview.json` 另有 6 个面板引用从未输出的指标，永远为空。
+| 环节 | 修复前 | 现在 | 证据 |
+|---|---|---|---|
+| 指标注册 | `core/monitoring.py` 注册约 70 个 | 同左 | `core/monitoring.py` |
+| **注册表被序列化** | **全仓 `generate_latest` 0 命中 —— 从未输出** | `GET /metrics` = `prometheus_client.generate_latest(REGISTRY)` | `api/routes/monitoring.py::_registry_exposition` |
+| **跨进程可见** | worker 容器递增，Prometheus 只抓 app → 恒为 0 | `PROMETHEUS_MULTIPROC_DIR` + `MultiProcessCollector` 聚合共享卷 | `core/metrics_exposition.py` |
+| 抓取认证 | 端点在 supervisor/admin 面内，抓取配置**不带凭据** → 401 | `bearer_token_file` + `Authorization: Bearer` 接受 | `api/utils.py::check_admin_token` |
+| 告警规则 | `increase(agent_run_dead_letter_total[5m]) > 0` 引用不存在的时间序列 | 同一表达式，**真实 Prometheus 上进入 FIRING** | `make metrics-exposure-verify` |
+| Grafana 面板 | 6 个面板引用从未输出的指标 | 补齐输出（`get_stats`/`get_kpi_stats` 里本来就有） | `tests/unit/test_metrics_exposure_contract.py` |
 
-**为什么这条是"声称与事实不符"而非"缺功能"**：仓库提供了完整的
-崩溃恢复 + DLQ + 重放 + runbook，唯独缺了"通知"这一环，
-这会让读者以为闭环是完整的。
+**已验证（VERIFIED_LOCAL）**：`make metrics-exposure-verify` —— 真实
+`prom/prometheus:v2.51.0`、真实抓取、真实 worker 进程注入 3 次 dead-letter、
+`AgentRunDeadLetterDetected` 实际进入 `firing`。证据：
+`artifacts/observability/metrics-exposure-<ts>/report.json`。
+另有 `make alert-rules-test`（官方 `promtool test rules`，引用**真实规则文件**）
+钉住「真会触发」与「历史值不 latching」。
 
-→ 修复方案：[PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-1
+**仍未验证（NOT_VERIFIED）**：
+
+- **Alertmanager 通知投递**（webhook / SMTP 真的把消息送出去）—— 未做端到端；
+- **整套 docker compose 栈**（真实 FastAPI app + 真实 Celery worker 二进制 +
+  Grafana 渲染）—— 上面用的是复用了真实暴露函数的 harness，不是整套栈；
+- 生产集群 / 多副本长期运行。
+
+因此准确表述是：**「指标可达 + 告警表达式在真实 Prometheus 上成立」已验证，
+「有人真的收到通知」尚未验证。** 不要把它写成「告警闭环已完成」。
+
+防复发：`tests/unit/test_metrics_exposure_contract.py` 断言告警规则与 Grafana
+面板引用的**每个** metric name 都出现在暴露面里 —— 这类「注册了却没暴露」的断链
+不再依赖人记得检查。
 
 ### 1.3 "转人工"不是已实现的功能
 
 **状态：Partial（仅状态标记）**
+
+这一条**本轮未改代码**，结论不变：人工**审批**与人工**坐席接管**是两件事，
+仓库只有前者。
 
 | 机制 | 人工**审批**高危副作用 | 转**人工坐席**处理会话 |
 |---|---|---|
@@ -88,8 +106,9 @@ escalation 的真实实现只有两处，都不是"转交"：
 全仓 `handoff|ticket|human_handoff` 在生产代码中 **0 命中**。
 
 **准确表述**：本系统能*说出* "建议转人工"，但**没有任何东西接住这句话**。
+它是一个**会话级状态标记 + 响应策略提示**，不是工单系统。
 
-→ [agent-design.md](agent-design.md) §4、[PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-2
+→ [agent-design.md](agent-design.md) §4
 
 ---
 
@@ -98,16 +117,19 @@ escalation 的真实实现只有两处，都不是"转交"：
 | 项 | 状态 | 说明 |
 |---|---|---|
 | 审批机制本身 | **Implemented** | 风险分级、拦在执行前、`interrupt()`、durable 表、TTL、职责分离、RBAC |
-| 默认开关 | **默认关闭** | `HITL_ENABLED=false`（`core/config.py:795`） |
-| **开了但没配 = 静默放行** | **Partial（fail-open）** | `HITL_ENABLED=true` + `HITL_HIGH_RISK_TOOLS` 空 + `HITL_HIGH_AMOUNT_THRESHOLD=0` → 全部判为 `LOW` → 什么都不拦，**且不报警**。与仓库其余部分（checkpoint / MCP / 分布式运行时都 fail-closed）不一致 |
-| `/api/chat` 快路径 | **明确不在治理边界内** | 快路径无 run 上下文（`core/hitl/gate.py:82-87`）。补偿措施是**拒绝**无治理的副作用调用，而不是放行 |
+| 默认开关 | **默认关闭** | `HITL_ENABLED=false`（`core/config.py`） |
+| ~~开了但没配 = 静默放行~~ | **已修复：fail-closed** | `HITL_ENABLED=true` 且两条 HIGH 规则全空 → **拒绝启动**（`core.config.validate_hitl_settings`）。与 MCP / 分布式运行时同一原则 |
+| ~~没声明风险等级的有副作用工具 = 静默放行~~ | **已修复：fail-closed** | 治理开启时，`side_effect=True` 却没被任何规则认领的工具一律判 **HIGH**。只读工具不受影响 |
+| `/api/chat` 快路径 | **明确不在治理边界内** | 快路径无 run 上下文（`core/hitl/gate.py::is_ungoverned_side_effect`）。补偿措施是**拒绝**无治理的副作用调用，而不是放行 |
+| 并发审批 | **Implemented** | 真实 PostgreSQL 下 N 个并发决策**恰好一个赢家**（`UPDATE ... WHERE status=PENDING` 的数据库级 CAS），见 `tests/integration/runtime/test_hitl_approval_concurrency.py` |
 | 待审批通知 | **Designed** | 只有轮询队列，**没有 push / 邮件 / IM 主动通知** |
 | 真实 ERP 退款/改单 | **NOT_VERIFIED** | `tools/hitl_staging_tools.py` 是确定性 staging 工具，验证的是**治理机制**，不是金蝶 ERP 的正确性。无企业 staging 环境 |
-| MCP 写操作工具 | **结构上不可能存在** | 只注册 `risk_level=low` 的 MCP 服务器（`tools/mcp_adapter.py:1078-1086`），且 `side_effect=False` 硬编码 |
+| MCP 写操作工具 | **结构上不可能存在** | 只注册 `risk_level=low` 的 MCP 服务器（`tools/mcp_adapter.py`），且 `side_effect=False` 硬编码 |
 
 **默认配置下实际生效的高危工具集 = 只有两个 staging 工具**
 （`staging_refund` / `staging_order_change`）。4 个 ERP 工具全部
-`side_effect=False`、`risk_level` 未声明。
+`side_effect=False`、`risk_level` 未声明 —— 它们是**只读查询**，因此不受
+新的 side-effect 兜底影响（这正是兜底没有把「所有 ERP 查询」都拖进审批的原因）。
 
 ---
 
@@ -135,12 +157,17 @@ escalation 的真实实现只有两处，都不是"转交"：
 |---|---|---|
 | 注册表 / OpenAI schema / ERP 授权 / HITL 拦截 / 幂等 | **Implemented** | — |
 | MCP 适配器 | **Implemented**（11 条 fail-closed 策略 + 真实 stdio 子进程契约测试） | 默认**不启用**（`MCP_SERVERS` 为空）；`mcp` 是 optional 依赖 |
-| 原生工具超时 | **Partial** | `agents/` 内无 `asyncio.wait_for`。**只有 MCP 有 per-call timeout**。一个慢的 ERP 工具可以拖住整个 run |
-| 工具级重试 | **Partial** | `RETRY_MAX_ATTEMPTS` 只作用于 LLM 客户端，不作用于工具 |
-| 并行工具调用 | **Partial** | `agents/base_agent.py:733` 是顺序 `for`；`asyncio.gather` 只用于上下文准备。LLM 一次返回多个 tool_call 时没有并行收益 |
-| 工具级熔断器 | **Partial** | `CircuitBreaker` 只保护 LLM，不保护 ERP / MCP |
+| **原生工具超时** | **Implemented**（本轮新增） | `TOOL_EXECUTION_TIMEOUT_SECONDS`（默认 30s）覆盖**两条**执行分支。只读工具超时降级为可解释错误；**副作用工具超时冒泡**（结果未知），绝不被 ledger 记成成功。契约：`tests/unit/test_tool_execution_reliability.py` |
+| 工具级重试 | **不存在** | `RETRY_MAX_ATTEMPTS` 只作用于 **LLM 客户端**。工具失败不以退避重试的形式回到 executor；run 级 retry 只会因**可重试错误分类**而重投整条 run |
+| 并行工具调用 | **不存在** | `agents/base_agent.py` 的工具循环是顺序 `for`；`asyncio.gather` 只用于上下文准备。LLM 一次返回多个 tool_call 时没有并行收益 |
+| 工具级熔断器 | **不存在** | `CircuitBreaker` 只保护 LLM，不保护 ERP / MCP。ERP 挂掉时每次调用都会等到超时，而不是熔断后快速失败 |
+| MCP 工具治理边界 | **Implemented（只读）** | 只注册 `risk_level=low` 的 server；`side_effect=False` 硬编码，因此 MCP 写操作在结构上不可能存在 |
 | 真实 ERP 写操作 | **NOT_VERIFIED** | 同 §2 |
 | `media/`（图片/音频/视频/文档/TTS）与 `alerts/` | **不在工具循环内** | 它们是 API 层集成，**不是 Agent 可调用的工具**。不要把它们算进"工具生态" |
+
+> 「不存在」三行是被**测试断言**锁住的（`TestAbsentToolLayerFeatures`）：
+> 一旦有人给工具层补上同名同参的重试 / 熔断 / 并行，测试会失败并要求同时补
+> 配置项、文档与验证 —— 避免出现「文档说有、代码没有」或反之。
 
 ---
 
@@ -150,10 +177,16 @@ escalation 的真实实现只有两处，都不是"转交"：
 |---|---|---|
 | 混合检索 + RRF + rerank + 确定性 point ID + 迁移工具 | **Implemented** | ADR-008 |
 | 5000+ 语料导入（幂等 + manifest + 覆盖率审计） | **Implemented** | — |
-| 正式检索指标 | **NOT_VERIFIED，且当前不可测** | 见 §1.1 |
+| 正式检索指标（人工相关度判定） | **NOT_VERIFIED，且当前不可测** | 见 §1.1。**全量 649 指标不得对外发布** |
+| **gold 数据集缺陷（已量化并修复到"可人工核验"状态）** | **Partial** | 649 query 中 **40 条全部 gold 缺失**、**160 个 gold 引用不在语料中**（见 `make rag-gold-review` 输出）。已产出 1787 条 `DRAFT_UNVERIFIED` + 40 条 `UNDETERMINABLE` 工作清单，**全部通过 `rag-gold-label/v1` 校验**，可交人工判定 |
+| **known-item（构造）gold 与 BM25 消融** | **Implemented / 可测** | query := 文档标题（逐字），相关度**由构造保证**，非人工判定。度量**索引词法可检索性**，不是搜索质量。负控通过（打乱 gold 后 `hit@1` 由 1.0 → 0.0）。见 `make rag-gold-known-item` / `make rag-ablation` |
+| **vector_only / hybrid / hybrid+rerank 消融** | **BLOCKED** | embedding provider 在本环境不可用（凭据为占位符）。**不使用占位向量替代**：占位向量会让 Qdrant 返回任意结果，把 `vector_only` 的 Hit@K 变成随机召回率 |
+| 语料质量 | **已知缺陷** | 5000 条中仅 **617 条标题唯一**（4383 条文档共享标题），且 `source: "synthetic"`。任何指标都必须附带这一事实 |
 | 语义缓存（L2）的向量质量 | 依赖 embedding provider | embedding 不可用时 L2 失效并**显式标记 degraded**，回退 L3 |
 | Reranker 不可用 | 降级到 `hybrid_no_rerank` | 该配置的指标是独立口径，不能与 rerank 结果混报 |
 | LangGraph `store` 长期记忆 | **Designed（未使用）** | `compile()` 只传 `checkpointer`。跨会话记忆由 `core/session/` 承担，两者**明确分离** |
+
+→ 详见 [reference/agent-evaluation.md](reference/agent-evaluation.md)、[reference/rag-evaluation.md](reference/rag-evaluation.md)
 
 ---
 
@@ -163,11 +196,12 @@ escalation 的真实实现只有两处，都不是"转交"：
 |---|---|---|
 | OTel tracing（provider + 5 个语义 span + 自动 instrument） | **Implemented，本地已验证** | 对真实 Collector 验证过 span 到达与隐私 canary 不泄漏 |
 | 结构化日志 + 两层密钥脱敏 | **Implemented** | 含 `scrub_exception_message()` 就地脱敏，防止 ASGI 自己的 traceback 泄漏 |
-| 指标注册（~70 个） | **Implemented** | — |
-| **指标 HTTP 暴露** | **Partial（断链）** | 见 §1.2 |
-| **DLQ 告警** | **Partial（永不触发）** | 见 §1.2 |
-| Grafana 看板 | **Partial** | 6 个面板永远为空 |
-| **持久化 / 可查询 trace 后端** | **Designed** | `deploy/otel/collector-config.yaml` 只有 `debug` exporter，无存储、无保留期、无查询 UI |
+| 指标注册（~70 个） | **Implemented** | `core/monitoring.py`；实际暴露的 family 数由 `prometheus_exposition_metric_families` 自报 |
+| **指标 HTTP 暴露** | **Implemented（VERIFIED_LOCAL）** | `GET /metrics` 序列化真实 REGISTRY；`/metrics/prometheus` 保留 `csai_*` 业务聚合。真实 Prometheus 抓取验证过，见 §1.2 |
+| **跨进程指标聚合** | **Implemented（VERIFIED_LOCAL）** | app / worker 是两个容器，`PROMETHEUS_MULTIPROC_DIR` + `MultiProcessCollector`。暴露面自报 `prometheus_multiprocess_enabled`，可对它配告警 |
+| **DLQ 告警规则** | **表达式 VERIFIED_LOCAL / 通知 NOT_VERIFIED** | `promtool test rules` + 真实 Prometheus FIRING 均通过；Alertmanager 投递未验证，见 §1.2 |
+| Grafana 看板 | **Implemented（未做真实渲染验证）** | 6 个空白面板已补齐输出；**NOT_VERIFIED**：未在真实 Grafana 里渲染确认 |
+| 持久化 / 可查询 trace 后端 | **Designed** | `deploy/otel/collector-config.yaml` 只有 `debug` exporter，无存储、无保留期、无查询 UI |
 | LangSmith / Langfuse / OpenInference | **未集成** | 应用代码 0 引用。`langsmith` 只作为 lockfile 传递依赖存在 |
 | LangChain 原生 callback handler | **未使用** | tracing 是手写 span，不是 LangChain-native |
 | 日志聚合 | **Implemented** | Loki + Promtail |
@@ -184,9 +218,12 @@ escalation 的真实实现只有两处，都不是"转交"：
 | OTel span 完整性 | **Level 2 本地已验证** | 有 artifact |
 | 响应质量评分 | **Implemented，但是启发式** | `agents/evaluator.py` 是关键词打分，**不是 LLM-as-judge**。它的真实用途是"要不要升级重试"的触发器 |
 | **LLM-as-judge 语义质量** | **未实现** | 启发式测不了"答非所问但用词礼貌" |
-| **Agent 行为回归评测** | **未实现** | 无 golden 用例集。`evaluation/agent_eval/` 只在 gitignore 的 `.pyc` 里留有痕迹，源码从未提交、当前不可运行 |
+| **Agent 行为评测（Agent Eval V1）** | **Implemented（LEVEL_2_APPLICATION_MEASURED）** | 真实编译图 + 脚本化 LLM（零出网）。测**编排/治理/路由**行为，**不测**模型能力。见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
+| **Agent 路由准确率（正式）** | **NOT_MEASURED** | 数据集 111 条全部是 `llm_candidate`，**人工确认数为 0**。门禁因此刻意报 `NOT_AVAILABLE` —— 没测出来不等于达标。用 LLM 起草的标签验证 LLM 驱动的系统 = 自我验证 |
+| **工具选择准确率的语义** | **治理层保真度，非模型能力** | 工具计划来自数据集；指标回答的是"编排层有没有把计划执行对" |
 | 真实用户满意度 / NPS | **NOT_MEASURED** | 无真实流量 |
-| **P99 延迟 / 容量基线** | **NOT_MEASURED** | 有 9 个 `scripts/benchmark_*.py`，但**无 SLO 定义、无生产基线** |
+| **端到端 P50/P95/P99 / TTFT / QPS / Token 成本** | **NOT_VERIFIED（BLOCKED）** | LLM provider 不可用（凭据为占位符）。**不产生任何估算**。见 `make perf-evidence` |
+| 离线工程逻辑（token 计数确定性 / 缓存作用域隔离） | **Implemented** | 不依赖 provider，随 `make perf-evidence` 一起验证 |
 | **生产 SLA** | **不声明** | 无生产环境、无证据。任何百分比都是编的 |
 
 ---
@@ -248,18 +285,20 @@ escalation 的真实实现只有两处，都不是"转交"：
 完整优先级与执行顺序见
 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) §3–§5。
 
-| 项 | 前置条件 |
-|---|---|
-| 修复 DLQ 告警断链 | 无（一个端点 + 抓取配置 + 一个契约测试） |
-| HITL fail-closed 启动校验 | 无 |
-| 工具超时 / 并行 / 熔断 / 重试 | 需先定义"读可重试、写不可重试"的边界 |
-| Agent 行为评测 harness | 需确定性 mock graph + JSONL 行为用例集 |
-| LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 |
-| 坐席工作台 | 需产品定义（工单模型、SLA、坐席权限） |
-| RAG gold 人工标注 | 需标注预算 + Kappa 一致性度量 |
-| 持久化 trace 后端 | 需选定 Jaeger / Tempo 并配 retention |
-| 压测与容量基线 | 需先定义 SLO |
-| Kubernetes | 需先有真实集群与多副本一致性验证 |
+| 项 | 前置条件 | 状态 |
+|---|---|---|
+| ~~修复 DLQ 告警断链~~ | — | **已完成**（§1.2）：指标可达 VERIFIED_LOCAL；通知投递仍 NOT_VERIFIED |
+| ~~HITL fail-closed 启动校验~~ | — | **已完成**（§2）：启动校验 + side_effect 兜底 + 并发审批真实 PG 验证 |
+| ~~原生工具超时~~ | — | **已完成**（§4）；副作用超时的「冒泡而非降级」语义已锁定 |
+| 工具并行 / 熔断 / 重试 | 需先定义"读可重试、写不可重试"的边界；并行还需先确认副作用工具的调用序语义 | 未开始 |
+| Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
+| ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
+| LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |
+| 坐席工作台 | 需产品定义（工单模型、SLA、坐席权限） | 未开始 |
+| RAG gold 人工标注 | 需标注预算 + Kappa 一致性度量 | 未开始 |
+| 持久化 trace 后端 | 需选定 Jaeger / Tempo 并配 retention | 未开始 |
+| 压测与容量基线 | 需先定义 SLO | 未开始 |
+| Kubernetes | 需先有真实集群与多副本一致性验证 | 未开始 |
 
 ---
 
@@ -269,6 +308,12 @@ escalation 的真实实现只有两处，都不是"转交"：
 make facts          # 当前事实（版本/模型/评测状态），不硬编码数字
 make audit-docs     # 文档一致性守卫
 pytest --collect-only -q   # 测试规模以当前输出为准
+
+# 指标暴露链（本轮修复的 P0）
+make metrics-exposure-check     # 契约测试：告警/Grafana 引用的每个指标名都可达
+make monitoring-token           # 生成 Prometheus 抓取凭据（fail-closed）
+make alert-rules-test           # 官方 promtool：规则语法 + 真会 firing + 不 latching
+make metrics-exposure-verify    # 真实 Prometheus 端到端（DLQ 告警实际 FIRING）
 ```
 
 关键证据 artifact（可逐个打开复查）：
@@ -278,5 +323,10 @@ pytest --collect-only -q   # 测试规模以当前输出为准
 | `artifacts/distributed-runtime/<ts>/report.json` | 分布式 Runtime 跨进程/锁/幂等 **PASS**（带 `tested_code_sha`） |
 | `artifacts/runtime/chaos-<ts>.json` | SIGKILL 崩溃恢复 **PASS**（恢复后 `attempt` 递增、副作用仍只发生一次） |
 | `artifacts/observability/otel-collector-<ts>/report.json` | 5 个语义 span 到达真实 Collector，隐私 canary 未出现 |
+| `artifacts/observability/metrics-exposure-<ts>/report.json` | 指标可达 + DLQ 告警在真实 Prometheus 上 **FIRING**；边界写明未验证什么 |
 | `artifacts/evaluation/rag-gold-provenance/<ts>/report.json` | 正式检索指标 **当前不可测** 的根因 |
 | `artifacts/evaluation/rag-649/preflight-<ts>/report.json` | 那次 preflight 被环境问题阻塞（历史证据，不是当前根因） |
+| `artifacts/agent-eval/<ts>/report.json` | Agent 行为评测（真实图回放）；含每个指标的分子/分母/排除数与**证据边界** |
+| `artifacts/evaluation/rag-ablation/<ts>/report.json` | BM25 消融（known-item CONSTRUCTED gold）+ 负控；vector/hybrid 配置结构化 BLOCKED |
+| `artifacts/evaluation/performance/<ts>/report.json` | 性能/成本门禁：provider 不可用 -> 全部 NOT_VERIFIED，**不产生估算** |
+| `artifacts/distributed-runtime-summary/<ts>.json` | 运行时验收汇总；副作用按**真实执行次数**计（非调用次数、非 ledger 命中） |

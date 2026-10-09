@@ -63,6 +63,13 @@ make runtime-e2e        # tests/integration/runtime：真实 PG + Redis + 多进
 make runtime-chaos      # scripts/test_worker_crash_recovery.py → artifacts/runtime/chaos-<ts>.json
 make runtime-verify     # scripts/verify_distributed_runtime.py → artifacts/distributed-runtime/<ts>/report.json
 make runtime-replay-help # scripts/replay_dead_run.py --help（DLQ 人工重放）
+
+# 指标暴露链（Prometheus 告警闭环；见 docs/limitations.md §1.2）
+make metrics-exposure-check  # 契约测试：告警/Grafana 引用的每个指标名都真的可达
+make monitoring-token        # 生成 Prometheus 抓取凭据（fail-closed：缺失/占位符/过短直接失败）
+make alert-rules-test        # 官方 promtool check config + test rules（真会 firing / 不 latching）
+make metrics-exposure-verify # 真实 Prometheus 端到端：DLQ 告警实际进入 FIRING
+make monitoring-up           # 启动完整监控栈（Prometheus + Grafana + Alertmanager + Loki + Promtail）
 make openapi-check      # docs/openapi.json 与 app.openapi() 表面一致
 make facts              # python3 scripts/project_facts.py
 make audit-docs         # 文档一致性/语义漂移守卫
@@ -199,8 +206,19 @@ make db-downgrade # 回滚迁移
 [docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md)）。
 
 - **风险分级** `core/hitl/risk.py`：LOW / MEDIUM / HIGH；优先级为
-  「工具显式声明 > 工具名白名单 > 金额阈值 > 默认 LOW」；**只有 HIGH 需要
+  「工具显式声明 > HIGH 白名单 > 金额阈值 > MEDIUM 白名单 >
+  **未认领风险等级的有副作用工具 = HIGH** > 默认 LOW」；**只有 HIGH 需要
   人工审批**。判定失败时 fail-closed（挂起而非放行）。
+- **治理必须真的生效（fail-closed，两层互补）**：
+  - 启动校验 `core.config.validate_hitl_settings`：`HITL_ENABLED=true` 但两条
+    HIGH 规则全空 → **拒绝启动**（此前是 LOW 全放行且无任何告警）。
+    校验**先于** `DEV_MODE` 早退，开发机同样受约束。
+  - 执行期兜底：治理开启时，`side_effect=True` 却未被任何规则认领的工具一律
+    判 HIGH；**只读工具完全不受影响**（普通问答/订单查询路径不变）。
+- **并发与恢复（真实 PostgreSQL 验证）**：`decide()` 是数据库级 CAS
+  （`UPDATE ... WHERE status=PENDING`），N 个并发决策**恰好一个赢家**；
+  `consume_resume()` 是 `WHERE resumed_at IS NULL`，N 个并发恢复**恰好一份载荷**。
+  **无决策时 `consume_resume` 返回 None** —— 重试与 worker 崩溃恢复**不能**绕过审批。
 - **拦在执行之前**：Agent 工具循环把 HIGH 风险调用**摘出**到
   `state["pending_actions"]`（不执行），由图节点 `human_approval_gate`
   （协作模式与 `final_response` 之间）逐个 `interrupt()`。
@@ -247,6 +265,7 @@ make db-downgrade # 回滚迁移
 - CSRF 双重 Cookie 提交 + CSP（script-src 用 nonce，style-src 用 'unsafe-inline'）
 - WebSocket 首条消息认证 + 连接限制 + 消息限流 + 空闲超时
 - SSRF 防护：Webhook URL 验证阻止私有 IP / 回环 / 元数据端点
+- 结构化日志 + 两层密钥脱敏：**Implemented**（含 `scrub_exception_message()` 就地脱敏，防止 ASGI 自己的 traceback 泄漏）
 - **Token Quota：用户级 Token 消耗限额（每日/每月），Redis 持久化 + 内存回退**
 - **黑板 Session 隔离：ContextVar 按 session 隔离 Agent 间共享数据**
 - **会话数据加密：AES-256-Fernet 可选加密（`SESSION_ENCRYPTION_KEY`）**
