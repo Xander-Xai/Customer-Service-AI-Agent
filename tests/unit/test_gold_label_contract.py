@@ -13,11 +13,13 @@ from pathlib import Path
 import pytest
 
 from scripts.gold_label_contract import (
+    LABEL_STATUS_CONSTRUCTED,
     LABEL_STATUS_DRAFT,
     LABEL_STATUS_EXCLUDED,
     LABEL_STATUS_JUDGED,
     LABEL_STATUS_UNDETERMINABLE,
     METHOD_CATEGORY_RANDOM,
+    METHOD_DERIVED,
     METHOD_HUMAN,
     METHOD_LLM_SUGGESTED,
     SCHEMA_VERSION,
@@ -48,6 +50,9 @@ def _record(**overrides):
         "reviewed_at": "2026-07-01T00:00:00Z",
         "label_status": LABEL_STATUS_JUDGED,
         "exclusion_reason": None,
+        # 仅 CONSTRUCTED 需要非空；其它状态为 null。字段必须**显式出现**，
+        # 这样"缺失"与"刻意留空"在审计时是可区分的两件事。
+        "derivation_rule": None,
     }
     base.update(overrides)
     return base
@@ -240,3 +245,67 @@ class TestValidatorAgainstCorpusFileIfPresent:
                 if line:
                     ids.add(json.loads(line).get("id"))
         assert "derm_000001" in ids
+
+
+class TestConstructedGold:
+    """CONSTRUCTED：机械推导的 gold，与 JUDGED **分属不同 population**。"""
+
+    def test_valid_constructed_passes(self):
+        assert (
+            _errors(
+                _record(
+                    relevance_grade=3,
+                    annotator="derive_from_title_v1",
+                    annotation_method=METHOD_DERIVED,
+                    reviewed_at=None,
+                    label_status=LABEL_STATUS_CONSTRUCTED,
+                    derivation_rule="query := document.title (verbatim)",
+                )
+            )
+            == []
+        )
+
+    def test_constructed_requires_derivation_rule(self):
+        errors = _errors(
+            _record(
+                annotation_method=METHOD_DERIVED,
+                reviewed_at=None,
+                label_status=LABEL_STATUS_CONSTRUCTED,
+                derivation_rule=None,
+            )
+        )
+        assert any("derivation_rule" in e for e in errors), errors
+
+    def test_constructed_must_not_claim_human_review(self):
+        """CONSTRUCTED 声称有人审过 = 把机械推导伪装成人工判定。"""
+        errors = _errors(
+            _record(
+                annotation_method=METHOD_DERIVED,
+                label_status=LABEL_STATUS_CONSTRUCTED,
+                derivation_rule="query := document.title",
+                reviewed_at="2026-07-01T00:00:00Z",
+            )
+        )
+        assert any("must NOT claim a human review" in e for e in errors), errors
+
+    def test_derived_method_requires_constructed_status(self):
+        errors = _errors(_record(annotation_method=METHOD_DERIVED))
+        assert any("only valid with" in e for e in errors), errors
+
+    def test_is_human_verified_is_false_for_constructed(self):
+        """核心断言：CONSTRUCTED 永远不算人工确认。
+
+        任何把 CONSTRUCTED 与 JUDGED 混进同一个分母的统计都是在偷换概念 ——
+        "索引能不能按标题找回文档"和"搜索结果相不相关"是两件事。
+        """
+        from scripts.gold_label_contract import is_human_verified
+
+        constructed = _record(
+            annotation_method=METHOD_DERIVED,
+            reviewed_at=None,
+            label_status=LABEL_STATUS_CONSTRUCTED,
+            derivation_rule="query := document.title (verbatim)",
+        )
+        judged = _record()
+        assert is_human_verified(constructed) is False
+        assert is_human_verified(judged) is True
