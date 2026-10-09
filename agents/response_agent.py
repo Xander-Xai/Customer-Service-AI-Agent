@@ -276,23 +276,37 @@ class ResponseAgent(BaseAgent):
 
     def _evaluate_resolution(self, state: dict[str, Any]) -> str:
         """
-        v3.4: 基于多维信号评估解决状态（修复投诉误判为 escalated 的问题）
-        - escalated: 仅当响应明确要求转人工时才标记
-        - failed: 空响应 / 错误降级 → failed
-        - uncertain: 响应过短 / 包含不确定短语 / 低置信度路由 → uncertain
-        - resolved: Agent 正常返回有效响应 → resolved
-        """
-        response = state.get("response", "")
+        v3.4: 基于多维信号评估解决状态
+        v6.4: 收敛到 ``core.outcome`` 业务结果契约 —— 交付 ≠ 解决。
+        关键修复：LLM/工具降级后交付的**通用兜底文案**不再被判成 ``resolved``。
+        只有当 ``outcome.outcome_verified`` 为真（非降级且确实交付了回复、
+        无需人工介入）才返回 ``resolved``。
 
-        # 失败场景：空响应或错误降级
+        - escalated: 需要人工介入（HITL 挂起 / 审批被拒 / 明确转人工）
+        - failed: 空响应 / 明确错误降级
+        - uncertain: 降级兜底 / 过短 / 不确定短语 / 截断
+        - resolved: 无降级、有交付、无需人工介入
+        """
+        from core.outcome import classify_outcome
+
+        response = state.get("response", "")
+        outcome = classify_outcome(state)
+        state["outcome"] = outcome
+        state["degraded"] = outcome.degraded
+
+        # 失败场景：空响应或明确错误降级（先于契约，保留既有精确语义）
         if not response or response.strip() == "":
             return RESOLUTION_FAILED
         if response in ("处理出错，请重试", "处理出错"):
             return RESOLUTION_FAILED
 
-        # v3.4: 升级场景 — 仅基于响应内容判断（而非路由模式）
-        if any(phrase in response for phrase in ESCALATION_PHRASES):
+        # 需要人工介入（HITL 挂起 / 审批被拒 / 明确转人工）
+        if outcome.requires_human_action:
             return RESOLUTION_ESCALATED
+
+        # 降级降级（LLM/工具/检索）——交付了兜底文案，不构成业务解决证据
+        if outcome.degraded:
+            return RESOLUTION_UNCERTAIN
 
         # 不确定场景：响应过短（< 15 字符，通常不是有效回答）
         if len(response.strip()) < 15:
@@ -308,8 +322,10 @@ class ResponseAgent(BaseAgent):
             logger.warning("响应疑似被截断，标记为 uncertain")
             return RESOLUTION_UNCERTAIN
 
-        # 正常解决（包括 hierarchical 模式成功处理的投诉）
-        return RESOLUTION_RESOLVED
+        # 仅当契约认定"有交付且无降级、无需人工介入"时才判 resolved
+        if outcome.outcome_verified:
+            return RESOLUTION_RESOLVED
+        return RESOLUTION_UNCERTAIN
 
     def _evaluate_quality(self, state: dict[str, Any]) -> dict:
         """

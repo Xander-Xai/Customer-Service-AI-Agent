@@ -108,18 +108,23 @@ try:
     session_resolution_rate = _gauge(
         "session_resolution_rate",
         "Session resolution rate (resolved / total)",
+        # 比值型 gauge：多进程模式下默认 `all`（跨进程求和）会把 N 个 API 副本的
+        # 同一个比值加起来（ratio * N），语义直接错。取「最近写入值」= 单副本视角。
+        multiprocess_mode="mostrecent",
     )
 
     # 人工升级率
     escalation_rate = _gauge(
         "escalation_rate",
         "Human escalation rate (escalated / total)",
+        multiprocess_mode="mostrecent",
     )
 
     # 缓存命中率（业务维度）
     business_cache_hit_rate = _gauge(
         "business_cache_hit_rate",
         "Business-level cache hit rate",
+        multiprocess_mode="mostrecent",
     )
 
     # v6.1: 缓存分层命中率
@@ -140,7 +145,11 @@ try:
 
     # v6.1: RAG 检索
     rag_queries_total = _counter("rag_queries_total", "RAG queries count")
-    rag_recall_at_3 = _gauge("rag_recall_at_3", "RAG recall@3 score")
+    rag_recall_at_3 = _gauge(
+        "rag_recall_at_3",
+        "RAG recall@3 score",
+        multiprocess_mode="mostrecent",
+    )
 
     # v6.1: 场景路由
     scene_routing_total = _counter(
@@ -275,6 +284,23 @@ try:
     tool_result_cache_latency_seconds = _histogram(
         "tool_result_cache_latency_seconds", "Tool result cache lookup latency"
     )
+    # 工具层可靠性（与 LLM 客户端的 timeout/retry/circuit breaker 是**不同**机制：
+    # 后者只保护 LLM 调用，前者保护工具 handler）。
+    #
+    # label 基数纪律：只允许已注册工具名（注册表是有界集合），**严禁**把参数、
+    # order_id、异常消息放进 label。
+    tool_execution_total = _counter(
+        "tool_execution_total", "Native tool executions by outcome", ["outcome"]
+    )
+    tool_execution_timeout_total = _counter(
+        "tool_execution_timeout_total", "Native tool executions aborted by per-call timeout"
+    )
+    tool_execution_duration_seconds = _histogram(
+        "tool_execution_duration_seconds",
+        "Native tool execution latency",
+        ["tool_name"],
+        buckets=[0.05, 0.1, 0.5, 1, 2, 5, 10, 30, 60],
+    )
 
     # 分布式 Agent Run 可靠性 + 可观测性（未发布版本；runtime 版本仍为 6.3）
     #
@@ -304,11 +330,22 @@ try:
         "AgentRun queue wait (queued_at -> started_at)",
         buckets=[0.1, 0.5, 1, 2, 5, 10, 30, 60, 300],
     )
-    agent_worker_active = _gauge("agent_worker_active", "Active worker tasks")
+    agent_worker_active = _gauge(
+        "agent_worker_active",
+        "Active worker tasks",
+        # 集群视角的 gauge：跨进程**求和**才是对的（各 worker 各自持有局部值）。
+        # 但 `all` 会把已退出进程留下的最后值也算进来，所以用 `livesum`
+        # （只累加仍存活的进程）而不是默认的 `all`。
+        multiprocess_mode="livesum",
+    )
     agent_worker_task_total = _counter(
         "agent_worker_task_total", "Worker task outcomes", ["status"]
     )
-    agent_run_inflight = _gauge("agent_run_inflight", "AgentRuns currently executing")
+    agent_run_inflight = _gauge(
+        "agent_run_inflight",
+        "AgentRuns currently executing",
+        multiprocess_mode="livesum",
+    )
     agent_run_failed_total = _counter(
         "agent_run_failed_total", "AgentRun terminal failures (FAILED/DEAD_LETTER)"
     )
@@ -390,7 +427,11 @@ try:
         ["server", "outcome"],
     )
     agent_approval_pending = _gauge(
-        "agent_approval_pending", "Applications awaiting human decision"
+        "agent_approval_pending",
+        "Applications awaiting human decision",
+        # 待审批数是全局事实：多个进程各自加/减同一个计数，`livesum` 才是集群视角的
+        # 正确聚合（`all` 会把已退出进程的残留值重复计入）。
+        multiprocess_mode="livesum",
     )
     agent_approval_wait_seconds = _histogram(
         "agent_approval_wait_seconds",
@@ -405,6 +446,28 @@ try:
         "agent_approval_execution_total",
         "Outcomes of approved side-effect executions",
         ["outcome"],
+    )
+
+    # ===== 暴露面自描述 =====
+    #
+    # 这两个 gauge 回答一个运维必须能一眼看出、而**不能**靠读代码才回答的问题：
+    # 「我看到的指标，是全部进程的，还是只有被抓取的那个进程的？」
+    #
+    # 背景：`agent_run_dead_letter_total` 等可靠性指标由 **worker 容器**递增
+    # （`runtime/run_service.py` -> `runtime/metrics.py` -> 本模块），而 Prometheus
+    # 抓的是 **app 容器**。`prometheus_client` 的默认 REGISTRY 是进程内的，因此若未
+    # 启用多进程模式，该指标在抓取侧**恒为 0** —— 它存在、它被 scrape、它就是不动。
+    # 这种「看起来正常地不触发」比「指标缺失」更难发现，所以把它做成可查询的事实。
+    prometheus_multiprocess_enabled = _gauge(
+        "prometheus_multiprocess_enabled",
+        "1 when PROMETHEUS_MULTIPROC_DIR aggregation is active, else 0 "
+        "(0 means worker-process counters are NOT visible to the scraper)",
+        multiprocess_mode="mostrecent",
+    )
+    prometheus_exposition_metric_families = _gauge(
+        "prometheus_exposition_metric_families",
+        "Metric families actually served by GET /metrics",
+        multiprocess_mode="mostrecent",
     )
 
     PROMETHEUS_BUSINESS_ENABLED = True
@@ -475,6 +538,9 @@ except ImportError:
     tool_result_cache_errors_total = _NoopMetric()
     tool_result_cache_bypass_total = _NoopMetric()
     tool_result_cache_latency_seconds = _NoopMetric()
+    tool_execution_total = _NoopMetric()
+    tool_execution_timeout_total = _NoopMetric()
+    tool_execution_duration_seconds = _NoopMetric()
     agent_run_total = _NoopMetric()
     agent_run_retry_total = _NoopMetric()
     agent_run_dead_letter_total = _NoopMetric()
@@ -501,6 +567,8 @@ except ImportError:
     agent_approval_wait_seconds = _NoopMetric()
     agent_approval_expired_total = _NoopMetric()
     agent_approval_execution_total = _NoopMetric()
+    prometheus_multiprocess_enabled = _NoopMetric()
+    prometheus_exposition_metric_families = _NoopMetric()
     mcp_tool_call_total = _NoopMetric()
     mcp_tool_error_total = _NoopMetric()
     mcp_tool_duration_seconds = _NoopMetric()
@@ -606,6 +674,8 @@ class MetricsCollector:
         self.total_single_turn_resolved = 0
         self.total_ai_handled = 0
         self.total_escalated = 0
+        # v6.4: 降级计数 —— 交付了兜底文案不等于解决了业务问题。
+        self.total_degraded = 0
         self.session_turn_counts: dict[str, int] = {}
         self.session_last_activity: dict[str, float] = {}
         self._session_ttl: float = SESSION_TTL  # 会话统计过期时间
@@ -642,10 +712,12 @@ class MetricsCollector:
         resolution_status: str = "",
         query_type: str = "",  # v5.4: 查询类型（product/billing/complaint等）
         satisfaction_score: int = 0,  # v5.4: 用户满意度评分（1-5）
+        degraded: bool = False,  # v6.4: 是否发生 LLM/工具/检索降级
     ):
         """
         v3.4: 改为 async，使用 asyncio.Lock 保护并发写入
         v5.4: 新增业务指标记录（query_type, satisfaction_score）
+        v6.4: 新增 degraded —— 降级交付的兜底文案不得计入"单轮解决"
 
         Args:
             elapsed: 请求耗时（秒）
@@ -658,6 +730,7 @@ class MetricsCollector:
             resolution_status: 解决状态 (resolved/uncertain/failed/escalated)
             query_type: 查询类型 (product_info/billing/tech_support等)
             satisfaction_score: 用户满意度评分（1-5）
+            degraded: 是否降级交付（core.outcome.Outcome.degraded）
         """
         async with self._ensure_lock():
             self.total_requests += 1
@@ -695,6 +768,8 @@ class MetricsCollector:
 
             # Business KPI tracking（v3.2: 细粒度解决率）
             now = time.time()
+            if degraded:
+                self.total_degraded += 1
             if session_id is not None:
                 is_first_turn = session_id not in self.session_turn_counts
                 self.session_turn_counts[session_id] = (
@@ -705,6 +780,7 @@ class MetricsCollector:
                     is_first_turn
                     and not escalated
                     and not cached
+                    and not degraded
                     and resolution_status == "resolved"
                 ):
                     self.total_single_turn_resolved += 1
@@ -894,6 +970,9 @@ class MetricsCollector:
                 "total_escalated": self.total_escalated,
                 "total_single_turn_resolved": single_turn_sessions,
                 "total_multi_turn": total_sessions - single_turn_sessions,
+                # v6.4: 降级交付计数与比率（降级不构成"已解决"）
+                "total_degraded": self.total_degraded,
+                "degraded_rate": f"{self.total_degraded / max(self.total_requests, 1) * PERCENTAGE_MULTIPLIER:.1f}%",
             }
 
     # --- Section: Monitoring Dashboard Queries ---

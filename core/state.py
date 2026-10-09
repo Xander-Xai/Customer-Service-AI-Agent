@@ -15,6 +15,10 @@ class AgentState(TypedDict, total=False):
     cached: bool
     agents_used: list[str]
     resolution_status: str  # resolved | uncertain | failed | escalated
+    # v6.4: 业务结果契约（core.outcome.Outcome）——区分"交付"与"解决"。
+    # degraded 为真表示 LLM/工具/检索发生降级，交付的可能是兜底文案。
+    degraded: bool
+    outcome: object  # core.outcome.Outcome（避免 core.state -> core.outcome 循环）
     trace_id: str
     stream_callback: object  # v4.2: SSE 流式回调
     # v5.1: 多模态扩展
