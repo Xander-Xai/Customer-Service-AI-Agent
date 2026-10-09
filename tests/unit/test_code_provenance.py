@@ -83,6 +83,14 @@ def test_untracked_source_changes_are_captured(git_repo: Path):
     assert prov.untracked_source_sha256 != prov2.untracked_source_sha256
 
 
+def test_untracked_non_source_artifact_does_not_mark_dirty(git_repo: Path):
+    # 运行产物（JSON）不影响被测代码，不应让 provenance 变"脏"。
+    (git_repo / "report.json").write_text("{}\n", encoding="utf-8")
+    prov = collect_code_provenance(git_repo)
+    assert prov.dirty is False
+    assert prov.publication_status == REPRODUCIBLE
+
+
 def test_generator_mutating_sources_is_unpublishable(git_repo: Path):
     prov = collect_code_provenance(git_repo, generator_mutated_sources=True)
     assert prov.publication_status == UNPUBLISHABLE

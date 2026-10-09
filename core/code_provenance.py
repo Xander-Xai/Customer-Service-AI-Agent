@@ -135,7 +135,6 @@ def collect_code_provenance(
 
     # tracked diff：HEAD 与工作区（含已暂存）的差异。--binary 保证二进制也计入。
     _, tracked = _run_git(root, "diff", "HEAD", "--binary")
-    rc_status, status = _run_git(root, "status", "--porcelain")
     tracked_diff_sha256 = _sha256_hex(tracked.encode("utf-8")) if tracked else None
 
     # 未跟踪源文件：逐文件哈希后拼成稳定指纹（排序保证可复现）。
@@ -158,7 +157,10 @@ def collect_code_provenance(
         untracked_digest.update(b"\0")
     untracked_source_sha256 = untracked_digest.hexdigest() if untracked_files else None
 
-    dirty = bool(status.strip()) if rc_status == 0 else False
+    # ``dirty`` 只表示**被测代码**与 commit 不一致：tracked 修改 + 未跟踪源文件。
+    # 未跟踪的 JSON/日志等运行产物不影响被测代码，不应让每次生成证据都变"脏"，
+    # 否则这个标记会因为仓库里总有未跟踪 artifact 而永远为真、失去意义。
+    dirty = bool(tracked.strip()) or bool(untracked_files)
 
     dataset_sha256 = None
     if dataset_path is not None:
