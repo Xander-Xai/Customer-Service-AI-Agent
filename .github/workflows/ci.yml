@@ -511,10 +511,18 @@ jobs:
       - name: Agent eval contract guards (blocking)
         run: make agent-eval-contract
 
-      - name: RAG gold-label contract + worklist (blocking)
-        run: |
-          make rag-gold-validate
-          make rag-gold-review
+      # 只跑**契约校验**，不跑 `make rag-gold-review`。
+      #
+      # 两者需要的东西不一样：`validate_gold_labels.py` 对缺失语料是**设计好的**
+      # 降级（doc-id / corpus-hash 标 NOT_RUN 并警告），所以它能在没有语料的 CI 上
+      # 有意义地跑。而 `build_rag_gold_review_worklist.py` 产出的是**语料派生**的
+      # 人工标注工作清单：每条记录都带 corpus_hash，且 rag-gold-label/v1 要求它是
+      # 非空字符串。语料是生成物（data/** 被 gitignore），干净 runner 上根本没有，
+      # 硬跑只会得到一条 FileNotFoundError —— 那是环境缺失，不是契约失败。
+      #
+      # 该脚本保留为**本地**作者工具（先 `make generate-knowledge-base` 再跑）。
+      - name: RAG gold-label contract (blocking)
+        run: make rag-gold-validate
 
       - name: Agent eval dataset annotation status
         run: make agent-eval-annotation-status
