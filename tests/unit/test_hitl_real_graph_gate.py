@@ -144,8 +144,21 @@ def _prepare(container, tool_name: str, arguments: dict[str, Any]) -> None:
 
 @pytest.fixture
 def hitl_env(monkeypatch):
-    """治理**已开启**且规则有效（本轮新增的 fail-closed 校验要求如此）。"""
+    """治理**已开启**且规则有效（本轮新增的 fail-closed 校验要求如此）。
+
+    同时保证审批表存在。本测试驱动**真实容器**，而闸门节点会经
+    ``core.hitl.approval_service`` 往应用自己的 DB 写 ``human_approvals``。开发机
+    上 ``data/csai.db`` 早就迁移过、该表一直都在，所以这里一直"碰巧"能过；
+    干净的 CI runner 上没有 ``data/``（它被 gitignore），于是报
+    ``no such table: human_approvals`` —— 又是"靠本机状态兜底"的一类假依赖。
+
+    ``create_all`` 是幂等的，只补缺失的表，不改动已有数据。
+    """
     import core.config as config_module
+    from db.database import engine as db_engine
+    from db.models import Base
+
+    Base.metadata.create_all(db_engine, checkfirst=True)
 
     monkeypatch.setattr(config_module, "HITL_ENABLED", True)
     monkeypatch.setattr(
