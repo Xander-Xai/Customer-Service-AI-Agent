@@ -368,6 +368,22 @@ try:
     agent_worker_heartbeat = _counter(
         "agent_worker_heartbeat", "Worker ownership lease heartbeats", ["outcome"]
     )
+    agent_worker_heartbeat_error_total = _counter(
+        "agent_worker_heartbeat_error_total",
+        "Lease renewal calls that raised (renewal loop continues; early signal of lease loss)",
+    )
+    agent_run_ownership_lost_commit_total = _counter(
+        "agent_run_ownership_lost_commit_total",
+        "Completion commits rejected by the owner/lease CAS (stale worker write-back)",
+    )
+    agent_run_stale_reclaimed_total = _counter(
+        "agent_run_stale_reclaimed_total",
+        "Stale RUNNING runs (expired lease) re-dispatched by the reconciler",
+    )
+    agent_run_stale_dead_letter_total = _counter(
+        "agent_run_stale_dead_letter_total",
+        "Stale RUNNING runs dead-lettered by the reconciler after attempt budget exhaustion",
+    )
     checkpoint_errors_total = _counter(
         "checkpoint_errors_total", "LangGraph checkpoint backend errors"
     )
@@ -557,6 +573,10 @@ except ImportError:
     agent_thread_lease_wait_seconds = _NoopMetric()
     agent_thread_lease_renewed_total = _NoopMetric()
     agent_worker_heartbeat = _NoopMetric()
+    agent_worker_heartbeat_error_total = _NoopMetric()
+    agent_run_ownership_lost_commit_total = _NoopMetric()
+    agent_run_stale_reclaimed_total = _NoopMetric()
+    agent_run_stale_dead_letter_total = _NoopMetric()
     checkpoint_errors_total = _NoopMetric()
     agent_checkpoint_recovery_total = _NoopMetric()
     agent_run_idempotency_hit_total = _NoopMetric()
@@ -1316,7 +1336,7 @@ class SLAAlertManager:
 
                     await alert_notifier.send_alert(
                         title="[升级] SLA 告警",
-                        content=f"SLA违约告警已持续{elapsed//60:.0f}分钟未解决，已升级为emergency级别",
+                        content=f"SLA违约告警已持续{elapsed // 60:.0f}分钟未解决，已升级为emergency级别",
                         severity="emergency",
                     )
 

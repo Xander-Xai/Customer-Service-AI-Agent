@@ -125,8 +125,7 @@ async def _park_for_approval(
         svc.mark_waiting_approval(run_id, expected_worker_id=expected_worker_id)
     except RunOwnershipLost as lost:
         logger.warning(
-            "挂起审批时 ownership 已丢失，放弃提交 run_id=%s expected_worker=%s "
-            "current_status=%s",
+            "挂起审批时 ownership 已丢失，放弃提交 run_id=%s expected_worker=%s current_status=%s",
             run_id,
             lost.expected_worker_id,
             lost.current_status,
@@ -475,6 +474,12 @@ async def execute_run(
                 except RunOwnershipLost as lost:
                     # 已被接管：这次执行的结果不再有权提交。读回当前状态退出，
                     # 绝不 mark_failed —— ownership 丢失不是业务失败。
+                    #
+                    # 这里返回**正常状态**（而不是抛异常），Celery 因此会 ACK，broker
+                    # 不再投递该 run。若新 owner 尚未出现（只是本 worker 的 lease 过期），
+                    # 该 run 就是「没有任何机制会再碰它」的孤儿——由 reconciler 扫描
+                    # 过期 lease 的 RUNNING 收敛（见 ``runtime/retry.py``）。
+                    metrics.record_ownership_lost_commit()
                     logger.warning(
                         "提交成功时 ownership 已丢失，放弃提交 run_id=%s "
                         "expected_worker=%s current_status=%s current_worker=%s",
@@ -783,12 +788,26 @@ async def _heartbeat_loop(
     只续 DB 不续 Redis 时，长执行会在图跑完之前丢掉 thread lock，另一个 worker
     就能进入同一条 state lineage——这正是需要避免的并发写。失去锁后本 worker 不
     再静默继续：记录指标与告警日志，交由 lease 语义收口。
+
+    续租失败**不得**终止循环
+    ------------------------
+    早期实现只捕获 ``ThreadLockBackendError`` 与 ``CancelledError``。于是 ``heartbeat()``
+    抛出任何瞬时数据库异常（连接重置、序列化失败、一次超时）时，异常会穿出协程、
+    续租就此**永久停止**，而调用方在 ``finally`` 里
+    ``suppress(asyncio.CancelledError, Exception)`` 地 await 它，于是异常连日志都不会有。
+
+    后果不是「这次没续上」，而是确定的活性缺陷：worker 继续把图跑完，lease 过期后
+    它的 ``mark_succeeded`` 被 owner CAS 正确拒绝，任务正常返回被 ACK，
+    而没有任何机制会再投递这个 run——它永久停在 RUNNING。
+
+    因此这里按轮次隔离异常：记录有界告警后**继续下一轮**。真正的失效信号是
+    ``renewed is False``（lease 已被接管），那才 return。
     """
+    consecutive_errors = 0
     try:
         while True:
             await asyncio.sleep(max(1.0, interval))
-            renewed = svc.heartbeat(run_id, worker_id=worker_id, lease_seconds=lease_seconds)
-            metrics.record_worker_heartbeat(bool(renewed))
+            # lock 续租独立于 DB 续租：DB 抖动不该顺带丢掉 thread lock。
             if lock is not None and thread_id is not None and lock_ttl_seconds is not None:
                 try:
                     ok = await lock.refresh(thread_id, worker_id, lock_ttl_seconds)
@@ -807,7 +826,26 @@ async def _heartbeat_loop(
                         run_id,
                         thread_id,
                     )
+
+            try:
+                renewed = svc.heartbeat(run_id, worker_id=worker_id, lease_seconds=lease_seconds)
+            except Exception as e:  # noqa: BLE001 - 续租失败必须继续下一轮
+                consecutive_errors += 1
+                metrics.record_worker_heartbeat_error()
+                logger.warning(
+                    "lease 续租异常，继续重试 run_id=%s consecutive=%s err=%s",
+                    run_id,
+                    consecutive_errors,
+                    type(e).__name__,
+                )
+                continue
+
+            if consecutive_errors:
+                logger.info("lease 续租已恢复 run_id=%s after=%s", run_id, consecutive_errors)
+            consecutive_errors = 0
+            metrics.record_worker_heartbeat(bool(renewed))
             if not renewed:
+                # lease 已被接管 / 已失效：停止续租，不与新 owner 竞争。
                 return
     except asyncio.CancelledError:
         return
