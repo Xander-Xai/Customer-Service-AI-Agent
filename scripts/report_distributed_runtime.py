@@ -177,7 +177,6 @@ def _environment() -> dict[str, object]:
     }
 
 
-
 def _latest(pattern: str) -> Path | None:
     files = sorted(REPO_ROOT.glob(pattern))
     return files[-1] if files else None

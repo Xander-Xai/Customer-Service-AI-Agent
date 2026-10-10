@@ -482,6 +482,27 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
         )
     )
 
+    # ── 重复只读调用（重复/重试边界，不含写幂等）──────────────────────
+    # 同一只读工具被脚本连续发起两次：验证编排层对重复调用**可观测**、参数
+    # schema 仍逐次通过，且不会因此被计成工具选择失败。写操作的「重复不得重做」
+    # 由 runtime 的 side-effect ledger 保证（见 make runtime-e2e），本套件不重复
+    # 度量那条语义。
+    cases.append(
+        _case(
+            "tool_repeat_readonly_001",
+            "帮我再查一遍订单 RO-DUP-001 的状态",
+            expected_route="order_status",
+            expected_tools=("staging_readonly_lookup",),
+            expected_risk="low",
+            scripted_tool_calls=(_read_call("RO-DUP-001"), _read_call("RO-DUP-001")),
+            tags=("tool", "readonly", "resilience"),
+            notes=(
+                "重复发起同一只读工具：编排层必须两次都可观测，schema 逐次校验通过；"
+                "写操作幂等语义不在此断言。"
+            ),
+        )
+    )
+
     # ── 禁止工具（治理必须拦住不该调用的）────────────────────────────
     for idx, text in enumerate(
         [

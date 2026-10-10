@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases agent-eval-real rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
 
 # reviewed-gold 人工标注数据集（人工生产，默认路径；可用 GOLD_LABELS=... 覆盖）
 GOLD_LABELS ?= tests/eval/gold_labels/reviewed_gold.jsonl
@@ -304,6 +304,13 @@ agent-eval-contract: ## agent-eval 契约守卫（指标名 / 证据边界 / 降
 
 agent-eval-annotation-status: ## 标注状态报告（human_confirmed 占比 + 各指标分母）
 	@python3 scripts/evaluate_agent.py --print-annotation-status
+
+# 真实模型 lane：默认**不**调用外部 provider。凭据只能从环境变量注入
+# （AGENT_EVAL_REAL_PROVIDER_API_KEY / OPENAI_API_KEY），且必须同时满足
+# AGENT_EVAL_REAL_PROVIDER_AUTHORIZED=1 与 --i-authorize-external-calls。
+# 缺任一条件 -> NOT_MEASURED，零外网请求。真实结果单独落盘，不与 scripted 混合。
+agent-eval-real: ## 真实模型评测 lane（默认 NOT_MEASURED；需凭据 + 显式授权）
+	@python3 scripts/evaluate_agent_real.py $(ARGS)
 
 agent-eval-cases: ## 重新生成候选数据集（全部标为 llm_candidate，需人工确认）
 	@python3 scripts/generate_agent_eval_cases.py

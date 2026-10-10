@@ -84,11 +84,17 @@
   **脚本化 LLM**（不接受 base_url、不持 API key → 结构上不出网）。
 - **测什么**：编排 / 治理 / 路由层行为。**不测**模型能力（选工具质量、
   答案正确性）—— 那需要 LLM-as-a-Judge 与真实 provider，明确不在 V1 范围。
-- 数据集 `tests/eval/agent_cases.jsonl`（111 条）。标注的
+- 数据集 `tests/eval/agent_cases.jsonl`（115 条）。标注的
   `provenance` 默认 `llm_candidate`；**只有 `human_confirmed` 的
   `expected_route` 进入 `route_accuracy` 分母**。当前确认数 **0**，
-  因此 `route_accuracy` = `NOT_MEASURED`，整体门禁报 `FAIL` —— 这是刻意设计：
-  门禁不许靠「没测出来」过关。
+  因此 `route_accuracy` = `NOT_MEASURED`，整体门禁报 `INCONCLUSIVE`
+  （可测门禁全过 + 存在 `NOT_AVAILABLE` 门禁）—— 这是刻意设计：
+  `INCONCLUSIVE ≠ PASS`，门禁不许靠「没测出来」过关。
+- **真实模型 lane**（`scripts/evaluate_agent_real.py` /
+  `make agent-eval-real`）：凭据只从环境变量读取，且需
+  `AGENT_EVAL_REAL_PROVIDER_AUTHORIZED=1` + `--i-authorize-external-calls` 双开关；
+  缺任一条件即 `NOT_MEASURED` 且零外网请求。真实结果单独落盘
+  `artifacts/agent-eval-real/`，**绝不**与脚本化 LLM 回归混合统计。
 - 每个指标带 `numerator` / `denominator` / `excluded`；分母为 0 →
   `NOT_MEASURED`（不是 0%，也不是 100%）。artifact schema
   `agent-eval-evidence/v1.2`，含 `code_provenance`（`commit_sha` / `dirty` /

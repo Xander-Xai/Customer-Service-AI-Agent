@@ -299,6 +299,11 @@ class CaseObservation:
     pinned_mode: str | None = None
     error: str | None = None
     error_traceback: str | None = None
+    #: Agents the collaboration mode reported running for this case (from the
+    #: graph's ``agents_used`` state key). Used by the orchestration-coverage
+    #: diagnostic to show cross-agent hand-off, and to report honestly which
+    #: collaboration modes this dataset does *not* exercise.
+    agents_used: tuple[str, ...] = ()
 
     @property
     def requested_tool_names(self) -> tuple[str, ...]:
@@ -351,6 +356,7 @@ class CaseObservation:
             "pinned_mode": self.pinned_mode,
             "error": self.error,
             "error_traceback": self.error_traceback,
+            "agents_used": list(self.agents_used),
         }
 
 
@@ -435,10 +441,16 @@ class AgentEvalHarness:
         hitl_enabled: bool = True,
         register_staging_tools: bool = True,
         thread_prefix: str = "agent-eval",
+        inject_scripted_llm: bool = True,
     ):
         self.hitl_enabled = hitl_enabled
         self.register_staging_tools = register_staging_tools
         self.thread_prefix = thread_prefix
+        #: When ``False`` the harness runs the real compiled graph against
+        #: whatever LLM the container was built with (the real-provider lane).
+        #: Scripted injection is then **not** applied, so no mock can be swapped
+        #: in silently. The scripted-LLM regression lane keeps this ``True``.
+        self.inject_scripted_llm = inject_scripted_llm
         self.container: Any = None
         self.agent_llm: Any = None
         self.router_llm: Any = None
@@ -492,6 +504,20 @@ class AgentEvalHarness:
         await self.close()
 
     # ── injection ───────────────────────────────────────────────────────
+    def _reset_pinned_mode(self) -> None:
+        """Restore the orchestrator's real mode selection (per-case hygiene).
+
+        Used by the real-provider lane, which never pins a mode: the whole point
+        of that lane is to observe the orchestrator's *own* choice.
+        """
+        orchestrator = getattr(self.container, "orchestrator", None)
+        if orchestrator is not None:
+            if self._original_select is None:
+                self._original_select = orchestrator.select_mode_name
+            else:
+                orchestrator.select_mode_name = self._original_select
+        self.pinned_mode = None
+
     def _inject_llms(self, case: AgentCase) -> None:
         """把脚本化 LLM 注入**每一个** Agent 与路由器。
 
@@ -560,7 +586,7 @@ class AgentEvalHarness:
         from runtime.context import reset_run_context, set_run_context
         from tools.hitl_staging_tools import reset_staging_ledger, staging_ledger
 
-        self._inject_llms(case)
+        self._inject_llms(case) if self.inject_scripted_llm else self._reset_pinned_mode()
         # **每条 case 前清空响应缓存。**
         #
         # Layer-0 缓存命中会在 ``check_cache`` 直接短路到 ``final_response``：
@@ -679,6 +705,7 @@ class AgentEvalHarness:
             pinned_mode=self.pinned_mode,
             error=error,
             error_traceback=error_traceback,
+            agents_used=tuple(str(a) for a in (observed.get("agents_used") or ())),
         )
         return observation
 

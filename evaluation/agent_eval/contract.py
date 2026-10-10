@@ -53,6 +53,17 @@ ROUTE_SOURCES: tuple[str, ...] = (
 #: 因此只有它能进入工具类指标的分母（不可达 case 必须显式排除并记账）。
 TOOL_REACHABLE_MODE = "react"
 
+#: 全部协作模式（与 ``collaboration/orchestrator.py::_modes`` 同源）。
+#: 用于 orchestration-coverage 诊断：如实报告本数据集**没有**覆盖到哪些模式，
+#: 而不是假装模式选择已被遍历。
+COLLABORATION_MODES: tuple[str, ...] = (
+    "sequential",
+    "parallel",
+    "consultation",
+    "hierarchical",
+    "react",
+)
+
 #: LangGraph 在 interrupt 时于返回值注入的键（与 ``core/hitl/gate.py`` 同源）。
 WAITING_APPROVAL = "WAITING_APPROVAL"
 
@@ -267,11 +278,13 @@ def describe_contract() -> dict[str, Any]:
         "risk_levels": list(RISK_LEVELS),
         "terminal_states": list(TERMINAL_STATES),
         "tool_reachable_mode": TOOL_REACHABLE_MODE,
+        "collaboration_modes": list(COLLABORATION_MODES),
         "route_shortcut_confidence": ROUTE_SHORTCUT_CONFIDENCE,
     }
 
 
 __all__ = [
+    "COLLABORATION_MODES",
     "DATASET_SCHEMA_VERSION",
     "DIAGNOSTIC_METRIC_NAMES",
     "EVIDENCE_BOUNDARIES",

@@ -39,7 +39,7 @@ JSONL，一条 case 一行。字段与约束见 `evaluation/agent_eval/cases.py`
 **严格校验、失败即崩**：一条语义不合法的 case 被静默跳过会让分母变小、分数变高 ——
 那是评测系统最危险的缺陷。
 
-覆盖的类别（114 条候选）：
+覆盖的类别（115 条候选）：
 
 | 类别 | 数量 | 说明 |
 |---|---|---|
@@ -52,14 +52,20 @@ JSONL，一条 case 一行。字段与约束见 `evaluation/agent_eval/cases.py`
 | 投诉反馈 | 10 | 意图分类 |
 | 通用 / 问候 | 6 | 意图分类 |
 | 多意图组合 | 8 | 意图分类 |
-| 工具执行（只读 / HIGH / 混合） | 17 | 治理保真度 + 期望参数 |
+| 工具执行（只读 / HIGH / 混合 / 重复只读） | 18 | 治理保真度 + 期望参数 + 重复调用边界 |
 | 故障注入（含 `agent_llm_timeout` 超时） | 5 | 降级路径 |
 | 禁止工具 | 5 | 治理边界 |
 
 > **场景覆盖边界（诚实登记）**：当前评测集覆盖常见路由、只读/HIGH/混合工具、HITL 审批、
-> 超时与 LLM 故障降级、禁止工具、期望参数。**尚未覆盖**：跨 Agent 协作交接
-> （`agents_used` 未被断言）、RBAC 角色拒绝（无角色上下文）、模型主动选错工具
-> （工具计划来自数据集，V1 不测模型选择）。这些是**明确的未覆盖项**，不当作已测。
+> 超时与 LLM 故障降级、禁止工具、期望参数、重复只读调用。artifact 的
+> `orchestration_coverage` 段**逐条报告实际驱动的协作模式**；本数据集当前只驱动
+> `sequential` 与 `react`，**未覆盖** `parallel` / `consultation` / `hierarchical`
+> （也是 `uncovered_modes` 明示项，跨 Agent 交接 case 数 = 0）。此外**未覆盖**：
+> RBAC 角色拒绝（评测图无角色上下文）、模型主动选错工具（工具计划来自数据集，
+> V1 不测模型选择）、写操作的部分成功/重复重做（写幂等由 runtime side-effect
+> ledger 在 `make runtime-e2e` 验证，本套件不重复度量）。这些是**明确的未覆盖项**，
+> 不当作已测 —— 数据集严格校验不允许加入会在**构造上**拉低门禁的负例（例如缺参
+> 调用会让 schema 门禁恒红），因此宁可显式登记缺口，也不伪造覆盖。
 
 ### 2.1 标注必须人工确认（最重要的纪律）
 
@@ -156,10 +162,27 @@ make agent-eval                      # 全量回放 + evidence artifact
 make agent-eval-contract             # 契约守卫（指标名/边界/降级标记与生产同步）
 make agent-eval-annotation-status    # 标注状态 + 各指标分母
 make agent-eval-cases                # 重新生成候选数据集
+make agent-eval-real                 # 真实模型 lane（默认 NOT_MEASURED；见 §3.4）
 ```
 
-artifact：`artifacts/agent-eval/<ts>/report.json`（schema `agent-eval-evidence/v1`），
-带 `git_sha` + 数据集 `sha256`。
+artifact：`artifacts/agent-eval/<ts>/report.json`（schema `agent-eval-evidence/v1.2`），
+带 `git_sha` + 数据集 `sha256` + `orchestration_coverage` + `measurement_gaps`。
+
+### 3.4 真实模型 lane（`scripts/evaluate_agent_real.py`）
+
+与 scripted-LLM 回归**分开存储、分开统计**。四项同时满足才会发出一个外部请求：
+
+1. 环境变量里有凭据（`AGENT_EVAL_REAL_PROVIDER_API_KEY` 或 `OPENAI_API_KEY`；
+   **从不由命令行传入**）；
+2. `AGENT_EVAL_REAL_PROVIDER_AUTHORIZED=1`；
+3. 显式 `--i-authorize-external-calls`；
+4. 先打印计划（模型 / host / 查询上限 / token 预算 / 成本上限 / 预估请求量与最坏 token）。
+
+缺任一条件 → 写出 `NOT_MEASURED` artifact 且**零网络请求**；失败案例逐条记为 `ERROR`，
+**绝不**静默切回 mock。artifact schema `agent-eval-real-provider/v1`，落
+`artifacts/agent-eval-real/<ts>/report.json`。逐案例记录 route / mode / 工具 / 参数 /
+是否有回复 / 异常 / 延迟 / token / 成本（token、成本未暴露时保持 `NOT_MEASURED`，
+绝不估算）。本环境无凭据 → 该 lane 保持 `NOT_MEASURED`。
 
 ---
 
@@ -215,7 +238,9 @@ SIDE EFFECTS RUN : 0
 |---|---|
 | 编排 / 治理 / 路由行为 | **LEVEL_2_APPLICATION_MEASURED**（真实图 + 脚本化 LLM，零出网） |
 | 模型能力（选工具、答对、推理质量） | **不测** —— 需要 LLM-as-a-Judge 与真实 provider |
-| 真实模型评测（real-provider lane） | **NOT_MEASURED** —— 本环境无 provider 凭据。artifact 的 `provenance.real_provider.status` 显式登记；真实模型指标**不得**与脚本化 LLM 回归混合统计 |
+| 真实模型评测（real-provider lane） | **入口 Implemented / 指标 NOT_MEASURED** —— 本环境无 provider 凭据。`make agent-eval-real` 是受四重开关保护的完整执行入口；真实模型指标**不得**与脚本化 LLM 回归混合统计 |
+| 协作模式覆盖 | **Partial（已量化）** —— `orchestration_coverage` 如实报告：本数据集只驱动 `sequential` / `react`，`parallel` / `consultation` / `hierarchical` 为 `uncovered_modes`，跨 Agent 交接 case = 0。这是**声明缺口**，不是通过 |
+| 跨 Agent 交接状态传递正确性 | **未单独断言** —— 仅 `agents_used` 的分布被记录；交接内容正确性需要带 ground truth 的交接用例（未建） |
 | 真实 ERP 写入 | **NOT_VERIFIED** —— staging 工具验证的是治理机制 |
 | 检索质量 | **不测** —— 那是 `make rag-eval-649` 的事 |
 | `elapsed_ms` | **不是 SLO 证据** —— 进程内无网络回放，只反映 harness 开销 |

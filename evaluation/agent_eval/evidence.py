@@ -21,6 +21,7 @@ from typing import Any
 
 from .cases import AgentDataset
 from .contract import (
+    COLLABORATION_MODES,
     DIAGNOSTIC_METRIC_NAMES,
     METRIC_NAMES,
     REPORT_SCHEMA_VERSION,
@@ -146,6 +147,42 @@ def build_report(
 
     populations = dataset.population_counts()
 
+    # Orchestration coverage: report what the dataset actually exercised and,
+    # just as importantly, what it did NOT. Mode selection is not a metric here
+    # (see harness: tool cases are pinned to ``react``), so coverage is an
+    # honest diagnostic, not a score. Uncovered modes are surfaced explicitly so
+    # nobody reads "governance_outcome_match_rate = 1.0" as "all 5 modes tested".
+    mode_counts: dict[str, int] = {}
+    single_agent_cases = 0
+    multi_agent_cases = 0
+    for o in observations:
+        mode = o.observed_mode or "unknown"
+        mode_counts[mode] = mode_counts.get(mode, 0) + 1
+        if len(o.agents_used) == 1:
+            single_agent_cases += 1
+        elif len(o.agents_used) >= 2:
+            multi_agent_cases += 1
+    observed_modes = sorted(m for m in mode_counts if m != "unknown")
+    uncovered_modes = [m for m in COLLABORATION_MODES if m not in observed_modes]
+    orchestration_coverage = {
+        "observed_mode_counts": dict(sorted(mode_counts.items())),
+        "expected_modes": list(COLLABORATION_MODES),
+        "covered_modes": observed_modes,
+        "uncovered_modes": uncovered_modes,
+        # A cross-agent hand-off requires >= 2 agents on one case.
+        "cases_with_single_agent": single_agent_cases,
+        "cases_with_multi_agent": multi_agent_cases,
+        "measures": (
+            "which collaboration modes and cross-agent hand-offs the dataset "
+            "actually drove on the real graph"
+        ),
+        "does_not_measure": (
+            "that every mode's internal correctness was verified. Tool cases are "
+            "pinned to react; uncovered_modes are a declared coverage gap, not a "
+            "pass. Mode *selection* quality needs a human-labelled route set."
+        ),
+    }
+
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "generated_at": None,  # 由 CLI 填入，保持 build_report 纯函数
@@ -165,6 +202,7 @@ def build_report(
         },
         "metrics": {name: metrics[name].to_dict() for name in sorted(metrics)},
         "gates": gates,
+        "orchestration_coverage": orchestration_coverage,
         "measurement_gaps": measurement_gaps,
         "evidence_boundaries": describe_contract()["evidence_boundaries"],
         "contract": describe_contract(),

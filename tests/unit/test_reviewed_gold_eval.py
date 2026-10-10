@@ -308,6 +308,25 @@ class TestCli:
         rc = main(["--gold-labels", str(tmp_path / "nope.jsonl"), "--no-corpus"])
         assert rc == 2
 
+    def test_missing_gold_file_summary_only_reports_not_measurable(self, tmp_path):
+        # `make rag-gold-reviewed-status` must be runnable in the pre-annotation
+        # state: a missing human gold file is NOT_MEASURABLE, not a crash.
+        rc = main(
+            [
+                "--gold-labels",
+                str(tmp_path / "nope.jsonl"),
+                "--no-corpus",
+                "--summary-only",
+                "--output",
+                str(tmp_path / "out"),
+            ]
+        )
+        assert rc == 0
+        report = json.loads((tmp_path / "out").glob("*/report.json").__next__().read_text())
+        assert report["status"] == "NOT_MEASURABLE"
+        assert report["not_measurable_reason"] == "GOLD_LABELS_FILE_ABSENT"
+        assert report["ablation_executed"] is False
+
 
 def test_gold_population_is_frozen_dataclass():
     population = GoldPopulation(

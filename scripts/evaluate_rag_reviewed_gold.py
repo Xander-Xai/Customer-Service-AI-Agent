@@ -468,6 +468,42 @@ def main(argv: list[str] | None = None) -> int:
 
     gold_path = Path(args.gold_labels)
     if not gold_path.is_file():
+        if args.summary_only:
+            # A status/QC command must be runnable *before* any human labelling
+            # exists. "No reviewed-gold file yet" is the expected pre-annotation
+            # state, not a crash: report NOT_MEASURABLE and exit 0. The formal
+            # path still fails closed (exit 2) below.
+            reason = "GOLD_LABELS_FILE_ABSENT"
+            run_id = args.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            out_dir = Path(args.output) / run_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            report = {
+                "schema_version": REPORT_SCHEMA_VERSION,
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "NOT_MEASURABLE",
+                "not_measurable_reason": reason,
+                "gold_labels": {
+                    "path": str(gold_path),
+                    "sha256": None,
+                    "contract": GOLD_SCHEMA_VERSION,
+                    "exists": False,
+                },
+                "ablation_executed": False,
+                "notes": [
+                    "No reviewed-gold file exists yet: the pre-annotation state.",
+                    "Formal reviewed-gold metrics stay NOT_MEASURABLE until a human "
+                    "produces JUDGED labels (see scripts/build_rag_gold_review_worklist.py).",
+                    "The shipped 649 benchmark is never read or modified.",
+                ],
+            }
+            (out_dir / "report.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"summary-only: status=NOT_MEASURABLE ({reason})")
+            print("  0 judged queries (no gold file); Recall/NDCG stay NOT_MEASURABLE.")
+            print(f"  artifact: {out_dir / 'report.json'}")
+            return 0
         print(f"[FATAL] gold labels not found: {gold_path}", file=sys.stderr)
         return 2
 

@@ -225,7 +225,7 @@ escalation 的真实实现只有两处，都不是"转交"：
 | 响应质量评分 | **Implemented，但是启发式** | `agents/evaluator.py` 是关键词打分，**不是 LLM-as-judge**。它的真实用途是"要不要升级重试"的触发器 |
 | **LLM-as-judge 语义质量** | **未实现** | 启发式测不了"答非所问但用词礼貌" |
 | **Agent 行为评测（Agent Eval V1）** | **Implemented（LEVEL_2_APPLICATION_MEASURED）** | 真实编译图 + 脚本化 LLM（零出网）。测**编排/治理/路由**行为，**不测**模型能力。见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
-| **Agent 路由准确率（正式）** | **NOT_MEASURED** | 数据集 111 条全部是 `llm_candidate`，**人工确认数为 0**。门禁因此刻意报 `NOT_AVAILABLE` —— 没测出来不等于达标。用 LLM 起草的标签验证 LLM 驱动的系统 = 自我验证 |
+| **Agent 路由准确率（正式）** | **NOT_MEASURED** | 数据集 115 条全部是 `llm_candidate`，**人工确认数为 0**。门禁因此刻意报 `NOT_AVAILABLE`，整体为 `INCONCLUSIVE` —— 没测出来不等于达标。用 LLM 起草的标签验证 LLM 驱动的系统 = 自我验证 |
 | **工具选择准确率的语义** | **治理层保真度，非模型能力** | 工具计划来自数据集；指标回答的是"编排层有没有把计划执行对" |
 | 真实用户满意度 / NPS | **NOT_MEASURED** | 无真实流量 |
 | **端到端 P50/P95/P99 / TTFT / QPS / Token 成本** | **NOT_VERIFIED（BLOCKED）** | LLM provider 不可用（凭据为占位符）。**不产生任何估算**。见 `make perf-evidence` |

@@ -439,3 +439,30 @@ class TestShippedDatasetIsHonest:
         for case in load_dataset().cases:
             assert case.annotation.provenance in ("human_confirmed", "llm_candidate")
             assert case.annotation.method
+
+
+class TestOrchestrationCoverageIsHonest:
+    """The artifact must state which collaboration modes it did NOT exercise."""
+
+    def test_contract_lists_all_five_collaboration_modes(self):
+        assert set(contract.COLLABORATION_MODES) == {
+            "sequential",
+            "parallel",
+            "consultation",
+            "hierarchical",
+            "react",
+        }
+        assert contract.describe_contract()["collaboration_modes"] == list(
+            contract.COLLABORATION_MODES
+        )
+
+    def test_empty_population_reports_every_mode_uncovered(self):
+        from evaluation.agent_eval import build_report, load_dataset
+
+        dataset = load_dataset()
+        report = build_report(dataset=dataset, observations=[])
+        coverage = report["orchestration_coverage"]
+        assert coverage["covered_modes"] == []
+        assert coverage["uncovered_modes"] == list(contract.COLLABORATION_MODES)
+        # It must say what it does NOT prove.
+        assert coverage["does_not_measure"].strip()
