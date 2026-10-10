@@ -123,6 +123,27 @@ FROM agent_runs WHERE status = 'RUNNING';
 `severity: critical`，见 `monitoring/alert_rules.yml`）。用 `increase()` 而非
 `agent_run_dead_letter_total > 0`，避免历史一次失败后永久报警。
 
+**这个指标是 worker 容器写的，Prometheus 抓的是 app 容器。** 收到告警前先确认
+指标真的可见 —— 否则你会盯着一个恒为 0 的计数器：
+
+```bash
+# 1) 应用确实暴露了指标（需要监控 token：X-Admin-Token 或 Bearer）
+curl -s "$BASE_URL/metrics" -H "Authorization: Bearer $MONITORING_ADMIN_TOKEN" \
+  | grep -E '^agent_run_dead_letter_total'
+
+# 2) 多进程聚合是否开启 —— 0 表示 worker 的计数在抓取侧不可见，DLQ 告警不会触发
+curl -s "$BASE_URL/metrics" -H "Authorization: Bearer $MONITORING_ADMIN_TOKEN" \
+  | grep '^prometheus_multiprocess_enabled'
+#   期望 1。0 = 两个容器没共享同一个 PROMETHEUS_MULTIPROC_DIR 目录
+#   （compose 里应为同一个 prom-metrics 卷），或服务栈启动时没跑 metrics-init。
+
+# 3) Prometheus 侧确实有这条时间序列（不是"抓到了 0"）
+curl -s -G "$PROM_URL/api/v1/query" --data-urlencode 'query=agent_run_dead_letter_total'
+```
+
+> 若 `prometheus_exposition_metric_families` 明显偏小，说明大量指标模块根本没被
+> import —— 暴露面是按「真的注册并输出」的 family 计数的，不是按代码里声明的数量。
+
 1. **查看待处置队列**：
 
    ```bash
@@ -274,6 +295,17 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
   原子认领，重复投递安全。
 - `resumed_at` 非空但 run 仍在 `WAITING_APPROVAL` → 恢复执行本身失败，查
   `agent_runs.error_code` 与 DLQ。
+- **`resumed_at` 非空、`status='APPROVED'`、run 停在 `WAITING_APPROVAL`，且无
+  error / 无 DLQ** → worker 在**认领决策之后、run 收敛之前**崩溃。这是已知
+  **liveness 边界**：`resumed_at IS NULL` 的一次性认领意味着重投递**不会**重新
+  消费该决策，run 不会自愈（`consume_resume` 返回 `None`，executor 保持等待）。
+  **副作用不会重复**（`operation_key = run_id:approval:{approval_id}` 的 ledger
+  去重），但需人工介入：
+  1. 若已确认无需执行，按 §3.7 第 4 步经 `WAITING_APPROVAL → CANCELLED`
+     收口后重新发起；
+  2. 若仍需执行，重新创建一条审批（新 `approval_id` → 新 `operation_key`）。
+  自动 re-issue 机制**未实现**。
+  回归用例：`tests/integration/runtime/test_hitl_resume_fault_injection.py::TestCrashDuringResume`。
 - `status='REJECTED'` / `'EXPIRED'` → 图已按拒绝恢复，**不会**产生副作用
   （`operation_key = run_id:approval:{approval_id}` 从未写入 ledger）。
 
@@ -291,9 +323,32 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
 | `agent_checkpoint_recovery_total{recovered}` | 突增 → worker 反复崩溃 |
 | `agent_tool_idempotency_hit_total` | 突增 → 重复投递变多，查 broker/visibility timeout |
 | `checkpoint_errors_total` | > 0 → checkpoint 后端故障（生产会 fail-fast 拒绝启动） |
+| `prometheus_multiprocess_enabled` | **≠ 1 → 告警全部失明**：worker 写的 `agent_*` 指标在抓取侧恒为 0 |
+| `prometheus_exposition_metric_families` | 骤降 → 指标模块未 import / REGISTRY 被换掉 |
+| `tool_execution_timeout_total` | 突增 → 上游（ERP/外部 API）变慢，检查 `TOOL_EXECUTION_TIMEOUT_SECONDS` 是否偏紧 |
 
 **label 纪律**：任何 `agent_*` 指标都不得带 `run_id` / `thread_id` / `user_id` /
 `query`（高基数会打爆 Prometheus）。有测试断言这一点。
+
+### 4.1 告警链自检（改了监控配置之后）
+
+```bash
+make metrics-exposure-check    # 契约：告警/Grafana 引用的每个指标名都真的可达
+make alert-rules-test          # 官方 promtool：规则语法 + 真会 firing + 不 latching
+make metrics-exposure-verify   # 真实 Prometheus 端到端（DLQ 告警实际进入 firing）
+```
+
+三条命令覆盖的是**不同**的失效面，缺一不可：
+
+| 命令 | 抓什么 |
+|---|---|
+| `metrics-exposure-check` | 「注册了却没暴露」「引用了不存在的指标」「scrape job 没带凭据」 |
+| `alert-rules-test` | 表达式语义：真的有 dead-letter 时会不会 firing；历史值会不会 latching |
+| `metrics-exposure-verify` | 真实 Prometheus + 真实抓取 + **另一个进程**写入 → 跨进程聚合是否生效 |
+
+`metrics-exposure-verify` 的证据落在
+`artifacts/observability/metrics-exposure-<ts>/report.json`。它**不**验证
+Alertmanager 的通知投递 —— 那是另一段链路，见 §5。
 
 ---
 
@@ -312,4 +367,8 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
    `agent_approval_requested_total` 与 `agent_approval_expired_total`。
 9. **审批 SLA 未测量**：`agent_approval_wait_seconds` 的分布没有生产数据，
    `NOT_MEASURED`。
-10. **生产集群未验证**：以上全部为本地 + CI 证据，`PRODUCTION NOT_VERIFIED`。
+10. **DLQ 告警的通知投递未端到端验证**：指标可达与告警表达式在真实 Prometheus 上
+    已验证（`make metrics-exposure-verify`，告警实际进入 `firing`），但
+    **Alertmanager 的 webhook / SMTP 实际送达、整套 compose 栈上的端到端、
+    Grafana 面板真实渲染均 NOT_VERIFIED**。值班仍需主动查 §3.3 的队列。
+11. **生产集群未验证**：以上全部为本地 + CI 证据，`PRODUCTION NOT_VERIFIED`。

@@ -64,10 +64,47 @@ def extract_user_id(request) -> str | None:
     return None
 
 
+#: ``Authorization: Bearer <token>`` 的 scheme 前缀（大小写不敏感）。
+_BEARER_PREFIX = "bearer "
+
+
+def _bearer_token(request) -> str:
+    """从 ``Authorization: Bearer <token>`` 取出 token；不是 Bearer 形式返回 ""。"""
+    authorization = request.headers.get("Authorization", "")
+    if authorization[: len(_BEARER_PREFIX)].lower() != _BEARER_PREFIX:
+        return ""
+    return authorization[len(_BEARER_PREFIX) :].strip()
+
+
 def check_admin_token(request) -> bool:
-    """检查 Admin Token"""
+    """检查监控/管理端点的 Admin Token。
+
+    接受两种**等价**的携带形式，都是同一个 ``MONITORING_ADMIN_TOKEN`` 密钥：
+
+    - ``X-Admin-Token: <token>`` —— 浏览器 / curl / 自研采集器的既有形式；
+    - ``Authorization: Bearer <token>`` —— Prometheus 的标准抓取凭据形式
+      （``bearer_token_file`` / ``authorization.credentials_file`` 只会发这个头）。
+      没有它，``monitoring/prometheus.yml`` 无论怎么配都拿不到凭据，
+      指标端点对抓取器永远 401 —— 这正是 ``agent_run_dead_letter_total``
+      告警链断掉的第二个环节。
+
+    安全边界不变：只比对**同一个**密钥，不接受任何其它凭据，也不放宽 JWT / API Key
+    的既有要求。显式给了 ``X-Admin-Token`` 且不匹配时**不再**回退到 Bearer
+    （fail-closed：不能用第二种形式绕过第一种形式的显式拒绝）。
+
+    与 ``check_jwt_auth`` 共用 ``Authorization`` 头不冲突：JWT 会被拿去和
+    ``MONITORING_ADMIN_TOKEN`` 做常量时间比较，不等即失败，随后由调用方走 JWT 分支。
+    """
+    if not MONITORING_ADMIN_TOKEN:
+        # 未配置 token = 没有监控凭据。绝不因为「没配」就放行。
+        return False
     admin_token = request.headers.get("X-Admin-Token", "")
-    return bool(MONITORING_ADMIN_TOKEN and hmac.compare_digest(admin_token, MONITORING_ADMIN_TOKEN))
+    if admin_token:
+        return hmac.compare_digest(admin_token, MONITORING_ADMIN_TOKEN)
+    bearer = _bearer_token(request)
+    if bearer:
+        return hmac.compare_digest(bearer, MONITORING_ADMIN_TOKEN)
+    return False
 
 
 def is_authenticated(request) -> bool:

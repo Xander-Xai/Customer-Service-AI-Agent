@@ -167,8 +167,62 @@ class RunService:
         """列出"卡住"的 run：RETRYING/QUEUED 且 next_retry_at 已到。
 
         用于重试投递失败后的兜底恢复（见 ``runtime/retry.py::reconcile_stuck_runs``）。
+
+        刻意**不含**过期 lease 的 RUNNING：那一类由
+        :meth:`list_stale_running_runs` 单独覆盖。
         """
         return self.repo.list_recoverable_runs(limit=limit, now=now or _utcnow())
+
+    def list_stale_running_runs(
+        self, *, limit: int = 100, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """列出 lease 已过期、owner 已失效的 RUNNING run（含 attempt 预算）。
+
+        这些 run 不会再被任何其它机制捞起：broker 已 ACK，``list_recoverable_runs``
+        也不看 RUNNING。没有本方法，它们会永久停在 RUNNING。
+        """
+        return self.repo.list_stale_running_runs(limit=limit, now=now or _utcnow())
+
+    def dead_letter_stale_running(
+        self, run_id: str, *, error_code: str, error_message: str, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        """把 lease 仍处于过期状态的 RUNNING run 推入 DEAD_LETTER（预算已耗尽）。
+
+        与 :meth:`mark_dead_letter` 的区别：这里**不**做 ``worker_id`` 匹配
+        （owner 本来就已失效，没有 owner 可匹配），但**要求 lease 仍然过期**——
+        一个刚刚续上 lease 的健康 run 不会被 reconciler 误杀。
+
+        返回 ``None`` 表示谓词不成立（run 已被别的执行者接走/已终态/刚续租），
+        调用方应把它当作 benign no-op，而不是错误。
+        """
+        now = now or _utcnow()
+        run = self.repo.get(run_id)
+        if run is None:
+            raise RunNotFound(run_id)
+        updated = self.repo.transition_stale_running(
+            run_id,
+            to_status=RunStatus.DEAD_LETTER,
+            now=now,
+            error_code=error_code,
+            error_message=error_message[:2000],
+            error_type="transient",
+            last_error=error_message[:2000],
+            lease_expires_at=None,
+            finished_at=now,
+        )
+        if updated is None:
+            return None
+        self.repo.add_dead_letter(
+            run_id=run_id,
+            thread_id=run["thread_id"],
+            attempt_count=int(run["attempt"]),
+            max_attempts=int(run["max_attempts"]),
+            error_type="transient",
+            error_code=error_code,
+            error_message=error_message,
+            worker_id=run.get("worker_id"),
+        )
+        return updated
 
     def get_dead_letter(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get_dead_letter(run_id)

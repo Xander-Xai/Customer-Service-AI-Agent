@@ -57,6 +57,8 @@
 | worker SIGKILL 崩溃恢复 + 副作用只发生一次 | `make runtime-chaos` → `artifacts/runtime/chaos-*.json` | Verified (CI) |
 | Runtime 证据报告 | `make runtime-verify` → `artifacts/distributed-runtime/<ts>/report.json`（schema `distributed-runtime-evidence/v2`，带 `tested_code_sha`） | Verified (Local+CI) |
 | DLQ 人工重放闭环 | `scripts/replay_dead_run.py`（复用原 `run_id`） | Verified (Local) |
+| Prometheus 指标暴露 + DLQ 告警表达式 | `make metrics-exposure-verify` → `artifacts/observability/metrics-exposure-*/report.json`（`VERIFIED_LOCAL`，真实 `prom/prometheus:v2.51.0` 上告警实际 FIRING）+ `make alert-rules-test`（官方 `promtool test rules`） | Verified (Local) |
+| 指标暴露 / 告警引用契约（防复发） | `make metrics-exposure-check`（告警与 Grafana 引用的每个指标名都必须可达） | Verified (CI) |
 | OTel Collector 传输链路（traces only） | `make otel-collector-smoke` → `artifacts/observability/otel-collector-*/report.json`（`VERIFIED_LOCAL`） | Verified (Local) |
 | 安全扫描 | CI `security` lane（严格 mypy + bandit + secret guard） | Verified (CI) |
 | 离线可复现 demo（证据卡） | `make demo-offline` | Verified (Local) |
@@ -82,13 +84,20 @@
 | 真实第三方 MCP server（网络/鉴权/写工具） | `NOT_VERIFIED` | 只有 deterministic fake-server 契约测试 |
 | 生产 worker autoscaling / backpressure / admission control | `NOT_VERIFIED` | 无自动扩缩与准入控制 |
 | 审批主动通知（push / 邮件 / IM）、审批 SLA | `NOT_VERIFIED` / `NOT_MEASURED` | 只有轮询队列 |
-| Agent 行为回归评测 / LLM-as-judge | 未实现 | 无 golden 用例集；`agents/evaluator.py` 为启发式 |
-| 「转人工」坐席台 / 工单闭环 | 未实现 | 只有关键词 escalation，无工单/队列/坐席台 |
+| Agent 行为回归评测（Agent Eval V1） | `LEVEL_2_APPLICATION_MEASURED` | 已实现评测框架与**真实图脚本化回放**（零出网、JSONL 用例集、显式分子/分母/证据边界）。测编排/治理/路由行为，**不测**模型能力；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
+| LLM-as-judge 语义质量 | 未实现 | 需固定 judge 模型 + 判官一致性验证；`agents/evaluator.py` 仍为启发式 |
+| 「转人工」坐席台 / 工单闭环 | 未实现 | 只有关键词 escalation，**无工单 / 队列 / 坐席台 / 推送**。它是会话级状态标记，不是转交机制 |
+| **Alertmanager 通知实际送达** | `NOT_VERIFIED` | 指标可达与告警表达式已在真实 Prometheus 上验证（告警实际 FIRING），但 webhook / SMTP 投递、整套 compose 栈端到端、Grafana 面板真实渲染均未验证 |
+| 工具级重试 / 熔断 / 并行调用 | 未实现 | 仅 LLM 客户端有重试与熔断；工具层此前无超时，现已补 `TOOL_EXECUTION_TIMEOUT_SECONDS`（重试/熔断/并行仍缺） |
 
-> **已知的声明-事实断链**（须优先闭环）：`agent_run_dead_letter_total` 等
-> Prometheus 指标已注册但 `GET /metrics/prometheus` 手工拼接、注册表从未被
-> `generate_latest` 序列化，导致 DLQ 告警规则依赖的时间序列不存在。详见
-> [limitations.md](limitations.md) 与 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-1。
+> **已闭环的声明-事实断链**：原 P0-1（Prometheus 注册表从未被序列化，导致 DLQ 告警
+> 依赖的时间序列不存在）与 P0-3（`HITL_ENABLED=true` 但规则为空时静默放行）已修复。
+> 指标侧除了暴露端点，还补了**跨进程聚合** —— worker 容器递增的计数器在只抓 app 的
+> Prometheus 眼里本就恒为 0，只补端点会得到一个「看起来正常却不触发」的假修复。
+> 详见 [limitations.md](limitations.md) §1.2 / §2 与
+> [current-state.md](reference/current-state.md)。
+>
+> **仍然不要写成「告警闭环已完成」**：通知投递段仍未验证。
 
 ---
 
@@ -99,24 +108,30 @@
 
 ### P0 — 上线前必须闭环（否则存在静默故障/安全边界缺口）
 
-1. **监控序列化闭环**：`GET /metrics/prometheus` 改用 `prometheus_client.generate_latest`，
-   让 DLQ 告警规则真正可触发。
-2. **HITL 配置 fail-closed**：`HITL_ENABLED=true` 但风险规则为空时拒绝启动，
-   消除「开着却静默放行」。
+1. ~~**监控序列化闭环**~~ **已完成**：`GET /metrics` 序列化真实 REGISTRY +
+   `PROMETHEUS_MULTIPROC_DIR` 跨进程聚合 + `bearer_token_file` 抓取凭据；
+   真实 Prometheus 上 DLQ 告警实际 FIRING。**剩余**：Alertmanager 实际投递、
+   整套 compose 栈端到端验证。
+2. ~~**HITL 配置 fail-closed**~~ **已完成**：启动校验（无规则即拒绝启动，
+   且先于 `DEV_MODE` 早退）+ 执行期兜底（未认领风险等级的有副作用工具 = HIGH）。
 3. **生产凭据/证书/ERP/CORS**：替换全部占位符，接入真实 TLS、金蝶 ERP 与
-   `CORS_ORIGINS`。
-4. **告警可执行性契约测试**：每个 `expr` 的指标名必须真实可得。
+   `CORS_ORIGINS`。另外 `make monitoring-token` 必须先跑，否则 Prometheus
+   拒绝启动（fail-closed，这是刻意设计）。
+4. ~~**告警可执行性契约测试**~~ **已完成**：告警与 Grafana 引用的每个指标名
+   都必须可达（`make metrics-exposure-check`）+ 官方 `promtool test rules`
+   （`make alert-rules-test`）。
 
 ### P1 — 工程纵深（让「企业级」从设计变成可验证）
 
-1. 原生工具超时 / 并行调用 / 工具级熔断与重试（读可重试、写不重试）。
+1. ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
+   （需先定义「读可重试、写不可重试」的边界）。
 2. `reconcile_stuck_runs` 接入调度（beat/CronJob），卡死 run 兜底从文档变为运行。
-3. Grafana 面板对齐实际指标；补齐 language/observability 契约测试。
+3. Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
 4. 持久化 trace 后端（Jaeger/Tempo）接入，tracing 从本地验证升级为可查询。
 
 ### P2 — 路线图（不在本次收尾范围）
 
-Agent 行为评测 harness · LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
+LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
 长期记忆 · 真实 ERP 写操作验证 · RAG gold relevance 人工标注 · Kubernetes
 部署与多副本一致性 · 压测与容量基线 · MCP 写操作工具 · 多 LLM 供应商容灾。
 

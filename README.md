@@ -555,9 +555,22 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 
 | # | 问题 | 状态 | 说明 |
 |---|---|---|---|
-| 1 | **DLQ 告警规则永远不可能触发** | `Partial` | `core/monitoring.py` 用 `prometheus_client` 注册了约 70 个指标（含 `agent_run_dead_letter_total`），但唯一的端点 `GET /metrics/prometheus`（`api/routes/monitoring.py:332`）**手工拼接** 10 个 `csai_*` 行，全仓无 `generate_latest` → 注册表**从未被序列化输出**。`monitoring/alert_rules.yml` 的 `AgentRunDeadLetterDetected` 依赖一个不存在的时间序列。**DLQ 目前靠人看或主动查询。** Grafana 另有 6 个面板永远为空 |
-| 2 | **"转人工"不是已实现的功能** | `Partial` | escalation 只有两处：`agents/response_agent.py:280` 检查回复文本是否含"转人工"等词；`agents/complaint_agent.py:88` 设一个提示词 flag。**没有工单表、没有队列、没有坐席台、没有推送。** 系统能*说出* "建议转人工"，但没有东西接住这句话。（注意：这与"人工**审批**"是两件事，后者是 Implemented） |
-| 3 | **`HITL_ENABLED=true` 但没配 = 静默放行** | `Partial`（fail-open） | `HITL_HIGH_RISK_TOOLS` 默认空 + `HITL_HIGH_AMOUNT_THRESHOLD` 默认 `0.0` → 风险优先级链全部落空 → 判定 `LOW` → **什么都不拦且不报警**。与本仓库其余部分（checkpoint / MCP / 分布式运行时都 fail-closed）**不一致**。生产部署前必须显式设置这些变量 |
+| 1 | **DLQ 告警断链** | **已修复（暴露链 `VERIFIED_LOCAL`）/ 通知链 `NOT_VERIFIED`** | 断链有两半：① 注册表**从未被序列化**（唯一的 `/metrics/prometheus` 手工拼接 `csai_*`，全仓无 `generate_latest`）；② `agent_run_dead_letter_total` 由 **worker 容器**递增而 Prometheus 只抓 **app 容器**，进程内 REGISTRY 互不可见。现在有 `GET /metrics`（`generate_latest`）+ `PROMETHEUS_MULTIPROC_DIR` 多进程聚合 + `bearer_token_file` 抓取凭据。真实 `prom/prometheus:v2.51.0` 上 `AgentRunDeadLetterDetected` 实际进入 `firing`（`make metrics-exposure-verify`；`make alert-rules-test` 是官方 `promtool test rules`）。**仍未验证**：Alertmanager 实际投递、整套 compose 栈端到端、Grafana 真实渲染 |
+| 2 | **"转人工"不是已实现的功能** | `Partial`（**本轮未改代码，结论不变**） | escalation 只有两处：`agents/response_agent.py:280` 检查回复文本是否含"转人工"等词；`agents/complaint_agent.py:88` 设一个提示词 flag。**没有工单表、没有队列、没有坐席台、没有推送。** 系统能*说出* "建议转人工"，但没有东西接住这句话 —— 它是**会话级状态标记 + 响应策略提示**。（注意：这与"人工**审批**"是两件事，后者是 Implemented） |
+| 3 | **`HITL_ENABLED=true` 但没配 = 静默放行** | **已修复（fail-closed）** | ① **启动校验** `core.config.validate_hitl_settings`：`HITL_ENABLED=true` 而两条 HIGH 规则全空 → **拒绝启动**（此前是 LOW 全放行且无任何告警）。校验先于 `DEV_MODE` 早退，开发机同样受约束。② **执行期兜底**：治理开启时，`side_effect=True` 却没被任何规则认领风险等级的工具一律判 **HIGH**；只读工具不受影响 |
+
+### 工具执行层的真实边界
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 原生工具超时 | `Implemented` | `TOOL_EXECUTION_TIMEOUT_SECONDS`（默认 30s）覆盖只读与幂等 ledger **两条**分支。**只读超时降级为可解释错误；副作用超时必须冒泡** —— 转成字符串会被 ledger 记成 `SUCCEEDED`，重投递时直接返回缓存，副作用再也不会发生 |
+| 工具级重试 | **不存在** | `RETRY_MAX_ATTEMPTS` 只作用于 **LLM 客户端**。不要因为 LLM 有重试就说工具层也有 |
+| 工具级熔断 | **不存在** | `CircuitBreaker` 只保护 LLM，不保护 ERP / MCP |
+| 并行工具调用 | **不存在** | `agents/base_agent.py` 的工具循环是顺序 `for`；`asyncio.gather` 只用于上下文准备 |
+
+> 这三条"不存在"由 `tests/unit/test_tool_execution_reliability.py::TestAbsentToolLayerFeatures`
+> **断言其不存在** —— 补上它们会失败并要求同时补配置、文档与验证，
+> 避免又出现一句无法验证的"工具层支持重试"。
 
 ### 证据状态
 
@@ -583,8 +596,8 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 | LangGraph `store` 长期记忆 | `compile()` 只传 `checkpointer`；跨会话记忆由 `core/session/` 承担，两者**明确分离** |
 | LangSmith / Langfuse / OpenInference | **未集成**。tracing 是手写 span，不是 LangChain-native |
 | Kubernetes manifests | **没有**。没有真实集群与多副本一致性验证的 K8s manifest 是**装饰性声明，比没有更糟** |
-| Agent 行为回归评测 | **未实现**。无 golden 用例集 |
-| LLM-as-judge | **未实现**。`agents/evaluator.py` 是启发式关键词打分 |
+| Agent 行为回归评测（Agent Eval V1） | **已实现**：真实编译图 + 脚本化 LLM（零出网）+ JSONL 用例集，测编排/治理/路由行为。**不测**模型能力。见 `docs/reference/agent-evaluation.md` |
+| LLM-as-judge 语义质量 | **未实现**。`agents/evaluator.py` 是启发式关键词打分 |
 
 ### 没有做的技术选择（及理由）
 
@@ -612,17 +625,21 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 
 ### P0 — 上线前必须闭环（否则存在静默故障/安全边界缺口）
 
-- **监控序列化闭环**：`GET /metrics/prometheus` 改用 `prometheus_client.generate_latest`，
-  让 DLQ 告警规则真正可触发。
-- **HITL 配置 fail-closed**：`HITL_ENABLED=true` 但风险规则为空时拒绝启动。
+- ~~**监控序列化闭环**：让 DLQ 告警规则真正可触发。~~ **已完成**
+  （`GET /metrics` + 多进程聚合 + 抓取凭据；真实 Prometheus 上告警实际 FIRING）。
+  剩余：Alertmanager 实际投递端到端、整套 compose 栈验证。
+- ~~**HITL 配置 fail-closed**~~ **已完成**（启动校验 + side-effect 兜底）。
 - **生产凭据/证书/ERP/CORS**：替换全部占位符，接入真实 TLS、金蝶 ERP 与 `CORS_ORIGINS`。
-- **告警可执行性契约测试**：每个 `expr` 的指标名必须真实可得。
+- ~~**告警可执行性契约测试**~~ **已完成**
+  （`tests/unit/test_metrics_exposure_contract.py` 断言告警与 Grafana 引用的每个
+  指标名都可达；另有官方 `promtool test rules`）。
 
 ### P1 — 工程纵深（让「企业级」从设计变成可验证）
 
-- 原生工具超时 / 并行调用 / 工具级熔断与重试（读可重试、写不重试）。
+- ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
+  （需先定义「读可重试、写不可重试」的边界）。
 - `reconcile_stuck_runs` 接入调度（beat / CronJob），卡死 run 兜底从文档变为运行。
-- Grafana 面板对齐实际指标；补齐 language / observability 契约测试。
+- Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
 - 持久化 trace 后端（Jaeger / Tempo）接入，tracing 从本地验证升级为可查询。
 
 ### P2 — 路线图（不在本次收尾范围）

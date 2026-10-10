@@ -49,6 +49,28 @@ services:
     networks:
       - cs-network
 
+  # ===== 多进程指标样本目录初始化（一次性）=====
+  # 为什么需要它：`agent_run_dead_letter_total` 等可靠性指标由 **worker 容器**递增，
+  # 而 Prometheus 抓的是 **app 容器**。`prometheus_client` 默认 REGISTRY 是进程内的，
+  # 两者互不可见 —— 不启用多进程模式的话，该指标在抓取侧恒为 0，DLQ 告警永不触发
+  # （指标存在、target 是 UP、值不动）。app / worker 通过共享卷 `prom-metrics`
+  # 交换 mmap 样本，由 app 侧 MultiProcessCollector 聚合成一条时间序列。
+  #
+  # 本服务**只做一次**清理。绝不能放进 app/worker 的启动命令：每个进程启动都清一遍
+  # 会把先起来的 worker 的样本抹掉，指标静默归零，部署窗口内告警失明且无任何报错。
+  metrics-init:
+    build: ../..
+    container_name: customer-service-metrics-init
+    command: ["python", "-m", "core.metrics_exposition"]
+    environment:
+      - SERVICE_ROLE=worker
+      - PROMETHEUS_MULTIPROC_DIR=/app/var/prom-metrics
+    volumes:
+      - prom-metrics:/app/var/prom-metrics
+    restart: "no"
+    networks:
+      - cs-network
+
   # ===== Nginx 反向代理（v3.9）=====
   nginx:
     # 构建上下文 = deploy/nginx/（含 Dockerfile + nginx.conf）。
@@ -170,6 +192,9 @@ services:
       - AGENT_RUN_DISPATCH=${AGENT_RUN_DISPATCH:-celery}
       - AGENT_RUN_THREAD_LOCK_BACKEND=${AGENT_RUN_THREAD_LOCK_BACKEND:-redis}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
+      # 多进程指标聚合：app 是唯一的暴露进程，worker 是主要写入进程，
+      # 两者通过共享卷交换 mmap 样本（见 metrics-init 与 core/metrics_exposition.py）。
+      - PROMETHEUS_MULTIPROC_DIR=/app/var/prom-metrics
     volumes:
       - ../../chat_sessions:/app/chat_sessions
       - app-logs:/app/logs
@@ -177,6 +202,8 @@ services:
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
       # v4.0: 数据库持久化
       - ../../data:/app/data
+      # 与 worker 共享的 Prometheus 多进程样本目录
+      - prom-metrics:/app/var/prom-metrics
     depends_on:
       redis:
         condition: service_healthy
@@ -184,6 +211,8 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      metrics-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/api/health'); assert r.status_code==200"]
@@ -246,14 +275,20 @@ services:
       - LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT=${LANGGRAPH_CHECKPOINT_SETUP_TIMEOUT:-15}
       - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
       - CHECKPOINT_RETENTION_MIN_AGE_SECONDS=${CHECKPOINT_RETENTION_MIN_AGE_SECONDS:-86400}
+      # 与 app 共享的 Prometheus 多进程样本目录：worker 递增的
+      # agent_run_dead_letter_total 等指标经由它对 app 侧可见（否则恒为 0）。
+      - PROMETHEUS_MULTIPROC_DIR=/app/var/prom-metrics
     volumes:
       - app-logs:/app/logs
       - ../../data:/app/data
+      - prom-metrics:/app/var/prom-metrics
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      metrics-init:
+        condition: service_completed_successfully
       qdrant:
         condition: service_started
     # Celery-native liveness。
@@ -336,6 +371,13 @@ services:
     volumes:
       - ../../monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../monitoring/alert_rules.yml:/etc/prometheus/rules/alert_rules.yml:ro
+      # 抓取凭据（`bearer_token_file`）。缺失时 Prometheus **拒绝启动**，
+      # 这是刻意的 fail-closed：宁可响亮地起不来，也不要静默采不到任何指标。
+      # 生成方式见 `make monitoring-token`。
+      # 路径锚点是本文件所在目录 `deploy/compose/`，因此 `..` 即 `deploy/`；
+      # 不要写成 `../../deploy/...` —— 同一个目录拼成两种写法正是 issue #48
+      # 的成因（见 test_compose_deploy_topology）。
+      - ../monitoring/secrets:/etc/prometheus/secrets:ro
       - prometheus-data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -433,6 +475,9 @@ volumes:
   alertmanager-data:
   qdrant_storage:
   qdrant_snapshots:
+  # app 与 worker 共享的 Prometheus 多进程 mmap 样本目录。
+  # 删掉它 = 指标归零（等价于服务重启，由 metrics-init 负责显式清理）。
+  prom-metrics:
 
 networks:
   cs-network:

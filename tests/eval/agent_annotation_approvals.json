@@ -1,0 +1,12 @@
+{
+  "_readme": [
+    "Agent Eval 数据集的人工确认记录。",
+    "空 = 没有任何 case 经人工确认 -> route_accuracy 保持 NOT_MEASURED。这是正确状态：",
+    "用 LLM 起草的标签验证 LLM 驱动的系统 = 自我验证，得到的准确率没有意义。",
+    "写入方式：python3 scripts/approve_agent_eval_annotations.py --confirm <case_id> --reviewer <who>",
+    "然后：python3 scripts/generate_agent_eval_cases.py --apply-approvals tests/eval/agent_annotation_approvals.json",
+    "确认后必须重跑 make agent-eval，artifact 里会记录 confirmed 数与被确认的 case。"
+  ],
+  "schema_version": "agent-eval-approvals/v1",
+  "approvals": {}
+}
