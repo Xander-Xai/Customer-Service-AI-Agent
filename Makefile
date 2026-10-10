@@ -332,7 +332,8 @@ rag-ablation: ## 4 组检索消融（可测的给数字，不可用的输出 BLO
 
 # ===== 运行时与性能证据 =====
 runtime-report: ## 汇总分布式运行时验收报告（副作用按真实执行次数计）
-	@python3 scripts/report_distributed_runtime.py
+	@TEST_DISTRIBUTED_DB_URL="$(RUNTIME_DB_URL)" TEST_REDIS_URL="$(RUNTIME_REDIS_URL)" \
+		python3 scripts/report_distributed_runtime.py
 
 perf-evidence: ## 性能/成本门禁与证据（无真实 provider 时结构化 BLOCKED）
 	@python3 scripts/measure_performance.py --offline-checks

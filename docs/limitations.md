@@ -122,6 +122,8 @@ escalation 的真实实现只有两处，都不是"转交"：
 | ~~没声明风险等级的有副作用工具 = 静默放行~~ | **已修复：fail-closed** | 治理开启时，`side_effect=True` 却没被任何规则认领的工具一律判 **HIGH**。只读工具不受影响 |
 | `/api/chat` 快路径 | **明确不在治理边界内** | 快路径无 run 上下文（`core/hitl/gate.py::is_ungoverned_side_effect`）。补偿措施是**拒绝**无治理的副作用调用，而不是放行 |
 | 并发审批 | **Implemented** | 真实 PostgreSQL 下 N 个并发决策**恰好一个赢家**（`UPDATE ... WHERE status=PENDING` 的数据库级 CAS），见 `tests/integration/runtime/test_hitl_approval_concurrency.py` |
+| 审批恢复的重复副作用防护 | **Implemented / 已测** | `consume_resume`（`resumed_at IS NULL` 原子认领）+ side-effect ledger（`run_id:approval:{approval_id}`）双保险。重复投递、崩溃后重投递均不重复执行。测试：`tests/integration/runtime/test_hitl_resume_fault_injection.py`（6 场景） |
+| **审批恢复的 liveness 边界** | **Partial（已知，已测）** | 若 worker 在**认领决策之后、run 收敛之前**崩溃，`resumed_at` 已被消费，重投递**不会**重新消费 → run 停在 `WAITING_APPROVAL`（安全但需运维介入）。**无自动 re-issue 机制**。复现：`TestCrashDuringResume`；见 `make runtime-report` 的 `remaining_risks` |
 | 待审批通知 | **Designed** | 只有轮询队列，**没有 push / 邮件 / IM 主动通知** |
 | 真实 ERP 退款/改单 | **NOT_VERIFIED** | `tools/hitl_staging_tools.py` 是确定性 staging 工具，验证的是**治理机制**，不是金蝶 ERP 的正确性。无企业 staging 环境 |
 | MCP 写操作工具 | **结构上不可能存在** | 只注册 `risk_level=low` 的 MCP 服务器（`tools/mcp_adapter.py`），且 `side_effect=False` 硬编码 |
@@ -148,6 +150,8 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **正确性语义是 at-least-once，不是 exactly-once** | 设计如此 | `acks_late` + `reject_on_worker_lost` + `visibility_timeout`。正确性靠三层幂等（run / thread / 工具） |
 | Run 事件流 | **不是真相源** | Redis Stream → SSE，best-effort 可续读，**非 exactly-once**。断线会丢事件（可续读，但非完整） |
 | DLQ 重放 | **需人工** | 复用原 `run_id`（避免绕过工具幂等键），无自动重放策略 |
+| checkpoint 恢复用例的 liveness 预算 | **已硬化** | SIGKILL 恢复用例在全套并发跑时曾对固定 150s 预算敏感（1 次观察到卡在 `RUNNING`/attempt=2）。liveness 预算改为可配置（`RUNTIME_RECOVERY_WAIT_SECONDS`，默认 300s）；**正确性断言未放宽**（仍要求 `SUCCEEDED` + 续跑证据） |
+| 结构化故障注入报告 | **Implemented** | `make runtime-report`（`scripts/report_distributed_runtime.py`）聚合 e2e/chaos/verify，输出 git SHA + 环境 + 7 个故障场景 + 副作用计数 + 剩余风险。artifact：`artifacts/distributed-runtime-summary/<ts>.json` |
 
 ---
 
