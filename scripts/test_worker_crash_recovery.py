@@ -198,9 +198,21 @@ def run() -> dict:
         worker_a_id = row[2]  # (status, attempt, worker_id)
         if not worker_a_id:
             raise ChaosFailure("Worker A 未写入 worker_id")
-        ckpts = _checkpoint_count(engine, thread_id)
-        if ckpts < 1:
-            raise ChaosFailure("崩溃前 PostgreSQL 不存在 checkpoint，无法验证续跑")
+        # 轮询等 checkpoint 落库，而不是查一次就下结论。
+        #
+        # 这里原本是单次 `_checkpoint_count()` 后立刻 `if ckpts < 1: raise`。但
+        # checkpoints 由 checkpointer **异步**写入：RunService 把 run 置成 RUNNING
+        # 与 LangGraph 持久化 checkpoint 之间存在时间窗。于是"状态已是 RUNNING"
+        # 推不出"checkpoint 已落库"，慢机器/高负载 CI 上大约每 3 次假失败一次
+        # （error=崩溃前 PostgreSQL 不存在 checkpoint），而系统本身毫无异常 ——
+        # 典型的时序 flake，它只会把真正的回归信号埋掉。
+        #
+        # 本脚本其余每一步都用 `wait_for`，唯独这一步没有，正是这个 race 的来源。
+        ckpts = wait_for(
+            lambda: (n := _checkpoint_count(engine, thread_id)) >= 1 and n,
+            30,
+            "崩溃前 checkpoint 落库",
+        )
         steps.append(
             {
                 "step": 4,

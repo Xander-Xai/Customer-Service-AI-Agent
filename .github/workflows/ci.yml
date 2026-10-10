@@ -423,6 +423,17 @@ jobs:
       # 因此必须**同时**安装 requirements.txt 与 requirements-dev.txt —— 只装 dev
       # 会在测试收集阶段就 ModuleNotFoundError。这与 runtime-e2e / rag lane 的
       # 安装方式一致（见本文件其它 "Install dependencies" 步骤）。
+      # 与 `test` lane 同样的必需步骤：这两个 job 会 import 应用运行时，
+      # ``core/config.py`` 在**导入时**就 fail-closed 校验凭据
+      # （API_KEY_ENABLED=true 且 API_KEY 为空 -> 直接 ValueError）。
+      # 没有 .env 时 CI runner 上没有 .env，配置校验会在 import 阶段就炸，
+      # 表现为"收集测试就 ModuleNotFoundError / ValueError"。
+      # 用仓库内提交的 .env.test（占位符、无真实凭据）提供确定的测试配置。
+      - name: Setup test environment
+        run: |
+          cp .env.test .env
+          echo "✅ .env.test → .env 已复制"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -480,6 +491,17 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+
+      # 与 `test` lane 同样的必需步骤：这两个 job 会 import 应用运行时，
+      # ``core/config.py`` 在**导入时**就 fail-closed 校验凭据
+      # （API_KEY_ENABLED=true 且 API_KEY 为空 -> 直接 ValueError）。
+      # 没有 .env 时 CI runner 上没有 .env，配置校验会在 import 阶段就炸，
+      # 表现为"收集测试就 ModuleNotFoundError / ValueError"。
+      # 用仓库内提交的 .env.test（占位符、无真实凭据）提供确定的测试配置。
+      - name: Setup test environment
+        run: |
+          cp .env.test .env
+          echo "✅ .env.test → .env 已复制"
 
       - name: Install dependencies
         run: |
