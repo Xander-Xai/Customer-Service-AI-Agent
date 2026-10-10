@@ -43,6 +43,7 @@ def _case(
     expected_tools: tuple[str, ...] = (),
     forbidden_tools: tuple[str, ...] = (),
     expected_risk: str | None = None,
+    expected_parameters: dict[str, dict] | None = None,
     scripted_tool_calls: tuple[dict, ...] = (),
     scripted_route: str | None = None,
     scripted_failure: str | None = None,
@@ -91,6 +92,10 @@ def _case(
         payload["expected_route"] = expected_route
     if expected_risk is not None:
         payload["expected_risk"] = expected_risk
+    if expected_parameters:
+        payload["expected_parameters"] = {
+            name: dict(args) for name, args in expected_parameters.items()
+        }
     if scripted_route is not None:
         payload["scripted_route"] = scripted_route
     if scripted_failure is not None:
@@ -283,6 +288,7 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
                 expected_route="order_status",
                 expected_tools=("staging_readonly_lookup",),
                 expected_risk="low",
+                expected_parameters={"staging_readonly_lookup": {"order_id": f"RO-READ-{idx:03d}"}},
                 scripted_tool_calls=(_read_call(f"RO-READ-{idx:03d}"),),
                 tags=("tool", "readonly", "low-risk"),
                 notes="只读工具：治理必须放行，且参数必须通过 schema 校验。",
@@ -306,6 +312,9 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
                 expected_terminal_state="WAITING_APPROVAL",
                 expected_tools=("staging_refund",),
                 expected_risk="high",
+                expected_parameters={
+                    "staging_refund": {"order_id": f"RO-HITL-{idx:03d}", "amount": 99}
+                },
                 scripted_tool_calls=(_refund_call(f"RO-HITL-{idx:03d}"),),
                 tags=("tool", "hitl", "high-risk"),
                 notes=(
@@ -331,6 +340,12 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
                 expected_terminal_state="WAITING_APPROVAL",
                 expected_tools=("staging_order_change",),
                 expected_risk="high",
+                expected_parameters={
+                    "staging_order_change": {
+                        "order_id": f"RO-CHG-{idx:03d}",
+                        "new_status": "CANCELLED",
+                    }
+                },
                 scripted_tool_calls=(_change_call(f"RO-CHG-{idx:03d}"),),
                 tags=("tool", "hitl", "high-risk"),
                 notes="HIGH 风险副作用（改单）：同上，必须被摘出且未执行。",
@@ -347,6 +362,10 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
                 expected_terminal_state="WAITING_APPROVAL",
                 expected_tools=("staging_readonly_lookup", "staging_refund"),
                 expected_risk="high",
+                expected_parameters={
+                    "staging_readonly_lookup": {"order_id": f"RO-MIX-{idx:03d}"},
+                    "staging_refund": {"order_id": f"RO-MIX-{idx:03d}", "amount": 99},
+                },
                 scripted_tool_calls=(
                     _read_call(f"RO-MIX-{idx:03d}"),
                     _refund_call(f"RO-MIX-{idx:03d}"),
@@ -411,6 +430,54 @@ def build_cases(approvals: dict[str, dict] | None = None) -> list[dict]:
             notes=(
                 "故障注入：脚本化了一个只读工具，但首轮 LLM 就失败。"
                 "工具计划应保持未使用，系统走降级而不是半途执行。"
+            ),
+        )
+    )
+    cases.append(
+        _case(
+            "fault_agent_llm_timeout_001",
+            "帮我推荐一款抗老精华",
+            expected_route="recommendation",
+            expect_fallback=True,
+            scripted_failure="agent_llm_timeout",
+            tags=("fault-injection", "fallback", "timeout"),
+            notes=(
+                "故障注入：Agent LLM 超时（asyncio.TimeoutError）。验证超时被归类为降级/"
+                "故障而不是静默成功；expect_task_completed=false（注入故障本就不应完成任务）。"
+            ),
+        )
+    )
+
+    # ── 参数期望控制项（证明 expected_parameter_match_rate 有区分力）────────
+    # 正向：脚本参数与 expected_parameters 一致 -> 该 (case, tool) slot 命中。
+    cases.append(
+        _case(
+            "tool_param_match_001",
+            "查询订单 RO-PARAM-001 的状态",
+            expected_route="order_status",
+            expected_tools=("staging_readonly_lookup",),
+            expected_risk="low",
+            expected_parameters={"staging_readonly_lookup": {"order_id": "RO-PARAM-001"}},
+            scripted_tool_calls=(_read_call("RO-PARAM-001"),),
+            tags=("tool", "readonly", "parameter-check"),
+            notes="期望参数与脚本一致：expected_parameter_match_rate 该 slot 命中。",
+        )
+    )
+    # 控制项：脚本参数与期望参数**故意不一致**。若该指标恒为 1.0，说明它没有
+    # 度量任何东西；这条 case 保证指标能被观测到下降（负控思路）。
+    cases.append(
+        _case(
+            "tool_param_mismatch_001",
+            "查询订单 RO-PARAM-002 的状态",
+            expected_route="order_status",
+            expected_tools=("staging_readonly_lookup",),
+            expected_risk="low",
+            expected_parameters={"staging_readonly_lookup": {"order_id": "RO-PARAM-002"}},
+            scripted_tool_calls=(_read_call("RO-WRONG-999"),),
+            tags=("tool", "readonly", "parameter-check", "control"),
+            notes=(
+                "负控：脚本传入的 order_id 与期望不符。expected_parameter_match_rate 必须因此"
+                "下降；若恒为 1.0 则说明该诊断指标没有区分力。"
             ),
         )
     )

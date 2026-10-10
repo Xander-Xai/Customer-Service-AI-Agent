@@ -179,6 +179,8 @@ escalation 的真实实现只有两处，都不是"转交"：
 | 5000+ 语料导入（幂等 + manifest + 覆盖率审计） | **Implemented** | — |
 | 正式检索指标（人工相关度判定） | **NOT_VERIFIED，且当前不可测** | 见 §1.1。**全量 649 指标不得对外发布** |
 | **gold 数据集缺陷（已量化并修复到"可人工核验"状态）** | **Partial** | 649 query 中 **40 条全部 gold 缺失**、**160 个 gold 引用不在语料中**（见 `make rag-gold-review` 输出）。已产出 1787 条 `DRAFT_UNVERIFIED` + 40 条 `UNDETERMINABLE` 工作清单，**全部通过 `rag-gold-label/v1` 校验**，可交人工判定 |
+| **reviewed-gold 评测入口（JUDGED 消费方）** | **Implemented / 待人工标注** | `scripts/evaluate_rag_reviewed_gold.py` 是 `rag-gold-label/v1` 的**唯一评测消费方**：只把人工核验的 `JUDGED` 记录计入正式指标；`DRAFT`/`llm_suggested`/`category_random_match`/`EXCLUDED`/`UNDETERMINABLE` 只计数不计分。**无 JUDGED 标签 → `NOT_MEASURABLE`，不跑 4 组消融**（fail closed）。未标注项**不算作不相关**（`precision_judged` 分母剔除 unjudged）。见 `make rag-gold-reviewed-eval` / `make rag-gold-reviewed-status` |
+| **JUDGED 人工相关度标签** | **NOT_MEASURED** | 仓库当前 **0 条**人工 JUDGED 标签（`review_worklist` 全为 `DRAFT_UNVERIFIED`）。正式 reviewed-gold 指标与 Recall/NDCG 因此保持 `NOT_MEASURABLE`，直到人工标注完成 |
 | **known-item（构造）gold 与 BM25 消融** | **Implemented / 可测** | query := 文档标题（逐字），相关度**由构造保证**，非人工判定。度量**索引词法可检索性**，不是搜索质量。负控通过（打乱 gold 后 `hit@1` 由 1.0 → 0.0）。见 `make rag-gold-known-item` / `make rag-ablation` |
 | **vector_only / hybrid / hybrid+rerank 消融** | **BLOCKED** | embedding provider 在本环境不可用（凭据为占位符）。**不使用占位向量替代**：占位向量会让 Qdrant 返回任意结果，把 `vector_only` 的 Hit@K 变成随机召回率 |
 | 语料质量 | **已知缺陷** | 5000 条中仅 **617 条标题唯一**（4383 条文档共享标题），且 `source: "synthetic"`。任何指标都必须附带这一事实 |

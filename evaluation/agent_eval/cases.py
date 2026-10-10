@@ -50,6 +50,7 @@ _KNOWN_FIELDS = frozenset(
         "expected_tools",
         "forbidden_tools",
         "expected_risk",
+        "expected_parameters",
         "scripted_tool_calls",
         "scripted_route",
         "scripted_failure",
@@ -68,6 +69,7 @@ SCRIPTED_FAILURES: tuple[str | None, ...] = (
     "agent_llm_error",
     "router_llm_error",
     "agent_llm_error_first_turn",
+    "agent_llm_timeout",
 )
 
 #: 标注来源。``human_confirmed`` 才能进入正式路由指标。
@@ -144,6 +146,11 @@ class AgentCase:
     expected_route: str | None = None
     expected_tools: tuple[str, ...] = ()
     forbidden_tools: tuple[str, ...] = ()
+    #: Correct arguments per tool (tool name -> expected argument subset). Nil for
+    #: cases that carry no argument expectation. Cross-checked by the diagnostic
+    #: ``expected_parameter_match_rate`` metric; it is NOT a schema check (that is
+    #: ``tool_argument_schema_pass_rate``).
+    expected_parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
     expected_risk: str | None = None
     scripted_tool_calls: tuple[ScriptedToolCall, ...] = ()
     scripted_route: str | None = None
@@ -166,6 +173,10 @@ class AgentCase:
         """该 case 是否进入 HITL 触发指标分母。"""
         return self.expected_risk is not None and bool(self.scripted_tool_calls)
 
+    def scores_parameters(self) -> bool:
+        """该 case 是否进入期望参数匹配诊断指标的分母。"""
+        return bool(self.expected_parameters)
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "case_id": self.case_id,
@@ -175,6 +186,9 @@ class AgentCase:
             "expected_route": self.expected_route,
             "expected_tools": list(self.expected_tools),
             "forbidden_tools": list(self.forbidden_tools),
+            "expected_parameters": {
+                name: dict(args) for name, args in self.expected_parameters.items()
+            },
             "expected_risk": self.expected_risk,
             "scripted_tool_calls": [
                 {"name": c.name, "arguments_json": c.arguments_json}
@@ -249,6 +263,25 @@ def _parse_scripted_calls(raw: Any, line_no: int) -> tuple[ScriptedToolCall, ...
             )
         parsed.append(ScriptedToolCall(name=name, arguments_json=arguments_json))
     return tuple(parsed)
+
+
+def _parse_expected_parameters(raw: Any, line_no: int) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise DatasetError(f"line {line_no}: field `expected_parameters` must be an object")
+    parsed: dict[str, dict[str, Any]] = {}
+    for name, args in raw.items():
+        if not isinstance(name, str) or not name.strip():
+            raise DatasetError(
+                f"line {line_no}: expected_parameters keys must be tool names (non-empty strings)"
+            )
+        if not isinstance(args, dict):
+            raise DatasetError(
+                f"line {line_no}: expected_parameters[{name!r}] must be an argument object"
+            )
+        parsed[name] = dict(args)
+    return parsed
 
 
 def _parse_annotation(raw: Any, line_no: int) -> Annotation:
@@ -342,6 +375,7 @@ def parse_case(payload: dict[str, Any], line_no: int) -> AgentCase:
         expected_route=expected_route,
         expected_tools=_require_str_tuple(payload, "expected_tools", line_no),
         forbidden_tools=_require_str_tuple(payload, "forbidden_tools", line_no),
+        expected_parameters=_parse_expected_parameters(payload.get("expected_parameters"), line_no),
         expected_risk=expected_risk,
         scripted_tool_calls=_parse_scripted_calls(payload.get("scripted_tool_calls"), line_no),
         scripted_route=scripted_route,
@@ -392,6 +426,23 @@ def _validate_semantics(case: AgentCase, line_no: int) -> None:
             f"line {line_no}: case {case.case_id!r} declares expected_risk "
             f"{case.expected_risk!r} without any scripted tool call"
         )
+    if case.expected_parameters:
+        if not case.expected_tools:
+            raise DatasetError(
+                f"line {line_no}: case {case.case_id!r} declares expected_parameters without "
+                "expected_tools — a parameter expectation needs a tool expectation to attach to"
+            )
+        unknown_tools = sorted(set(case.expected_parameters) - set(case.expected_tools))
+        if unknown_tools:
+            raise DatasetError(
+                f"line {line_no}: case {case.case_id!r} expects parameters for tools "
+                f"{unknown_tools} that are not in expected_tools {list(case.expected_tools)}"
+            )
+        if not case.scripted_tool_calls:
+            raise DatasetError(
+                f"line {line_no}: case {case.case_id!r} declares expected_parameters without "
+                "scripted_tool_calls — the parameters can never be observed"
+            )
     if (
         case.expected_terminal_state == WAITING_APPROVAL
         and case.expected_risk != "high"
@@ -433,6 +484,7 @@ class AgentDataset:
             "total": len(self.cases),
             "route": sum(1 for c in self.cases if c.scores_route()),
             "tools": sum(1 for c in self.cases if c.scores_tools()),
+            "parameters": sum(1 for c in self.cases if c.scores_parameters()),
             "risk": sum(1 for c in self.cases if c.scores_risk()),
             "waiting_approval": sum(
                 1 for c in self.cases if c.expected_terminal_state == WAITING_APPROVAL

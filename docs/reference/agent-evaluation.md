@@ -39,7 +39,7 @@ JSONL，一条 case 一行。字段与约束见 `evaluation/agent_eval/cases.py`
 **严格校验、失败即崩**：一条语义不合法的 case 被静默跳过会让分母变小、分数变高 ——
 那是评测系统最危险的缺陷。
 
-覆盖的类别（111 条候选）：
+覆盖的类别（114 条候选）：
 
 | 类别 | 数量 | 说明 |
 |---|---|---|
@@ -52,9 +52,14 @@ JSONL，一条 case 一行。字段与约束见 `evaluation/agent_eval/cases.py`
 | 投诉反馈 | 10 | 意图分类 |
 | 通用 / 问候 | 6 | 意图分类 |
 | 多意图组合 | 8 | 意图分类 |
-| 工具执行（只读 / HIGH / 混合） | 15 | 治理保真度 |
-| 故障注入 | 4 | 降级路径 |
+| 工具执行（只读 / HIGH / 混合） | 17 | 治理保真度 + 期望参数 |
+| 故障注入（含 `agent_llm_timeout` 超时） | 5 | 降级路径 |
 | 禁止工具 | 5 | 治理边界 |
+
+> **场景覆盖边界（诚实登记）**：当前评测集覆盖常见路由、只读/HIGH/混合工具、HITL 审批、
+> 超时与 LLM 故障降级、禁止工具、期望参数。**尚未覆盖**：跨 Agent 协作交接
+> （`agents_used` 未被断言）、RBAC 角色拒绝（无角色上下文）、模型主动选错工具
+> （工具计划来自数据集，V1 不测模型选择）。这些是**明确的未覆盖项**，不当作已测。
 
 ### 2.1 标注必须人工确认（最重要的纪律）
 
@@ -127,10 +132,12 @@ artifact 会逐条列出 `measurement_gaps`（含每个缺口的"解除条件"�
 > `not_resolved` / `requires_human` / `unverified_degraded` / `assessed` /
 > `evidenced`），降级交付不计入 `total_single_turn_resolved`。
 
-### 3.2 诊断指标（3）
+### 3.2 诊断指标（4）
 
 `rule_route_agreement`（纯规则分类器 vs 标注）、
 `hitl_gate_propagation`（摘出 → interrupt 的端到端连通性）、
+`expected_parameter_match_rate`（实际调用是否含有数据集为工具声明的**期望参数**，
+子集匹配；与 schema 校验互补，衡量"期望参数是否端到端被保留"，不是模型参数推理）、
 `step_count`（节点执行次数分布 + 超预算 case）。
 
 ### 3.3 三条不可让步的计数纪律
@@ -208,6 +215,7 @@ SIDE EFFECTS RUN : 0
 |---|---|
 | 编排 / 治理 / 路由行为 | **LEVEL_2_APPLICATION_MEASURED**（真实图 + 脚本化 LLM，零出网） |
 | 模型能力（选工具、答对、推理质量） | **不测** —— 需要 LLM-as-a-Judge 与真实 provider |
+| 真实模型评测（real-provider lane） | **NOT_MEASURED** —— 本环境无 provider 凭据。artifact 的 `provenance.real_provider.status` 显式登记；真实模型指标**不得**与脚本化 LLM 回归混合统计 |
 | 真实 ERP 写入 | **NOT_VERIFIED** —— staging 工具验证的是治理机制 |
 | 检索质量 | **不测** —— 那是 `make rag-eval-649` 的事 |
 | `elapsed_ms` | **不是 SLO 证据** —— 进程内无网络回放，只反映 harness 开销 |

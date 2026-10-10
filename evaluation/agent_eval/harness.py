@@ -35,6 +35,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hashlib
 import json
@@ -78,12 +79,14 @@ class ScriptedAgentLLM:
         fail_on_exhaustion: bool = True,
         fail_first_tool_turn: bool = False,
         always_fail: bool = False,
+        time_out: bool = False,
     ):
         self.plan = tuple(plan)
         self.final_answer = final_answer
         self.fail_on_exhaustion = fail_on_exhaustion
         self.fail_first_tool_turn = fail_first_tool_turn
         self.always_fail = always_fail
+        self.time_out = time_out
         self._index = 0
         self._turns = 0
         self._issued = 0
@@ -123,6 +126,8 @@ class ScriptedAgentLLM:
 
     async def async_invoke(self, messages, timeout=None, tools=None):
         self._turns += 1
+        if self.time_out:
+            raise asyncio.TimeoutError("scripted agent LLM timeout (agent-eval)")
         if self.always_fail:
             raise RuntimeError("scripted agent LLM failure (agent-eval)")
         if self.fail_first_tool_turn and self._turns == 1:
@@ -135,6 +140,8 @@ class ScriptedAgentLLM:
 
     async def async_invoke_stream(self, messages, timeout=None):
         self._turns += 1
+        if self.time_out:
+            raise asyncio.TimeoutError("scripted agent LLM timeout (agent-eval)")
         if self.always_fail:
             raise RuntimeError("scripted agent LLM failure (agent-eval)")
         if self.fail_first_tool_turn and self._turns == 1:
@@ -507,6 +514,7 @@ class AgentEvalHarness:
             fail_on_exhaustion=bool(case.forbidden_tools),
             fail_first_tool_turn=case.scripted_failure == "agent_llm_error_first_turn",
             always_fail=case.scripted_failure == "agent_llm_error",
+            time_out=case.scripted_failure == "agent_llm_timeout",
         )
         self.router_llm = ScriptedRouterLLM(case.scripted_route)
 
