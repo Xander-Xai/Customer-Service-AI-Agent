@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from evaluation.agent_eval.cases import DEFAULT_DATASET_PATH, DatasetError, parse_case  # noqa: E402
-from evaluation.agent_eval.contract import DATASET_SCHEMA_VERSION  # noqa: E402
+from evaluation.agent_eval.contract import DATASET_SCHEMA_VERSION, WAITING_APPROVAL  # noqa: E402
 
 SV = DATASET_SCHEMA_VERSION
 
@@ -58,6 +58,11 @@ def _case(
     # fault_tool_turn_001 正是这样被算成完成的）。
     if expect_task_completed is None:
         expect_task_completed = not expect_fallback
+    # WAITING_APPROVAL 的 case 同样**没有完成业务任务** —— 它们在等人审批，
+    # 业务动作按治理要求本就还没执行。这条不能靠调用方逐个记得传参，否则漏一个
+    # 就会把"正确地拦住高风险写操作"算成"成功地退了款"。
+    if expected_terminal_state == WAITING_APPROVAL:
+        expect_task_completed = False
     payload = {
         "schema_version": SV,
         "case_id": case_id,

@@ -22,10 +22,32 @@ LLM 挂掉后由 ``RuleBasedLLM`` 或 ``fallback_response`` 生成的**通用兜
 ``workflow_finished``   工作流是否正常结束（无未捕获错误）。
 ``response_delivered``  是否向用户交付了非空回复。
 ``degraded``           是否发生 LLM / 工具 / 检索降级。
-``business_resolved``  业务问题是否**实际被解决**；``None`` = UNKNOWN。
-``outcome_verified``   是否有足够证据证明"解决"。
+``business_resolved``  业务问题是否**实际被解决**；``None`` = 无法证明。
+``outcome_verified``   是否有**独立证据**证明"解决"。
 ``requires_human_action`` 是否需要人工介入（HITL 挂起 / 明确转人工）。
 ======================  ===================================================
+
+三级"完成"语义（本模块最重要的区分）
+--------------------------------
+一段非降级的正常回答**不等于**业务已解决。回答是 LLM 的自述，独立证据是别的东西。
+因此把"完成"拆成三个等级，``business_outcome`` 取其中之一：
+
+=========================  ==========================================  ==========
+``business_outcome``       含义                                       ``outcome_verified``
+=========================  ==========================================  ==========
+``NOT_RESOLVED``           空回复 / 出错 / 截断 / 明确不确定            False
+``REQUIRES_HUMAN``         HITL 待审批、被拒绝、明确转人工               False
+``UNVERIFIED_DEGRADED``    交付了兜底模板，无任何成功证据                 False
+``ASSESSED``              交付了实质回复且无降级，但**没有独立证据**     False
+``EVIDENCED``              有独立证据（工具真的执行成功 / 审批放行后执行成功） True
+=========================  ==========================================  ==========
+
+对应地，``business_resolved`` 只在 ``EVIDENCED`` 时为 ``True``；``ASSESSED``
+与 ``UNVERIFIED_DEGRADED`` 都是 ``None``（无法证明），其余为 ``False``。
+
+**兼容性**：``ASSESSED`` 仍然映射成既有的 ``resolution_status == "resolved"``，
+因此普通低风险问答的缓存写入、SLA 统计、看板口径**完全不变** —— 被收紧的只有
+"业务已解决"这句话本身的含义。
 
 设计纪律
 --------
@@ -112,6 +134,8 @@ class Outcome:
     business_resolved: bool | None
     outcome_verified: bool
     requires_human_action: bool
+    business_outcome: str = ""
+    evidence: tuple[str, ...] = ()
     degradation_flags: tuple[str, ...] = ()
     reason: str = ""
 
@@ -123,9 +147,26 @@ class Outcome:
             "business_resolved": self.business_resolved,
             "outcome_verified": self.outcome_verified,
             "requires_human_action": self.requires_human_action,
+            "business_outcome": self.business_outcome,
+            "evidence": list(self.evidence),
             "degradation_flags": list(self.degradation_flags),
             "reason": self.reason,
         }
+
+
+#: ``business_outcome`` 的取值。与上面的文档表格一一对应，不要另立词汇。
+BUSINESS_NOT_RESOLVED = "not_resolved"
+BUSINESS_REQUIRES_HUMAN = "requires_human"
+BUSINESS_UNVERIFIED_DEGRADED = "unverified_degraded"
+BUSINESS_ASSESSED = "assessed"
+BUSINESS_EVIDENCED = "evidenced"
+BUSINESS_OUTCOMES: tuple[str, ...] = (
+    BUSINESS_NOT_RESOLVED,
+    BUSINESS_REQUIRES_HUMAN,
+    BUSINESS_UNVERIFIED_DEGRADED,
+    BUSINESS_ASSESSED,
+    BUSINESS_EVIDENCED,
+)
 
 
 def detect_response_degradation(response: str) -> tuple[str, ...]:
@@ -147,6 +188,39 @@ def _approval_requires_human(approval_results: list[dict[str, Any]]) -> bool:
         if status != "executed":
             return True
     return False
+
+
+def _independent_evidence(state: dict[str, Any]) -> tuple[str, ...]:
+    """收集"业务动作**确实发生**"的独立证据。
+
+    只认两种，且都必须来自**执行侧**而不是 LLM 自述：
+
+    1. ``state["tool_executions"]`` 里 ``ok=True`` 的记录 —— 由
+       ``agents/base_agent.py::_record_tool_execution`` 在工具**真的返回**后写入；
+       被 HITL 摘出、从未执行的调用不会出现在这里（它们只在 ``pending_actions``）。
+    2. ``approval_results`` 里 ``status="executed"`` —— 人工批准后工具确实执行了。
+
+    刻意**不**认的东西：非空的 ``response``、无降级标记、图正常结束。一段写得
+    像模像样的回答只说明"系统在说话"，不说明"退款真的退了"。把它们当证据，就是
+    把上一轮修掉的 bug（兜底文案算成功）换个说法再犯一次。
+    """
+    evidence: list[str] = []
+
+    records = state.get("tool_executions") or []
+    if isinstance(records, list):
+        for record in records:
+            if isinstance(record, dict) and record.get("ok"):
+                evidence.append(f"tool_executed:{record.get('tool')}")
+
+    results = state.get("approval_results") or []
+    if isinstance(results, list):
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            if str(result.get("status", "")).strip().lower() == "executed":
+                evidence.append(f"approval_executed:{result.get('tool')}")
+
+    return tuple(dict.fromkeys(evidence))
 
 
 def classify_outcome(state: dict[str, Any]) -> Outcome:
@@ -184,36 +258,41 @@ def classify_outcome(state: dict[str, Any]) -> Outcome:
     if escalated_phrase and not approval_results:
         requires_human = True
 
-    # ── 是否有足够证据证明"已解决" ────────────────────────────────────
-    # 反例优先：交付了兜底文案，或需要人工，都不构成"已解决"的证据。
-    outcome_verified = (
-        workflow_finished and not requires_human and response_delivered and not degraded
-    )
+    evidence = _independent_evidence(state)
 
-    # ── business_resolved ─────────────────────────────────────────────
-    if not workflow_finished:
-        business_resolved: bool | None = False
+    # ── 分级：流程完成 / 业务可能解决 / 业务解决有证据 ────────────────
+    if not workflow_finished or not response_delivered:
+        business_outcome = BUSINESS_NOT_RESOLVED
     elif requires_human:
-        # 业务动作尚未完成（等审批 / 被拒绝 / 需人工）——不是"已解决"。
-        business_resolved = False
-    elif not response_delivered:
-        business_resolved = False
+        # 业务动作尚未完成（等审批 / 被拒绝 / 需人工）。
+        business_outcome = BUSINESS_REQUIRES_HUMAN
     elif degraded:
-        # 交付的是兜底模板：没有任务成功证据 => UNKNOWN（不是成功）。
+        # 交付的是兜底模板：连"可能解决"都算不上，只能标"未验证的降级"。
+        business_outcome = BUSINESS_UNVERIFIED_DEGRADED
+    elif evidence:
+        # 有执行侧证据：某个业务动作真的跑了。
+        business_outcome = BUSINESS_EVIDENCED
+    else:
+        # 有实质回复、无降级、但**没有**独立证据：只能说"可能解决"。
+        business_outcome = BUSINESS_ASSESSED
+
+    outcome_verified = business_outcome == BUSINESS_EVIDENCED
+    if business_outcome == BUSINESS_EVIDENCED:
+        business_resolved: bool | None = True
+    elif business_outcome in (BUSINESS_ASSESSED, BUSINESS_UNVERIFIED_DEGRADED):
         business_resolved = None
     else:
-        business_resolved = True
+        business_resolved = False
 
-    if business_resolved is True:
-        reason = "delivered non-degraded response"
-    elif requires_human:
-        reason = "human action required (pending/rejected approval or escalation)"
-    elif degraded:
-        reason = "degraded fallback delivered; no verified task success"
-    elif not response_delivered:
-        reason = "no response delivered"
-    else:
-        reason = "workflow did not finish cleanly"
+    reason = {
+        BUSINESS_NOT_RESOLVED: (
+            "workflow did not finish cleanly" if not workflow_finished else "no response delivered"
+        ),
+        BUSINESS_REQUIRES_HUMAN: "human action required (pending/rejected approval or escalation)",
+        BUSINESS_UNVERIFIED_DEGRADED: "degraded fallback delivered; no verified task success",
+        BUSINESS_ASSESSED: "substantive non-degraded answer delivered, but NO independent evidence",
+        BUSINESS_EVIDENCED: "business action independently observed to have executed",
+    }[business_outcome]
 
     return Outcome(
         workflow_finished=workflow_finished,
@@ -222,23 +301,37 @@ def classify_outcome(state: dict[str, Any]) -> Outcome:
         business_resolved=business_resolved,
         outcome_verified=outcome_verified,
         requires_human_action=requires_human,
+        business_outcome=business_outcome,
+        evidence=evidence,
         degradation_flags=degradation_flags,
         reason=reason,
     )
 
 
 def resolution_status_for(outcome: Outcome) -> str:
-    """把 Outcome 映射回既有的四值 ``resolution_status`` 词表。"""
+    """把 Outcome 映射回既有的四值 ``resolution_status`` 词表。
+
+    兼容性要求：``ASSESSED``（实质回复、无降级、但无独立证据）仍然映射成
+    ``resolved``。它是**系统自评的"这一轮正常作答了"**，不是"业务已验证解决" ——
+    后者看 :attr:`Outcome.outcome_verified`。把两者混同会让缓存写入、SLA 统计
+    与看板口径在收紧"已解决"时被一起改坏。
+    """
     if outcome.requires_human_action:
         return RESOLUTION_ESCALATED
     if not outcome.workflow_finished or not outcome.response_delivered:
         return RESOLUTION_FAILED
-    if outcome.outcome_verified:
+    if outcome.business_outcome in (BUSINESS_ASSESSED, BUSINESS_EVIDENCED):
         return RESOLUTION_RESOLVED
     return RESOLUTION_UNCERTAIN
 
 
 __all__ = [
+    "BUSINESS_ASSESSED",
+    "BUSINESS_EVIDENCED",
+    "BUSINESS_NOT_RESOLVED",
+    "BUSINESS_OUTCOMES",
+    "BUSINESS_REQUIRES_HUMAN",
+    "BUSINESS_UNVERIFIED_DEGRADED",
     "FALLBACK_MARKERS",
     "LOG_ONLY_MARKERS",
     "RESOLUTION_ESCALATED",

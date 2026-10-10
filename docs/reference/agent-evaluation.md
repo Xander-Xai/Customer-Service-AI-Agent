@@ -84,7 +84,7 @@ python3 scripts/generate_agent_eval_cases.py \
 
 ## 3. 指标
 
-### 3.1 正式指标（11）
+### 3.1 正式指标（12）
 
 | 指标 | 分母 | 备注 |
 |---|---|---|
@@ -95,19 +95,37 @@ python3 scripts/generate_agent_eval_cases.py \
 | `hitl_trigger_accuracy` | `expected_risk` 且产生可观测工具调用的 case | HIGH 必须被摘出且未执行；低风险不得被误拦 |
 | `workflow_execution_rate` | 全部观测到的 case | 图是否正常结束（无未捕获异常） |
 | `response_delivery_rate` | 全部观测到的 case | 是否交付了非空回复。**交付 ≠ 解决** |
-| `task_completion_rate` | 全部观测到的 case | 抵达期望终态 + 非空回复 + **无未预期降级**；故障注入 case（`expect_task_completed=false`）不计入分子 |
-| `task_completion_evidence_coverage` | 被计为完成的 case | 完成结论有独立可核验证据（真实执行过的工具结果 / WAITING_APPROVAL 的 pending+interrupt）的比例 |
+| `governance_outcome_match_rate` | 全部观测到的 case | 图是否抵达 `expected_terminal_state`，**包含** `WAITING_APPROVAL`（治理正确） |
+| `task_completion_rate` | **业务完成口径适用**的 case | 抵达终态 + 非空回复 + **无未预期降级**；`WAITING_APPROVAL` 被排除并计入 `excluded`；故障注入 case（`expect_task_completed=false`）不计入分子 |
+| `task_completion_evidence_coverage` | 被计为完成的 case | 完成结论有**真实执行过的工具结果**支撑的比例。interrupt/pending_actions **不算**业务证据 |
 | `fallback_rate` | 全部观测到的 case | 命中至少一个真实降级标记的占比 |
 | `fallback_detection_accuracy` | 声明 `expect_fallback` 或命中标记的 case | 标注与实测是否一致 |
 
-> **`task_completion_rate` 的口径修订（v1 → v1.1）**：旧口径只要求"抵达终态 +
-> 非空回复"，于是 LLM 故障后交付的**兜底文案**也被算作完成（历史 `111/111`）。
-> 新口径要求"无未预期降级"，并把 `expect_task_completed=false` 的故障注入 case
-> 排除出分子（但仍留在分母）。因此新旧数字**不可直接比较**。
-> 与之配套的是 `response_delivery_rate`（交付）与
-> `task_completion_evidence_coverage`（证据覆盖率）——"交付了"不等于"解决了"，
-> 更不等于"有证据证明解决了"。运行时监控侧用同一套定义
-> （`core.outcome.Outcome`），降级交付不计入 `total_single_turn_resolved`。
+### 3.1.1 三态 overall_status（NOT_MEASURED ≠ 达标）
+
+| overall_status | 含义 | 退出码 |
+|---|---|---|
+| `FAIL` | 至少一条**可测**门禁真的没过（系统缺陷） | 1 |
+| `INCONCLUSIVE` | 可测门禁全过，但仍有门禁 `NOT_AVAILABLE`（缺外部前提，如人工标注） | 0 |
+| `PASS` | 全部门禁 `PASS` 且无一条 `NOT_AVAILABLE` | 0 |
+
+**`PASS` 与"存在 `NOT_AVAILABLE`"严格互斥**：没测出来的东西永远不能算达标。
+artifact 会逐条列出 `measurement_gaps`（含每个缺口的"解除条件"），CI 的
+`agent-eval` step 因此是**真正阻塞**的，不再使用 `continue-on-error` 把缺口吞掉。
+
+> **`task_completion_rate` 的口径修订（v1 → v1.1 → v1.2）**：
+> - **v1**：只要求"抵达终态 + 非空回复" → LLM 故障后的兜底文案被算成完成（111/111）。
+> - **v1.1**：要求"无未预期降级"；拆出 `workflow_execution_rate` /
+>   `response_delivery_rate` / `task_completion_evidence_coverage`。
+> - **v1.2**：**`WAITING_APPROVAL` 不再计入业务完成**（新增
+>   `governance_outcome_match_rate` 承接"治理正确"的语义），并把
+>   interrupt/pending_actions 从"业务完成证据"里剔除 —— 它只证明"拦住了"，
+>   不证明"退款真的退了"。
+>
+> 三代数字**互不可直接比较**。运行时监控侧用同一套定义
+> （`core.outcome.Outcome` 的 `business_outcome` 五级：
+> `not_resolved` / `requires_human` / `unverified_degraded` / `assessed` /
+> `evidenced`），降级交付不计入 `total_single_turn_resolved`。
 
 ### 3.2 诊断指标（3）
 

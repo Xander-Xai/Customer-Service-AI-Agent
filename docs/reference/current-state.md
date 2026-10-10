@@ -91,13 +91,21 @@
   门禁不许靠「没测出来」过关。
 - 每个指标带 `numerator` / `denominator` / `excluded`；分母为 0 →
   `NOT_MEASURED`（不是 0%，也不是 100%）。artifact schema
-  `agent-eval-evidence/v1.1`，含 `code_provenance`（`commit_sha` / `dirty` /
-  diff 指纹）+ 数据集 `sha256` + `evidence_boundaries`。
-- **业务完成口径**（v1.1）：`response_delivery_rate`（交付）与
-  `task_completion_rate`（完成）分开；`task_completion_rate` 要求"抵达终态 +
-  非空回复 + 无未预期降级"，`expect_task_completed=false` 的故障注入 case
-  不计入分子。运行时监控用同一套定义（`core.outcome.Outcome`）——降级兜底
-  不计入 `total_single_turn_resolved`。
+  `agent-eval-evidence/v1.2`，含 `code_provenance`（`commit_sha` / `dirty` /
+  diff 指纹）+ 数据集 `sha256` + `evidence_boundaries` + `measurement_gaps`。
+- **业务完成口径**（v1.2）：四类指标严格分开 ——
+  `workflow_execution_rate`（流程跑完）/ `response_delivery_rate`（交付）/
+  `governance_outcome_match_rate`（治理正确，**含** WAITING_APPROVAL）/
+  `task_completion_rate`（**业务**完成，**不含** WAITING_APPROVAL）。
+  等待审批是"治理正确"，不是"业务完成"；interrupt/pending_actions 也不构成
+  业务证据（只证明拦住了，不证明退款成功了）。
+- **三态门禁**：`FAIL`（可测门禁没过）/ `INCONCLUSIVE`（可测门禁过了但仍有
+  NOT_AVAILABLE）/ `PASS`。`PASS` 与"存在 NOT_AVAILABLE"互斥，NOT_MEASURED
+  永远不会被渲染成达标。
+- 运行时监控用同一套定义（`core.outcome.Outcome.business_outcome` 五级：
+  `not_resolved` / `requires_human` / `unverified_degraded` / `assessed` /
+  `evidenced`）。只有 `evidenced`（工具真的执行成功 / 审批放行后执行成功）
+  才算"业务解决有独立证据"；普通问答停在 `assessed`。
 - 命令：`make agent-eval` / `agent-eval-contract` / `agent-eval-annotation-status`
   / `agent-eval-cases`。
 - **harness 抓到的真实 P0（已修）**：`ReActMode.execute` 曾丢弃

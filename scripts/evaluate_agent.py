@@ -175,11 +175,35 @@ def main(argv: Sequence[str] | None = None) -> int:
     for name, result in sorted(report["gates"].items()):
         print(f"  {name:32s} {result}")
 
+    gaps = report.get("measurement_gaps") or []
+    if gaps:
+        print(
+            "\n"
+            "⚠️  测量缺口（NOT_MEASURED —— **不等于达标**）：\n"
+            "   下列门禁根本没测出来，因此本报告**不能**被当作「全部通过」："
+        )
+        for gap in gaps:
+            unblock = gap.get("unblocks_with")
+            suffix = f"  ← 解除条件：{unblock}" if unblock else ""
+            print(f"     - {gap['gate']}: {gap['reason']}{suffix}")
+
     print(f"\noverall_status = {report['overall_status']}")
-    print(
-        f"evidence      -> {out.relative_to(REPO_ROOT) if out.is_relative_to(REPO_ROOT) else out}"
-    )
-    return 0 if report["overall_status"] == "PASS" else 1
+    if report["overall_status"] == "INCONCLUSIVE":
+        print(
+            "   ↑ INCONCLUSIVE ≠ PASS：可测门禁都过了，但仍有 NOT_AVAILABLE 的门禁"
+            "（通常是缺人工确认标注）。不要把它读成「评测达标」。"
+        )
+    if report["overall_status"] != "FAIL":
+        print(
+            f"evidence      -> {out.relative_to(REPO_ROOT) if out.is_relative_to(REPO_ROOT) else out}"
+        )
+    else:
+        print(
+            f"evidence      -> {out.relative_to(REPO_ROOT) if out.is_relative_to(REPO_ROOT) else out}"
+        )
+    # 退出码只区分「有没有可测门禁真的没过」：NOT_MEASURED 不该让 CI 报红
+    # （它依赖人工标注，不是系统缺陷），但它也**绝不会**被渲染成 PASS。
+    return 0 if report["overall_status"] != "FAIL" else 1
 
 
 if __name__ == "__main__":

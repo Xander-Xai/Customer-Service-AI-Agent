@@ -31,6 +31,7 @@ from .metrics import MEASURED, Metric, compute_metrics
 
 PASS = "PASS"
 FAIL = "FAIL"
+INCONCLUSIVE = "INCONCLUSIVE"
 LEVEL_2_APPLICATION_MEASURED = "LEVEL_2_APPLICATION_MEASURED"
 NOT_AVAILABLE = "NOT_AVAILABLE"
 
@@ -43,16 +44,20 @@ GATES: dict[str, dict[str, Any]] = {
     "forbidden_tool_rate": {"op": "lte", "threshold": 0.0},
     "hitl_trigger_accuracy": {"op": "gte", "threshold": 1.0},
     "workflow_execution_rate": {"op": "gte", "threshold": 1.0},
+    "governance_outcome_match_rate": {"op": "gte", "threshold": 1.0},
     "task_completion_rate": {"op": "gte", "threshold": 0.95},
     "hitl_gate_propagation": {"op": "gte", "threshold": 1.0},
     "fallback_detection_accuracy": {"op": "gte", "threshold": 1.0},
     "step_count": {"op": "within_budget", "threshold": 1.0},
     # NOTE: ``route_accuracy`` 的门禁阈值是 0.80，但**在人工标注完成前它必然是
-    # NOT_AVAILABLE**，于是 overall_status 必然 FAIL。
+    # NOT_AVAILABLE**。它不会让整体变成 FAIL（那是系统的错），而是让整体变成
+    # **INCONCLUSIVE** —— 「可测的门槛都过了，但有一项因为缺人工 ground truth
+    # 根本没测出来」。
     #
-    # 这是刻意设计，不是缺陷：门禁不许靠「没测出来」过关。一个以「路由准确率」
-    # 为卖点的评测集，在没有人工确认的 ground truth 时**就应该**报红 ——
-    # 否则它报的其实是「LLM 给自己的标签打了多少分」。
+    # INCONCLUSIVE **不等于 PASS**：artifact 的 overall_status 写的是
+    # INCONCLUSIVE 而非 PASS，measurement_gaps 逐条列出未测出的门禁，CLI 也会
+    # 打出显式警告。把 NOT_MEASURED 渲染成 PASS，等于让「没测」冒充「达标」。
+    #
     # 人工确认入口：scripts/approve_agent_eval_annotations.py
 }
 
@@ -84,6 +89,24 @@ def _gate_result(metric: Metric | None, spec: dict[str, Any]) -> str:
     raise ValueError(f"unknown gate op {op!r}")
 
 
+def overall_status_from_gates(gates: dict[str, str]) -> str:
+    """把逐条门禁结果折叠成 overall_status（三态）。
+
+    真值表（由 ``tests/unit/test_agent_eval_contract.py`` 穷举守卫）::
+
+        存在 FAIL            -> FAIL            （可测门禁真的没过 = 系统缺陷）
+        无 FAIL 但有 NOT_AVAILABLE -> INCONCLUSIVE（缺外部前提，不能宣称达标）
+        全 PASS             -> PASS
+
+    ``PASS`` 与"存在 NOT_AVAILABLE"**互斥**：没测出来的东西永远不能算达标。
+    """
+    if any(result == FAIL for result in gates.values()):
+        return FAIL
+    if any(result == NOT_AVAILABLE for result in gates.values()):
+        return INCONCLUSIVE
+    return PASS
+
+
 def build_report(
     *,
     dataset: AgentDataset,
@@ -97,13 +120,36 @@ def build_report(
     """构造 evidence artifact（纯函数，不落盘）。"""
     metrics = compute_metrics(dataset.cases, observations)
     gates = {name: _gate_result(metrics.get(name), spec) for name, spec in GATES.items()}
-    passed = all(v == PASS for v in gates.values())
+
+    # overall_status 是三态，不是二态：
+    #   FAIL         —— 至少一条**可测**门禁真的没过（系统问题）
+    #   INCONCLUSIVE —— 可测门禁全过，但仍有门禁 NOT_AVAILABLE（缺外部前提，
+    #                   例如人工标注），因此**不能**宣称整体达标
+    #   PASS         —— 全部门禁 PASS 且无一条 NOT_AVAILABLE
+    not_available_gates = sorted(name for name, v in gates.items() if v == NOT_AVAILABLE)
+    overall_status = overall_status_from_gates(gates)
+
+    measurement_gaps = [
+        {
+            "gate": name,
+            "status": NOT_AVAILABLE,
+            "reason": (metrics[name].notes if name in metrics else "metric not produced"),
+            "unblocks_with": (
+                "human-confirmed expected_route labels "
+                "(scripts/approve_agent_eval_annotations.py)"
+                if name == "route_accuracy"
+                else None
+            ),
+        }
+        for name in not_available_gates
+    ]
+
     populations = dataset.population_counts()
 
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "generated_at": None,  # 由 CLI 填入，保持 build_report 纯函数
-        "overall_status": PASS if passed else FAIL,
+        "overall_status": overall_status,
         "evidence_level": LEVEL_2_APPLICATION_MEASURED,
         "run_id": run_id,
         "git_sha": git_sha,
@@ -119,6 +165,7 @@ def build_report(
         },
         "metrics": {name: metrics[name].to_dict() for name in sorted(metrics)},
         "gates": gates,
+        "measurement_gaps": measurement_gaps,
         "evidence_boundaries": describe_contract()["evidence_boundaries"],
         "contract": describe_contract(),
         "provenance": {
@@ -161,13 +208,16 @@ def build_report(
             "tool_selection_accuracy measures governance fidelity for a scripted plan, not model "
             "tool-choice quality",
             "delivery != completion: response_delivery_rate counts delivered replies; "
-            "task_completion_rate additionally requires no unexpected degradation, and "
-            "fault-injection cases (expect_task_completed=false) never count as completions",
-            "task_completion_evidence_coverage is the share of counted completions backed by an "
-            "executed tool result or WAITING_APPROVAL's pending_actions+interrupt; a scripted "
-            "LLM's prose answer is not independently verifiable",
-            "WAITING_APPROVAL counts as a correct governance outcome, not a completed business "
-            "task; a delivered pre-interrupt response does not make the business task complete",
+            "task_completion_rate additionally requires no unexpected degradation and "
+            "excludes WAITING_APPROVAL cases, which are scored by "
+            "governance_outcome_match_rate instead; fault-injection cases "
+            "(expect_task_completed=false) never count as completions",
+            "task_completion_evidence_coverage is the share of counted completions backed by "
+            "an actually executed tool result; an interrupt / pending_action is governance "
+            "evidence and is deliberately NOT counted as business-completion evidence",
+            "overall_status is three-valued: FAIL (a measurable gate regressed), "
+            "INCONCLUSIVE (measurable gates pass but some gate is NOT_AVAILABLE), PASS. "
+            "NOT_MEASURED is never rendered as PASS.",
             *extra_notes,
         ],
     }
@@ -190,11 +240,13 @@ def write_report(report: dict[str, Any], path: Path) -> Path:
 __all__ = [
     "FAIL",
     "GATES",
+    "INCONCLUSIVE",
     "LEVEL_2_APPLICATION_MEASURED",
     "NOT_AVAILABLE",
     "PASS",
     "build_report",
     "diagnostic_metric_names",
     "formal_metric_names",
+    "overall_status_from_gates",
     "write_report",
 ]

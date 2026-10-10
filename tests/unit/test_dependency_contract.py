@@ -33,13 +33,16 @@ ALLOWED_UNDECLARED: dict[str, str] = {
     ),
 }
 
-#: 由已声明发行包**传递**提供、不需要单独声明的 import 名 -> 提供方（任一即可）。
+#: 由已声明发行包**传递**提供、或 import 名与发行包名不同的模块 -> 提供方（任一即可）。
 #: 显式列出是为了让"这个 import 为什么不用声明"可被 review，而不是靠运气。
 TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
     "PIL": "pillow",
     "cv2": "opencv-python-headless",
     "docx": "python-docx",
     "dotenv": "python-dotenv",
+    # import 名与发行包名不同：import yaml 来自发行包 PyYAML
+    # （已直接声明在 requirements-dev.txt，仅测试/CI 工具链使用）。
+    "yaml": "pyyaml",
     "jwt": "PyJWT",
     "cryptography": "python-jose",
     "numpy": ("qdrant-client", "openai", "opencv-python-headless"),
@@ -53,9 +56,14 @@ TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
 }
 
 #: 这些模块由仓库自身提供，不是第三方依赖。
-_LOCAL_ROOTS = {p.name for p in ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")} | {
-    p.stem for p in ROOT.glob("*.py")
-}
+#: 顶层目录 + 根级 .py，以及 ``scripts/`` 下的脚本模块 —— 测试会用
+#: ``sys.path`` 注入后 ``import rag_evidence_status`` 这类方式直接引入它们，
+#: 它们不是第三方依赖。
+_LOCAL_ROOTS = (
+    {p.name for p in ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")}
+    | {p.stem for p in ROOT.glob("*.py")}
+    | {p.stem for p in (ROOT / "scripts").glob("*.py")}
+)
 
 
 def _declared_names(*files: Path) -> set[str]:
@@ -101,6 +109,33 @@ def _canonical(name: str) -> str:
     return name.lower().replace("_", "-")
 
 
+def _scan_third_party_imports(roots: tuple[str, ...], skip_prefixes: tuple[str, ...]) -> set[str]:
+    """扫描指定目录下的第三方顶层 import（跳过 stdlib 与仓库自有模块）。"""
+    stdlib = set(sys.stdlib_module_names)
+    found: set[str] = set()
+    for f in ROOT.rglob("*.py"):
+        rel = f.relative_to(ROOT).as_posix()
+        if rel.startswith(skip_prefixes):
+            continue
+        if not rel.startswith(roots):
+            continue
+        try:
+            tree = ast.parse(f.read_text(encoding="utf-8", errors="ignore"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                found.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                found.add(node.module.split(".")[0])
+    return {m for m in found if m and m not in stdlib and m not in _LOCAL_ROOTS}
+
+
+def _test_third_party_imports() -> set[str]:
+    """tests/ 里直接 import 的第三方模块（测试工具链依赖）。"""
+    return _scan_third_party_imports(("tests/",), (".venv/", "node_modules/", ".worktrees/"))
+
+
 def _is_declared(mod: str, declared: set[str]) -> bool:
     canonical = _canonical(mod)
     if any(canonical == d or canonical == d.split("-")[0] for d in declared):
@@ -127,6 +162,30 @@ def test_runtime_imports_are_declared():
         "运行时 import 但未在 requirements*.txt 声明的模块："
         f"{undeclared}。要么声明依赖，要么（若确为可选/历史）登记到 "
         "ALLOWED_UNDECLARED 并说明理由 —— 否则会像 prometheus_client 那样静默降级。"
+    )
+
+
+@pytest.mark.unit
+def test_test_suite_imports_are_declared():
+    """tests/ 里直接 import 的第三方模块必须在 requirements*.txt 中声明。
+
+    历史缺陷：``tests/unit/test_compose_metrics_topology.py`` 与
+    ``test_metrics_exposure_contract.py`` 直接 ``import yaml``，而 PyYAML
+    **在任何 requirements 文件里都没有声明**。本地开发机碰巧装了它，缺陷不可见；
+    一旦 CI 在只装 requirements-dev.txt 的干净 job 里收集测试，就直接
+    ``ModuleNotFoundError: No module named 'yaml'`` —— 测试根本没跑，却要靠人读
+    日志才发现。
+
+    声明集合取 runtime + dev 的并集，因为 CI 的测试 job 会同时安装两者。
+    """
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    undeclared = sorted(
+        mod for mod in _test_third_party_imports() if not _is_declared(mod, declared)
+    )
+    assert not undeclared, (
+        f"tests/ import 但未在 requirements*.txt 声明的模块：{undeclared}。"
+        "测试专用依赖请声明到 requirements-dev.txt（若运行时代码也用，则进 "
+        "requirements.txt）；不要依赖开发机碰巧装了什么。"
     )
 
 

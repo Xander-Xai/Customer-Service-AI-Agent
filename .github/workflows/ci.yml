@@ -418,10 +418,15 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      # 这两个 job 都会 import 应用运行时（`core.config` -> python-dotenv；
+      # `core.code_provenance` -> core 包 -> FastAPI/LangGraph/Redis/Qdrant…），
+      # 因此必须**同时**安装 requirements.txt 与 requirements-dev.txt —— 只装 dev
+      # 会在测试收集阶段就 ModuleNotFoundError。这与 runtime-e2e / rag lane 的
+      # 安装方式一致（见本文件其它 "Install dependencies" 步骤）。
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
       # 这是一个**一次性、仅用于本 job** 的抓取凭据：它只写进 runner 上一个
       # gitignore 的临时文件，让 `promtool check config` 能验证
@@ -479,7 +484,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Agent eval contract guards (blocking)
         run: make agent-eval-contract
@@ -492,8 +497,21 @@ jobs:
       - name: Agent eval dataset annotation status
         run: make agent-eval-annotation-status
 
-      - name: Agent eval evidence artifact (may FAIL before human annotation)
-        continue-on-error: true
+      # 这个 step 是**阻塞**的，且不使用 continue-on-error。
+      #
+      # 退出码语义（由 scripts/evaluate_agent.py 实现）：
+      #   1 = FAIL        —— 至少一条**可测**门禁真的没过（系统缺陷）
+      #   0 = INCONCLUSIVE —— 可测门禁全过，但仍有门禁 NOT_AVAILABLE
+      #   0 = PASS         —— 全部 PASS
+      #
+      # 人工标注完成前 ``route_accuracy`` 必然 NOT_AVAILABLE，于是本 job 会是
+      # INCONCLUSIVE（exit 0）而不是 FAIL/绿。关键在于：INCONCLUSIVE **绝不**会被
+      # 渲染成 PASS —— artifact 的 overall_status 字面写 INCONCLUSIVE，
+      # measurement_gaps 逐条列出未测出的门禁，stdout 也打显式警告。
+      #
+      # 之前这里挂 `continue-on-error: true`：job 变绿了，但门禁失败会被无声吞掉，
+      # 读 CI 的人会以为 agent-eval 通过了。那正是"让 NOT_MEASURED 冒充达标"的路子。
+      - name: Agent eval evidence artifact (NOT_MEASURED => INCONCLUSIVE, never PASS)
         run: make agent-eval
 
       - name: Upload agent-eval evidence

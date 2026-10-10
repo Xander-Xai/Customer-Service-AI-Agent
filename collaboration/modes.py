@@ -132,6 +132,9 @@ class SequentialMode(CollaborationMode):
             # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
             # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
             "pending_actions": list(result.get("pending_actions") or []),
+            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
+            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
+            "tool_executions": list(result.get("tool_executions") or []),
         }
 
 
@@ -203,6 +206,7 @@ class ParallelMode(CollaborationMode):
         responses = []
         agents_used = []
         collected_pending: list[dict] = []
+        collected_tool_executions: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 responses.append(f"[error] {r}")
@@ -211,6 +215,7 @@ class ParallelMode(CollaborationMode):
                 responses.append(f"【{name}】\n{resp}")
                 agents_used.append(name)
                 collected_pending.extend(agent_result.get("pending_actions") or [])
+                collected_tool_executions.extend(agent_result.get("tool_executions") or [])
 
         aggregated = "\n\n---\n\n".join(responses) if responses else "无可用 Agent 响应"
         elapsed = time.time() - start
@@ -231,6 +236,9 @@ class ParallelMode(CollaborationMode):
             # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
             # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
             "pending_actions": collected_pending,
+            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
+            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
+            "tool_executions": collected_tool_executions,
         }
 
 
@@ -377,6 +385,9 @@ class ConsultationMode(CollaborationMode):
             # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
             # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
             "pending_actions": list(result.get("pending_actions") or []),
+            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
+            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
+            "tool_executions": list(result.get("tool_executions") or []),
         }
 
 
@@ -450,6 +461,7 @@ class HierarchicalMode(CollaborationMode):
         sub_responses = []
         agents_used = []
         collected_pending: list[dict] = []
+        collected_tool_executions: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 continue
@@ -457,6 +469,7 @@ class HierarchicalMode(CollaborationMode):
             sub_responses.append(f"[{name}] {resp}")
             agents_used.append(name)
             collected_pending.extend(agent_result.get("pending_actions") or [])
+            collected_tool_executions.extend(agent_result.get("tool_executions") or [])
 
         # 从 Blackboard 读取所有子任务结果作为汇总补充
         bb_subtask_data = await self._safe_bb_read_prefix("hierarchical.subtask.")
@@ -485,6 +498,9 @@ class HierarchicalMode(CollaborationMode):
             # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
             # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
             "pending_actions": collected_pending + list(final.get("pending_actions") or []),
+            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
+            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
+            "tool_executions": collected_tool_executions + list(final.get("tool_executions") or []),
         }
 
 
@@ -551,4 +567,7 @@ class ReActMode(SequentialMode):
             # elapsed 四个字段。仓库里唯一验证 HITL 的集成测试是**自己搭的最小图**
             # 直接驱动 gate 节点，因此完全覆盖不到真实图上的这条接缝。
             "pending_actions": list(result.get("pending_actions") or []),
+            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
+            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
+            "tool_executions": list(result.get("tool_executions") or []),
         }

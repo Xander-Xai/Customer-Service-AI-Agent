@@ -102,6 +102,31 @@ def _should_gate_tool(
         return True
 
 
+def _record_tool_execution(state: dict[str, Any], tool_name: str, *, ok: bool) -> None:
+    """把一次**真实发生**的工具执行记进 state（业务结果契约的证据来源）。
+
+    为什么要有它
+    ------------
+    ``core.outcome`` 需要区分两件完全不同的事：
+
+    - 我们**交付了一段回答**（``response_delivered``）；
+    - 某个业务动作**确实执行了**（例如退款/改单真的写进去了）。
+
+    只有后者才构成"业务已解决"的**独立证据**。没有这条记录时，任何非降级回复
+    都会让系统宣称"业务已验证解决"，而实际上它只是一段 LLM 文本。
+
+    记录内容刻意保持极简：只有工具名与成功与否。``state`` 会被 checkpointer
+    序列化落盘，不应该把业务参数（订单号/金额等）写进 checkpoint。
+
+    被 HITL 摘出、**从未执行**的调用不会走到这里 —— 它们只进 ``pending_actions``，
+    因此"待审批"永远不会伪装成"已执行"。
+    """
+    records = state.setdefault("tool_executions", [])
+    if not isinstance(records, list):  # pragma: no cover - 防御异常 state
+        return
+    records.append({"tool": str(tool_name), "ok": bool(ok)})
+
+
 class BaseAgent(ABC):
     def __init__(
         self,
@@ -823,6 +848,14 @@ class BaseAgent(ABC):
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
                         result = "工具暂时不可用，请稍后重试"
+                        _record_tool_execution(state, p["name"], ok=False)
+                    else:
+                        # 只有真正跑完的工具调用才算「有执行证据」。记进 state 是
+                        # 为了让业务结果契约（core.outcome）能区分"我们给出了一段
+                        # 回答"与"某个业务动作**确实执行了**"——见 outcome.py 的
+                        # ASSESSED / EVIDENCED 分级。不记录 arguments：state 会被
+                        # checkpointer 序列化落盘，不该把业务参数带进去。
+                        _record_tool_execution(state, p["name"], ok=True)
 
                     if cache_enabled and not cache_hit and cacheable_result(result, cache_policy):
                         cache_started = time.perf_counter()

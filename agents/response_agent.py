@@ -279,15 +279,20 @@ class ResponseAgent(BaseAgent):
         v3.4: 基于多维信号评估解决状态
         v6.4: 收敛到 ``core.outcome`` 业务结果契约 —— 交付 ≠ 解决。
         关键修复：LLM/工具降级后交付的**通用兜底文案**不再被判成 ``resolved``。
-        只有当 ``outcome.outcome_verified`` 为真（非降级且确实交付了回复、
-        无需人工介入）才返回 ``resolved``。
+
+        注意 ``resolved`` 的含义是"**这一轮正常作答了**"（契约里的
+        ``assessed`` / ``evidenced``），**不是**"业务已验证解决"
+        （那是 ``outcome.outcome_verified``，需要真实执行过的工具证据）。
+        两者的区分由 ``core.outcome.resolution_status_for`` 统一维护 ——
+        这里必须调用它而不是自己判 ``outcome_verified``，否则普通问答会全部
+        掉成 uncertain，缓存写入与 SLA 统计随之失效。
 
         - escalated: 需要人工介入（HITL 挂起 / 审批被拒 / 明确转人工）
         - failed: 空响应 / 明确错误降级
         - uncertain: 降级兜底 / 过短 / 不确定短语 / 截断
         - resolved: 无降级、有交付、无需人工介入
         """
-        from core.outcome import classify_outcome
+        from core.outcome import classify_outcome, resolution_status_for
 
         response = state.get("response", "")
         outcome = classify_outcome(state)
@@ -304,7 +309,7 @@ class ResponseAgent(BaseAgent):
         if outcome.requires_human_action:
             return RESOLUTION_ESCALATED
 
-        # 降级降级（LLM/工具/检索）——交付了兜底文案，不构成业务解决证据
+        # 降级（LLM/工具/检索）——交付了兜底文案，不构成业务解决证据
         if outcome.degraded:
             return RESOLUTION_UNCERTAIN
 
@@ -322,10 +327,8 @@ class ResponseAgent(BaseAgent):
             logger.warning("响应疑似被截断，标记为 uncertain")
             return RESOLUTION_UNCERTAIN
 
-        # 仅当契约认定"有交付且无降级、无需人工介入"时才判 resolved
-        if outcome.outcome_verified:
-            return RESOLUTION_RESOLVED
-        return RESOLUTION_UNCERTAIN
+        # 其余情况交给契约统一裁决（assessed / evidenced 均算"正常作答"）
+        return resolution_status_for(outcome)
 
     def _evaluate_quality(self, state: dict[str, Any]) -> dict:
         """

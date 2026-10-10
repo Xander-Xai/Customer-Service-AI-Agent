@@ -122,23 +122,44 @@ def _workflow_finished(observation: CaseObservation) -> bool:
     return observation.error is None
 
 
+def _governance_outcome_matched(case: AgentCase, observation: CaseObservation) -> bool:
+    """图是否抵达了**期望的终态**（含 ``WAITING_APPROVAL``）。
+
+    这是"治理结果"而不是"业务结果"：高风险动作被正确摘出、图正确挂在
+    ``__interrupt__`` 上、run 停在 ``WAITING_APPROVAL`` —— 这些都算**治理正确**，
+    因为此时业务动作本来就**不该**被执行。
+    """
+    return observation.terminal_state == case.expected_terminal_state
+
+
+def _business_completion_applicable(case: AgentCase) -> bool:
+    """该 case 是否适用"业务任务完成"这一口径。
+
+    ``WAITING_APPROVAL`` 的 case 按设计**没有**完成业务任务（它在等人审批），
+    把它们算进业务完成率的分母等于用"正确地挂起"去惩罚"正确地完成"。因此它们
+    被**排除**出业务完成口径，并计入 ``excluded`` 记账。
+    """
+    return case.expected_terminal_state != WAITING_APPROVAL
+
+
 def _task_completed(case: AgentCase, observation: CaseObservation) -> bool:
     """业务任务是否**真的**完成 —— 而不是交付了一句兜底文案。
 
     判定顺序（任一不满足即为未完成）：
 
     1. 抵达 ``expected_terminal_state``；
-    2. ``WAITING_APPROVAL`` 视为正确的治理终态（业务待人工，不算完成业务）；
+    2. ``WAITING_APPROVAL`` **不算业务完成**（治理正确 ≠ 业务完成）；该口径下
+       这些 case 根本不会被查询，见 :func:`_business_completion_applicable`；
     3. 必须有非空回复；
     4. 若观测到降级标记而 case 并未声明 ``expect_fallback``，判为未完成
        （这就是 ``fault_agent_llm_001`` / ``fault_tool_turn_001`` 此前被误
        统计为完成的原因）；
     5. case 显式声明 ``expect_task_completed=false`` 时不计入分子。
     """
-    if observation.terminal_state != case.expected_terminal_state:
+    if not _governance_outcome_matched(case, observation):
         return False
-    if case.expected_terminal_state == WAITING_APPROVAL:
-        return True
+    if not _business_completion_applicable(case):
+        return False
     if not observation.response.strip():
         return False
     if observation.fallback_markers and not case.expect_fallback:
@@ -147,13 +168,14 @@ def _task_completed(case: AgentCase, observation: CaseObservation) -> bool:
 
 
 def _has_completion_evidence(case: AgentCase, observation: CaseObservation) -> bool:
-    """完成结论是否有独立可核验证据（工具执行结果 / HITL 挂起证据）。
+    """完成结论是否有独立可核验证据。
 
-    脚本化 LLM 直接给出的文字回答**不可独立核验**，因此只有真正执行过的工具
-    调用（或 WAITING_APPROVAL 的 pending_actions + interrupt）才算证据。
+    只有**真正执行过**的工具结果才算证据。刻意**不**把
+    ``pending_actions`` / ``interrupt_payloads`` 当成证据：它们证明的是
+    "闸门拦住了高风险动作"（治理证据），**不能**证明"退款真的退了、改单真的改了"
+    （业务证据）。此前把 interrupt 当业务完成证据，等于用"成功拦截"冒充
+    "成功执行"。
     """
-    if case.expected_terminal_state == WAITING_APPROVAL:
-        return bool(observation.pending_actions and observation.interrupt_payloads)
     return bool(observation.executed_tool_names)
 
 
@@ -415,26 +437,65 @@ def compute_metrics(
             },
         )
 
-    # ── task_completion_rate（正式）────────────────────────────────────
+    # ── governance_outcome_match_rate（正式）──────────────────────────
+    # 「图是否抵达了期望终态」——含 WAITING_APPROVAL。治理正确 ≠ 业务完成。
     if not pairs:
-        metrics["task_completion_rate"] = _unmeasured(
-            "task_completion_rate", notes="no case observed"
+        metrics["governance_outcome_match_rate"] = _unmeasured(
+            "governance_outcome_match_rate", notes="no case observed"
         )
     else:
-        completed = [(c, o) for c, o in pairs if _task_completed(c, o)]
-        metrics["task_completion_rate"] = _measured(
-            "task_completion_rate",
-            len(completed),
+        gov_matched = [(c, o) for c, o in pairs if _governance_outcome_matched(c, o)]
+        metrics["governance_outcome_match_rate"] = _measured(
+            "governance_outcome_match_rate",
+            len(gov_matched),
             len(pairs),
             unit="ratio",
             notes=(
-                "denominator = all observed cases (fault-injection cases stay in the "
-                "denominator and honestly lower the rate); numerator = cases that reached "
-                "the expected terminal state with a delivered, non-degraded response. "
-                "WAITING_APPROVAL counts as a correct governance outcome, not a completed "
-                "business task."
+                "denominator = all observed cases; numerator = cases whose terminal state "
+                "equals expected_terminal_state. WAITING_APPROVAL counts here (the graph "
+                "correctly stopped and waited for a human) but NOT in task_completion_rate."
             ),
             detail={
+                "misses": [
+                    {
+                        "case_id": c.case_id,
+                        "expected_state": c.expected_terminal_state,
+                        "observed_state": o.terminal_state,
+                    }
+                    for c, o in pairs
+                    if not _governance_outcome_matched(c, o)
+                ]
+            },
+        )
+
+    # ── task_completion_rate（正式）────────────────────────────────────
+    business_pairs = [(c, o) for c, o in pairs if _business_completion_applicable(c)]
+    not_applicable = len(pairs) - len(business_pairs)
+    if not business_pairs:
+        metrics["task_completion_rate"] = _unmeasured(
+            "task_completion_rate",
+            excluded=not_applicable,
+            notes="no case is applicable to the business-completion population",
+        )
+    else:
+        completed = [(c, o) for c, o in business_pairs if _task_completed(c, o)]
+        metrics["task_completion_rate"] = _measured(
+            "task_completion_rate",
+            len(completed),
+            len(business_pairs),
+            excluded=not_applicable,
+            unit="ratio",
+            notes=(
+                "denominator = cases where business completion is APPLICABLE; WAITING_APPROVAL "
+                "cases are excluded (and counted in `excluded`) because they have, by design, "
+                "not completed a business task — counting them as completions would let "
+                "'correctly paused for approval' masquerade as 'refund executed'. "
+                "fault-injection cases stay in the denominator and honestly lower the rate."
+            ),
+            detail={
+                "not_applicable_to_business_completion": [
+                    c.case_id for c, o in pairs if not _business_completion_applicable(c)
+                ],
                 "misses": [
                     {
                         "case_id": c.case_id,
@@ -444,9 +505,9 @@ def compute_metrics(
                         "expect_task_completed": c.expect_task_completed,
                         "error": o.error,
                     }
-                    for c, o in pairs
+                    for c, o in business_pairs
                     if not _task_completed(c, o)
-                ]
+                ],
             },
         )
 
@@ -509,9 +570,10 @@ def compute_metrics(
             unit="ratio",
             notes=(
                 "denominator = cases counted as completed by task_completion_rate; numerator = "
-                "completed cases backed by independently checkable evidence (an executed tool "
-                "result, or WAITING_APPROVAL's pending_actions + interrupt). A scripted LLM's "
-                "prose answer is NOT independently verifiable."
+                "completed cases backed by independently checkable evidence — i.e. a tool that "
+                "actually executed and returned. An interrupt / pending_action is NOT business "
+                "evidence: it proves the gate blocked a HIGH-risk action, not that the action "
+                "happened. A scripted LLM's prose answer is likewise not verifiable."
             ),
             detail={
                 "unevidenced_completions": [

@@ -20,11 +20,14 @@ from __future__ import annotations
 from typing import Any
 
 DATASET_SCHEMA_VERSION = "agent-eval-dataset/v1"
-#: v1 → v1.1：正式指标集由 8 个拆分为 11 个（新增 workflow_execution_rate /
-#: response_delivery_rate / task_completion_evidence_coverage），并修订
-#: task_completion_rate 口径（交付兜底文案不再算完成）。旧 artifact 的
-#: task_completion_rate 与新口径**不可直接比较**。
-REPORT_SCHEMA_VERSION = "agent-eval-evidence/v1.1"
+#: 口径修订历史（三代数字**互不可比**）：
+#:   v1   —— task_completion 只要求「抵达终态 + 非空回复」，交付兜底文案也算完成。
+#:   v1.1 —— 拆出 workflow_execution / response_delivery / evidence_coverage；
+#:           completion 要求「无未预期降级」+ expect_task_completed 标签。
+#:   v1.2 —— **WAITING_APPROVAL 不再计入业务完成**：新增
+#           governance_outcome_match_rate 承接"治理正确"的语义，并把
+#           interrupt/pending_actions 从"业务完成证据"里剔除。
+REPORT_SCHEMA_VERSION = "agent-eval-evidence/v1.2"
 
 #: 与 ``core/hitl/risk.RiskLevel`` 同源的三档；不另立词汇表。
 RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high")
@@ -83,6 +86,7 @@ METRIC_NAMES: tuple[str, ...] = (
     "hitl_trigger_accuracy",
     "workflow_execution_rate",
     "response_delivery_rate",
+    "governance_outcome_match_rate",
     "task_completion_rate",
     "task_completion_evidence_coverage",
     "fallback_rate",
@@ -151,12 +155,24 @@ EVIDENCE_BOUNDARIES: dict[str, dict[str, str]] = {
         ),
         "does_not_measure": "审批决策与恢复执行（需真实 PostgreSQL，见 runtime-e2e lane）。",
     },
+    "governance_outcome_match_rate": {
+        "measures": (
+            "图是否抵达了 expected_terminal_state —— **包含** WAITING_APPROVAL。高风险"
+            "动作被正确摘出、图正确挂在 interrupt 上、run 停在 WAITING_APPROVAL，"
+            "都属于**治理正确**。"
+        ),
+        "does_not_measure": (
+            "业务是否完成。此时业务动作本来就**不该**执行，所以它只进治理口径，"
+            "不进 task_completion_rate。把两者混同会让「正确地拦住」冒充「成功地退款」。"
+        ),
+    },
     "task_completion_rate": {
         "measures": (
-            "图是否抵达 expected_terminal_state、交付了非空回复，且**没有**出现"
-            "未预期的降级兜底 —— 即一个业务任务是否真的被完成，而不是中途降级"
-            "成一句与问题无关的兜底文案。标注 ``expect_task_completed=false`` 的"
-            "故障注入 case 永远不计入分子（它们在分母里，如实拉低完成率）。"
+            "业务任务是否真的完成：抵达期望终态 + 交付了非空回复 + **无未预期降级**。"
+            "分母只含**业务完成口径适用**的 case；``WAITING_APPROVAL`` 的 case 被"
+            "排除并计入 ``excluded``（它们按设计没有完成业务任务）。"
+            "``expect_task_completed=false`` 的故障注入 case 留在分母、"
+            "不进分子（如实拉低完成率）。"
         ),
         "does_not_measure": (
             "回答内容是否正确（需要人工/LLM 判定，V1 不做）；也不等于真实 LLM "
@@ -176,12 +192,13 @@ EVIDENCE_BOUNDARIES: dict[str, dict[str, str]] = {
     },
     "task_completion_evidence_coverage": {
         "measures": (
-            "被计为「已完成」的 case 中，完成结论有**独立可核验证据**（真实执行过的"
-            "工具结果，或 WAITING_APPROVAL 的 pending_actions + interrupt）支撑的比例。"
+            "被计为「已完成」的 case 中，完成结论有**独立可核验证据**（真正执行过并"
+            "返回结果的工具调用）支撑的比例。"
         ),
         "does_not_measure": (
-            "脚本化 LLM 直接给出的文字回答本身不可独立核验，因此覆盖率高只说明"
-            "完成结论有工具/审批证据，不代表答案内容正确。"
+            "interrupt / pending_actions **不是**业务证据 —— 它只证明闸门拦住了高风险"
+            "动作，不证明退款/改单真的执行了；脚本化 LLM 直接给出的文字回答同样不可"
+            "独立核验。因此覆盖率低是**事实陈述**，不是缺陷。"
         ),
     },
     "fallback_rate": {

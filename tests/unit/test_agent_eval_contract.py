@@ -270,6 +270,144 @@ class TestDatasetLoaderIsStrict:
         assert parse_case(payload, 1).scores_route() is True
 
 
+class TestNotMeasuredIsNeverRenderedAsPass:
+    """``NOT_MEASURED`` 绝不能被渲染成"达标"。
+
+    历史问题：``overall_status`` 只有 PASS/FAIL 二态，人工标注完成前
+    ``route_accuracy`` 恒为 ``NOT_AVAILABLE``，于是整体恒为 FAIL；而 CI 又用
+    ``continue-on-error`` 把这个 FAIL 吞掉 —— 于是「没测出来」被彻底隐藏。
+
+    现在是三态：FAIL（可测门禁真的没过）/ INCONCLUSIVE（可测门禁过了但仍有
+    未测出的门禁）/ PASS。**PASS 与"存在 NOT_AVAILABLE"互斥**。
+    """
+
+    @staticmethod
+    def _dataset(cases):
+        from evaluation.agent_eval.cases import AgentDataset
+
+        return AgentDataset(
+            path="tests/eval/agent_cases.jsonl", sha256="x" * 64, cases=tuple(cases)
+        )
+
+    @staticmethod
+    def _obs(**overrides):
+        from evaluation.agent_eval.harness import CaseObservation
+
+        base = dict(
+            case_id="c",
+            nodes_executed=("n",),
+            step_count=1,
+            observed_route="general",
+            route_source="rule_shortcut",
+            rule_route="general",
+            rule_confidence=0.9,
+            router_llm_calls=0,
+            observed_mode="sequential",
+            resolution_status="resolved",
+            response="正常回答",
+            terminal_state="SUCCEEDED",
+            tool_calls=(),
+            fallback_markers=(),
+            route_shortcut_used=True,
+            hitl_defer_logged=False,
+            pending_actions=(),
+            interrupt_payloads=(),
+            side_effect_counters={},
+            scripted_plan_remaining=0,
+            scripted_tool_rounds=0,
+            elapsed_ms=1.0,
+        )
+        base.update(overrides)
+        return CaseObservation(**base)
+
+    def test_unmeasured_gates_produce_inconclusive_not_pass(self):
+        from evaluation.agent_eval.cases import AgentCase
+        from evaluation.agent_eval.evidence import INCONCLUSIVE, PASS, build_report
+
+        case = AgentCase(case_id="c", input="q", expected_terminal_state="SUCCEEDED", max_steps=5)
+        report = build_report(dataset=self._dataset([case]), observations=[self._obs()])
+
+        assert report["overall_status"] != PASS
+        assert report["overall_status"] == INCONCLUSIVE
+
+    def test_measurement_gaps_are_enumerated_with_unblock_conditions(self):
+        from evaluation.agent_eval.cases import AgentCase
+        from evaluation.agent_eval.evidence import build_report
+
+        case = AgentCase(
+            case_id="c",
+            input="q",
+            expected_terminal_state="SUCCEEDED",
+            max_steps=5,
+            expected_route="general",
+        )
+        report = build_report(dataset=self._dataset([case]), observations=[self._obs()])
+        gaps = report["measurement_gaps"]
+        assert gaps, "存在 NOT_AVAILABLE 门禁时必须列出 measurement_gaps"
+        names = {g["gate"] for g in gaps}
+        assert "route_accuracy" in names
+        route_gap = next(g for g in gaps if g["gate"] == "route_accuracy")
+        assert route_gap["unblocks_with"], "必须写明怎么才能解除该缺口"
+
+    def test_pass_requires_every_gate_measured_and_passing(self):
+        """PASS 与"存在 NOT_AVAILABLE"严格互斥（穷举真值表守卫）。"""
+        from itertools import product
+
+        from evaluation.agent_eval.evidence import (
+            FAIL,
+            INCONCLUSIVE,
+            NOT_AVAILABLE,
+            PASS,
+            overall_status_from_gates,
+        )
+
+        for a, b in product((PASS, FAIL, NOT_AVAILABLE), repeat=2):
+            gates = {"g1": a, "g2": b}
+            status = overall_status_from_gates(gates)
+            if FAIL in (a, b):
+                assert status == FAIL, f"{a}/{b} 必须折叠成 FAIL"
+            elif NOT_AVAILABLE in (a, b):
+                assert status == INCONCLUSIVE, f"{a}/{b} 必须折叠成 INCONCLUSIVE"
+            else:
+                assert status == PASS
+
+        # 明确的不变式：任何 NOT_AVAILABLE 都不得产出 PASS。
+        assert NOT_AVAILABLE != PASS
+        assert overall_status_from_gates({"g": NOT_AVAILABLE}) != PASS
+
+    def test_measurable_gate_regression_is_fail_not_inconclusive(self):
+        """可测门禁真的没过 => FAIL（不能被"缺口"洗白成 INCONCLUSIVE）。"""
+        from evaluation.agent_eval.cases import AgentCase, ScriptedToolCall
+        from evaluation.agent_eval.evidence import FAIL, build_report
+        from evaluation.agent_eval.harness import ToolCallObservation
+
+        case = AgentCase(
+            case_id="c",
+            input="q",
+            expected_terminal_state="SUCCEEDED",
+            max_steps=5,
+            expected_tools=("wanted_tool",),
+            scripted_tool_calls=(ScriptedToolCall("wanted_tool", "{}"),),
+        )
+        # 实际请求了别的工具 => tool_selection_accuracy = 0 < 1.0
+        obs = self._obs(
+            observed_mode="react",
+            tool_calls=(
+                ToolCallObservation(
+                    name="other_tool",
+                    arguments={},
+                    policy_risk="low",
+                    policy_requires_approval=False,
+                    schema_errors=(),
+                    executed=True,
+                    deferred=False,
+                ),
+            ),
+        )
+        report = build_report(dataset=self._dataset([case]), observations=[obs])
+        assert report["overall_status"] == FAIL
+
+
 class TestShippedDatasetIsHonest:
     def test_shipped_dataset_loads(self):
         from evaluation.agent_eval.cases import load_dataset
