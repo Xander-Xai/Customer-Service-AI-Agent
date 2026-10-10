@@ -96,6 +96,7 @@ METRIC_NAMES: tuple[str, ...] = (
 DIAGNOSTIC_METRIC_NAMES: tuple[str, ...] = (
     "rule_route_agreement",
     "hitl_gate_propagation",
+    "expected_parameter_match_rate",
     "step_count",
 )
 
@@ -132,6 +133,18 @@ EVIDENCE_BOUNDARIES: dict[str, dict[str, str]] = {
         "does_not_measure": (
             "参数语义正确性（keyword 传的是不是用户真要查的东西）—— "
             "那需要标注与 LLM 判断，V1 不做。"
+        ),
+    },
+    "expected_parameter_match_rate": {
+        "measures": (
+            "实际发起的工具调用参数是否**含有**数据集为该工具声明的期望参数"
+            "（`expected_parameters`，子集匹配）。这是参数**语义期望**的诊断校验，"
+            "与 `tool_argument_schema_pass_rate` 的 schema 校验互补。"
+        ),
+        "does_not_measure": (
+            "模型是否**自己**算出了正确参数。参数由脚本化 LLM 直接给出，因此它衡量的是"
+            "「期望参数是否端到端被保留/传递」，不是模型的参数推理能力；也不覆盖未声明"
+            "期望参数的工具。"
         ),
     },
     "forbidden_tool_rate": {

@@ -193,7 +193,7 @@ class TestTemplate:
     def test_template_is_admissible(self):
         records = load_jsonl(TEMPLATE)
         assert records, "template must contain at least one example"
-        errors = validate_records(records, corpus_ids={"derm_000001"})
+        errors = validate_records(records, corpus_ids={"derm_000001", "derm_000002"})
         assert errors == [], errors
 
     def test_template_hash_matches_pinned_corpus_hash(self):

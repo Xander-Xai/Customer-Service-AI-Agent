@@ -1,4 +1,7 @@
-.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases rag-gold-validate rag-gold-review rag-gold-known-item rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
+
+# reviewed-gold 人工标注数据集（人工生产，默认路径；可用 GOLD_LABELS=... 覆盖）
+GOLD_LABELS ?= tests/eval/gold_labels/reviewed_gold.jsonl
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -316,6 +319,13 @@ rag-gold-review: ## 生成待人工标注工作清单（含语料存在性与覆
 
 rag-gold-known-item: ## 生成 known-item CONSTRUCTED gold（构造保证相关，非人工判定）
 	@python3 scripts/build_rag_known_item_gold.py
+
+rag-gold-reviewed-eval: ## RAG reviewed-gold 正式评测（只消费人工 JUDGED 标签；无 JUDGED 即 NOT_MEASURABLE，fail closed）
+	@python3 scripts/evaluate_rag_reviewed_gold.py --gold-labels $(GOLD_LABELS)
+
+rag-gold-reviewed-status: ## reviewed-gold 标注状态/质检（离线，不触 Qdrant；可核对 JUDGED / 完整判断 / 排除分母）
+	@python3 scripts/evaluate_rag_reviewed_gold.py \
+		--gold-labels $(GOLD_LABELS) --no-corpus --summary-only
 
 rag-ablation: ## 4 组检索消融（可测的给数字，不可用的输出 BLOCKED，绝不估算）
 	@python3 scripts/run_rag_ablation.py --negative-control

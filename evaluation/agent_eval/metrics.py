@@ -329,6 +329,55 @@ def compute_metrics(
             },
         )
 
+    # ── expected_parameter_match_rate（诊断）────────────────────────────
+    # 参数**语义期望**校验：observed 调用是否含有数据集声明的期望参数（子集匹配）。
+    # 与 tool_argument_schema_pass_rate（schema 校验）互补，且明确是诊断口径 ——
+    # 参数由脚本化 LLM 给出，因此它衡量"期望参数是否端到端被保留"，不是模型的参数推理。
+    param_pairs = [(c, o) for c, o in pairs if c.expected_parameters]
+    param_excluded = [c.case_id for c, _o in param_pairs if c.expect_fallback]
+    param_eligible = [(c, o) for c, o in param_pairs if not c.expect_fallback]
+    param_slots = sum(len(c.expected_parameters) for c, _o in param_eligible)
+    if param_slots == 0:
+        metrics["expected_parameter_match_rate"] = _unmeasured(
+            "expected_parameter_match_rate",
+            excluded=len(param_excluded),
+            notes="no non-fault case declares expected_parameters",
+        )
+    else:
+        matched = 0
+        param_misses: list[dict[str, Any]] = []
+        for case, obs in param_eligible:
+            for tool_name, expected_args in case.expected_parameters.items():
+                calls = [call for call in obs.tool_calls if call.name == tool_name]
+                if any(
+                    all(call.arguments.get(key) == value for key, value in expected_args.items())
+                    for call in calls
+                ):
+                    matched += 1
+                else:
+                    param_misses.append(
+                        {
+                            "case_id": case.case_id,
+                            "tool": tool_name,
+                            "expected": dict(expected_args),
+                            "observed": [dict(call.arguments) for call in calls],
+                        }
+                    )
+        metrics["expected_parameter_match_rate"] = _measured(
+            "expected_parameter_match_rate",
+            matched,
+            param_slots,
+            excluded=len(param_excluded),
+            unit="ratio",
+            notes=(
+                "denominator = (case, tool) slots declared in expected_parameters across "
+                "non-fault cases; numerator = slots where an observed call for that tool "
+                "carried every expected key/value (subset match). Diagnostic: parameters come "
+                "from the scripted LLM, so this checks end-to-end preservation, not model reasoning."
+            ),
+            detail={"misses": param_misses},
+        )
+
     # ── forbidden_tool_rate（正式）─────────────────────────────────────
     forbidden_cases = [(c, o) for c, o in pairs if c.forbidden_tools]
     all_calls = [call for _c, o in pairs for call in o.tool_calls]

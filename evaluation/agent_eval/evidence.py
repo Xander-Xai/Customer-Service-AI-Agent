@@ -27,7 +27,7 @@ from .contract import (
     describe_contract,
 )
 from .harness import CaseObservation
-from .metrics import MEASURED, Metric, compute_metrics
+from .metrics import MEASURED, NOT_MEASURED, Metric, compute_metrics
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -176,6 +176,18 @@ def build_report(
             "provider": NOT_AVAILABLE,
             "network": NOT_AVAILABLE,
             "api_key": NOT_AVAILABLE,
+            "real_provider": {
+                "status": NOT_MEASURED,
+                "reason": "no real provider credentials in this environment",
+                "lanes": {
+                    "scripted_llm_regression": "MEASURED (this artifact)",
+                    "real_model_evaluation": NOT_MEASURED,
+                },
+                "unblock": (
+                    "provide a provider credential and run a separate real-model lane; "
+                    "its metrics must never be mixed with this scripted-LLM regression run"
+                ),
+            },
             "nature": ("NONE — a scripted in-process double; no provider, no API key, no network"),
             "measures": ("orchestration / governance / routing behaviour of the real graph"),
             "does_not_measure": (
