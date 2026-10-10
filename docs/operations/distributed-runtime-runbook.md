@@ -295,6 +295,17 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
   原子认领，重复投递安全。
 - `resumed_at` 非空但 run 仍在 `WAITING_APPROVAL` → 恢复执行本身失败，查
   `agent_runs.error_code` 与 DLQ。
+- **`resumed_at` 非空、`status='APPROVED'`、run 停在 `WAITING_APPROVAL`，且无
+  error / 无 DLQ** → worker 在**认领决策之后、run 收敛之前**崩溃。这是已知
+  **liveness 边界**：`resumed_at IS NULL` 的一次性认领意味着重投递**不会**重新
+  消费该决策，run 不会自愈（`consume_resume` 返回 `None`，executor 保持等待）。
+  **副作用不会重复**（`operation_key = run_id:approval:{approval_id}` 的 ledger
+  去重），但需人工介入：
+  1. 若已确认无需执行，按 §3.7 第 4 步经 `WAITING_APPROVAL → CANCELLED`
+     收口后重新发起；
+  2. 若仍需执行，重新创建一条审批（新 `approval_id` → 新 `operation_key`）。
+  自动 re-issue 机制**未实现**。
+  回归用例：`tests/integration/runtime/test_hitl_resume_fault_injection.py::TestCrashDuringResume`。
 - `status='REJECTED'` / `'EXPIRED'` → 图已按拒绝恢复，**不会**产生副作用
   （`operation_key = run_id:approval:{approval_id}` 从未写入 ledger）。
 

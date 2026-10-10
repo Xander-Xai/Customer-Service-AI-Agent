@@ -81,6 +81,102 @@ CAPABILITIES: tuple[dict[str, str], ...] = (
 LEVEL_2 = "LEVEL_2_CI_VERIFIED"
 NOT_VERIFIED = "NOT_VERIFIED"
 
+#: HITL 审批 + 崩溃恢复的故障注入场景矩阵。
+#:
+#: 每行把「场景」钉到一个**真实执行**它的测试节点上，避免本报告出现
+#: 「能力存在但没人测过」的悬空声明。``expected_side_effects`` 是治理属性
+#: （approve=1 / reject=0 / expire=0 / crash 后重投递不重复），不是装饰。
+FAULT_INJECTION_SCENARIOS: tuple[dict[str, object], ...] = (
+    {
+        "scenario": "approval_suspend",
+        "expected_side_effects": 0,
+        "evidence": "tests/integration/runtime/test_hitl_langgraph_interrupt.py::"
+        "TestRealInterruptSemantics::test_interrupt_pauses_graph_and_persists_checkpoint",
+    },
+    {
+        "scenario": "approval_approve_resume",
+        "expected_side_effects": 1,
+        "evidence": "tests/integration/runtime/test_hitl_langgraph_interrupt.py::"
+        "TestRealInterruptSemantics::test_command_resume_executes_approved_action_exactly_once",
+    },
+    {
+        "scenario": "approval_reject",
+        "expected_side_effects": 0,
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestRejectAndExpireDoNotExecute::test_rejected_resume_executes_nothing",
+    },
+    {
+        "scenario": "approval_expire",
+        "expected_side_effects": 0,
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestRejectAndExpireDoNotExecute::test_expired_approval_executes_nothing",
+    },
+    {
+        "scenario": "duplicate_resume_delivery",
+        "expected_side_effects": 1,
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestDuplicateResumeDelivery::test_terminal_replay_does_not_duplicate_side_effect",
+    },
+    {
+        "scenario": "worker_crash_after_side_effect",
+        "expected_side_effects": 1,
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestCrashDuringResume::test_crash_after_side_effect_does_not_duplicate_on_redelivery",
+        "known_boundary": "resume 决策被消费后 worker 崩溃 -> run 停在 WAITING_APPROVAL，"
+        "不重复但也无法自愈（需运维介入；见 remaining_risks）",
+    },
+    {
+        "scenario": "worker_crash_before_execution",
+        "expected_side_effects": 0,
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestCrashDuringResume::test_crash_before_execution_leaves_run_parked_without_side_effect",
+        "known_boundary": "同上：决策已认领、副作用未发生，run 停在 WAITING_APPROVAL",
+    },
+)
+
+REMAINING_RISKS: tuple[dict[str, str], ...] = (
+    {
+        "risk": "审批决策认领后 worker 崩溃导致 run 停在 WAITING_APPROVAL（liveness，不是重复副作用）",
+        "evidence": "tests/integration/runtime/test_hitl_resume_fault_injection.py::"
+        "TestCrashDuringResume",
+        "repro": "make runtime-e2e（该文件在 tests/integration/runtime 下被收集）",
+        "mitigation_status": "设计边界：副作用安全（ledger 去重），但需运维重新决策；"
+        "自动 re-issue 机制未实现",
+    },
+    {
+        "risk": "worker SIGKILL 恢复用例在全套并发跑时曾对 150s liveness 预算敏感（1 次观察到卡在 RUNNING/attempt=2）",
+        "evidence": "tests/integration/runtime/test_worker_checkpoint_recovery.py",
+        "repro": "RUNTIME_RECOVERY_WAIT_SECONDS=300 make runtime-e2e（已把预算可配置化）",
+        "mitigation_status": "已把 liveness 预算改为可配置（默认 300s），正确性断言未放宽",
+    },
+)
+
+
+def _environment() -> dict[str, object]:
+    """测试环境（不记录凭据；只记录类型/是否存在/主机）。"""
+    import os
+    import sys
+    from urllib.parse import urlparse
+
+    db_url = os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip()
+    redis_url = os.getenv("TEST_REDIS_URL", "").strip()
+
+    def _host(url: str) -> str | None:
+        try:
+            return urlparse(url).hostname
+        except Exception:  # noqa: BLE001
+            return None
+
+    return {
+        "python": sys.version.split()[0],
+        "postgres_configured": bool(db_url),
+        "postgres_host": _host(db_url),
+        "redis_configured": bool(redis_url),
+        "redis_host": _host(redis_url),
+        "note": "单机真实基础设施（本机 PG + Redis + 多进程 Celery）；非生产集群",
+    }
+
+
 
 def _latest(pattern: str) -> Path | None:
     files = sorted(REPO_ROOT.glob(pattern))
@@ -167,6 +263,17 @@ def main(argv=None) -> int:
             ),
         },
         "capabilities": list(CAPABILITIES),
+        "environment": _environment(),
+        "fault_injection": {
+            "scenario_count": len(FAULT_INJECTION_SCENARIOS),
+            "scenarios": list(FAULT_INJECTION_SCENARIOS),
+            "duplicate_side_effects_observed": accounting["real_side_effects"],
+            "canonical_rule": (
+                "每个场景的副作用次数以真实执行次数（staging 账本 / idem:counter）为准；"
+                "重复副作用 = 真实执行次数 > 1。"
+            ),
+        },
+        "remaining_risks": list(REMAINING_RISKS),
         "production_status": NOT_VERIFIED,
         "production_boundary": (
             "Level 2 = 真实基础设施（PG + Redis + 多进程 Celery）在 CI/本机通过。"
@@ -197,6 +304,15 @@ def main(argv=None) -> int:
         print(f"  ✓ {cap['capability']}")
         print(f"      证据: {cap['evidence']}")
         print(f"      边界: {cap['boundary']}")
+    print(f"\n故障注入场景（{len(FAULT_INJECTION_SCENARIOS)} 个，各有真实测试节点）：")
+    for scenario in FAULT_INJECTION_SCENARIOS:
+        print(
+            f"  • {scenario['scenario']:32s} expected_side_effects={scenario['expected_side_effects']}"
+        )
+    print(f"\n剩余风险（{len(REMAINING_RISKS)} 条，附复现方法）：")
+    for risk in REMAINING_RISKS:
+        print(f"  ! {risk['risk']}")
+        print(f"      复现: {risk['repro']}")
     print(f"\nproduction_status : {NOT_VERIFIED}")
     print(f"evidence -> {out.relative_to(REPO_ROOT) if out.is_relative_to(REPO_ROOT) else out}")
     return 0 if report["overall_status"] == "PASS" else 1
