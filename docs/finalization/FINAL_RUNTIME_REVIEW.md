@@ -172,3 +172,79 @@ behaviour is already covered by the approve→resume and duplicate-delivery case
 | "Real ERP writes verified" | ❌ staging tools only; `NOT_VERIFIED`. |
 | "Multi-replica long-run stable" | ❌ `NOT_VERIFIED` (no production cluster). |
 | Run event stream is a source of truth | ❌ best-effort observability; source of truth is `agent_runs`. |
+
+---
+
+## 7. P0 found and fixed in this pass: stranded RUNNING runs
+
+The review above passed its own gates and still shipped a live liveness defect.
+Recorded here because the *reason it survived* is the interesting part.
+
+### 7.1 The defect
+
+A worker whose ownership lease expires mid-execution has its `SUCCEEDED` commit
+**correctly rejected** by the owner CAS. It returns normally, Celery ACKs, the
+broker never redelivers. And `list_recoverable_runs` only ever scanned
+`RETRYING` / `QUEUED`:
+
+```
+broker redelivery ──► (only if the task escaped)
+RETRYING / QUEUED ──► reconcile_stuck_runs        ✔
+RUNNING (expired)  ──► nothing                   ✘  ← orphan, forever
+```
+
+The run never reached a terminal state, produced no DLQ row, and raised no
+alert. `WAITING_APPROVAL` was already excluded by design; `RUNNING` was excluded
+by **omission**, and that omission was the bug.
+
+### 7.2 It was deterministic, and it had been accumulating
+
+| Build | `test_worker_killed_mid_run_is_redelivered_and_succeeds` |
+|---|---|
+| Pre-fix `1c61ae9` | **3 / 3 FAILED** |
+| Post-fix | 5 / 5 FAILED (pre-fix-harness), then PASS |
+
+Signature every time: `('RUNNING', 2, '<new worker>', None)` — takeover happened
+(`attempt=2`), then the run stranded.
+
+The test database held **252** stranded `RUNNING` rows, the oldest with a lease
+expired on **2026-10-03** — a week of silent accumulation.
+
+### 7.3 Why the existing test suite missed it
+
+Two independent reasons, both worth remembering:
+
+1. **`tests/integration/test_worker_crash_recovery.py` is not in
+   `make runtime-e2e`** — that target runs `tests/integration/runtime` only. The
+   deterministically-failing test lived one directory over.
+2. The fake runtime used `time.sleep()` inside `async def run()`, which blocks
+   the event loop so the lease heartbeat can never run. With `LEASE=3s` and a
+   6s runtime, stranding was *guaranteed* — so the test was measuring event-loop
+   starvation while asserting broker redelivery, and its own harness caused the
+   very failure it reported.
+
+### 7.4 The fix, and what it deliberately does not do
+
+Two layers; **CAS strictness and tool idempotency were not relaxed**:
+
+- `_heartbeat_loop` now survives a transient `heartbeat()` exception instead of
+  silently ceasing renewal forever, and refreshes the thread lock independently
+  of the DB call.
+- `reconcile_stuck_runs` reclaims expired-lease `RUNNING` runs, reusing the
+  existing atomic `takeover_running` predicate — no new trust boundary. Tool
+  side effects remain exactly-once via the ledger.
+- Attempt-exhausted stale runs go to `DEAD_LETTER` rather than looping forever.
+- `transition_stale_running` keeps "still expired" in the same `UPDATE`, so a
+  run whose lease was renewed between scan and write is never killed.
+
+**Not reclaimed: `WAITING_APPROVAL`.** See §4.3 — auto-resend after a
+claim-then-crash cannot be proven free of duplicate side effects. The manual
+runbook and TTL boundary stand.
+
+### 7.5 Where this leaves the runtime
+
+The residual risk in §4.3 is unchanged and still deliberate. What changed is
+that the *unrelated* silent-orphan path is now closed. Any remaining
+`RUNNING` run older than its lease is now observable
+(`agent_run_stale_reclaimed_total`, `agent_run_stale_dead_letter_total`) and
+converges to a terminal state, instead of being invisible and permanent.

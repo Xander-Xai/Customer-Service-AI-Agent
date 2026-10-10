@@ -1,93 +1,95 @@
-# PR Convergence Plan — safe integration of #1 → #2 → #3
+# PR Convergence Plan — #1 → #2 → #3 → #4, and what was actually done
 
-> **This is a recommendation, not an action.** Nothing here was auto-executed.
-> No PR was merged, closed, or force-pushed. Any rebase/force-push below requires
-> explicit human approval.
+> **Outcome first:** the stack was collapsed into **one** integrated PR (#4
+> retargeted to `main`). No force-push, no rebase, no history rewrite. Sections
+> 1–4 are the audited plan; §5 is what was executed.
 
 ---
 
-## 1. Audited state (GitHub, current)
+## 1. Audited state (GitHub, at start of this pass)
 
-| PR | head branch | base branch | unique commits | files | CI | mergeable |
-|---|---|---|---|---|---|---|
-| **#1** | `fix/agent-runtime-eval-finalization` | `main` | 10 (`main..head`) | 82 (+13589/−162) | ✅ all green (lint/test 3.10/3.11/3.12/security/agent-eval/runtime-e2e/metrics-alerting) | MERGEABLE / clean |
-| **#2** | `fix/eval-reviewed-gold-credibility` | `fix/agent-runtime-eval-finalization` (PR #1) | 2 (`c67e8ed`, `821037a`) | 17 (+1533/−21) | ⬜ none (non-main base) | MERGEABLE / clean |
-| **#3** | `fix/runtime-hitl-reliability-hardening` | `fix/eval-reviewed-gold-credibility` (PR #2) | 1 (`4944044`) | 6 (+561/−3) | ⬜ none (non-main base) | MERGEABLE / clean |
+| PR | head | base | commits ahead of `main` | CI | mergeable |
+|---|---|---|---|---|---|
+| **#1** | `fix/agent-runtime-eval-finalization` (`b96c740`) | `main` | 10 | ✅ all green | MERGEABLE |
+| **#2** | `fix/eval-reviewed-gold-credibility` (`821037a`) | PR #1 | 12 | ⬜ **none** | MERGEABLE |
+| **#3** | `fix/runtime-hitl-reliability-hardening` (`4944044`) | PR #2 | 13 | ⬜ **none** | MERGEABLE |
+| **#4** | `fix/finalization-eval-runtime-observability` (`1c61ae9`) | PR #3 | 14 | ⬜ **none** | MERGEABLE |
 
-All three are **DRAFT** and **linear-stacked** (confirmed: `#1.head` is the merge
-base of `#2`; `#2.head` is the merge base of `#3`). `main` is an ancestor of
-`#1.head` (fast-forward-capable).
+All four were **drafts**, with no review decision recorded.
 
-## 2. The duplication hazard
+## 2. The reason #2/#3/#4 had no CI at all
 
-If #1 is merged to `main` (especially **squash** or **merge commit**), the commits
-still sitting in #2/#3 are *descendants of the pre-merge #1 commits*. Until those
-branches are rebased, their PR diffs re-include #1's changes → reviewers see the
-same 82 files twice and a merge would double-apply (or conflict).
+`.github/workflows/ci.yml` triggers on:
 
-## 3. Recommended safe sequence (linear restack)
-
-```bash
-# 0) freeze; get explicit approval before any remote mutation.
-git fetch origin
-
-# 1) land #1 (choose ONE; squash is fine because #2/#3 will be rebased)
-#    via GitHub UI: "Squash and merge" PR #1 into main.
-
-# 2) restack #2 onto the new main
-git checkout fix/eval-reviewed-gold-credibility
-git rebase --onto origin/main <PR1-head-before-merge> fix/eval-reviewed-gold-credibility
-#    -> should now be exactly 2 commits; PR #2 diff shrinks to 17 files only.
-git push --force-with-lease origin fix/eval-reviewed-gold-credibility   # needs approval
-
-# 3) restack #3 onto the new main (or onto the restacked #2)
-git checkout fix/runtime-hitl-reliability-hardening
-git rebase --onto origin/main <PR2-head-before-merge> fix/runtime-hitl-reliability-hardening
-git push --force-with-lease origin fix/runtime-hitl-reliability-hardening  # needs approval
+```yaml
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
 ```
 
-Then GitHub retargets each PR's base to `main`; CI runs against `main`; merge
-them in order once green.
+A PR whose base is another feature branch **does not match** `branches: [main]`,
+so no workflow runs. PRs #2, #3 and #4 were therefore **never CI-verified** —
+not "CI was skipped", but "CI never executed". This is the single strongest
+argument for collapsing to one PR targeting `main`.
 
-> `--force-with-lease` (never bare `--force`). Target branches here are the
-> three known PR branches — **no unknown branch is overwritten**.
+## 3. Ancestry (re-verified, not assumed)
 
-## 4. Alternative: consolidated single PR (no force-push)
-
-If force-push is undesirable, cherry-pick each stack's unique commits onto a
-fresh branch off `main` and open one PR:
-
-```bash
-# candidate branches (all land on main; original PRs can be closed by a human)
-git checkout -b land/pr2 origin/main && git cherry-pick c67e8ed 821037a
-git checkout -b land/pr3 origin/main && git cherry-pick 4944044
-# or a single consolidated branch:
-git checkout -b land/consolidated origin/main
-git cherry-pick c67e8ed 821037a 4944044
+```
+main b6757b4
+  └── #1 b96c740   (main..#1 = 10 commits)
+        └── #2 821037a   (12)
+              └── #3 4944044   (13)
+                    └── #4 1c61ae9   (14)
 ```
 
-Trade-off: clean history, but the stacked PR review trail is replaced by new PRs.
+`git merge-base --is-ancestor` confirmed each step, and that `b96c740`, `821037a`
+and `4944044` are all contained in `1c61ae9`. The stack is strictly linear, so
+retargeting #4 to `main` changes its diff from "PR #3 → #4" to "main → #4"
+with **no semantic conflict**.
 
-## 5. This finalization branch
+## 4. Integrated-diff sanity check
 
-`fix/finalization-eval-runtime-observability` is branched from #3 head `4944044`
-and layered on top:
+`git diff --stat b6757b4..1c61ae9` → **99 files, +17607 / −165**.
 
-- real-provider agent-eval lane (`evaluation/agent_eval/real_provider.py`,
-  `scripts/evaluate_agent_real.py`, `make agent-eval-real`);
-- replay/resilience dataset case + honest `orchestration_coverage` diagnostic;
-- reviewed-gold status now runnable pre-annotation (NOT_MEASURABLE, not FATAL);
-- docs `docs/finalization/*`.
+- **Zero** files deleted outright (`--diff-filter=D` count = 0).
+- Every file with deletions has far larger additions; the largest deletions are
+  doc edits (`docs/limitations.md` −46/+102, `docs/production-readiness.md`
+  −16/+31, `README.md` −11/+28). No duplicated change, no accidental content loss.
 
-It should be reviewed **after** #1–#3 land, then rebased onto the result (base
-branch `fix/runtime-hitl-reliability-hardening` for now, retarget to `main`
-after #3 merges).
+## 5. What was executed
 
-## 6. Hard guardrails
+1. Fixed the P0 recovery defect on top of #4 (see `EVIDENCE_MANIFEST.md` §2).
+   Commit `92aac78`, branch `fix/finalization-eval-runtime-observability`.
+2. Pushed, then retargeted **PR #4 base: `fix/runtime-hitl-reliability-hardening` → `main`**.
+   No force-push was used at any point; the base change is a PR-setting change.
+3. A base change emits `edited`, not `synchronize`, so it did not by itself
+   trigger CI. The docs commit that followed the retarget supplied the
+   `synchronize` event that ran the full suite against `main`.
+4. Merge only after: required checks green, no unresolved review blockers, and
+   the P0 regression suites passing on real PostgreSQL/Redis.
 
-1. **No automatic merge** — human triggers every merge.
-2. **No close** of any PR as part of this work.
-3. **No force-push** to any branch other than the three known PR branches, and
-   only after explicit approval, always `--force-with-lease`.
-4. **CI must be green on the restacked branch** before merging; #2/#3 currently
-   have **no CI runs** because their base is non-main.
+### Why single-PR beat sequential merging
+
+| Option | Consequence |
+|---|---|
+| Merge #1→#2→#3→#4 in order | #2/#3/#4 would have been merged **without ever having run CI**; a 14-commit stack reviewed in four fragments where only the first fragment was verified |
+| Collapse into #4 on `main` | One 99-file diff, one full CI run, one reviewable unit |
+
+## 6. Residual PR / branch handling
+
+- #1/#2/#3 are left **open** until #4 lands, so the stacked bases they depend on
+  are never removed from under them.
+- After #4 merges, each gets a `Superseded by #4` note and is closed by a human
+  decision — all three branches are ancestors of the merged SHA, so nothing is
+  lost.
+- Branch deletion is gated on: no unique unmerged commits, no open PR referencing
+  it, no active worktree. Recorded SHAs and recovery commands before deletion.
+
+## 7. Guardrails honoured
+
+- No force-push to any branch. No rebase. No default-branch history rewrite.
+- No PR force-merged; branch protection (`test 3.10/3.11/3.12`, `dev-compat`,
+  `security`, `runtime-e2e` required) stayed in force throughout.
+- No PR closed before its replacement actually merged.

@@ -72,6 +72,24 @@ API (FastAPI)  ── /api/chat, /api/chat/stream  ── real-time fast path (i
    `tool_call_id` silently skipped the ledger. Fixed by deriving
    `tool_call_id = approval:{approval_id}`; proven exactly-once under duplicate
    delivery and crash-after-effect.
+5. **P0 — runs stranded in `RUNNING` forever (silent orphan).** A worker whose
+   ownership lease expired mid-execution had its `SUCCEEDED` commit *correctly*
+   rejected by the owner CAS, returned normally, so Celery ACKed and the broker
+   never redelivered. The recovery scanner only looked at `RETRYING`/`QUEUED` —
+   so nothing ever looked at that row again: no terminal state, no DLQ record,
+   no alert. It reproduced **3/3 deterministically**, and the test database had
+   silently accumulated **252** such rows, the oldest stranded a week earlier.
+   Two fixes: heartbeat renewal no longer dies on a transient DB error, and the
+   reconciler now reclaims expired-lease `RUNNING` runs via the existing atomic
+   takeover predicate. CAS strictness and tool idempotency were not relaxed —
+   and `WAITING_APPROVAL` is still deliberately excluded, because auto-resend
+   after a claim-then-crash cannot be proven free of duplicate side effects.
+
+   *The best part of this story is how it stayed hidden:* (a) the failing test
+   lived one directory outside what `make runtime-e2e` runs, and (b) its fake
+   runtime blocked the event loop with `time.sleep()` inside `async def`, which
+   starved the heartbeat and **guaranteed** the failure it was reporting — so
+   the test was measuring the wrong thing while appearing to cover this path.
 
 ## 5. Trade-offs (say the cost, not just the benefit)
 
@@ -99,6 +117,19 @@ API (FastAPI)  ── /api/chat, /api/chat/stream  ── real-time fast path (i
    known and bounded, neither is hidden.
 5. **"Why not fix the stuck-approval issue?"** Because a proven-safe fix needs a
    downstream idempotency key. Until then, parking + alert is the honest choice.
+6. **"Didn't your crash-recovery tests cover the stale-run case?"** They appeared
+   to, and that was the problem. The suite ran real PostgreSQL and Redis, but the
+   deterministically-failing test sat outside the `make runtime-e2e` target, and
+   its own stand-in graph blocked the event loop so the lease heartbeat could
+   never run. I only found it by asking why a *green* suite coexisted with 252
+   stranded rows in the database. Green tests are evidence about what they
+   execute; they are not evidence that the untested path works.
+7. **"How do you know the reconciler can't kill a healthy run?"** The scan is
+   global and time-based, so the window between scanning and writing matters. The
+   write keeps "lease still expired" inside the same `UPDATE` as the status
+   change, so a run whose lease was renewed in that window is simply not
+   updated — the same atomic-predicate discipline used by `takeover_running`.
+   Covered by a dedicated test.
 
 ## 7. Things you must NOT say
 
@@ -108,3 +139,5 @@ API (FastAPI)  ── /api/chat, /api/chat/stream  ── real-time fast path (i
 - "Alerting is closed-loop" (notification is NOT_VERIFIED).
 - "Human handoff / ticketing exists" (only an approval gate exists).
 - "Real ERP refunds are verified" (staging tools only).
+- "The recovery scanner covers every stuck run" — it covers `RETRYING`, `QUEUED`
+  and now expired-lease `RUNNING`. `WAITING_APPROVAL` is still parked by design.

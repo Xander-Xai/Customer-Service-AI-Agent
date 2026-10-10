@@ -31,14 +31,30 @@ dated personal/open-source work, not part of the earlier employment.
 PostgreSQL checkpointer + Redis + Celery: at-least-once delivery with three-layer
 application-level idempotency (run / thread-lock / tool side-effect ledger),
 crash recovery from checkpoints, and a dead-letter queue with manual replay.
+Recovery converges stranded runs (expired-lease `RUNNING` reclaimed by a
+reconciler; attempt-exhausted runs dead-lettered) rather than orphaning them.
 
-**Proof:** `make runtime-e2e` (103 tests on real PostgreSQL + Redis),
+**Proof:** `make runtime-e2e` (110 tests on real PostgreSQL + Redis),
 `make runtime-chaos` (SIGKILL worker → lease expiry → checkpoint resume, side
 effect still once), `make runtime-verify` (evidence artifact with
-`tested_code_sha`)."
+`tested_code_sha`), and a multi-round real-infra regression recorded in
+`docs/finalization/EVIDENCE_MANIFEST.md`."
 
 > Boundary to state: this is **Level 2 (real infra, CI-verified)** — **not**
 > production-cluster verified.
+
+### A2. Finding a P0 that a green test suite was hiding
+
+"Found and fixed a silent-orphan defect in which runs could remain `RUNNING`
+forever: an expired-lease worker's completion commit was correctly rejected, the
+task was ACKed, and the recovery scanner never scanned `RUNNING`. It reproduced
+deterministically (3/3) and had silently accumulated 252 stranded rows in the
+test database. Fixed without relaxing CAS strictness or tool idempotency, with
+20 new regression tests (unit + real PostgreSQL) that fail without the fix."
+
+**Proof:** `tests/unit/test_stale_run_reconciliation.py` (13 tests, 9 fail
+pre-fix), `tests/integration/runtime/test_stale_run_reconciliation.py` (7 tests,
+5 fail pre-fix), `docs/finalization/EVIDENCE_MANIFEST.md` §2.
 
 ### B. Human-in-the-Loop governance for high-risk side effects
 
