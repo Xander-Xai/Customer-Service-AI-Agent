@@ -48,9 +48,15 @@ effect still once), `make runtime-verify` (evidence artifact with
 "Found and fixed a silent-orphan defect in which runs could remain `RUNNING`
 forever: an expired-lease worker's completion commit was correctly rejected, the
 task was ACKed, and the recovery scanner never scanned `RUNNING`. It reproduced
-deterministically (3/3) and had silently accumulated 252 stranded rows in the
-test database. Fixed without relaxing CAS strictness or tool idempotency, with
-20 new regression tests (unit + real PostgreSQL) that fail without the fix."
+deterministically (3/3, always the same failure signature). Fixed without
+relaxing CAS strictness or tool idempotency, with 20 new regression tests
+(unit + real PostgreSQL) that fail without the fix.
+
+While validating, I also had to correct my own first reading of the evidence:
+252 stranded rows in the test database looked like proof of production
+accumulation, but they turned out to be test debris from a case that
+deliberately strands runs — the defect is real, that particular corroboration
+was not, and the write-up says so."
 
 **Proof:** `tests/unit/test_stale_run_reconciliation.py` (13 tests, 9 fail
 pre-fix), `tests/integration/runtime/test_stale_run_reconciliation.py` (7 tests,

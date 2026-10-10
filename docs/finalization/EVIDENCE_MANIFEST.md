@@ -49,19 +49,37 @@ runtime.executor - WARNING - 提交成功时 ownership 已丢失，放弃提交 
   expected_worker=Ydxx:3148898:918b8a3a current_status=RUNNING current_worker=Ydxx:3148898:918b8a3a
 ```
 
-### 2.2 Accumulated evidence in the live test database
+### 2.2 What the 252 stranded rows in the test database actually were
 
-The shared test database had been accumulating stranded runs from previous
-crash-recovery runs:
+An initial reading of the shared test database looked like damning production
+evidence — 252 rows stuck in `RUNNING`, the oldest with a lease expired since
+**2026-10-03**, a week of silent accumulation:
 
 ```sql
-SELECT count(*) FROM agent_runs WHERE status='RUNNING';
--- 252 rows; oldest lease_expires_at = 2026-10-03 08:21:59+00
+SELECT count(*) FROM agent_runs WHERE status='RUNNING';  -- 252
 ```
 
-Sample rows all show `attempt=2` with worker ids `B` / `worker-B` — i.e. a
-takeover happened and then the run stranded. This is the defect accumulating
-silently over a week.
+**That reading was wrong, and the correction matters more than the original
+claim.** Every one of those rows has `worker_id` in `('A','B','worker-A','worker-B')`
+and `query = 'q'` — they are debris from
+`tests/integration/runtime/test_worker_ownership_cas.py`, which *deliberately*
+creates runs with expired leases to assert the fencing rules and never cleans
+them up. They are not evidence that a production system accumulated orphans.
+
+What they *are* evidence of is a second, real problem: **once stale `RUNNING`
+becomes reclaimable, test debris becomes reclaimable too.** The scanner is
+global (`ORDER BY lease_expires_at LIMIT 100`), so a backlog of 250+ stale rows
+starved newer candidates out of the result set and made unrelated assertions fail
+for the wrong reason. Two consequences, both acted on:
+
+- The new integration tests register their runs and delete them
+  (`cleanup_runs` fixture) — they must not depend on the shared table's history.
+- Reconciler behaviour under a backlog is now a known operational consideration,
+  not an untested edge: the scan is FIFO by `lease_expires_at`, so a permanent
+  backlog drains oldest-first and never starves itself.
+
+The P0 itself does **not** rest on these rows. It rests on the deterministic
+reproduction in §2.1, which needs no historical data.
 
 ### 2.3 Mechanism
 
@@ -126,12 +144,46 @@ not before — which is a large part of why the defect survived.
 
 ## 4. Multi-round real-infrastructure runs
 
-Each round is an independent full run of real PostgreSQL + Redis + real Celery
-workers (SIGKILL crash recovery, checkpoint resume, chaos script). Rounds are
-recorded individually; **no round was dropped or re-run for being inconvenient**.
+Each round is an independent full run against real PostgreSQL 15.18 + Redis 7.4.9
+with real Celery prefork workers: SIGKILL crash recovery
+(`tests/integration/test_worker_crash_recovery.py`) plus checkpoint resume
+(`tests/integration/runtime/test_worker_checkpoint_recovery.py`) plus the chaos
+script (`scripts/test_worker_crash_recovery.py`).
 
-See `artifacts/p0-investigation/multiround3/summary.txt` and `rounds3plus.txt`
-for the raw per-round record.
+**All 8 rounds are recorded. None was dropped, re-run, or reported selectively.**
+
+| Round | recovery tests | chaos script |
+|---|---|---|
+| 1 | 2 passed (53.99s) | PASS |
+| 2 | 2 passed (54.20s) | PASS |
+| 3 | 2 passed (54.59s) | PASS |
+| 4 | 2 passed (54.17s) | PASS |
+| 5 | 2 passed (54.25s) | PASS |
+| 6 | 2 passed (54.74s) | PASS |
+| 7 | 2 passed (54.57s) | PASS |
+| 8 | 2 passed (54.64s) | PASS |
+
+### What the rounds are and are not worth
+
+They are worth exactly this: after the fix, the crash-recovery and
+checkpoint-resume paths completed on **8/8** independent real-infra runs, where
+the crash-recovery leg failed **3/3 and 5/5** before it.
+
+They are **not** proof of production behaviour. Same as every other Level 2
+result: local/CI real infrastructure, one machine, no multi-replica cluster, no
+SLO, no real ERP writes.
+
+### Honest note on how the rounds were obtained
+
+- Rounds 1–2 ran against the working tree *before* the P0 fix was committed;
+  rounds 3–8 ran against committed SHA `92aac78`.
+- The first multi-round attempt was aborted and restarted because two harness
+  errors of mine produced unusable data: a wrong test path (`rc=4`, pytest usage
+  error) and a background job killed by a tool timeout. Those aborted attempts
+  are **not** counted in the 8 rounds above.
+- One round was measured while the working tree was being committed. That round
+  is excluded; the 8 counted rounds each ran against a fixed SHA or a tree that
+  was not being modified during the run.
 
 ---
 

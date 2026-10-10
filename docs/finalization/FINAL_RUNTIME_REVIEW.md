@@ -207,8 +207,19 @@ by **omission**, and that omission was the bug.
 Signature every time: `('RUNNING', 2, '<new worker>', None)` — takeover happened
 (`attempt=2`), then the run stranded.
 
-The test database held **252** stranded `RUNNING` rows, the oldest with a lease
-expired on **2026-10-03** — a week of silent accumulation.
+The shared test database also held **252** stranded `RUNNING` rows. It is
+tempting to read those as proof of production accumulation — they are not.
+Every one has `worker_id` in `('A','B','worker-A','worker-B')` and `query='q'`:
+they are debris from `test_worker_ownership_cas.py`, which deliberately strands
+runs to assert the fencing rules and never cleans up. The P0 rests on §7.1's
+deterministic reproduction, which needs no historical data.
+
+They did surface a real second-order problem: once stale `RUNNING` becomes
+reclaimable, test debris becomes reclaimable too. The scan is global
+(`ORDER BY lease_expires_at LIMIT 100`), so a 250+ row backlog starved newer
+candidates out of the result set and made unrelated assertions fail for the
+wrong reason — caught while writing the new tests, and fixed by having them
+clean up after themselves.
 
 ### 7.3 Why the existing test suite missed it
 

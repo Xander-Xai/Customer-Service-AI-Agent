@@ -121,10 +121,19 @@ API (FastAPI)  ── /api/chat, /api/chat/stream  ── real-time fast path (i
    to, and that was the problem. The suite ran real PostgreSQL and Redis, but the
    deterministically-failing test sat outside the `make runtime-e2e` target, and
    its own stand-in graph blocked the event loop so the lease heartbeat could
-   never run. I only found it by asking why a *green* suite coexisted with 252
-   stranded rows in the database. Green tests are evidence about what they
-   execute; they are not evidence that the untested path works.
-7. **"How do you know the reconciler can't kill a healthy run?"** The scan is
+   never run. I found it by noticing a *green* suite coexisted with a
+   deterministically failing test one directory away. Green tests are evidence
+   about what they execute; they are not evidence that the untested path works.
+7. **"You said the database showed stranded runs — weren't those proof of a
+   production problem?"** No, and correcting that mattered. All 252 rows had
+   worker ids `A`/`B` and query `q` — debris from a test that deliberately
+   strands runs to assert fencing. The defect was real, that corroboration was
+   not. It did surface something real though: once stale `RUNNING` is
+   reclaimable, a backlog of stale rows is too, and the global
+   `ORDER BY lease_expires_at LIMIT 100` scan meant a 250-row backlog starved
+   newer candidates out. My own new tests failed for that reason before I
+   gave them cleanup.
+8. **"How do you know the reconciler can't kill a healthy run?"** The scan is
    global and time-based, so the window between scanning and writing matters. The
    write keeps "lease still expired" inside the same `UPDATE` as the status
    change, so a run whose lease was renewed in that window is simply not

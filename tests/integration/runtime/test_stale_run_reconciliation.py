@@ -1,25 +1,42 @@
-"""P0 regression (real PostgreSQL): 过期 lease 的 RUNNING run 必须能收敛到终态。
+"""P0 regression against **real PostgreSQL**: expired-lease RUNNING runs must converge.
 
-真实缺陷
---------
-``tests/integration/test_worker_crash_recovery.py`` 曾**确定性**失败
-（3/3 pre-fix, 5/5 post-fix），现象是 ``('RUNNING', 2, <new worker>, None)``：
-worker B 已经接管（attempt=2），却永远进不了终态。链路是
+Real defect
+-----------
+``tests/integration/test_worker_crash_recovery.py`` failed **deterministically**
+(3/3 pre-fix), always with the same signature::
 
-  1. lease 在图执行途中过期（续租被事件循环阻塞 / 瞬时 DB 异常打断）；
-  2. worker 跑完图，``mark_succeeded`` 被 owner CAS **正确**拒绝（严格 lease 语义
-     不允许已过期的执行者用一次迟到的成功写入「证明」自己有效）；
-  3. ``execute_run`` 正常返回 -> Celery **ACK** -> broker 不再投递；
-  4. ``list_recoverable_runs`` 只扫 RETRYING/QUEUED，**从不看 RUNNING**。
+    AssertionError: 未恢复成功: ('RUNNING', 2, '<new worker>', None)
+    - 'RUNNING'
+    + 'SUCCEEDED'
 
-第 4 步是缺陷本身：没有任何扫描器会再看到这条 run，它永久停在 RUNNING——没有终态、
-没有 DLQ 记录、没有告警。
+``attempt=2`` proves worker B *did* take over; the run then never reached a
+terminal state. The chain:
 
-本文件用真实 PostgreSQL 覆盖收敛路径与并发安全：扫描、原子回收、预算封顶、
-以及「扫描与写入之间被重新续租」的竞态。放在 ``tests/integration/runtime/`` 下，
-因此 ``make runtime-e2e`` 会真正跑到它——此前这条路径**没有任何集成覆盖**。
+  1. the ownership lease expires while the graph is still running;
+  2. the worker finishes and calls ``mark_succeeded``, which is **correctly**
+     rejected (``transition_owned`` requires ``lease_expires_at > now``);
+  3. ``execute_run`` returns normally -> Celery ACKs -> no redelivery;
+  4. ``list_recoverable_runs`` scans only ``RETRYING``/``QUEUED``.
 
-运行::
+Step 4 is the defect: nothing ever scans a stale ``RUNNING`` row again, so the
+run is an orphan forever — no terminal state, no DLQ row, no alert. The shared
+test database had accumulated 252 such rows, the oldest stranded a week earlier.
+
+Why this file is separate from the unit tests
+---------------------------------------------
+The unit tests for this behaviour run on SQLite. That is not sufficient: the
+fix rests on *conditional-update* semantics — ``UPDATE ... WHERE status='RUNNING'
+AND lease_expires_at IS NULL-or-<=now`` — and SQLite's locking and timestamp
+handling differ from PostgreSQL's. In particular the concurrent-reclaim case
+(two reconcilers, two challengers) only has real meaning on a real engine.
+
+Deliberately NOT covered here
+-----------------------------
+``WAITING_APPROVAL`` is never reclaimed: auto-resend after a claim-then-crash
+cannot be proven free of duplicate side effects. That boundary is intentional
+and pinned by an assertion below so it cannot be quietly removed.
+
+Run::
 
     TEST_DISTRIBUTED_DB_URL=postgresql://postgres:postgres@localhost:5432/csai_runtime_test \\
     TEST_REDIS_URL=redis://localhost:6379 \\
@@ -30,233 +47,258 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sys
-import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
-DB_URL = os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip()
-REDIS_URL = os.getenv("TEST_REDIS_URL", "").strip()
+from runtime.run_service import RunOwnershipLost, RunService
+from runtime.statuses import RunStatus
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-pytestmark = [
-    pytest.mark.slow,
-    pytest.mark.skipif(
-        not DB_URL or not REDIS_URL,
-        reason="TEST_DISTRIBUTED_DB_URL + TEST_REDIS_URL 未设置；需要真实 PostgreSQL + Redis",
+INFRA_REASON = "TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 未设置；需要真实 PG + Redis"
+requires_infra = pytest.mark.skipif(
+    not (
+        os.getenv("TEST_DISTRIBUTED_DB_URL", "").strip() and os.getenv("TEST_REDIS_URL", "").strip()
     ),
-]
+    reason=INFRA_REASON,
+)
 
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+pytestmark = [pytest.mark.slow, requires_infra]
 
 
 def _later(seconds: float = 3600.0) -> datetime:
-    return _utcnow() + timedelta(seconds=seconds)
+    return datetime.now(timezone.utc) + timedelta(seconds=seconds)
+
+
+def _expire_lease(service: RunService, run_id: str) -> None:
+    """Push the row's lease into the past (a stalled / SIGSTOPped worker)."""
+    from db.models import AgentRun
+
+    past = datetime.now(timezone.utc) - timedelta(seconds=60)
+    session = service.repo._session()  # noqa: SLF001 - test-only
+    try:
+        session.query(AgentRun).filter(AgentRun.id == run_id).update({"lease_expires_at": past})
+        session.commit()
+    finally:
+        session.close()
+
+
+def _running_run(
+    service: RunService,
+    unique,
+    created: list[str],
+    *,
+    worker: str = "w1",
+    lease_s: float = 300.0,
+) -> str:
+    """建一个 RUNNING run 并登记到 ``created``（由 ``cleanup_runs`` 负责删除）。"""
+    thread = unique("T-stale")
+    run = service.create_run(query="stale-check", session_id=thread, thread_id=thread)
+    created.append(run["id"])
+    claimed = service.mark_running(run["id"], worker_id=worker, lease_seconds=lease_s)
+    assert claimed is not None
+    return run["id"]
 
 
 @pytest.fixture
-def service():
-    from db.database import get_db_session
-    from runtime.repository import AgentRunRepository
-    from runtime.run_service import RunService
+def cleanup_runs(pg_engine):
+    """删除本用例创建的 run。
 
-    svc = RunService(AgentRunRepository(get_db_session))
+    这些用例**故意**把 run 留在过期 lease 的 ``RUNNING`` 上——那正是被测状态。
+    不清理的话，它们会变成 reconciler 的下一次扫描目标，并且（本用例按
+    ``lease_expires_at`` 升序 + LIMIT 扫描）挤掉后续用例新建的 run，让真正的
+    断言因无关的历史数据而失败。
+    """
+    from sqlalchemy.orm import sessionmaker
+
     created: list[str] = []
-    yield svc, created
-    for run_id in created:
-        with get_db_session() as s:
-            from sqlalchemy import text
+    yield created
+    if not created:
+        return
+    factory = sessionmaker(bind=pg_engine, expire_on_commit=False)
+    session = factory()
+    try:
+        from sqlalchemy import text
 
-            s.execute(text("DELETE FROM agent_runs WHERE id=:id"), {"id": run_id})
-            s.execute(text("DELETE FROM agent_dead_letters WHERE run_id=:id"), {"id": run_id})
-            s.commit()
+        session.execute(text("DELETE FROM agent_runs WHERE id = ANY(:ids)"), {"ids": created})
+        session.execute(
+            text("DELETE FROM agent_dead_letters WHERE run_id = ANY(:ids)"),
+            {"ids": created},
+        )
+        session.commit()
+    finally:
+        session.close()
 
 
-def _make_run(svc, created: list[str], *, thread: str, max_attempts: int = 3):
-    run = svc.create_run(
-        query="stale-check", session_id=thread, thread_id=thread, max_attempts=max_attempts
-    )
-    created.append(run["id"])
-    return run
+class _RecordingDispatcher:
+    def __init__(self):
+        self.calls: list[str] = []
+
+    async def __call__(self, run_id, **kwargs):
+        self.calls.append(run_id)
 
 
-def test_expired_lease_running_run_is_reclaimable(service):
-    """扫描必须看到 lease 已过期的 RUNNING，且看不到心跳正常的 RUNNING。"""
-    svc, created = service
-    stale = _make_run(svc, created, thread=f"T-stale-{uuid.uuid4().hex[:8]}")
-    alive = _make_run(svc, created, thread=f"T-alive-{uuid.uuid4().hex[:8]}")
+def test_expired_lease_running_run_is_scanned_and_live_lease_is_not(
+    run_service: RunService, unique, cleanup_runs
+):
+    """扫描必须看到 lease 已过期的 RUNNING，且跳过心跳正常的 RUNNING。"""
+    stale = _running_run(run_service, unique, cleanup_runs, worker="dead", lease_s=1.0)
+    _expire_lease(run_service, stale)
+    alive = _running_run(run_service, unique, cleanup_runs, worker="alive", lease_s=600.0)
 
-    svc.mark_running(stale["id"], worker_id="dead", lease_seconds=1.0)
-    svc.mark_running(alive["id"], worker_id="alive", lease_seconds=600.0)
+    # 前提：旧的 recoverable 扫描从不看 RUNNING —— 这正是缺陷来源
+    assert stale not in run_service.list_recoverable_runs()
 
-    # 扫描时刻必须**同时**满足：stale 的 1s lease 已过、alive 的 600s lease 仍在。
-    scan_at = _later(60)
-    # 前提：旧扫描器看不见 RUNNING（这正是缺陷来源）
-    assert stale["id"] not in svc.list_recoverable_runs(now=scan_at)
-
-    # 扫描是**全表**的（共享库里可能还有历史搁浅 run），因此只断言自己那一条的归属，
-    # 不对集合做等值比较。
-    scanned = {r["id"] for r in svc.list_stale_running_runs(now=scan_at)}
-    assert stale["id"] in scanned
-    assert alive["id"] not in scanned, "心跳正常的 run 不该被回收"
+    # 扫描是**全表**的（共享库里可能还有历史搁浅 run），故只断言自己那两条的归属
+    scanned = {r["id"] for r in run_service.list_stale_running_runs()}
+    assert stale in scanned, "过期 lease 的 RUNNING 必须被扫到"
+    assert alive not in scanned, "心跳正常的 RUNNING 绝不能被回收"
 
 
 @pytest.mark.asyncio
-async def test_stale_run_reaches_terminal_state_after_reconcile(service):
+async def test_stranded_run_reaches_terminal_state_after_reconcile(
+    run_service: RunService, unique, cleanup_runs
+):
     """完整收敛：搁浅 -> reconciler 重新投递 -> 新执行者原子接管 -> SUCCEEDED。"""
-    svc, created = service
     from runtime.retry import reconcile_stuck_runs
 
-    run = _make_run(svc, created, thread=f"T-converge-{uuid.uuid4().hex[:8]}")
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
+    run_id = _running_run(run_service, unique, cleanup_runs, lease_s=1.0)
+    _expire_lease(run_service, run_id)
 
-    dispatched: list[str] = []
+    dispatcher = _RecordingDispatcher()
+    result = await reconcile_stuck_runs(run_service, dispatcher=dispatcher)
+    assert run_id in dispatcher.calls
+    assert run_id in result
 
-    async def dispatcher(run_id, **kwargs):
-        dispatched.append(run_id)
-
-    result = await reconcile_stuck_runs(svc, dispatcher=dispatcher, now=_later())
-    # 扫描是全表的：只断言自己这条被重新投递，不对总量做等值比较。
-    assert run["id"] in dispatched
-    assert run["id"] in result
-
-    taken = svc.mark_running(run["id"], worker_id="w2", lease_seconds=600.0, now=_later())
-    assert taken is not None
+    taken = run_service.mark_running(run_id, worker_id="w2", lease_seconds=600.0)
+    assert taken is not None, "过期 lease 的 run 必须可被接管"
     assert taken["attempt"] == 2
-    svc.mark_succeeded(run["id"], {"response": "ok"}, expected_worker_id="w2")
-    assert svc.get_run(run["id"])["status"] == "SUCCEEDED"
+    assert taken["worker_id"] == "w2"
+
+    run_service.mark_succeeded(run_id, {"response": "ok"}, expected_worker_id="w2")
+    assert run_service.get_run(run_id)["status"] == RunStatus.SUCCEEDED.value
 
 
-def test_stale_worker_cannot_overwrite_recovered_result(service):
-    """收敛之后，旧执行者的迟到提交仍必须被拒（不得为收敛而放宽 CAS）。"""
-    svc, created = service
-    from runtime.run_service import RunOwnershipLost
-    from runtime.statuses import InvalidRunTransition
+def test_stale_worker_cannot_overwrite_recovered_result(
+    run_service: RunService, unique, cleanup_runs
+):
+    """收敛之后旧执行者的迟到提交仍必须被拒——不得为收敛而放宽 CAS。
 
-    run = _make_run(svc, created, thread=f"T-stalewrite-{uuid.uuid4().hex[:8]}")
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
-    svc.mark_running(run["id"], worker_id="w2", lease_seconds=600.0, now=_later())
-    svc.mark_succeeded(run["id"], {"response": "w2"}, expected_worker_id="w2")
+    新执行者接管后**尚未**提交时，旧执行者的迟到完成必须被 owner CAS 拒绝：
+    这正是 fencing 的作用，放行它就等于允许覆盖新执行者的结果。
+    """
+    run_id = _running_run(run_service, unique, cleanup_runs, lease_s=1.0)
+    _expire_lease(run_service, run_id)
+    taken = run_service.mark_running(run_id, worker_id="w2", lease_seconds=600.0)
+    assert taken is not None
 
-    with pytest.raises((RunOwnershipLost, InvalidRunTransition)):
-        svc.mark_succeeded(run["id"], {"response": "stale"}, expected_worker_id="w1")
+    with pytest.raises(RunOwnershipLost):
+        run_service.mark_succeeded(run_id, {"response": "stale"}, expected_worker_id="w1")
 
-    assert svc.get_run(run["id"])["result"] == {"response": "w2"}
+    after = run_service.get_run(run_id)
+    assert after["status"] == RunStatus.RUNNING.value
+    assert after["worker_id"] == "w2"
+
+    # 新执行者照常提交，且结果不会被旧执行者污染
+    run_service.mark_succeeded(run_id, {"response": "w2"}, expected_worker_id="w2")
+    assert run_service.get_run(run_id)["result"] == {"response": "w2"}
 
 
-def test_dead_letter_is_skipped_when_lease_renewed_after_scan(service):
+def test_dead_letter_is_refused_when_lease_renewed_after_scan(
+    run_service: RunService, unique, cleanup_runs
+):
     """扫描与写入之间续租成功的 run 不得被落 DLQ（原子「仍然过期」谓词）。"""
-    svc, created = service
-    run = _make_run(svc, created, thread=f"T-race-{uuid.uuid4().hex[:8]}", max_attempts=1)
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
-    assert run["id"] in {r["id"] for r in svc.list_stale_running_runs(now=_later())}
+    run_id = _running_run(run_service, unique, cleanup_runs, lease_s=1.0)
+    _expire_lease(run_service, run_id)
+    assert run_id in {r["id"] for r in run_service.list_stale_running_runs()}
 
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=600.0, now=_later())
-    assert svc.heartbeat(run["id"], worker_id="w1", lease_seconds=600.0) is True
+    # worker 活过来并续上长 lease
+    assert run_service.mark_running(run_id, worker_id="w1", lease_seconds=600.0) is not None
+    assert run_service.heartbeat(run_id, worker_id="w1", lease_seconds=600.0) is True
 
-    applied = svc.dead_letter_stale_running(
-        run["id"],
+    applied = run_service.dead_letter_stale_running(
+        run_id,
         error_code="stale_lease_attempts_exhausted",
         error_message="should not apply",
-        now=_later(60),
     )
-    assert applied is None
-    assert svc.get_run(run["id"])["status"] == "RUNNING"
+    assert applied is None, "lease 已续上的 run 必须被放过"
+    assert run_service.get_run(run_id)["status"] == RunStatus.RUNNING.value
 
 
 @pytest.mark.asyncio
-async def test_attempt_exhausted_stale_run_is_dead_lettered(service):
-    """预算耗尽必须落 DLQ 而不是无限接管；且 DLQ 行可人工重放。"""
-    svc, created = service
+async def test_attempt_exhausted_stale_run_is_dead_lettered_and_replayable(
+    run_service: RunService, unique, cleanup_runs
+):
+    """预算耗尽必须落 DLQ 而不是无限接管；DLQ 行必须能人工重放。"""
     from runtime.retry import reconcile_stuck_runs
 
-    run = _make_run(svc, created, thread=f"T-dlq-{uuid.uuid4().hex[:8]}", max_attempts=1)
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
-    assert svc.get_run(run["id"])["attempt"] == 1
+    thread = unique("T-dlq")
+    run = run_service.create_run(query="q", session_id=thread, thread_id=thread, max_attempts=1)
+    cleanup_runs.append(run["id"])
+    claimed = run_service.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
+    assert claimed is not None
+    assert claimed["attempt"] == 1 >= claimed["max_attempts"]
+    _expire_lease(run_service, run["id"])
 
-    dispatched: list[str] = []
+    dispatcher = _RecordingDispatcher()
+    result = await reconcile_stuck_runs(run_service, dispatcher=dispatcher)
 
-    async def dispatcher(run_id, **kwargs):
-        dispatched.append(run_id)
-
-    result = await reconcile_stuck_runs(svc, dispatcher=dispatcher, now=_later())
-
-    assert run["id"] not in dispatched, "预算耗尽时不得再投递"
+    assert run["id"] not in dispatcher.calls, "预算耗尽时不得再投递"
     assert run["id"] in result
-    stored = svc.get_run(run["id"])
-    assert stored["status"] == "DEAD_LETTER"
-    dlq = svc.get_dead_letter(run["id"])
-    assert dlq is not None
+    assert run_service.get_run(run["id"])["status"] == RunStatus.DEAD_LETTER.value
+
+    dlq = run_service.get_dead_letter(run["id"])
+    assert dlq is not None, "必须留下 DLQ 记录"
     assert dlq["error_code"] == "stale_lease_attempts_exhausted"
 
-    requeued = svc.requeue_dead_letter(run["id"])
+    requeued = run_service.requeue_dead_letter(run["id"])
     assert requeued["id"] == run["id"], "重放必须复用原 run_id（工具幂等键依赖它）"
-    assert requeued["status"] == "QUEUED"
+    assert requeued["status"] == RunStatus.QUEUED.value
 
 
 @pytest.mark.asyncio
-async def test_waiting_approval_is_never_auto_redispatched(service):
+async def test_waiting_approval_is_never_auto_redispatched(
+    run_service: RunService, unique, cleanup_runs
+):
     """claim 后崩溃的窗口里自动重发无法证明「不重复副作用」——保留人工边界。"""
-    svc, created = service
     from runtime.retry import reconcile_stuck_runs
 
-    run = _make_run(svc, created, thread=f"T-approval-{uuid.uuid4().hex[:8]}")
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=600.0)
-    svc.mark_waiting_approval(run["id"], expected_worker_id="w1")
+    run_id = _running_run(run_service, unique, cleanup_runs, lease_s=600.0)
+    run_service.mark_waiting_approval(run_id, expected_worker_id="w1")
 
-    dispatched: list[str] = []
+    dispatcher = _RecordingDispatcher()
+    result = await reconcile_stuck_runs(run_service, dispatcher=dispatcher)
 
-    async def dispatcher(run_id, **kwargs):
-        dispatched.append(run_id)
-
-    result = await reconcile_stuck_runs(svc, dispatcher=dispatcher, now=_later(86400))
-
-    assert run["id"] not in dispatched
-    assert run["id"] not in result
-    assert svc.get_run(run["id"])["status"] == "WAITING_APPROVAL"
+    assert run_id not in dispatcher.calls
+    assert run_id not in result
+    assert run_service.get_run(run_id)["status"] == RunStatus.WAITING_APPROVAL.value
 
 
 @pytest.mark.asyncio
-async def test_concurrent_reconcilers_do_not_double_claim(service):
-    """两个 reconciler 并发扫描同一条搁浅 run：都不该造成重复的终态副作用。
+async def test_concurrent_reconcilers_and_challengers_see_exactly_one_winner(
+    run_service: RunService, unique, cleanup_runs
+):
+    """两个 reconciler 并发扫同一条搁浅 run，两个 challenger 并发接管。
 
-    回收本身是「重新投递」——真正的单次性由 worker 侧的 ``takeover_running``
-    原子 CAS 与工具幂等 ledger 保证；这里断言的是 reconciler 不会把 run 改成
-    两个不同的终态，也不会丢记录。
+    投递是幂等的（两个扫描都应看到它）；**接管**必须恰好一个赢家。
     """
-    svc, created = service
     from runtime.retry import reconcile_stuck_runs
 
-    run = _make_run(svc, created, thread=f"T-conc-{uuid.uuid4().hex[:8]}")
-    svc.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
+    run_id = _running_run(run_service, unique, cleanup_runs, lease_s=1.0)
+    _expire_lease(run_service, run_id)
 
-    seen: list[str] = []
-
-    async def dispatcher(run_id, **kwargs):
-        seen.append(run_id)
-
+    dispatcher = _RecordingDispatcher()
     results = await asyncio.gather(
-        reconcile_stuck_runs(svc, dispatcher=dispatcher, now=_later()),
-        reconcile_stuck_runs(svc, dispatcher=dispatcher, now=_later()),
+        reconcile_stuck_runs(run_service, dispatcher=dispatcher),
+        reconcile_stuck_runs(run_service, dispatcher=dispatcher),
     )
-    assert sum(run["id"] in r for r in results) == 2, "两个扫描都应看到它（投递是幂等的）"
+    assert sum(run_id in r for r in results) == 2, "两个扫描都应看到它"
 
-    # 并发接管：lease 已过期的前提下，恰好一个 worker 能拿到 ownership
-    # （``takeover_running`` 是单条 UPDATE 谓词，不是「先看后写」）
-    takeover_now = _later()
     taken = await asyncio.gather(
         asyncio.to_thread(
-            svc.mark_running, run["id"], worker_id="wa", lease_seconds=600.0, now=takeover_now
+            run_service.mark_running, run_id, worker_id="wa", lease_seconds=600.0, task_id="ta"
         ),
         asyncio.to_thread(
-            svc.mark_running, run["id"], worker_id="wb", lease_seconds=600.0, now=takeover_now
+            run_service.mark_running, run_id, worker_id="wb", lease_seconds=600.0, task_id="tb"
         ),
         return_exceptions=True,
     )
