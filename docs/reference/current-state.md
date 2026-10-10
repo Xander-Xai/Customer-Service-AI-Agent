@@ -20,8 +20,8 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`62`**（`docs/openapi.json` 快照；
-  数字随 approval endpoints 等新增而变，以本命令输出为准）
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`63`**（`docs/openapi.json` 快照；
+  数字随 approval / metrics endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
 ## RAG evaluation / evidence state
@@ -75,6 +75,69 @@
   `make rag-eval-649-smoke`（冒烟，非正式证据） → `make rag-eval-649`
   （`make eval-rag` 为其兼容 alias）。该文档在此方面内容为 **CURRENT**
   （随评测实现同步），其历史小节单独标注。
+
+## Agent 行为评测（Agent Eval V1）
+
+- 位置：`evaluation/agent_eval/`；契约唯一真相源 `contract.py`；说明
+  [agent-evaluation.md](agent-evaluation.md)。
+- **跑真实编译图**（`container.graph_app.astream(stream_mode="updates")`）+
+  **脚本化 LLM**（不接受 base_url、不持 API key → 结构上不出网）。
+- **测什么**：编排 / 治理 / 路由层行为。**不测**模型能力（选工具质量、
+  答案正确性）—— 那需要 LLM-as-a-Judge 与真实 provider，明确不在 V1 范围。
+- 数据集 `tests/eval/agent_cases.jsonl`（111 条）。标注的
+  `provenance` 默认 `llm_candidate`；**只有 `human_confirmed` 的
+  `expected_route` 进入 `route_accuracy` 分母**。当前确认数 **0**，
+  因此 `route_accuracy` = `NOT_MEASURED`，整体门禁报 `FAIL` —— 这是刻意设计：
+  门禁不许靠「没测出来」过关。
+- 每个指标带 `numerator` / `denominator` / `excluded`；分母为 0 →
+  `NOT_MEASURED`（不是 0%，也不是 100%）。artifact schema
+  `agent-eval-evidence/v1.2`，含 `code_provenance`（`commit_sha` / `dirty` /
+  diff 指纹）+ 数据集 `sha256` + `evidence_boundaries` + `measurement_gaps`。
+- **业务完成口径**（v1.2）：四类指标严格分开 ——
+  `workflow_execution_rate`（流程跑完）/ `response_delivery_rate`（交付）/
+  `governance_outcome_match_rate`（治理正确，**含** WAITING_APPROVAL）/
+  `task_completion_rate`（**业务**完成，**不含** WAITING_APPROVAL）。
+  等待审批是"治理正确"，不是"业务完成"；interrupt/pending_actions 也不构成
+  业务证据（只证明拦住了，不证明退款成功了）。
+- **三态门禁**：`FAIL`（可测门禁没过）/ `INCONCLUSIVE`（可测门禁过了但仍有
+  NOT_AVAILABLE）/ `PASS`。`PASS` 与"存在 NOT_AVAILABLE"互斥，NOT_MEASURED
+  永远不会被渲染成达标。
+- 运行时监控用同一套定义（`core.outcome.Outcome.business_outcome` 五级：
+  `not_resolved` / `requires_human` / `unverified_degraded` / `assessed` /
+  `evidenced`）。只有 `evidenced`（工具真的执行成功 / 审批放行后执行成功）
+  才算"业务解决有独立证据"；普通问答停在 `assessed`。
+- 命令：`make agent-eval` / `agent-eval-contract` / `agent-eval-annotation-status`
+  / `agent-eval-cases`。
+- **harness 抓到的真实 P0（已修）**：`ReActMode.execute` 曾丢弃
+  `pending_actions`，导致 HITL 闸门在真实图上从未触发、高风险副作用被**静默丢弃**
+  而 run 报成功。修复 + 真实图回归见
+  `tests/unit/test_hitl_real_graph_gate.py`。
+
+## RAG 评测（gold 数据集状态）
+
+- **649 全量正式指标：NOT_VERIFIED，不得对外发布**（见上「RAG evaluation」节）。
+- 数据集缺陷已量化：**40 条 query 全部 gold 缺失**、**160 个 gold 引用不在
+  5000 条语料中**。`make rag-gold-review` 产出 `DRAFT_UNVERIFIED` +
+  `UNDETERMINABLE` 工作清单（`rag-gold-label/v1` 校验通过），供人工判定。
+- **known-item（CONSTRUCTED）gold**：`make rag-gold-known-item` ——
+  query := 文档标题（逐字），相关度**由构造保证**，可机械核验。
+  度量**索引词法可检索性**，**不是**搜索质量；与 `JUDGED` 分属不同 population，
+  `is_human_verified()` 对它恒为 `False`。
+- **BM25 消融可测**（`make rag-ablation`）：复用生产
+  `QdrantKnowledgeBase.rebuild_bm25_from_qdrant` / `_bm25_search`。
+  负控通过（打乱 gold 后 `hit@1` 1.0 → 0.0）。
+- **vector_only / hybrid_no_rerank / hybrid_rerank：BLOCKED**
+  （embedding provider 不可用）。**不使用占位向量替代** —— 那会把 Hit@K
+  变成随机召回率。
+- 语料质量已知缺陷：5000 条中仅 **617 条标题唯一**（4383 条共享标题），
+  `source: "synthetic"`。
+
+## 性能 / 成本
+
+- 端到端 P50/P95/P99、TTFT、并发 QPS、Token 成本：**NOT_VERIFIED（BLOCKED）**
+  —— LLM provider 凭据为占位符。**不产生任何估算**（`make perf-evidence`）。
+- 离线工程逻辑（不依赖 provider）已单独验证并通过：
+  token 计数确定性、缓存作用域隔离。
 
 ## 验证命令（不要复制数字，重新执行）
 
@@ -167,7 +230,22 @@ make mcp-verify
     它验证的是**本仓适配器的契约**，不等于"接了任意第三方 server 也成立"。
 - Embedding 通过 HTTP API 计算（`rag/api_embedding.py`），应用侧计算、Qdrant 只做存储检索。
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
-  降级兜底 `llm/rule_based_llm.py`。
+  降级兜底 `llm/rule_based_llm.py`。**该熔断器与重试只保护 LLM 调用**，
+  与工具层无关（见下）。
+- **工具执行层可靠性**（`tools/tool_registry.py`）：
+  - **超时（Implemented）**：`TOOL_EXECUTION_TIMEOUT_SECONDS`（默认 30s），
+    覆盖只读直调与幂等 ledger 闭包**两条**分支。**只读工具超时降级**为可解释的
+    错误字符串（Agent 换策略或如实告知用户）；**副作用工具超时冒泡**
+    （`ToolExecutionTimeout`，被 `runtime/errors.py` 按 `is_tool_timeout` 属性
+    识别为 TIMEOUT → 可重试）。这是必须的：若把超时转成字符串返回，ledger 会把
+    一个「结果未知」的写操作记成 `SUCCEEDED` 并缓存，重投递时直接返回该字符串 ——
+    副作用再也不会发生，而 run 表面成功。超时对副作用而言是**未知执行结果**，
+    只能交给幂等 ledger + run 级 retry/DLQ + 人工重放处理。
+  - **工具级重试 / 熔断 / 并行调用：不存在**。`RETRY_MAX_ATTEMPTS` 只作用于 LLM
+    客户端；`CircuitBreaker` 只保护 LLM；`agents/base_agent.py` 的工具循环是顺序
+    `for`。这三条由 `tests/unit/test_tool_execution_reliability.py::TestAbsentToolLayerFeatures`
+    **断言其不存在** —— 一旦有人补上，会失败并要求同时补配置、文档与验证，
+    而不是留下一句无法验证的「工具层支持重试」。
 - **应用语义 tracing**（`core/telemetry.py` + 基础设施 `core/tracing.py`）同样是独立
   机制，与 Session Memory / LangGraph Checkpoint / Response Cache / Tool Result Store
   都不是同一个概念。span 语义已接线且本地验证：
@@ -247,9 +325,79 @@ make mcp-verify
   明确**不在**该治理边界内（不得宣称其受 durable HITL 保护）；
   **真实 ERP 写操作 NOT_VERIFIED**（无企业 staging，副作用验证走确定性 staging
   工具，见该文档 §9）。
+  - **治理有效性 fail-closed（本轮修复）**：
+    - **启动校验** `core.config.validate_hitl_settings`：`HITL_ENABLED=true` 但
+      `HITL_HIGH_RISK_TOOLS` 为空**且** `HITL_HIGH_AMOUNT_THRESHOLD<=0` 时
+      **拒绝启动**（`ConfigurationError`）。此前这种配置会让每个工具都判为
+      LOW —— 审批开关开着、闸门什么都不拦、且无任何日志或告警。
+      校验**先于** `DEV_MODE` 早退，因此开发机上同样受约束。
+    - **执行期兜底** `core.hitl.risk.classify_risk(side_effect=...)`：治理开启时，
+      声明了 `side_effect=True` 却被所有规则（显式 risk_level / HIGH 白名单 /
+      金额阈值 / MEDIUM 白名单）漏掉判定的工具一律按 **HIGH** 处理。只读工具
+      完全不受影响，因此普通问答与订单查询的执行路径不变。
+    - 两层互补：启动校验管「配置**根本不可能**产生 HIGH」，执行期兜底管
+      「**个别工具**没被覆盖」。只做其中一层都不够。
+  - **并发审批**：`decide()` 是 `UPDATE ... WHERE status=PENDING` 的**数据库级
+    CAS**；`consume_resume()` 是 `WHERE resumed_at IS NULL`。真实 PostgreSQL +
+    真实线程下 N 个并发决策**恰好一个赢家**、N 个并发恢复**恰好一份载荷**：
+    `tests/integration/runtime/test_hitl_approval_concurrency.py`。
+    「worker 恢复不得绕过审批」的落点是：**没有任何决策时 `consume_resume`
+    返回 None**，恢复路径拿不到任何执行许可。
 - **取消（协作式）**：`POST /api/runs/{run_id}/cancel` 立即置 `CANCELLED`。
   未开始的 run 不会再被执行；**已进入 RUNNING 的 run 不会被强行中断**，
   调用方需轮询确认终态。
+
+## Prometheus 指标暴露链（曾经断开，本轮修复）
+
+**断链有两半，只修一半会得到更隐蔽的故障。**
+
+1. **注册表从未被序列化**：`core/monitoring.py` / `runtime` / `cache` /
+   `tools.mcp_adapter` 在 `prometheus_client` 的 `REGISTRY` 上注册了约 70 个指标，
+   但全仓唯一的 Prometheus 输出 `/metrics/prometheus` 是**手工拼接**的 `csai_*`
+   文本，从不触碰 `REGISTRY`。结果：`increase(agent_run_dead_letter_total[5m]) > 0`
+   引用的是一个**永远不存在的时间序列**，DLQ 告警不可能触发。
+2. **跨进程不可见**：`agent_run_dead_letter_total` 由 **Celery worker 容器**递增
+   （`runtime/run_service.py` → `runtime/metrics.py`），而 Prometheus 抓的是
+   **app 容器**。`prometheus_client` 默认 REGISTRY 是进程内的。只修第 1 半，
+   指标会「存在、target 是 UP、值恒为 0」—— 告警仍然不触发，且更难被发现。
+
+现在的实现：
+
+- `GET /metrics` = `prometheus_client.generate_latest(...)`
+  （`api/routes/monitoring.py::_registry_exposition`，委托 `core/metrics_exposition.py`）。
+- `PROMETHEUS_MULTIPROC_DIR` + `MultiProcessCollector` 聚合 app / worker 共享卷里的
+  mmap 样本；**默认 REGISTRY 被排除**，否则同一批样本会出现两份 sample 行，
+  Prometheus 解析时会丢弃其中一份（worker 的计数照样丢）。
+- compose 用一次性 `metrics-init` 服务在**服务栈启动时清理恰好一次**样本目录 ——
+  每个进程都清会把先启动进程的样本抹掉，指标静默归零。
+- 多进程模式下 gauge 的聚合语义按指标显式声明：比值型用 `mostrecent`
+  （`session_resolution_rate` / `escalation_rate` / `business_cache_hit_rate` /
+  `rag_recall_at_3`），集群视角用 `livesum`（`agent_worker_active` /
+  `agent_run_inflight` / `agent_approval_pending`）—— 默认的 `all` 会把 N 个副本的
+  同一个比值加起来。
+- **暴露面自述**：`prometheus_multiprocess_enabled`（0 = worker 计数对抓取侧
+  不可见）与 `prometheus_exposition_metric_families`（真的被输出的 family 数）。
+  「为什么 DLQ 指标不动」因此是一个可查询的事实，而不是一句需要读代码的说明。
+- 认证：`/metrics` 与 `/metrics/prometheus` 同在 supervisor/admin 面，
+  接受 `X-Admin-Token` 或 `Authorization: Bearer`（`api/utils.py::check_admin_token`）
+  —— 后者是 Prometheus `bearer_token_file` 的标准形式。`monitoring/prometheus.yml`
+  两个 job 都带该凭据；文件缺失时 Prometheus **拒绝启动**（`make monitoring-token`）。
+
+**证据**：`make metrics-exposure-verify` 用真实 `prom/prometheus:v2.51.0` 抓取真实
+暴露函数、真实 worker 进程注入 3 次 dead-letter，
+`AgentRunDeadLetterDetected` 实际进入 `firing`。artifact
+`artifacts/observability/metrics-exposure-<ts>/report.json`（schema
+`metrics-exposure-evidence/v1`，带 `tested_code_sha`）。
+`make alert-rules-test` 是官方 `promtool test rules`，引用**真实规则文件**
+（不是副本，避免漂移），钉住「真会触发」与「历史值不 latching」。
+
+**未验证（NOT_VERIFIED）**：Alertmanager 的 webhook/SMTP 实际投递、整套
+compose 栈上的端到端、Grafana 面板真实渲染、多副本长期运行。
+因此**不得**表述为「生产告警闭环已完成」。
+
+防复发契约：`tests/unit/test_metrics_exposure_contract.py` 断言告警规则与
+Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 scrape job 的路径
+与凭据也被锁定。
 - **Checkpoint**：生产 `postgres`（`AsyncPostgresSaver`）跨 worker/副本共享，
   见上；API 快路径与 worker 异步路径共享同一 checkpoint 后端。
 - **Thread lock（API 执行边界 + worker 共用）**：Redis

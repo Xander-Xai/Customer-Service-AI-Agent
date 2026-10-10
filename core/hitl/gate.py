@@ -69,8 +69,14 @@ def should_propose_approval(
       - ``HITL_ENABLED`` 总开关；
       - ``get_current_run_id()``：只有异步 Run 路径有 durable checkpoint 与
         run 上下文；``/api/chat`` 实时快路径无 run 上下文，拦了也无法挂起/恢复，
-        因此明确不在此拦（该路径的治理边界由部署形态决定，不由本模块假装覆盖）；
+        因此明确不在此拦（该路径的治理边界由 ``is_ungoverned_side_effect``
+        的 fail-closed 拒绝来覆盖，而不是假装也被审批保护）；
       - ``requires_approval(classify_risk(...))``：只有 HIGH。
+
+    ``side_effect`` 必须**由调用方从注册表读出**并传下去：治理已开启时，
+    「有副作用但没人认领风险等级」的工具要按 HIGH 处理（覆盖缺口的 fail-closed），
+    而不是因为「忘了声明 risk_level」就判成 LOW 放行。注册表不可用时按最保守
+    方向处理（``True`` = 视为有副作用）。
     """
     try:
         from core.config import HITL_ENABLED
@@ -89,9 +95,16 @@ def should_propose_approval(
     from .risk import classify_risk, requires_approval
 
     explicit = None
+    side_effect = True  # 无法确认是否有副作用时，向「需要审批」收敛
     if registry is not None and hasattr(registry, "risk_level_for"):
         explicit = registry.risk_level_for(tool_name)
-    return requires_approval(classify_risk(tool_name, explicit=explicit, arguments=arguments))
+        try:
+            side_effect = bool(registry.is_side_effect(tool_name))
+        except Exception:
+            side_effect = True
+    return requires_approval(
+        classify_risk(tool_name, explicit=explicit, arguments=arguments, side_effect=side_effect)
+    )
 
 
 def is_ungoverned_side_effect(

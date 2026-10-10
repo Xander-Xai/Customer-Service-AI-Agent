@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases rag-gold-validate rag-gold-review rag-gold-known-item rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
 
 # ===== 默认目标 =====
 help: ## 显示帮助
@@ -57,13 +57,18 @@ demo-offline: env-test ## 一键离线演示（Mock LLM / 无 API Key / 输出�
 	@python3 scripts/demo_offline.py
 
 # ===== 代码质量 =====
+# canonical lint 工具链是 requirements-dev.txt / .pre-commit-config.yaml 里
+# pin 的 ruff（当前 0.4.0）。若 PATH 上是一个更新的 ruff，同一份代码会因新
+# 规则产生假失败。优先用项目 venv 里 pin 的 ruff，保持本地与 CI 一致。
+RUFF ?= $(shell if [ -x .venv/bin/ruff ]; then echo .venv/bin/ruff; else echo ruff; fi)
+
 lint: ## 代码检查（ruff）
-	ruff check .
-	ruff format --check .
+	$(RUFF) check .
+	$(RUFF) format --check .
 
 format: ## 代码格式化
-	ruff format .
-	ruff check --fix .
+	$(RUFF) format .
+	$(RUFF) check --fix .
 
 # ===== RAG 评估 =====
 eval-rag: ## RAG 检索质量评估（rag-eval-649 的兼容 alias；此为唯一正式评测入口）
@@ -259,9 +264,68 @@ scale-down: ## 恢复单实例
 	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d --scale app=1
 
 # ===== 监控增强 =====
-monitoring-up: ## 启动 Loki 日志聚合
-	@echo "📊 启动 Loki + Promtail..."
-	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.monitoring.yml up -d loki promtail
+monitoring-token: ## 生成 Prometheus 抓取凭据（fail-closed：缺失/占位符直接失败）
+	@python3 scripts/generate_monitoring_token.py
+
+monitoring-up: monitoring-token ## 启动完整监控栈（Prometheus + Grafana + Alertmanager + Loki + Promtail）
+	@echo "📊 启动 Prometheus + Grafana + Alertmanager + Loki + Promtail..."
+	docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.monitoring.yml \
+		up -d prometheus alertmanager grafana loki promtail
+	@echo "✅ 监控栈已拉起。验证指标是否真的被抓到：make metrics-exposure-check"
+
+metrics-exposure-check: ## 指标暴露链路契约（告警/Grafana 引用的每个指标名都可达）
+	@python3 -m pytest tests/unit/test_metrics_exposure_contract.py tests/unit/test_metrics_multiprocess.py tests/unit/test_compose_metrics_topology.py -v --tb=short -p no:cacheprovider
+
+alert-rules-test: monitoring-token ## 官方 promtool 规则单测（DLQ 告警是否真会 firing / 是否会 latching）
+	@echo "🧪 promtool check config + test rules（真实 Prometheus 镜像）..."
+	@docker run --rm \
+		-v "$(PWD)/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+		-v "$(PWD)/monitoring/alert_rules.yml:/etc/prometheus/rules/alert_rules.yml:ro" \
+		-v "$(PWD)/deploy/monitoring/secrets:/etc/prometheus/secrets:ro" \
+		--entrypoint promtool prom/prometheus:v2.51.0 check config /etc/prometheus/prometheus.yml
+	@docker run --rm -v "$(PWD)/monitoring:/etc/prometheus:ro" \
+		--entrypoint promtool prom/prometheus:v2.51.0 test rules /etc/prometheus/alert_rules_test.yml
+
+metrics-exposure-verify: ## 真实 Prometheus 端到端：DLQ 告警是否真的会触发（不依赖本地 token）
+	@bash scripts/verify_metrics_exposure.sh
+
+# ===== Agent 行为评测（Agent Eval V1）=====
+# 真实编译图 + 脚本化 LLM，零出网、可重复。它**不是**单元测试通过率：
+# 分母是 case 数，失败 case 照常计入，NOT_MEASURED 不会被渲染成 0%。
+# 见 docs/reference/agent-evaluation.md
+agent-eval: ## Agent 行为评测（真实图回放 + evidence artifact）
+	@python3 scripts/evaluate_agent.py
+
+agent-eval-contract: ## agent-eval 契约守卫（指标名 / 证据边界 / 降级标记与生产代码同步）
+	@python3 -m pytest tests/unit/test_agent_eval_contract.py tests/unit/test_hitl_real_graph_gate.py -v --tb=short -p no:cacheprovider
+
+agent-eval-annotation-status: ## 标注状态报告（human_confirmed 占比 + 各指标分母）
+	@python3 scripts/evaluate_agent.py --print-annotation-status
+
+agent-eval-cases: ## 重新生成候选数据集（全部标为 llm_candidate，需人工确认）
+	@python3 scripts/generate_agent_eval_cases.py
+
+# ===== RAG 标注与消融 =====
+rag-gold-validate: ## RAG gold 标注契约校验（rag-gold-label/v1，含语料存在性检查）
+	@python3 scripts/validate_gold_labels.py tests/eval/gold_labels/template.jsonl --no-corpus
+	@python3 scripts/validate_gold_labels.py tests/eval/gold_labels/known_item_gold.jsonl \
+		--corpus data/knowledge_base/knowledge_base_5000.jsonl
+
+rag-gold-review: ## 生成待人工标注工作清单（含语料存在性与覆盖率统计）
+	@python3 scripts/build_rag_gold_review_worklist.py
+
+rag-gold-known-item: ## 生成 known-item CONSTRUCTED gold（构造保证相关，非人工判定）
+	@python3 scripts/build_rag_known_item_gold.py
+
+rag-ablation: ## 4 组检索消融（可测的给数字，不可用的输出 BLOCKED，绝不估算）
+	@python3 scripts/run_rag_ablation.py --negative-control
+
+# ===== 运行时与性能证据 =====
+runtime-report: ## 汇总分布式运行时验收报告（副作用按真实执行次数计）
+	@python3 scripts/report_distributed_runtime.py
+
+perf-evidence: ## 性能/成本门禁与证据（无真实 provider 时结构化 BLOCKED）
+	@python3 scripts/measure_performance.py --offline-checks
 
 # ===== 部署（脚本方式）=====
 deploy-prod: ## 使用 deploy.sh 部署生产环境

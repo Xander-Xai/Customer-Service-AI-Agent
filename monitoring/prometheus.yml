@@ -1,4 +1,15 @@
 # Prometheus 配置 — 药妆智多星客服系统
+#
+# 抓取凭据（fail-closed）
+# -----------------------
+# 两个 job 都必须携带 `MONITORING_ADMIN_TOKEN`：应用的 `/metrics` 与
+# `/metrics/prometheus` 都在 supervisor/admin 认证面内，没有凭据一律 401。
+# Prometheus 的标准形式是 `bearer_token_file`，它发送
+# `Authorization: Bearer <file content>` —— 应用侧由
+# `api.utils.check_admin_token` 接受该形式。
+#
+# 先执行 `make monitoring-token` 生成该文件；缺失时 Prometheus **拒绝启动**
+# （而不是静默采集不到任何数据）。这是刻意选择：采集不到要响亮失败。
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -13,8 +24,32 @@ alerting:
         - targets: ['alertmanager:9093']
 
 scrape_configs:
+  # Job 1 — 标准注册表（prometheus_client REGISTRY 全量）。
+  #
+  # 这一层**才是** `core/monitoring.py` / `runtime/` / `cache/` /
+  # `tools.mcp_adapter` 注册的约 70 个指标真正被 Prometheus 收到的地方，
+  # 包括 DLQ 闭环依赖的 `agent_run_dead_letter_total`、
+  # `agent_run_dead_letter_replay_total`、`agent_run_retry_total`，以及全部
+  # HITL / tool-result / MCP 指标。
+  #
+  # 历史断链（P0-1）：此前只有下面 Job 2 一个抓取点，而它手工拼接 10 行
+  # `csai_*` 文本、从不序列化 REGISTRY —— 于是这约 70 个指标一条都没进去，
+  # `increase(agent_run_dead_letter_total[5m]) > 0` 引用的是一个永不存在的时间序列。
+  - job_name: 'csai-registry'
+    metrics_path: '/metrics'
+    bearer_token_file: '/etc/prometheus/secrets/monitoring_admin_token'
+    scheme: http
+    static_configs:
+      - targets: ['app:8000']
+        labels:
+          service: 'customer-service-ai'
+    scrape_interval: 10s
+
+  # Job 2 — 业务聚合 `csai_*`（Grafana csai-overview 看板 + 4 条历史告警规则）。
   - job_name: 'csai-app'
     metrics_path: '/metrics/prometheus'
+    bearer_token_file: '/etc/prometheus/secrets/monitoring_admin_token'
+    scheme: http
     static_configs:
       - targets: ['app:8000']
         labels:

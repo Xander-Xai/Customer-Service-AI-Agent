@@ -13,12 +13,12 @@
 
 ## 当前接口总览
 
-<!-- openapi-surface: paths=62 operations=64 api_operations=58 -->
+<!-- openapi-surface: paths=63 operations=65 api_operations=58 -->
 
 | 类型 | 数量 | 来源 |
 |------|------|------|
-| HTTP 路径 | **62** | `app.openapi()["paths"]` |
-| HTTP 操作 | **64** | 同一路径可含多 method |
+| HTTP 路径 | **63** | `app.openapi()["paths"]` |
+| HTTP 操作 | **65** | 同一路径可含多 method |
 | `/api/*` 业务操作 | **58** | 认证、对话、多模态、异步 Run、人工审批、会话、监控、知识库、缓存、告警、Prompt 管理 |
 | 非 `/api/*` 路径 | 6 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话（OpenAPI 不含 WebSocket 路由，单独列出） |

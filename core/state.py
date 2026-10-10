@@ -15,6 +15,15 @@ class AgentState(TypedDict, total=False):
     cached: bool
     agents_used: list[str]
     resolution_status: str  # resolved | uncertain | failed | escalated
+    # v6.4: 业务结果契约（core.outcome.Outcome）——区分"交付"与"解决"。
+    # degraded 为真表示 LLM/工具/检索发生降级，交付的可能是兜底文案。
+    degraded: bool
+    outcome: object  # core.outcome.Outcome（避免 core.state -> core.outcome 循环）
+    # 真实执行过的工具调用（{"tool": str, "ok": bool}）。由
+    # ``agents/base_agent.py::_record_tool_execution`` 在工具真的返回后追加；
+    # 被 HITL 摘出、从未执行的调用**不会**出现（它们只在 pending_actions）。
+    # 它是 core.outcome 判定"业务解决有独立证据"的唯一执行侧信号。
+    tool_executions: list[dict]
     trace_id: str
     stream_callback: object  # v4.2: SSE 流式回调
     # v5.1: 多模态扩展

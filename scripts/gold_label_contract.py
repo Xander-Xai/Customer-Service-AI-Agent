@@ -46,8 +46,29 @@ Trust rules enforced by :func:`validate_records`
 6. a ``category_random_match`` label can never be ``JUDGED`` (pseudo-gold);
 7. an ``llm_suggested`` label can only be ``DRAFT_UNVERIFIED`` (LLM candidates
    are never trusted gold until independently confirmed);
-8. only ``JUDGED`` may carry a non-null ``relevance_grade``; ``EXCLUDED`` and
-   ``UNDETERMINABLE`` must state an ``exclusion_reason``.
+8. only ``JUDGED`` and ``CONSTRUCTED`` may carry a non-null ``relevance_grade``;
+   ``EXCLUDED`` and ``UNDETERMINABLE`` must state an ``exclusion_reason``;
+9. a ``CONSTRUCTED`` label is **mechanically derived**, not judged: it requires a
+   non-empty ``derivation_rule`` and is reported in a **separate population**
+   from ``JUDGED`` — the two must never be merged into one accuracy number.
+
+Why ``CONSTRUCTED`` exists (and why it is not a loophole)
+--------------------------------------------------------
+The honest end state for this repository is: real-query relevance metrics are
+``NOT_VERIFIED`` until a human judges them. But that leaves *no* measurable
+retrieval signal at all while annotation is pending.
+
+``CONSTRUCTED`` closes that gap **without** inventing relevance judgements. A
+constructed label's query is derived from the target document by a stated rule
+(e.g. "query := the document's own title"), so the target is relevant **by
+construction**, and any reviewer can verify the derivation by reading the
+document. It measures *lexical retrievability of the index*, which is a real
+(retrieval-stack correctness) property — and it is labelled as such, never as
+"search quality".
+
+The rule that keeps it honest: ``CONSTRUCTED`` metrics are always reported
+under their own population. ``annotation_method`` is never counted as
+human-verified, and :func:`is_human_verified` returns ``False`` for it.
 
 Usage::
 
@@ -69,12 +90,15 @@ LABEL_STATUS_DRAFT = "DRAFT_UNVERIFIED"
 LABEL_STATUS_JUDGED = "JUDGED"
 LABEL_STATUS_EXCLUDED = "EXCLUDED"
 LABEL_STATUS_UNDETERMINABLE = "UNDETERMINABLE"
+#: Mechanically constructed gold (see module docstring). Never merged with JUDGED.
+LABEL_STATUS_CONSTRUCTED = "CONSTRUCTED"
 LABEL_STATUSES = frozenset(
     {
         LABEL_STATUS_DRAFT,
         LABEL_STATUS_JUDGED,
         LABEL_STATUS_EXCLUDED,
         LABEL_STATUS_UNDETERMINABLE,
+        LABEL_STATUS_CONSTRUCTED,
     }
 )
 
@@ -82,12 +106,15 @@ METHOD_HUMAN = "human"
 METHOD_LLM_VERIFIED = "llm_judge_human_verified"
 METHOD_LLM_SUGGESTED = "llm_suggested"
 METHOD_CATEGORY_RANDOM = "category_random_match"
+#: Query text is derived from the target document by an explicit, auditable rule.
+METHOD_DERIVED = "derived_from_source_document"
 ANNOTATION_METHODS = frozenset(
     {
         METHOD_HUMAN,
         METHOD_LLM_VERIFIED,
         METHOD_LLM_SUGGESTED,
         METHOD_CATEGORY_RANDOM,
+        METHOD_DERIVED,
     }
 )
 HUMAN_VERIFIED_METHODS = frozenset({METHOD_HUMAN, METHOD_LLM_VERIFIED})
@@ -108,6 +135,10 @@ REQUIRED_FIELDS = (
     "reviewed_at",
     "label_status",
     "exclusion_reason",
+    # 仅 CONSTRUCTED 需要非空：记录"查询是怎么从文档推出来的"。
+    # 其它状态为 null。放在 REQUIRED_FIELDS 里是为了让字段**必须显式出现** ——
+    # 缺失与"刻意留空"在审计时是两件事。
+    "derivation_rule",
 )
 
 _HASH_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -241,6 +272,39 @@ def validate_records(
             if grade is not None:
                 errors.append(f"{ref}: category_random_match must not carry a relevance_grade")
 
+        # Rule 9: CONSTRUCTED labels are mechanically derived, not judged.
+        if status == LABEL_STATUS_CONSTRUCTED:
+            if not _is_nonempty_str(doc_id):
+                errors.append(f"{ref}: CONSTRUCTED requires a doc_id")
+            if not _is_nonempty_str(record["evidence_span"]):
+                errors.append(
+                    f"{ref}: CONSTRUCTED requires a non-empty evidence_span "
+                    "(the verbatim source text the query was derived from)"
+                )
+            if not _is_nonempty_str(record["derivation_rule"]):
+                errors.append(
+                    f"{ref}: CONSTRUCTED requires a non-empty derivation_rule "
+                    "(how the query was derived from the document)"
+                )
+            if not _is_nonempty_str(record["annotator"]):
+                errors.append(f"{ref}: CONSTRUCTED requires an annotator (the deriving procedure)")
+            if grade is None:
+                errors.append(f"{ref}: CONSTRUCTED requires a relevance_grade")
+            if method != METHOD_DERIVED:
+                errors.append(
+                    f"{ref}: CONSTRUCTED requires annotation_method={METHOD_DERIVED!r}, got {method!r}"
+                )
+            if _is_nonempty_str(record["reviewed_at"]):
+                errors.append(
+                    f"{ref}: CONSTRUCTED must NOT claim a human review timestamp — "
+                    "it is mechanically derived, not judged. Use JUDGED for human labels."
+                )
+        elif method == METHOD_DERIVED:
+            errors.append(
+                f"{ref}: annotation_method={METHOD_DERIVED!r} is only valid with "
+                f"label_status={LABEL_STATUS_CONSTRUCTED!r}, got {status!r}"
+            )
+
         # Rule 7: LLM suggestions are never trusted gold.
         if method == METHOD_LLM_SUGGESTED and status != LABEL_STATUS_DRAFT:
             errors.append(
@@ -267,10 +331,10 @@ def validate_records(
             elif not _ISO_UTC_RE.match(reviewed_at):
                 errors.append(f"{ref}: reviewed_at must be ISO-8601 UTC, got {reviewed_at!r}")
 
-        elif grade is not None:
+        elif status not in (LABEL_STATUS_JUDGED, LABEL_STATUS_CONSTRUCTED) and grade is not None:
             errors.append(
                 f"{ref}: relevance_grade must be null unless label_status is "
-                f"{LABEL_STATUS_JUDGED} (got status={status!r})"
+                f"{LABEL_STATUS_JUDGED} or {LABEL_STATUS_CONSTRUCTED} (got status={status!r})"
             )
 
         if status in (LABEL_STATUS_EXCLUDED, LABEL_STATUS_UNDETERMINABLE) and not _is_nonempty_str(
@@ -290,8 +354,23 @@ def summarize(records: Iterable[dict[str, Any]]) -> dict[str, int]:
     return counts
 
 
+def is_human_verified(record: dict[str, Any]) -> bool:
+    """该记录的 gold 是否来自**人工**判定。
+
+    ``CONSTRUCTED`` 永远返回 ``False``：它是由规则推导出来的，不是人判的。
+    任何把两者混进同一个分母的统计都是在偷换概念。
+    """
+    return (
+        record.get("label_status") == LABEL_STATUS_JUDGED
+        and record.get("annotation_method") in HUMAN_VERIFIED_METHODS
+    )
+
+
 __all__ = [
     "ANNOTATION_METHODS",
+    "is_human_verified",
+    "METHOD_DERIVED",
+    "LABEL_STATUS_CONSTRUCTED",
     "HUMAN_VERIFIED_METHODS",
     "LABEL_STATUSES",
     "LABEL_STATUS_DRAFT",
