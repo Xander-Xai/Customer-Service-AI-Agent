@@ -5,8 +5,8 @@
 >
 > | | |
 > |---|---|
-> | Merged SHA on `main` | **`1c6047c59745d8d7c7207160ec6d4b435438b1e8`** |
-> | Merge commit | `1c6047c` — "Merge pull request #4 …" |
+> | Stack merge commit (PR #4) | **`1c6047c59745d8d7c7207160ec6d4b435438b1e8`** |
+> | `main` HEAD | `b84bd646472e176474577c69634509112f4fcc69` (that merge + one docs commit, PR #5) |
 > | Commits integrated | 15 (`main b6757b4` → `870a85a`), all preserved |
 > | Tree check | `git diff 870a85a 1c6047c` → **0 files differing** |
 > | `main` CI | **all jobs green** (incl. `build-and-push`) |
