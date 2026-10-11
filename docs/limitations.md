@@ -146,11 +146,11 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **真实用户流量下的行为** | **NOT_VERIFIED** | — |
 | **大规模 queue backlog** | **NOT_VERIFIED** | 无压测与容量模型 |
 | **K8s autoscaling / multi-region** | **NOT_VERIFIED** | 无 K8s manifest |
-| 卡死 run 兜底扫描 | **Partial** | `scripts/reconcile_stuck_runs.py` 是**手动 / cron 脚本**，没接 Celery Beat，也无 CI 契约保证会跑 |
+| 卡死 run 兜底扫描 | **Partial** | `scripts/reconcile_stuck_runs.py` 是**手动 / cron 脚本**，没接 Celery Beat，也无 CI 契约保证会跑。扫描现覆盖 `RETRYING`/`QUEUED` **及 lease 已过期的 `RUNNING`**（P0 修复）；扫描是全局的 `ORDER BY lease_expires_at LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口 |
 | **正确性语义是 at-least-once，不是 exactly-once** | 设计如此 | `acks_late` + `reject_on_worker_lost` + `visibility_timeout`。正确性靠三层幂等（run / thread / 工具） |
 | Run 事件流 | **不是真相源** | Redis Stream → SSE，best-effort 可续读，**非 exactly-once**。断线会丢事件（可续读，但非完整） |
 | DLQ 重放 | **需人工** | 复用原 `run_id`（避免绕过工具幂等键），无自动重放策略 |
-| checkpoint 恢复用例的 liveness 预算 | **已硬化** | SIGKILL 恢复用例在全套并发跑时曾对固定 150s 预算敏感（1 次观察到卡在 `RUNNING`/attempt=2）。liveness 预算改为可配置（`RUNTIME_RECOVERY_WAIT_SECONDS`，默认 300s）；**正确性断言未放宽**（仍要求 `SUCCEEDED` + 续跑证据） |
+| checkpoint 恢复用例曾卡在 `RUNNING`/attempt=2 | **已按根因修复** | 此前被记成「对 150s liveness 预算敏感」并靠调大 timeout 缓解——**那是错误诊断**，只掩盖症状。真正原因：worker lease 在图执行途中过期 → 完成提交被 owner CAS **正确**拒绝 → 任务被 ACK → `list_recoverable_runs` 只扫 `RETRYING`/`QUEUED` → run 永久停在 `RUNNING`（无终态、无 DLQ、无告警）。已修复：续租不再因一次瞬时异常永久中断；reconciler 复用既有原子 `takeover_running` 谓词回收过期 lease 的 `RUNNING`，attempt 耗尽落 DLQ；`WAITING_APPROVAL` 仍不自动重发。回归：`tests/unit/test_stale_run_reconciliation.py` + `tests/integration/runtime/test_stale_run_reconciliation_pg.py`（真实 PostgreSQL）。`RUNTIME_RECOVERY_WAIT_SECONDS` 的可配置化保留，但**不再**被当作该问题的修复 |
 | 结构化故障注入报告 | **Implemented** | `make runtime-report`（`scripts/report_distributed_runtime.py`）聚合 e2e/chaos/verify，输出 git SHA + 环境 + 7 个故障场景 + 副作用计数 + 剩余风险。artifact：`artifacts/distributed-runtime-summary/<ts>.json` |
 
 ---

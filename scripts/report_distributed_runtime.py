@@ -144,10 +144,22 @@ REMAINING_RISKS: tuple[dict[str, str], ...] = (
         "自动 re-issue 机制未实现",
     },
     {
-        "risk": "worker SIGKILL 恢复用例在全套并发跑时曾对 150s liveness 预算敏感（1 次观察到卡在 RUNNING/attempt=2）",
-        "evidence": "tests/integration/runtime/test_worker_checkpoint_recovery.py",
-        "repro": "RUNTIME_RECOVERY_WAIT_SECONDS=300 make runtime-e2e（已把预算可配置化）",
-        "mitigation_status": "已把 liveness 预算改为可配置（默认 300s），正确性断言未放宽",
+        # 这条风险此前被记成「对 150s liveness 预算敏感」，缓解措施是「把预算改成
+        # 可配置」。那个诊断是错的：把 timeout 调大只掩盖症状。真正原因是 lease
+        # 过期后完成提交被拒、任务被 ACK，而 reconciler 只扫 RETRYING/QUEUED，
+        # 于是 run 永久停在 RUNNING——一个**活性缺陷**，不是时序抖动。
+        # 已按根因修复（见 runtime/repository.py::list_stale_running_runs）。
+        "risk": "【已按根因修复】worker lease 在图执行途中过期 -> 完成提交被 owner CAS "
+        "拒绝 -> 任务被 ACK -> reconciler 不扫 RUNNING -> run 永久停在 RUNNING",
+        "evidence": "tests/unit/test_stale_run_reconciliation.py（13）、"
+        "tests/integration/runtime/test_stale_run_reconciliation_pg.py（7，真实 PostgreSQL）；"
+        "确定性复现：tests/integration/test_worker_crash_recovery.py 修复前 3/3 失败",
+        "repro": "make runtime-e2e",
+        "mitigation_status": "已修复：续租不再因一次瞬时异常永久中断；reconciler 复用既有原子 "
+        "takeover_running 谓词回收过期 lease 的 RUNNING；attempt 耗尽落 DLQ；"
+        "WAITING_APPROVAL 仍不自动重发（保留人工边界）。"
+        "注：RUNTIME_RECOVERY_WAIT_SECONDS 可配置化本身保留，但**不再**被当作该问题的修复",
+        "residual_risk": "8 轮真实基础设施回归全绿；仍属 Level 2（非生产多副本验证）",
     },
 )
 
