@@ -10,8 +10,9 @@
 
 | Field | Value |
 |---|---|
-| Code under test | PR #4 head, after the P0 lease-recovery fix |
-| Branch | `fix/finalization-eval-runtime-observability` |
+| Code under test | PR #4 head `870a85a`, **merged to `main` as `1c6047c`** |
+| `main` CI | all jobs green, including `build-and-push` |
+| Evidence binding | `artifacts/distributed-runtime-summary/<ts>.json` → `git_sha: 870a85a…`, `dirty: false`, `publication_status: REPRODUCIBLE` |
 | Real infrastructure | PostgreSQL 15.18 (`infra-postgres-1`, port 5432), Redis 7.4.9 (`infra-redis-1`, port 6379) |
 | Checkpoint backend | real `AsyncPostgresSaver` (postgres), not memory |
 | Transport | real Celery prefork workers, `acks_late` + `task_reject_on_worker_lost` + `visibility_timeout` |
@@ -187,7 +188,44 @@ SLO, no real ERP writes.
 
 ---
 
-## 5. Evidence-level boundaries (unchanged and still binding)
+## 5. Validation lanes executed this pass
+
+Run against `870a85a` (tree clean), PostgreSQL 15.18 + Redis 7.4.9.
+
+| Lane | Result |
+|---|---|
+| `make test` (full unit+integration+e2e, offline) | 3237 unit passed, 5 skipped |
+| `make runtime-e2e` (real PG + Redis) | **110 passed** (103 before the new P0 suite) |
+| `make runtime-chaos` | **PASS** — SIGKILL → lease expiry → checkpoint resume, side effect once |
+| `make runtime-verify` | **PASS**, `tested_code_sha == HEAD`, `dirty: false` |
+| `make runtime-report` | `overall_status: PASS`, `production_status: NOT_VERIFIED`, 7 fault scenarios |
+| `make metrics-exposure-check` | 21 passed |
+| `make metrics-exposure-verify` (real Prometheus) | **PASS** — target UP, cross-process aggregation live, `AgentRunDeadLetterDetected` reached **FIRING** |
+| `make alert-rules-test` (official `promtool`) | 5 rules valid, unit tests SUCCESS |
+| `make agent-eval` | **INCONCLUSIVE** — 9 gates PASS, `route_accuracy: NOT_AVAILABLE` (no human labels) |
+| `make agent-eval-contract` | 29 passed |
+| `make agent-eval-real` | **NOT_MEASURED** — no credentials, no authorization; **no external request made** |
+| `make lint` (pinned `ruff==0.4.0`) | clean |
+| `make audit-docs` | 58 documents OK |
+
+### Lanes deliberately not run, and why
+
+| Lane | Why not |
+|---|---|
+| `make agent-eval-real` | Real-model lane. No `*_API_KEY` present in any env file **and** no budget/credential authorization. It correctly exits `NOT_MEASURED` without touching the network. |
+| `make rag-eval-649` and formal RAG ablation | Formal metrics require human JUDGED relevance labels. Status stays **`NOT_MEASURABLE`**; no Hit@K/MRR/NDCG may be quoted. |
+
+### What the four new metrics are for
+
+`agent_worker_heartbeat_error_total`, `agent_run_ownership_lost_commit_total`,
+`agent_run_stale_reclaimed_total`, `agent_run_stale_dead_letter_total` — all four
+verified registered and exposed on the live registry after increment, so a
+stranded run is now *observable* rather than silent. They are not referenced by
+any alert rule yet; that is follow-up work, not a claim of a closed loop.
+
+---
+
+## 6. Evidence-level boundaries (unchanged and still binding)
 
 | Area | Level | What it does NOT mean |
 |---|---|---|

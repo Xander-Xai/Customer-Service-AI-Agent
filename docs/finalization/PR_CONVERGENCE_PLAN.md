@@ -1,8 +1,20 @@
 # PR Convergence Plan — #1 → #2 → #3 → #4, and what was actually done
 
-> **Outcome first:** the stack was collapsed into **one** integrated PR (#4
-> retargeted to `main`). No force-push, no rebase, no history rewrite. Sections
-> 1–4 are the audited plan; §5 is what was executed.
+> **Outcome: DONE.** The stack was collapsed into **one** integrated PR and
+> merged. No force-push, no rebase, no history rewrite.
+>
+> | | |
+> |---|---|
+> | Merged SHA on `main` | **`1c6047c59745d8d7c7207160ec6d4b435438b1e8`** |
+> | Merge commit | `1c6047c` — "Merge pull request #4 …" |
+> | Commits integrated | 15 (`main b6757b4` → `870a85a`), all preserved |
+> | Tree check | `git diff 870a85a 1c6047c` → **0 files differing** |
+> | `main` CI | **all jobs green** (incl. `build-and-push`) |
+> | Remote branches after | `main` only |
+> | PR #1–#4 | all MERGED; Superseded notes posted on #1/#2/#3 |
+
+Sections 1–4 are the audited plan; §5 is what was executed; §8 records the
+final state.
 
 ---
 
@@ -93,3 +105,59 @@ with **no semantic conflict**.
 - No PR force-merged; branch protection (`test 3.10/3.11/3.12`, `dev-compat`,
   `security`, `runtime-e2e` required) stayed in force throughout.
 - No PR closed before its replacement actually merged.
+- Merge happened only after: all six required checks green, evidence
+  `tested_code_sha` == `git HEAD` with `dirty: false`, and the P0 regression
+  suites green on real PostgreSQL.
+
+## 8. Final state, as executed
+
+### 8.1 What GitHub did on its own
+
+When #4 merged, GitHub **auto-marked #1, #2 and #3 as MERGED** (their heads are
+ancestors of the merge commit, so their commits landed in the base) and
+**auto-deleted all four `fix/*` branches** via the repository's
+delete-branch-on-merge setting. The `--delete-branch=false` flag applied to #4
+only; the other three were closed as a side effect of being stacked beneath it.
+
+This was verified safe before accepting it:
+
+```
+b96c740  reachable from main   OK
+821037a  reachable from main   OK
+4944044  reachable from main   OK
+1c61ae9  reachable from main   OK
+92aac78  reachable from main   OK      (P0 fix)
+870a85a  reachable from main   OK
+git diff 870a85a 1c6047c  →  0 files differing
+```
+
+Deleting a branch that is an ancestor of `main` destroys nothing: the commits
+remain reachable from `main` permanently.
+
+### 8.2 Recovery, had anything been needed
+
+```bash
+# restore any deleted branch from its recorded SHA
+git branch fix/agent-runtime-eval-finalization          b96c740d8c65e8ae84e71660f73935ae2b77e5f4
+git branch fix/eval-reviewed-gold-credibility           821037a4ee939e3b1e567c53c252c6f53924fc0a
+git branch fix/runtime-hitl-reliability-hardening       4944044653e406d7d9661ed4a39fa131f9c1375e
+git branch fix/finalization-eval-runtime-observability 870a85a94e1a72cabdea2c02e9183645326d02bd
+```
+
+| Branch | Head SHA at merge |
+|---|---|
+| `fix/agent-runtime-eval-finalization` | `b96c740d8c65e8ae84e71660f73935ae2b77e5f4` |
+| `fix/eval-reviewed-gold-credibility` | `821037a4ee939e3b1e567c53c252c6f53924fc0a` |
+| `fix/runtime-hitl-reliability-hardening` | `4944044653e406d7d9661ed4a39fa131f9c1375e` |
+| `fix/finalization-eval-runtime-observability` | `870a85a94e1a72cabdea2c02e9183645326d02bd` |
+
+### 8.3 Gates checked before merging
+
+| Gate | Result |
+|---|---|
+| `test (3.10/3.11/3.12)`, `dev-compat`, `security`, `runtime-e2e` | SUCCESS |
+| `lint`, `agent-eval`, `metrics-alerting` | SUCCESS |
+| `build-and-push` / `deploy` | skipped on PR, `build-and-push` green on `main` |
+| Review threads / review comments | none outstanding; policy requires 0 approvals |
+| Evidence `tested_code_sha` vs `git HEAD` | `870a85a…` == `870a85a…`, `dirty: false` |
+| Local P0 suites | unit 13/13, real PostgreSQL 7/7, `make runtime-e2e` 110 passed |
