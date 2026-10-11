@@ -10,7 +10,7 @@
 
 | Field | Value |
 |---|---|
-| Code under test | PR #4 head `870a85a`, **merged to `main` as `1c6047c`** |
+| Code under test | PR #4 head `870a85a`, merged to `main` as `1c6047c` (current `main` HEAD is `b84bd64`, that merge plus one docs commit) |
 | `main` CI | all jobs green, including `build-and-push` |
 | Evidence binding | `artifacts/distributed-runtime-summary/<ts>.json` → `git_sha: 870a85a…`, `dirty: false`, `publication_status: REPRODUCIBLE` |
 | Real infrastructure | PostgreSQL 15.18 (`infra-postgres-1`, port 5432), Redis 7.4.9 (`infra-redis-1`, port 6379) |
