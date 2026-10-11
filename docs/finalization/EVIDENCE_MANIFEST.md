@@ -129,14 +129,14 @@ assertion was relaxed. The recovery test then passes and runs ~6x faster
 | File | Tests | Pre-fix | Post-fix |
 |---|---|---|---|
 | `tests/unit/test_stale_run_reconciliation.py` | 13 | **9 fail** | 13 pass |
-| `tests/integration/runtime/test_stale_run_reconciliation.py` (real PostgreSQL) | 7 | **5 fail** | 7 pass |
+| `tests/integration/runtime/test_stale_run_reconciliation_pg.py` (real PostgreSQL) | 7 | **5 fail** | 7 pass |
 
 Covered: lease race, stale-worker write-back rejection, renewal survival,
 reclaim → takeover → terminal state, attempt-exhaustion DLQ, DLQ replay
 identity, `WAITING_APPROVAL` non-reclamation, renewed-lease protection,
 concurrent reconcilers, concurrent challengers.
 
-`tests/integration/runtime/test_stale_run_reconciliation.py` sits **inside**
+`tests/integration/runtime/test_stale_run_reconciliation_pg.py` sits **inside**
 `tests/integration/runtime/`, so `make runtime-e2e` now covers this path. It did
 not before — which is a large part of why the defect survived.
 

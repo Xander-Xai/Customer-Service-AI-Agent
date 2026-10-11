@@ -59,7 +59,7 @@ deliberately strands runs — the defect is real, that particular corroboration
 was not, and the write-up says so."
 
 **Proof:** `tests/unit/test_stale_run_reconciliation.py` (13 tests, 9 fail
-pre-fix), `tests/integration/runtime/test_stale_run_reconciliation.py` (7 tests,
+pre-fix), `tests/integration/runtime/test_stale_run_reconciliation_pg.py` (7 tests,
 5 fail pre-fix), `docs/finalization/EVIDENCE_MANIFEST.md` §2.
 
 ### B. Human-in-the-Loop governance for high-risk side effects
