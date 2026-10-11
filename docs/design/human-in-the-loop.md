@@ -33,12 +33,40 @@
 
 1. **工具显式声明**（`ToolRegistry.register(..., risk_level="high")`）——
    风险语义写在工具定义处，而不是散落在环境变量里；
-2. **工具名白名单**（`HITL_HIGH_RISK_TOOLS` / `HITL_MEDIUM_RISK_TOOLS`）——
-   逗号分隔、大小写不敏感；
+2. **工具名白名单（HIGH）**（`HITL_HIGH_RISK_TOOLS`）——逗号分隔、大小写不敏感；
 3. **金额阈值**（`HITL_HIGH_AMOUNT_THRESHOLD`）——提案参数中任一金额字段
    ≥ 阈值即判 HIGH。**覆盖白名单之外的大额写操作**：一个没被列入白名单的工具，
    改一次订单只退 50 元是 MEDIUM，改成退 50000 元就是 HIGH；
-4. **默认 LOW**。
+4. **工具名白名单（MEDIUM）**（`HITL_MEDIUM_RISK_TOOLS`）；
+5. **未认领风险等级的有副作用工具 → HIGH**（仅在 `HITL_ENABLED=true` 时生效）；
+6. **默认 LOW**。
+
+### 两条互补的 fail-closed（治理必须真的生效）
+
+"把 HIGH 当 LOW → 高风险写操作静默放行"是本能力最严重的失效方式。它有两条
+独立的成因，两条都被堵住了，但**不能互相替代**：
+
+**(a) 启动校验 —— 配置根本不可能产生任何 HIGH**
+`core.config.validate_hitl_settings`：若 `HITL_ENABLED=true` 而
+`HITL_HIGH_RISK_TOOLS` 为空**且** `HITL_HIGH_AMOUNT_THRESHOLD<=0`，判定链一路落到
+默认值，**每个工具都是 LOW**，审批闸门形同虚设 —— 且没有任何日志、指标或告警。
+这种配置发生在最常见的事故形态下：开了开关、忘了配规则。因此选择**拒绝启动**
+（`ConfigurationError`）。校验**先于** `DEV_MODE` 早退，开发机同样受约束。
+
+**(b) 执行期兜底 —— 个别工具没被任何规则覆盖**
+优先级链的第 5 条：治理开启时，一个声明了 `side_effect=True` 却既没写
+`risk_level`、又不在任何白名单、金额也够不到阈值的工具，属于**覆盖缺口**，
+不是「有意放行」，一律按 HIGH 处理。有意放行有专门的表达方式 ——
+写进 `HITL_MEDIUM_RISK_TOOLS`（它在链上更靠前，优先级更高）。
+
+**只读工具完全不受第 5 条影响**（`side_effect=False`），因此普通问答、订单查询
+的执行路径与延迟语义没有任何变化 —— 治理收紧不能以误伤正常流量为代价。
+本仓库 4 个 ERP 工具全部是只读（`side_effect=False`），所以兜底没有把它们拖进审批。
+
+反过来说：`classify_risk` 的 `side_effect` 参数默认 `False` 是刻意的 ——
+调用方必须**显式**从注册表读出这个事实，而不是靠「记得传」。真正的判据是
+`ToolRegistry.is_side_effect`（注册表声明），契约见
+`tests/unit/test_hitl_fail_closed.py::TestGatePassesRegistryFacts`。
 
 ### 三档语义
 
@@ -52,7 +80,8 @@
 
 `requires_approval()` 只认 HIGH。`HITL_ENABLED=false` 或没有 run 上下文
 （`/api/chat` 实时快路径）时**不拦**——快路径没有 durable checkpoint，
-拦了也无法挂起与恢复，假装覆盖反而是虚假的安全感。
+拦了也无法挂起与恢复，假装覆盖反而是虚假的安全感。该路径的补偿是
+**拒绝**无治理边界的副作用调用（`is_ungoverned_side_effect`），而不是放行。
 
 ### 一处刻意的 fail-closed
 
@@ -261,6 +290,8 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 | `test_hitl_api.py` | RBAC、身份不可空、自审 403、过期 409、重复决策幂等、投递失败不回滚 |
 | `test_hitl_run_status.py` | `WAITING_APPROVAL` 非终态、不进轮询、无 `→ QUEUED` 边 |
 | `test_hitl_executor.py` | 挂起非成功非失败、lease 清空、恢复不递增 attempt |
+| `test_hitl_fail_closed.py` | **启动校验**（无规则即拒绝启动）+ **执行期兜底**（未认领的有副作用工具 = HIGH）+ 只读工具不被误伤 + 显式声明/白名单仍优先 |
+| `test_hitl_approval_concurrency.py`（真实 PG） | 并发决策**恰好一个赢家**、并发恢复**恰好一份载荷**、**无决策时恢复拿不到执行许可**（重试/崩溃恢复不得绕过审批）、节点重放复用同一条已决策审批 |
 
 ### 真实基础设施测试（真实 PostgreSQL + Redis + 真实 LangGraph）
 
@@ -355,3 +386,10 @@ python3 -m alembic upgrade head / downgrade 005        # 真实 PG 上可升可�
 
 > `HITL_ENABLED` 默认 `false`：开启会让原本自动执行的高风险调用转为阻塞式人工
 > 流程，属于行为变更，应在明确配置工具风险声明后再开启。
+>
+> ⚠️ **开启即 fail-closed**：若 `HITL_HIGH_RISK_TOOLS` 为空**且**
+> `HITL_HIGH_AMOUNT_THRESHOLD<=0`，应用**拒绝启动**
+> （`core.config.validate_hitl_settings`）。那种配置下每个工具都会被判为 LOW，
+> 审批开关开着而闸门什么都不拦，且不产生任何日志或告警 ——
+> 与本仓库其余部分（checkpoint / MCP / 分布式运行时）fail-closed 的原则一致。
+> 另见 §2「两条互补的 fail-closed」。

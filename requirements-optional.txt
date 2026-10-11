@@ -15,3 +15,8 @@ mcp>=2.0.0  # MCP（Model Context Protocol）外部工具传输层
 # 仅 `scripts/migrate_chroma_to_qdrant.py` 需要：v6.0 已迁移到 Qdrant，该脚本是
 # **一次性历史数据迁移工具**，延迟 import + 自带失败提示，核心运行时不需要。
 chromadb>=0.5.0  # legacy ChromaDB -> Qdrant 迁移（仅历史迁移脚本）
+
+# 仅手工压测 `tests/performance/locustfile.py` 需要（手动 `pip install locust`
+# 后才能跑，CI 不跑该文件）。此前它只出现在 locustfile 的 docstring 里，任何
+# requirements 都没声明 —— 于是"能不能跑压测"完全取决于某台机器碰巧装了什么。
+locust>=2.20.0  # Locust 压测（仅手工，不进 CI）

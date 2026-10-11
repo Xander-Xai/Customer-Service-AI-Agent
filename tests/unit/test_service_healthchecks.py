@@ -112,6 +112,17 @@ def _has_docker() -> bool:
     return shutil.which("docker") is not None
 
 
+def _depends_on_items(service: dict):
+    """``depends_on`` 在 compose 里有两种写法：短横线列表，或 ``name: {condition:}``。
+
+    这里统一成 ``(name, condition_or_None)``，让断言不依赖写法。
+    """
+    raw = service.get("depends_on") or {}
+    if isinstance(raw, dict):
+        return list(raw.items())
+    return [(name, None) for name in raw]
+
+
 class TestQdrantProbeUsesOnlyWhatTheImageShips:
     def test_qdrant_probe_does_not_invoke_an_absent_binary(self) -> None:
         probe = _probe_text(_compose()["services"]["qdrant"])
@@ -194,6 +205,8 @@ class TestWorkerProbeIsCeleryNative:
             f"it shares the broker URL and node identity: {probe!r}"
         )
 
+
+class TestInheritedHttpProbe:
     def test_no_repo_built_service_is_left_with_the_inherited_http_probe(self) -> None:
         """No service built from this repo's Dockerfile may fall through to its HEALTHCHECK.
 
@@ -213,11 +226,35 @@ class TestWorkerProbeIsCeleryNative:
         assert (
             {"app", "worker"} <= repo_built
         ), f"expected app and worker to build from the repo root, got {sorted(repo_built)}"
-        offenders = [name for name in sorted(repo_built) if _healthcheck(services[name]) is None]
-        assert not offenders, (
-            f"{offenders} are built from the repo root but declare no healthcheck, "
-            f"so they inherit {inherited!r}; a Celery worker must never be probed "
-            "over HTTP"
+
+        # One-shot init jobs (``restart: "no"``) exit on purpose: the image-level
+        # HTTP probe would never pass for a container that is *supposed* to exit,
+        # and its real health signal is "completed successfully", which compose
+        # enforces via ``depends_on: service_completed_successfully``. That
+        # requirement is asserted below so the exemption cannot be used to hide a
+        # long-running service behind a fake one-shot declaration.
+        one_shot = {name for name, service in services.items() if service.get("restart") == "no"}
+        long_running = {
+            name for name in repo_built - one_shot if _healthcheck(services[name]) is None
+        }
+        assert not long_running, (
+            f"{sorted(long_running)} are built from the repo root but declare no "
+            f"healthcheck, so they inherit {inherited!r}; a Celery worker must never "
+            "be probed over HTTP"
+        )
+
+        # Every one-shot repo-built job must actually be gated on by someone,
+        # otherwise "it exits successfully" is not enforced by anything.
+        gated = {
+            dep
+            for service in services.values()
+            for dep, cond in _depends_on_items(service)
+            if isinstance(cond, dict) and cond.get("condition") == "service_completed_successfully"
+        }
+        ungated = sorted((repo_built & one_shot) - gated)
+        assert not ungated, (
+            f"{ungated} 是 repo 构建的一次性任务，却没有任何服务以 "
+            "service_completed_successfully 依赖它 —— 它的「成功完成」不是任何人的健康信号"
         )
 
 

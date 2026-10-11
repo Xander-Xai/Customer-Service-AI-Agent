@@ -388,6 +388,170 @@ jobs:
           path: artifacts/runtime/
 
   # P2-5: 安全扫描
+  # ===== Prometheus 告警链契约 =====
+  #
+  # DLQ 告警曾经是**死代码**：约 70 个 `prometheus_client` 指标注册了却从未被
+  # 序列化输出，`AgentRunDeadLetterDetected` 依赖一个不存在的时间序列，且抓取
+  # 配置不带凭据（端点在 supervisor/admin 面内 -> 401）。仓库有崩溃恢复、有 DLQ、
+  # 有重放，唯独没人被通知。
+  #
+  # 这个 job 把三层防复发做成阻塞门：
+  #   1. 契约测试 —— 告警规则与 Grafana 面板引用的**每个** metric name 都必须
+  #      真的出现在暴露面里；两个 scrape job 的路径与凭据必须有效；
+  #   2. promtool —— 官方 Prometheus 镜像验证配置语法，并用 `test rules` 喂真实
+  #      时间序列，断言「真有 dead-letter 时会 firing」且「历史值不会 latching」。
+  #      用的是**真实的** alert_rules.yml 而不是副本，避免副本漂移；
+  #   3. 端到端 —— 真实 Prometheus 抓真实暴露函数，另一个进程写入 DLQ 计数器，
+  #      验证跨进程聚合生效且告警进入 FIRING。
+  #
+  # 边界（第 3 步**不**覆盖）：Alertmanager 的 webhook/SMTP 实际投递、整套
+  # docker compose 栈、Grafana 面板真实渲染、生产集群。因此这条 lane PASS
+  # **不等于**「生产告警闭环已完成」。
+  metrics-alerting:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # 这两个 job 都会 import 应用运行时（`core.config` -> python-dotenv；
+      # `core.code_provenance` -> core 包 -> FastAPI/LangGraph/Redis/Qdrant…），
+      # 因此必须**同时**安装 requirements.txt 与 requirements-dev.txt —— 只装 dev
+      # 会在测试收集阶段就 ModuleNotFoundError。这与 runtime-e2e / rag lane 的
+      # 安装方式一致（见本文件其它 "Install dependencies" 步骤）。
+      # 与 `test` lane 同样的必需步骤：这两个 job 会 import 应用运行时，
+      # ``core/config.py`` 在**导入时**就 fail-closed 校验凭据
+      # （API_KEY_ENABLED=true 且 API_KEY 为空 -> 直接 ValueError）。
+      # 没有 .env 时 CI runner 上没有 .env，配置校验会在 import 阶段就炸，
+      # 表现为"收集测试就 ModuleNotFoundError / ValueError"。
+      # 用仓库内提交的 .env.test（占位符、无真实凭据）提供确定的测试配置。
+      - name: Setup test environment
+        run: |
+          cp .env.test .env
+          echo "✅ .env.test → .env 已复制"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # 这是一个**一次性、仅用于本 job** 的抓取凭据：它只写进 runner 上一个
+      # gitignore 的临时文件，让 `promtool check config` 能验证
+      # `bearer_token_file` 指向的路径存在。**不要**换成真实 secret ——
+      # 用真凭据去满足一个路径存在性检查，只增加泄漏面。
+      - name: Generate ephemeral scrape credential
+        env:
+          MONITORING_ADMIN_TOKEN: ci-ephemeral-scrape-token-not-a-secret
+        run: make monitoring-token
+
+      - name: Metrics exposure + alerting contract tests
+        run: make metrics-exposure-check
+
+      - name: Official promtool — config syntax and rule semantics
+        run: make alert-rules-test
+
+      - name: Real Prometheus end-to-end (DLQ alert actually fires)
+        run: make metrics-exposure-verify
+
+      - name: Upload exposure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-exposure-evidence
+          path: artifacts/observability/metrics-exposure-*/
+          retention-days: 14
+
+  # ===== Agent 行为评测 + RAG gold 契约（离线、可重复、零出网）=====
+  #
+  # Agent Eval 衡量的是**编排与治理层**行为，不是模型能力：它跑真实编译图，
+  # 但用脚本化 LLM 驱动（不接受 base_url、不持 API key -> 结构上不出网）。
+  #
+  # 这个 job 与 `test` lane 的区别不是"重复跑一遍"，而是三件 test lane 不做的事：
+  #   1. 真实图回放（astream updates + 真实工具循环 + HITL 闸门），
+  #      断言的是**任务完成/治理保真**，不是断言成不成立；
+  #   2. 每个指标都带分子/分母/排除数，且**分母为 0 时必须是 NOT_MEASURED**
+  #      （把它渲染成 0% 或 100% 都是撒谎，两个方向都有测试钉住）；
+  #   3. RAG gold 契约校验：649 的 gold 不是相关度判定，人工确认前
+  #      `route_accuracy`/正式检索指标都必须是 NOT_MEASURED/BLOCKED。
+  #
+  # 注意：本 job **允许** agent-eval 报 FAIL。它在人工标注完成前必然 FAIL，
+  # 因为门禁不许靠"没测出来"过关。CI 卡的是**契约**（指标名/边界/降级标记与
+  # 生产代码同步、数据集严格校验），不是那个必然为 NOT_MEASURED 的分数。
+  agent-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # 与 `test` lane 同样的必需步骤：这两个 job 会 import 应用运行时，
+      # ``core/config.py`` 在**导入时**就 fail-closed 校验凭据
+      # （API_KEY_ENABLED=true 且 API_KEY 为空 -> 直接 ValueError）。
+      # 没有 .env 时 CI runner 上没有 .env，配置校验会在 import 阶段就炸，
+      # 表现为"收集测试就 ModuleNotFoundError / ValueError"。
+      # 用仓库内提交的 .env.test（占位符、无真实凭据）提供确定的测试配置。
+      - name: Setup test environment
+        run: |
+          cp .env.test .env
+          echo "✅ .env.test → .env 已复制"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Agent eval contract guards (blocking)
+        run: make agent-eval-contract
+
+      # 只跑**契约校验**，不跑 `make rag-gold-review`。
+      #
+      # 两者需要的东西不一样：`validate_gold_labels.py` 对缺失语料是**设计好的**
+      # 降级（doc-id / corpus-hash 标 NOT_RUN 并警告），所以它能在没有语料的 CI 上
+      # 有意义地跑。而 `build_rag_gold_review_worklist.py` 产出的是**语料派生**的
+      # 人工标注工作清单：每条记录都带 corpus_hash，且 rag-gold-label/v1 要求它是
+      # 非空字符串。语料是生成物（data/** 被 gitignore），干净 runner 上根本没有，
+      # 硬跑只会得到一条 FileNotFoundError —— 那是环境缺失，不是契约失败。
+      #
+      # 该脚本保留为**本地**作者工具（先 `make generate-knowledge-base` 再跑）。
+      - name: RAG gold-label contract (blocking)
+        run: make rag-gold-validate
+
+      - name: Agent eval dataset annotation status
+        run: make agent-eval-annotation-status
+
+      # 这个 step 是**阻塞**的，且不使用 continue-on-error。
+      #
+      # 退出码语义（由 scripts/evaluate_agent.py 实现）：
+      #   1 = FAIL        —— 至少一条**可测**门禁真的没过（系统缺陷）
+      #   0 = INCONCLUSIVE —— 可测门禁全过，但仍有门禁 NOT_AVAILABLE
+      #   0 = PASS         —— 全部 PASS
+      #
+      # 人工标注完成前 ``route_accuracy`` 必然 NOT_AVAILABLE，于是本 job 会是
+      # INCONCLUSIVE（exit 0）而不是 FAIL/绿。关键在于：INCONCLUSIVE **绝不**会被
+      # 渲染成 PASS —— artifact 的 overall_status 字面写 INCONCLUSIVE，
+      # measurement_gaps 逐条列出未测出的门禁，stdout 也打显式警告。
+      #
+      # 之前这里挂 `continue-on-error: true`：job 变绿了，但门禁失败会被无声吞掉，
+      # 读 CI 的人会以为 agent-eval 通过了。那正是"让 NOT_MEASURED 冒充达标"的路子。
+      - name: Agent eval evidence artifact (NOT_MEASURED => INCONCLUSIVE, never PASS)
+        run: make agent-eval
+
+      - name: Upload agent-eval evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-evidence
+          path: artifacts/agent-eval/
+          retention-days: 14
+
   security:
     runs-on: ubuntu-latest
     needs: test

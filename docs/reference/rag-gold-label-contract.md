@@ -114,6 +114,43 @@ python3 scripts/validate_gold_labels.py your_labels.jsonl \
 
 ---
 
+## 5.1 评测消费方：reviewed-gold 入口（本契约唯一的指标消费方）
+
+契约本身不产生指标；在它之后必须有**一个消费方**把 `JUDGED` 记录变成可复现的
+评测。该消费方是 `scripts/evaluate_rag_reviewed_gold.py`
+（artifact schema `rag-reviewed-gold-eval/v1`）。它**不读、不改**
+`tests/eval/rag_benchmark.json`。
+
+消费规则（与契约一一对应，均可单测守卫）：
+
+| 规则 | 行为 |
+|---|---|
+| 只计 `JUDGED` | `DRAFT_UNVERIFIED` / `llm_suggested` / `category_random_match` / `EXCLUDED` / `UNDETERMINABLE` **只计数、不计分** |
+| 未标注 ≠ 不相关 | 检索到的无判定文档计入 `unjudged_at_K`，并从 `precision_judged@K` 分母**剔除**（绝不当作 miss） |
+| Recall/NDCG 需完整判断 | 只有当一条 query 的**全部** `JUDGED` 记录带 `judgment_completeness: "closed"`（标注者显式声明该 query 的相关集完整）时，才计算 Recall/NDCG；否则记 `null` + `JUDGMENT_SET_NOT_CLOSED` |
+| 无确认相关文档 | 全部 `grade=0` 的 query 记为 `NO_CONFIRMED_RELEVANT_DOC` 并排除，**不当作 0 分** |
+| 无 `JUDGED` 标签 | 整体 `NOT_MEASURABLE`（退出码 2），**不执行 4 组消融**（fail closed） |
+
+NDCG 采用分级增益（`gain = 2^grade - 1`）；Hit/Precision/Recall/MRR 为二元相关
+（`grade ≥ 1`）。artifact 每个指标都带 `numerator_sum` / `denominator` /
+`not_measured`，并固定记录 git SHA + code provenance、语料 hash/doc 数、
+query/标签计数、模型与环境、失败查询与各指标分母。
+
+```bash
+# 离线状态/质检（对示例模板；不触 Qdrant，可核对 JUDGED 数、完整判断数、排除分母）
+make rag-gold-reviewed-status GOLD_LABELS=tests/eval/gold_labels/template.jsonl
+
+# 正式 reviewed-gold 全量消融（需 Qdrant + provider + 完整判断；无 JUDGED 时 fail closed）
+# GOLD_LABELS 指向人工标注产出文件（默认值见 Makefile 的 GOLD_LABELS 变量）
+make rag-gold-reviewed-eval GOLD_LABELS=<人工标注产出>.jsonl
+```
+
+> 当前仓库 **0 条**人工 `JUDGED` 标签，因此 `make rag-gold-reviewed-status` 对
+> `review_worklist.jsonl` 会如实报告 `NOT_MEASURABLE`。这正是正确状态：评测框架
+> 已就绪，等待人工判定；在判定完成前**不产生任何正式检索质量数字**。
+
+---
+
 ## 6. 边界（不得越界宣称）
 
 - 本契约**不修改** `tests/eval/rag_benchmark.json`，**不生成**任何指标。

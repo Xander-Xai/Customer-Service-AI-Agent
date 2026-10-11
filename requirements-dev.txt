@@ -27,6 +27,19 @@ pytest-cov>=4.1.0
 pytest-timeout>=2.3.0
 mypy>=1.8.0
 
+# ===== 测试/CI 直接 import 的第三方库 =====
+#
+# PyYAML 被 tests/unit/test_compose_metrics_topology.py 与
+# tests/unit/test_metrics_exposure_contract.py 直接 import（解析 compose 文件与
+# Prometheus/告警规则配置）。它此前**在任何 requirements 文件里都没有声明**：
+# 本地开发机碰巧装了，于是缺陷不可见；一旦 CI 在只安装 requirements-dev.txt 的
+# 干净 job 里收集这两个测试，就直接 ModuleNotFoundError: No module named 'yaml'。
+#
+# 声明在这里（而不是 requirements.txt）是因为仓库的**运行时源码不 import yaml** ——
+# 那是测试/CI 工具链的依赖。tests/unit/test_dependency_contract.py 现在会扫描
+# tests/ 的第三方 import 并要求在此声明，防止它再次悄悄消失。
+PyYAML>=6.0
+
 # Linter / formatter. This is the **canonical** Ruff pin for the repository and
 # must stay byte-equal to the `.pre-commit-config.yaml` `rev:` (issue #71).
 #

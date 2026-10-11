@@ -50,6 +50,13 @@ pytest-counts.json
 *.db-wal
 artifacts/evidence/
 artifacts/mcp/
+# 单次运行的临时证据输出：正式证据必须在干净提交后重新生成并显式提交，
+# 不要批量把每个时间戳目录加入版本库。见 artifacts/README.md。
+artifacts/agent-eval/
+artifacts/agent-eval-real/
+artifacts/distributed-runtime-summary/
+artifacts/evaluation/performance/
+artifacts/evaluation/rag-ablation/
 *.sqlite
 *.sqlite3
 chat_sessions/
@@ -91,6 +98,14 @@ Thumbs.db
 
 # ===== 密钥文件 =====
 secrets/
+# Prometheus 抓取凭据目录：目录本身 + README/.gitkeep 必须可被 Git 跟踪
+# （否则新 clone 后 bind mount 目录不存在，容器起不来）；只有真实 token
+# 文件不能进版本库。注意 git 语义：父目录被忽略时无法单独 re-include 子文件，
+# 所以这里先显式 un-ignore 目录，再单独忽略 token。
+!deploy/monitoring/secrets/
+!deploy/monitoring/secrets/.gitkeep
+!deploy/monitoring/secrets/README.md
+deploy/monitoring/secrets/monitoring_admin_token
 
 # ===== 个人工具配置 =====
 CLAUDE.md

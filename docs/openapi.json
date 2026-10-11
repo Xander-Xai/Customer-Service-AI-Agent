@@ -163,10 +163,29 @@
         }
       }
     },
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus Registry",
+        "description": "**标准** Prometheus 抓取端点：序列化 ``prometheus_client`` 的全量 ``REGISTRY``。\n\n为什么必须有这个端点（历史断链，P0-1）\n--------------------------------------\n``core/monitoring.py`` / ``runtime`` / ``cache`` / ``tools.mcp_adapter`` 在\n``REGISTRY`` 上注册了约 70 个指标（``agent_run_dead_letter_total``、\n``agent_run_retry_total``、全部 HITL / tool-result / MCP 指标）。在它之前，\n全仓唯一的 Prometheus 输出是下面那个 ``/metrics/prometheus``，而它**手工拼接\n10 行 ``csai_*`` 文本**、从不触碰 ``REGISTRY``。结果是：注册的约 70 个指标没有\n任何一条进入 Prometheus，``monitoring/alert_rules.yml`` 里\n``increase(agent_run_dead_letter_total[5m]) > 0`` 引用的是一个**永远不存在的时间\n序列**，DLQ 告警因此**不可能触发**（有崩溃恢复、有 DLQ、有重放、就是没人被通知）。\n\n这里用 ``prometheus_client`` 官方序列化而不是自己拼字符串，理由是它与注册表\n天然一致：新增/改名任何指标都会立刻出现在输出里，不会再出现「注册了但没暴露」\n这类**需要靠人记得**的同步。契约由 ``tests/unit/test_metrics_exposure_contract.py``\n锁定（断言告警规则与 Grafana 面板引用的每个 metric name 都在本端点输出里）。\n\n认证与 ``/metrics/prometheus`` 一致（``X-Admin-Token`` 或\n``Authorization: Bearer``，见 ``api.utils.check_admin_token``）—— Prometheus 侧用\n``bearer_token_file`` 配好凭据即可（``make monitoring-token``）。",
+        "operationId": "prometheus_registry_metrics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/metrics/prometheus": {
       "get": {
         "summary": "Prometheus Metrics",
-        "description": "Prometheus 格式指标输出",
+        "description": "Prometheus 格式指标输出（业务聚合 ``csai_*``）。",
         "operationId": "prometheus_metrics_metrics_prometheus_get",
         "responses": {
           "200": {

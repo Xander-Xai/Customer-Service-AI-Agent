@@ -3,7 +3,9 @@
 支持 OpenAI Function Calling 格式的工具定义、注册和执行。
 """
 
+import asyncio
 import inspect
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +15,42 @@ from core.tool_result_cache import ToolCachePolicy
 
 logger = get_logger("tools.registry")
 
+
+def _tool_timeout_seconds() -> float:
+    """读当前生效的工具超时（每次调用读取，便于测试与运行时调整）。
+
+    读不到配置时返回 0 = 不加超时包装，**保持历史行为**：治理配置缺失不应该
+    悄悄改变既有工具的语义。配置校验在 ``core.config.validate_tool_settings``。
+    """
+    try:
+        from core.config import TOOL_EXECUTION_TIMEOUT_SECONDS
+
+        return float(TOOL_EXECUTION_TIMEOUT_SECONDS)
+    except Exception:
+        return 0.0
+
+
+def _observe_tool_execution(outcome: str, tool_name: str, elapsed: float) -> None:
+    """记录工具执行结果与耗时（无 label 敏感信息；失败绝不冒泡）。
+
+    ``outcome`` 是**有界**词表（ok / timeout / error），``tool_name`` 来自注册表，
+    因此不会引入无界时序。指标不可用时静默降级 —— 观测失败绝不能变成业务失败。
+    """
+    try:
+        from core.monitoring import (
+            tool_execution_duration_seconds,
+            tool_execution_timeout_total,
+            tool_execution_total,
+        )
+
+        tool_execution_total.labels(outcome=outcome).inc()
+        tool_execution_duration_seconds.labels(tool_name=tool_name).observe(elapsed)
+        if outcome == "timeout":
+            tool_execution_timeout_total.inc()
+    except Exception:  # noqa: BLE001 - 指标失败不得影响工具执行
+        return
+
+
 #: 工具来源。native = 进程内 Function Calling 工具；mcp = 外部 MCP server 工具
 #: （经 ``tools/mcp_adapter.py`` 叠加进同一个注册表）。
 #:
@@ -21,6 +59,30 @@ logger = get_logger("tools.registry")
 #: （审计、指标、debug），而不是散落在调用日志里。
 SOURCE_NATIVE = "native"
 SOURCE_MCP = "mcp"
+
+
+class ToolExecutionTimeout(Exception):
+    """原生工具的单次执行超时。
+
+    刻意**不**继承 ``runtime.errors`` 的异常：工具层不能依赖 runtime 包（``tools``
+    与 ``runtime`` 是两个独立边界），否则会形成单向依赖并让工具层无法单独使用。
+
+    但它**必须**能被上层的错误分类识别为「可重试 / 结果未知」，因此携带一个
+    ``timeout`` 标记；``runtime`` 侧的分类逻辑按属性识别（见
+    ``tests/unit/test_tool_execution_reliability.py``）。
+
+    语义是「执行结果未知」而不是「执行失败」：外部系统可能已经写成功了一部分。
+    把它当失败重试可能造成重复写，把它当成功会丢数据 —— 所以唯一安全的做法是
+    上抛，交给幂等 ledger + run 级 retry/DLQ + 人工重放处理。
+    """
+
+    #: 上层按属性识别（而不是 isinstance，避免跨包继承）
+    is_tool_timeout = True
+
+    def __init__(self, tool_name: str, timeout_seconds: float, message: str):
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.timeout_seconds = timeout_seconds
 
 
 @dataclass
@@ -237,18 +299,14 @@ class ToolRegistry:
             return await idempotent_op()
 
         try:
-            # v6.0: 注入 stream_callback，仅当 handler 接受此参数时传递
-            if stream_callback is not None:
-                sig = inspect.signature(tool.handler)
-                if "stream_callback" in sig.parameters:
-                    result = await tool.handler(arguments, stream_callback=stream_callback)
-                else:
-                    result = await tool.handler(arguments)
-            else:
-                result = await tool.handler(arguments)
+            # 只读工具走同一条带超时的调用路径（`_call_handler`）：超时是工具执行的
+            # **通用**边界，不该只对某一条分支生效。副作用工具的闭包 `_run` 内部
+            # 同样调用 `_call_handler`，因此两条分支的超时语义完全一致。
+            result = await self._call_handler(tool, arguments, stream_callback)
             return result if result is not None else "查询完成，无结果"
         except Exception as e:
             logger.error(f"工具执行失败 [{name}]: {e}", exc_info=True)
+            _observe_tool_execution("error", name, 0.0)
             return f"工具 '{name}' 执行失败，请稍后重试"
 
     def _idempotent_operation(
@@ -323,7 +381,13 @@ class ToolRegistry:
                 run_id=run_id,
                 thread_id=thread_id,
                 arguments=arguments,
-                operation=lambda: self._call_handler(tool, arguments, stream_callback),
+                # 副作用工具超时时**必须冒泡**：ledger 只有在收到异常时才会把这次
+                # 执行标记为 failed。若在这里把超时转成字符串返回，ledger 会把
+                # 一个「结果未知」的写操作记成 SUCCEEDED 并缓存，重投递时直接返回
+                # 那条字符串 —— 写操作从此再也不会被执行，而 run 表面成功。
+                operation=lambda: self._call_handler(
+                    tool, arguments, stream_callback, raise_on_timeout=True
+                ),
             )
 
         return _run, None
@@ -338,8 +402,67 @@ class ToolRegistry:
 
     @staticmethod
     async def _call_handler(
+        tool: ToolDefinition,
+        arguments: dict[str, Any],
+        stream_callback: Callable | None,
+        *,
+        raise_on_timeout: bool = False,
+    ) -> Any:
+        """调用 handler，套一层 per-call 超时。
+
+        为什么必须有超时
+        --------------
+        此前**只有** MCP 工具有 per-call timeout（``tools/mcp_adapter.py`` 用
+        ``asyncio.wait_for``），原生工具（ERP / 内部查询）完全裸跑。一个卡住的
+        ERP 连接会一路占着 Agent 的工具循环、run 的 ownership lease 与 Redis
+        thread lock，直到 Celery 的 ``AGENT_RUN_TASK_TIME_LIMIT`` 把整个 run 掐掉
+        —— 单个慢工具被升级成「整条 run 失败 + 重投 + 租约重分配」。
+
+        ``raise_on_timeout`` —— 为什么两种路径的**超时语义必须不同**
+        --------------------------------------------------------
+        - **只读工具**（``raise_on_timeout=False``，默认）：超时降级为一条可解释的
+          错误字符串。工具失败对 Agent 而言是「这条策略走不通，去换一条或如实
+          告知用户」，不是「整个请求崩掉」。
+        - **副作用工具**（``raise_on_timeout=True``）：超时必须**冒泡**。
+
+          这里曾经写反过一次，后果是严重的：超时被转成字符串返回后，
+          ``runtime.side_effects.execute_idempotent_operation`` 收到的是一个
+          **正常返回值**，于是把这次「根本没执行完」的写操作标记为
+          ``SUCCEEDED`` 并缓存结果。重投递时 ledger 直接返回那条错误字符串，
+          副作用**再也不会被重试**，而 run 看起来是成功的 ——
+          「写操作丢失」被伪装成「工具返回了错误提示」。
+
+          也就是说：超时对副作用工具而言是**未知的执行结果**（可能写了一半），
+          正确做法是让异常上抛 —— ledger 标记 failed 并把不确定性留给 run 级
+          的 retry / DLQ 与人工重放去处理，而不是由工具层擅自判定成功。
+
+        超时值 <= 0 时**完全不加包装**（保留历史行为），这样单元测试里的同步/极慢
+        handler 不会被静默截断。
+        """
+        timeout = _tool_timeout_seconds()
+        if timeout <= 0:
+            return await ToolRegistry._invoke_handler(tool, arguments, stream_callback)
+        started = time.perf_counter()
+        try:
+            result = await asyncio.wait_for(
+                ToolRegistry._invoke_handler(tool, arguments, stream_callback),
+                timeout=timeout,
+            )
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            logger.error("工具执行超时 [%s]: 超过 %s", tool.name, f"{timeout:g}s")
+            _observe_tool_execution("timeout", tool.name, time.perf_counter() - started)
+            message = f"工具 '{tool.name}' 执行超时（>{timeout:g}s），已中止本次调用"
+            if raise_on_timeout:
+                raise ToolExecutionTimeout(tool.name, timeout, message) from exc
+            return f"错误：{message}。请稍后重试或改用其它查询方式。"
+        _observe_tool_execution("ok", tool.name, time.perf_counter() - started)
+        return result
+
+    @staticmethod
+    async def _invoke_handler(
         tool: ToolDefinition, arguments: dict[str, Any], stream_callback: Callable | None
     ) -> Any:
+        """真正的 handler 调用（注入 stream_callback，仅当 handler 接受该参数时）。"""
         if stream_callback is not None:
             sig = inspect.signature(tool.handler)
             if "stream_callback" in sig.parameters:

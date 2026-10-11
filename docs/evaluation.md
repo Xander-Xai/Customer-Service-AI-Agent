@@ -176,18 +176,24 @@ artifact：`artifacts/observability/otel-collector-<ts>/report.json`
 **它真正的用途是"要不要升级重试"的触发器**，不是质量度量。
 在 `agents/response_agent.py:316` 低分时升级协作模式重跑一次。
 
-### 6.1 Agent 行为回归评测：未实现（当前最大评测缺口）
+### 6.1 Agent 行为评测：Agent Eval V1 已实现；语义质量 judge 仍缺
 
-这是当前最大的评测缺口。企业 Agent 项目的评测重心应该是
-"Agent 选择是否回归 / 工具选择是否正确 / 路由是否走偏"，
-而本项目**没有**这套评测：
+**Agent Eval V1 已落地**（`evaluation/agent_eval/`）：在**真实编译图**上回放
+JSONL 行为用例，用**脚本化 LLM**（零出网）度量编排 / 治理 / 路由层行为 ——
+路由、工具执行保真度、HITL 触发与闸门连通性、降级路径、步数、业务完成率。
+每个指标带 `numerator` / `denominator` / `excluded` 与**证据边界**；
+见 [reference/agent-evaluation.md](reference/agent-evaluation.md) 与
+`make agent-eval` / `make agent-eval-contract`。
 
-- 仓库里 `evaluation/` 只覆盖检索证据与 provider 证据；
-- 曾有过 `evaluation/agent_eval/` 的设计（源码从未提交，
-  只在 gitignore 的 `.pyc` 里留下痕迹），**当前不可运行**；
-- 没有 agent 行为的 golden 用例集。
+**仍然缺的**是**语义质量 judge**（LLM-as-judge）与**人工确认的 golden 标签**：
 
-补齐方向见 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P2-1 / P2-2。
+- Agent Eval V1 的 `expected_route` 目前全部是 `llm_candidate`，人工确认数 **0**，
+  因此 `route_accuracy` 报 `NOT_MEASURED`（刻意设计：不许用自己生成的标签
+  验证自己）；人工确认入口 `scripts/approve_agent_eval_annotations.py`；
+- 它**不测**模型能力（工具选择质量、答案正确性）—— 那需要 LLM-as-judge 与
+  真实 provider，`agents/evaluator.py` 仍只是启发式关键词打分。
+
+补齐方向见 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P2-2。
 
 ---
 

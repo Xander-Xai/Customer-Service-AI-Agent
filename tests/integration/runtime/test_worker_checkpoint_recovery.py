@@ -62,6 +62,17 @@ _VISIBILITY_TIMEOUT = 5
 _LEASE_SECONDS = 3
 _BLOCK_SECONDS = 25
 
+#: How long to wait for the recovered run to reach a terminal state after Worker B
+#: is started. This is a **liveness budget**, not a correctness assertion: the
+#: test still requires SUCCEEDED plus the resume-evidence checks below.
+#:
+#: The default was 150s, which was observed to be too tight when this suite runs
+#: concurrently with the rest of `tests/integration/runtime` on a loaded machine
+#: (the run reached RUNNING/attempt=2 via takeover but the graph had not finished).
+#: Making it env-overridable lets CI raise it without editing the test, and the
+#: value is recorded in the failure diagnostics so a recurrence is diagnosable.
+_RECOVERY_WAIT_SECONDS = float(os.getenv("RUNTIME_RECOVERY_WAIT_SECONDS", "300"))
+
 #: Channel that proves ``first``'s super-step has been **committed**.
 #:
 #: Why this and not ``count(*) >= 1``: LangGraph writes an *input* checkpoint for
@@ -364,8 +375,12 @@ def test_worker_crash_resumes_from_postgres_checkpoint():
                 return r
             return None
 
-        final = _wait_for(_terminal, 150)
-        diag.mark("final_state_observed", status=(final[0] if final else None))
+        final = _wait_for(_terminal, _RECOVERY_WAIT_SECONDS)
+        diag.mark(
+            "final_state_observed",
+            status=(final[0] if final else None),
+            wait_seconds=_RECOVERY_WAIT_SECONDS,
+        )
         assert final is not None, f"run 未进入终态: {row()}"
         assert final[0] == "SUCCEEDED", f"未恢复成功: {final}"
 

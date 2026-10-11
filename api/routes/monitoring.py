@@ -8,7 +8,7 @@ import sys
 import time
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 
 from core.logger import get_logger
 
@@ -329,9 +329,81 @@ async def circuit_breaker_status(request: Request):
     return {"state": "unknown"}
 
 
+def _registry_exposition() -> bytes:
+    """序列化完整 Prometheus 暴露内容（Prometheus 文本格式）。
+
+    抽成模块级函数（而不是写在路由体内）是为了让
+    ``tests/unit/test_metrics_exposure_contract.py`` 断言的**就是路由真正返回的
+    那份字节**，而不是另写一套遍历注册表的实现 —— 那样测试就成了第二套实现，
+    恰好会漏掉「路由返回了什么」这个真正的断点。
+
+    委托给 ``core.metrics_exposition``，因为暴露面必须同时正确处理两种进程拓扑：
+
+    - 单进程（默认）：直接序列化默认 ``REGISTRY``；
+    - 多进程（``PROMETHEUS_MULTIPROC_DIR``，生产 ``app`` / ``worker`` **两个容器**
+      的必需配置）：用 ``MultiProcessCollector`` 聚合 worker 进程的样本。
+
+    第二种不是可选优化。不开它，``agent_run_dead_letter_total`` 在抓取侧**恒为 0**
+    —— 递增发生在 worker 进程，Prometheus 只抓 app 容器 —— 告警仍然不会触发，
+    而且这次是「指标存在但恒零」，比「指标不存在」更难被发现。
+
+    失败时返回一条可读的注释而不是抛异常：监控端点不能反过来把请求搞 500。
+    ``prometheus_client`` 缺失时 ``core.monitoring`` 本就把指标降级为 no-op，
+    此时显式声明「没有可暴露的指标」比返回一个看似正常的空 body 更诚实。
+    """
+    from core.metrics_exposition import exposition_text, multiprocess_enabled
+
+    if not multiprocess_enabled():
+        try:
+            import prometheus_client  # noqa: F401  (import 可用性探针)
+        except ImportError:
+            logger.warning("[Prometheus] prometheus_client 未安装，无可暴露指标")
+            return b"# prometheus_client is not installed; no metrics are exposed\n"
+    try:
+        return exposition_text()
+    except Exception as exc:  # noqa: BLE001 - 监控端点不得反过来打断请求
+        logger.error("[Prometheus] 生成暴露内容失败: %s", type(exc).__name__, exc_info=True)
+        return b"# failed to generate Prometheus exposition\n"
+
+
+@router.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_registry(request: Request):
+    """**标准** Prometheus 抓取端点：序列化 ``prometheus_client`` 的全量 ``REGISTRY``。
+
+    为什么必须有这个端点（历史断链，P0-1）
+    --------------------------------------
+    ``core/monitoring.py`` / ``runtime`` / ``cache`` / ``tools.mcp_adapter`` 在
+    ``REGISTRY`` 上注册了约 70 个指标（``agent_run_dead_letter_total``、
+    ``agent_run_retry_total``、全部 HITL / tool-result / MCP 指标）。在它之前，
+    全仓唯一的 Prometheus 输出是下面那个 ``/metrics/prometheus``，而它**手工拼接
+    10 行 ``csai_*`` 文本**、从不触碰 ``REGISTRY``。结果是：注册的约 70 个指标没有
+    任何一条进入 Prometheus，``monitoring/alert_rules.yml`` 里
+    ``increase(agent_run_dead_letter_total[5m]) > 0`` 引用的是一个**永远不存在的时间
+    序列**，DLQ 告警因此**不可能触发**（有崩溃恢复、有 DLQ、有重放、就是没人被通知）。
+
+    这里用 ``prometheus_client`` 官方序列化而不是自己拼字符串，理由是它与注册表
+    天然一致：新增/改名任何指标都会立刻出现在输出里，不会再出现「注册了但没暴露」
+    这类**需要靠人记得**的同步。契约由 ``tests/unit/test_metrics_exposure_contract.py``
+    锁定（断言告警规则与 Grafana 面板引用的每个 metric name 都在本端点输出里）。
+
+    认证与 ``/metrics/prometheus`` 一致（``X-Admin-Token`` 或
+    ``Authorization: Bearer``，见 ``api.utils.check_admin_token``）—— Prometheus 侧用
+    ``bearer_token_file`` 配好凭据即可（``make monitoring-token``）。
+    """
+    _require_monitoring_auth(request)
+    body = _registry_exposition()
+    if body.startswith(b"# prometheus_client is not installed"):
+        # 「显式没有」优于「看起来正常的 200 空 body」：Prometheus 侧会立刻看到一个
+        # 抓取失败的 target，而不是把空注册表当成正常数据。
+        return Response(content=body, media_type="text/plain; charset=utf-8", status_code=503)
+    from prometheus_client import CONTENT_TYPE_LATEST
+
+    return Response(content=body, media_type=CONTENT_TYPE_LATEST)
+
+
 @router.get("/metrics/prometheus")
 async def prometheus_metrics(request: Request):
-    """Prometheus 格式指标输出"""
+    """Prometheus 格式指标输出（业务聚合 ``csai_*``）。"""
     _require_monitoring_auth(request)
     state = request.app.state
     metrics = getattr(state, "metrics", None)
@@ -339,6 +411,7 @@ async def prometheus_metrics(request: Request):
         return PlainTextResponse("# Metrics not available\n", media_type="text/plain")
 
     stats = await metrics.get_stats()
+    kpi = await metrics.get_kpi_stats()
     from core.config import VERSION
 
     lines = [
@@ -362,6 +435,16 @@ async def prometheus_metrics(request: Request):
         "# TYPE csai_avg_response_time_seconds gauge",
         f"csai_avg_response_time_seconds {stats.get('avg_response_time', 0)}",
         "",
+        # 以下 4 个由 `get_stats()` 计算得出但此前**从未输出**，导致 Grafana
+        # csai-overview 的「P95 响应时间」「缓存命中率」两个面板永远为空。
+        "# HELP csai_p95_response_time_seconds P95 response time",
+        "# TYPE csai_p95_response_time_seconds gauge",
+        f"csai_p95_response_time_seconds {stats.get('p95_response_time', 0)}",
+        "",
+        "# HELP csai_cache_hit_rate_percent Cache hit rate percentage",
+        "# TYPE csai_cache_hit_rate_percent gauge",
+        f"csai_cache_hit_rate_percent {stats.get('cache_hit_rate', 0)}",
+        "",
     ]
 
     # Agent 分布
@@ -373,6 +456,32 @@ async def prometheus_metrics(request: Request):
             safe_agent = _PROM_LABEL_RE.sub("_", agent)
             lines.append(f'csai_agent_calls_total{{agent="{safe_agent}"}} {count}')
         lines.append("")
+
+    # 协作模式分布（Grafana 面板引用，此前从未输出 -> 面板永久为空）
+    mode_counts = stats.get("mode_counts", {})
+    if mode_counts:
+        lines.append("# HELP csai_collaboration_mode_total Collaboration mode usage count")
+        lines.append("# TYPE csai_collaboration_mode_total counter")
+        for mode, count in mode_counts.items():
+            safe_mode = _PROM_LABEL_RE.sub("_", mode)
+            lines.append(f'csai_collaboration_mode_total{{mode="{safe_mode}"}} {count}')
+        lines.append("")
+
+    # KPI 计数（Grafana「KPI — AI 处理率 / 升级率」面板引用，此前从未输出）。
+    # 直接取 `get_kpi_stats()` 的整数计数，不从已格式化的百分号字符串二次推导 ——
+    # 那样会丢精度并让语义变成「字符串解析结果」。
+    lines.append("# HELP csai_total_ai_handled Requests handled by AI")
+    lines.append("# TYPE csai_total_ai_handled counter")
+    lines.append(f"csai_total_ai_handled {kpi.get('total_ai_handled', 0)}")
+    lines.append("")
+    lines.append("# HELP csai_total_escalated Requests flagged for human escalation")
+    lines.append("# TYPE csai_total_escalated counter")
+    lines.append(f"csai_total_escalated {kpi.get('total_escalated', 0)}")
+    lines.append("")
+    lines.append("# HELP csai_total_single_turn_resolved Sessions resolved in one turn")
+    lines.append("# TYPE csai_total_single_turn_resolved counter")
+    lines.append(f"csai_total_single_turn_resolved {kpi.get('total_single_turn_resolved', 0)}")
+    lines.append("")
 
     # SLA
     sla = stats.get("sla", {})

@@ -251,6 +251,7 @@ async def _run_graph(
             session_id=session_id,
             escalated=result.get("collaboration_mode", "") == "hierarchical",
             resolution_status=result.get("resolution_status", ""),
+            degraded=bool(result.get("degraded", False)),
         )
         if _sla_alert_mgr:
             try:

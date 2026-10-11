@@ -362,6 +362,96 @@ class AgentRunRepository:
             session.close()
         return self.get(run_id)
 
+    def list_stale_running_runs(
+        self, *, limit: int = 100, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """RUNNING 且 **lease 已过期** 的 run：owner 已被证明失效。
+
+        为什么必须单独扫这一类
+        ----------------------
+        :meth:`list_recoverable_runs` 只覆盖 ``RETRYING`` / ``QUEUED``。一旦一个
+        run 停在 ``RUNNING``（worker 执行途中 lease 过期、完成提交被 owner CAS
+        拒绝、任务却已正常返回被 ACK），没有任何扫描器会看到它：broker 不会再投递，
+        reconciler 也不会捞它，run 就**永久**停在 RUNNING——没有终态、没有 DLQ、
+        没有告警。这正是 ``test_worker_checkpoint_recovery`` 偶发失败的形态。
+
+        判定条件只用 ``lease_expires_at <= now``，与 :meth:`takeover_running` 信任的
+        是**同一个**信号（owner 的 lease 已过期 = owner 已被证明失效），因此这里
+        没有引入新的信任边界。仍然持有有效 lease 的 run（心跳正常）不会被选中。
+
+        返回 ``id`` / ``attempt`` / ``max_attempts``：调用方据此区分「还可以再执行
+        一次」与「预算已耗尽，应落 DLQ」，避免无界重投。
+        """
+        now = now or _utcnow()
+        stmt = (
+            select(
+                AgentRun.id,
+                AgentRun.attempt,
+                AgentRun.max_attempts,
+                AgentRun.lease_expires_at,
+            )
+            .where(
+                AgentRun.status == RunStatus.RUNNING.value,
+                AgentRun.lease_expires_at.isnot(None),
+                AgentRun.lease_expires_at <= now,
+            )
+            .order_by(AgentRun.lease_expires_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [
+                {
+                    "id": r[0],
+                    "attempt": int(r[1] or 0),
+                    "max_attempts": int(r[2] or 1),
+                    "lease_expires_at": r[3],
+                }
+                for r in session.execute(stmt).all()
+            ]
+        finally:
+            session.close()
+
+    def transition_stale_running(
+        self,
+        run_id: str,
+        *,
+        to_status: RunStatus,
+        now: datetime | None = None,
+        **fields: Any,
+    ) -> dict[str, Any] | None:
+        """原子「仍然过期」的 RUNNING 迁移（reconciler 专用）。
+
+        谓词 ``status=RUNNING AND lease_expires_at IS NOT NULL AND
+        lease_expires_at <= now`` 与 :meth:`list_stale_running_runs` 一致。
+
+        带上「仍然过期」这一步是必须的：reconciler 扫描与写入之间可能隔了任意长
+        时间，其间一个活着的 worker 可能刚刚续上 lease。只按 ``status=RUNNING``
+        更新就会把一个正在正常执行的 run 误改终态。续租一旦成功，谓词立刻不成立，
+        这次写入被挡下——与 ``takeover_running`` 是同一种「判定与写入原子化」。
+        """
+        now = now or _utcnow()
+        values: dict[str, Any] = {"status": to_status.value, "updated_at": now}
+        values.update(fields)
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.RUNNING.value,
+                    AgentRun.lease_expires_at.isnot(None),
+                    AgentRun.lease_expires_at <= now,
+                )
+                .values(**values)
+            )
+            session.commit()
+            if result.rowcount == 0:
+                return None
+        finally:
+            session.close()
+        return self.get(run_id)
+
     def touch_queued(self, run_id: str, when: datetime) -> None:
         """刷新 queued_at（重放重新投递时使用）。"""
         session = self._session()

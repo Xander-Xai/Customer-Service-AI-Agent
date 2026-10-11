@@ -232,6 +232,11 @@ def setup_middleware(app: FastAPI):
                 "/api/kpi",
                 "/api/circuit-breaker",
                 "/api/cache/stats",
+                # `/metrics` = prometheus_client REGISTRY 的标准暴露端点；
+                # `/metrics/prometheus` = 业务聚合 csai_*。两者都在监控面，
+                # 都需要 supervisor/admin 或监控 token（Bearer 形式见
+                # api.utils.check_admin_token，Prometheus 用 bearer_token_file）。
+                "/metrics",
                 "/metrics/prometheus",
                 "/api/feedback/stats",
             )

@@ -2652,11 +2652,72 @@ def check_env_references(docs: list[Path], errors: list[str], root: Path = ROOT)
                 )
 
 
+# ---- Guard AJ: Agent Eval V1 truth + active-file formatting.
+#
+# Two stale contradictions were found: docs/limitations.md described the Agent
+# behaviour eval harness as "未开始" and docs/production-readiness.md described
+# Agent behaviour regression eval as "未实现", even though Agent Eval V1 ships
+# (real compiled graph + scripted LLM + JSONL case set). This guard derives
+# "implemented" from the filesystem and forbids the stale claim. It also guards
+# the markdown list-merge bug and missing trailing newlines in named active
+# config/runbook files.
+AGENT_EVAL_STALE_CLAIM_RE = re.compile(
+    r"Agent\s*行为(?:评测|回归评测)\s*(?:harness)?[^\n]{0,40}?"
+    r"(?:未开始|未实现|尚未实现|待实现|计划中)",
+)
+# A sentence-ending punctuation followed by 2+ spaces and a list dash on the
+# SAME line is a merged list item (the bug that hit current-state.md).
+MARKDOWN_MERGED_BULLET_RE = re.compile(r"[。.!?]\s{2,}-\s+\S")
+ACTIVE_EOL_REQUIRED = (
+    "monitoring/prometheus.yml",
+    "monitoring/alert_rules.yml",
+    "monitoring/alert_rules_test.yml",
+    "docs/operations/distributed-runtime-runbook.md",
+    "deploy/compose/docker-compose.yml",
+    "deploy/compose/docker-compose.monitoring.yml",
+)
+
+
+def check_agent_eval_truth_and_formatting(
+    docs: list[Path], errors: list[str], root: Path = ROOT
+) -> None:
+    agent_eval_implemented = (root / "evaluation" / "agent_eval" / "harness.py").exists() and (
+        root / "tests" / "eval" / "agent_cases.jsonl"
+    ).exists()
+
+    for path in docs:
+        rel = path.relative_to(root)
+        for line_no, line in enumerate(text_lines(path), 1):
+            if agent_eval_implemented and AGENT_EVAL_STALE_CLAIM_RE.search(line):
+                errors.append(
+                    f"stale Agent Eval claim: {rel}:{line_no} describes the Agent "
+                    f"behaviour eval as future/not-implemented, but Agent Eval V1 "
+                    f"(real-graph scripted replay + JSONL cases) is implemented — "
+                    f"cite docs/reference/agent-evaluation.md"
+                )
+            if MARKDOWN_MERGED_BULLET_RE.search(line):
+                errors.append(
+                    f"markdown list-merge: {rel}:{line_no} has a list item merged onto "
+                    f"the previous sentence (punctuation + spaces + `-`); split into "
+                    f"separate lines"
+                )
+
+    for rel in ACTIVE_EOL_REQUIRED:
+        path = root / rel
+        if not path.exists():
+            continue
+        data = path.read_bytes()
+        if data and not data.endswith(b"\n"):
+            errors.append(
+                f"missing trailing newline: {rel} — active config/runbook files must "
+                f"end with a newline"
+            )
+
+
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
     globals()["_WARNINGS"] = warnings
-
     docs = discover_docs()
     for path in docs:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -2707,6 +2768,7 @@ def main() -> int:
     check_mcp_main_state_drift(docs, errors)
     check_rag_current_blocker_drift(docs, errors)
     check_rag_unresolved_blocker_drift(docs, errors)
+    check_agent_eval_truth_and_formatting(docs, errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -2733,7 +2795,7 @@ def main() -> int:
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
         f"approval API surface, MCP main-state drift, RAG current-blocker drift, "
-        f"RAG unresolved-blocker drift"
+        f"RAG unresolved-blocker drift, Agent Eval V1 truth + active-file formatting"
     )
     return 0
 

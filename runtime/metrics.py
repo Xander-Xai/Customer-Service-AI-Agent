@@ -88,6 +88,33 @@ def record_worker_heartbeat(renewed: bool) -> None:
     _inc("agent_worker_heartbeat", outcome="ok" if renewed else "lost")
 
 
+def record_worker_heartbeat_error() -> None:
+    """续租调用**抛异常**（区别于 renew=False 的「已被接管」）。
+
+    这是 lease 可能丢失的最早信号：早期实现里它会直接杀死续租循环且不留日志，
+    导致 run 永久停在 RUNNING。必须可观测。
+    """
+    _inc("agent_worker_heartbeat_error_total")
+
+
+def record_ownership_lost_commit() -> None:
+    """完成提交因 ownership/lease 失效被拒（worker 仍活着，但已不是 owner）。
+
+    该 run 的终态由 reconciler 接管收敛；这里只统计发生次数。
+    """
+    _inc("agent_run_ownership_lost_commit_total")
+
+
+def record_stale_run_reclaimed() -> None:
+    """reconciler 重新投递了 lease 已过期的 RUNNING run。"""
+    _inc("agent_run_stale_reclaimed_total")
+
+
+def record_stale_run_dead_lettered() -> None:
+    """reconciler 把预算耗尽的过期 RUNNING run 落入了 DLQ。"""
+    _inc("agent_run_stale_dead_letter_total")
+
+
 def record_run_failure() -> None:
     _inc("agent_run_failed_total")
 
