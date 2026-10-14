@@ -405,7 +405,7 @@ def test_new_history_finding_is_not_masked_by_known_baseline(
         assert command == ["git", "cat-file", "--batch"]
         assert new_sha.encode() in kwargs["input"]
         assert old_sha.encode() not in kwargs["input"]
-        payload = _batch_stream([(new_sha, b"blob", "# Resume claims\n".encode())])
+        payload = _batch_stream([(new_sha, b"blob", b"# Resume claims\n")])
         return subprocess.CompletedProcess(command, 0, stdout=payload, stderr=b"")
 
     monkeypatch.setattr(boundary.subprocess, "check_output", fake_check_output)
