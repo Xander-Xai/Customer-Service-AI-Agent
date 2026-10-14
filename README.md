@@ -12,7 +12,6 @@
 
 > 对外介绍统一使用「**企业项目经验 + 离职后个人独立复现（含部分后续改进）**」，不要将复现实现当作企业原始项目持续开发的版本。
 
-
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
