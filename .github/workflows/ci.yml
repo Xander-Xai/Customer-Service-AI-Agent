@@ -40,6 +40,10 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
+      - name: Show formatter diff for review
+        run: |
+          ruff format --diff scripts/check_public_repository_boundary.py tests/unit/test_public_repository_boundary.py || echo "Formatting differences shown above"
+          
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
