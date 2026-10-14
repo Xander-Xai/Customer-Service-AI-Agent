@@ -1,4 +1,4 @@
-# Alertmanager 配置 — 药妆智多星客服系统
+# Alertmanager 配置 — Customer Service AI Agent 客服系统
 #
 # 生产环境部署前必须配置真实外部接收方（Slack/钉钉/邮件）:
 #   - Slack: 在 Prometheus 或 Grafana 中配置 Alertmanager webhook URL

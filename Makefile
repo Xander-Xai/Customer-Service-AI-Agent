@@ -1,4 +1,4 @@
-.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases agent-eval-real rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
+.PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases agent-eval-real rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs public-boundary public-boundary-history openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
 
 # reviewed-gold 人工标注数据集（人工生产，默认路径；可用 GOLD_LABELS=... 覆盖）
 GOLD_LABELS ?= tests/eval/gold_labels/reviewed_gold.jsonl
@@ -106,6 +106,17 @@ tls-local-cert: ## 生成本地自签证书（LOCAL DEVELOPMENT ONLY，禁止用
 audit-docs: ## 文档一致性审计（链接/引用/配置/OpenAPI/基准）
 	@echo "🔍 文档一致性审计..."
 	python3 scripts/audit_doc_consistency.py
+
+public-boundary: ## 公开仓边界守卫（个人职业材料/内部代号/对外业务数字/示例数据 PII + 凭据委派）
+	@echo "🛡️ 公开仓边界守卫..."
+	python3 scripts/check_public_repository_boundary.py
+
+public-boundary-history: ## 公开仓边界守卫（历史模式；退出码 2 = 已知残留，见 DATA_PROVENANCE.md §4）
+	@echo "🛡️ 公开仓边界守卫（历史扫描）..."
+	@python3 scripts/check_public_repository_boundary.py --history; \
+		status=$$?; \
+		if [ $$status -eq 2 ]; then echo "⚠️  历史中存在已知残留（需授权的历史重写才能消除）"; exit 0; fi; \
+		exit $$status
 
 openapi-check: ## 校验 docs/openapi.json 与 app.openapi() 一致
 	@echo "🔍 OpenAPI 快照一致性..."

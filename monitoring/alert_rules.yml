@@ -1,4 +1,4 @@
-# Prometheus 告警规则 — 药妆智多星客服系统
+# Prometheus 告警规则 — Customer Service AI Agent 客服系统
 groups:
   - name: csai_alerts
     rules:

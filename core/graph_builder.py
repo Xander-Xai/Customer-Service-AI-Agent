@@ -1,5 +1,5 @@
 """
-药妆智多星多智能体客服系统（v4.5 统一版）
+Customer Service AI Agent 多智能体客服系统（v4.5 统一版）
 LangGraph 状态机 + 双层路由 + 5种协作模式 + 二级缓存 + 通信总线 + RAG + 工具调用
 
 v4.5 统一图构建：
@@ -485,4 +485,4 @@ def make_graph():
 
 if __name__ == "__main__":
     app = make_graph()
-    logger.info("药妆智多星多智能体客服系统 v4.5 启动成功")
+    logger.info("Customer Service AI Agent 多智能体客服系统 v4.5 启动成功")

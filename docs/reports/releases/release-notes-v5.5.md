@@ -1,4 +1,4 @@
-# 药妆智多星 v5.5 发布说明
+# Customer Service AI Agent v5.5 发布说明
 
 **发布日期**: 2026-06-18  
 **版本类型**: Minor Release  

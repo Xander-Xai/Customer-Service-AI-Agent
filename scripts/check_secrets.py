@@ -11,6 +11,7 @@ history-rewrite plan.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -99,10 +100,36 @@ def scan_current_tree(root: Path) -> list[Finding]:
     return findings
 
 
-def scan_history() -> list[Finding]:
+def known_history_blob_ids() -> set[str]:
+    """Blobs reachable from the reviewed baseline refs, not a blanket exception.
+
+    A ref that is unavailable in this checkout is ignored; at least one
+    baseline ref must be present so a shallow/incorrect checkout fails closed.
+    """
+    baseline = Path(__file__).with_name("public_history_baseline.json")
+    refs = json.loads(baseline.read_text(encoding="utf-8"))["refs"]
+    present: list[str] = []
+    for ref in refs:
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{ref}^{{object}}"],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            present.append(ref)
+    if not present:
+        raise RuntimeError("No reviewed historical baseline refs are available")
+    output = _run("rev-list", "--objects", *present).decode("utf-8", errors="replace")
+    return {line.split(" ", 1)[0] for line in output.splitlines()}
+
+
+def scan_history(new_only: bool = False) -> list[Finding]:
     findings: list[Finding] = []
     objects = _run("rev-list", "--objects", "--all").decode("utf-8", errors="replace")
     entries = [line.split(" ", 1) for line in objects.splitlines() if " " in line]
+    if new_only:
+        known = known_history_blob_ids()
+        entries = [entry for entry in entries if entry[0] not in known]
     if not entries:
         return findings
     process = subprocess.run(
@@ -139,10 +166,17 @@ def main() -> int:
         action="store_true",
         help="scan all unique historical blobs reachable from local refs",
     )
+    parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="with --history, fail only on newly reachable findings since reviewed refs",
+    )
     args = parser.parse_args()
+    if args.new_only and not args.history:
+        parser.error("--new-only requires --history")
 
     root = Path.cwd()
-    findings = scan_history() if args.history else scan_current_tree(root)
+    findings = scan_history(new_only=args.new_only) if args.history else scan_current_tree(root)
     if findings:
         print("Secret guard findings (content intentionally omitted):")
         for finding in findings:

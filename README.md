@@ -1,12 +1,27 @@
 # Customer Service AI Agent
 
-> **LangGraph multi-agent runtime for enterprise customer service** — hybrid RAG,
-> durable distributed execution, human approval governance, and evidence-driven evaluation.
+> **LangGraph-based Customer Service AI Agent** — multi-agent orchestration, hybrid RAG,
+> tool execution, durable runtime, HITL and observability.
 
-面向化妆品生产/销售企业的 **LangGraph 多 Agent 客服运行时**：四层状态机动态路由
+一个**独立维护**的 LangGraph 多智能体客服工程参考实现：四层状态机动态路由
 （缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理），叠加分布式执行底座
 （PostgreSQL checkpoint + Redis 锁 + Celery worker + 工具副作用幂等 ledger）
 与高风险操作的人工审批治理。
+
+> **项目与数据边界（请先读）**
+>
+> - 本仓库是独立维护的多智能体客服工程参考实现，**不代表任何特定企业的官方客服系统**，
+>   也不是任何生产系统的等价镜像。
+> - 示例知识库、客户会话、商品、订单、售后及投诉数据均为**合成或经授权可公开**的资料，
+>   不含真实客户信息、企业内部订单、商业秘密、生产日志、数据库凭据或未经授权公开的
+>   第三方资产。
+> - 退款、订单修改等工具调用用于演示**工作流、审批、幂等与故障恢复机制**，不应被理解为
+>   已接入真实企业 ERP 或具备真实交易执行能力。
+> - 测试与运行验证仅对**已执行的测试环境和条件**负责；不代表生产高可用、安全认证或实际
+>   业务正确性得到验证。
+>
+> 完整数据来源清单、已执行审计结论与已知残留：
+> **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
@@ -22,7 +37,7 @@
 | LLM（默认） | `siliconflow` / `Qwen/Qwen3-8B` | `core/config.py` |
 | Embedding / Rerank | `BAAI/bge-large-zh-v1.5` / `BAAI/bge-reranker-v2-m3` | `core/config.py` |
 | Agent 角色 / 协作模式 | 9 / 5 | `agents/`、`collaboration/modes.py` |
-| OpenAPI 路径数 | 62 | `docs/openapi.json`（`make openapi-check` 校验） |
+| OpenAPI 路径数 | 63 | `docs/openapi.json`（`make openapi-check` 校验） |
 | RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
 | 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
 

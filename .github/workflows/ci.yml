@@ -592,6 +592,13 @@ jobs:
         run: |
           bandit -r agents/ api/ auth/ cache/ collaboration/ core/ db/ erp/ knowledge/ rag/ router/ session_manager.py tools/ -ll --skip B101
 
+      - name: Public-repository boundary guard
+        run: |
+          # Career material, internal identifiers, self-awarded scores, reproduced
+          # outbound business KPIs and PII in the shipped sample corpus. Delegates
+          # to scripts/check_secrets.py for the credential half.
+          python scripts/check_public_repository_boundary.py
+
       - name: Check for secrets in code
         run: |
           python scripts/check_secrets.py

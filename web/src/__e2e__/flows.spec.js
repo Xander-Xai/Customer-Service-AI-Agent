@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('药妆智多星 E2E 完整业务链路测试', () => {
+test.describe('Customer Service AI Agent E2E 完整业务链路测试', () => {
   test.beforeEach(async ({ page }) => {
     page.on('console', (msg) => console.log('PAGE LOG:', msg.text()));
     // biome-ignore lint/suspicious/noConsole: E2E debug logs

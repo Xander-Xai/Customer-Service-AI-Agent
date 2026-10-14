@@ -6,7 +6,7 @@
 
 ## 概述
 
-为药妆智多星多智能体客服系统添加**用户可配置的主题与无障碍偏好系统**，让用户能够根据个人喜好选择界面外观和无障碍选项。
+为 Customer Service AI Agent 多智能体客服系统添加**用户可配置的主题与无障碍偏好系统**，让用户能够根据个人喜好选择界面外观和无障碍选项。
 
 ## 目标
 
@@ -256,7 +256,7 @@ web/
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>药妆智多星 - 智能客服系统</title>
+  <title>Customer Service AI Agent - 智能客服系统</title>
 
   <!-- 防 FOUC 早期主题应用（同步阻塞，必须在 CSS 之前） -->
   <script>

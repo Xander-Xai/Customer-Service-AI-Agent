@@ -2,7 +2,7 @@
   "dashboard": {
     "id": null,
     "uid": "csai-main",
-    "title": "药妆智多星 — 客服系统概览",
+    "title": "Customer Service AI Agent — 客服系统概览",
     "tags": ["csai", "customer-service"],
     "timezone": "browser",
     "refresh": "30s",

@@ -234,7 +234,7 @@ def _normalize_provider(raw: str | None, *, default: str = PROVIDER_REMOTE) -> s
 
 # ===== 系统配置（放在 HTTP 配置之前，因为 HTTP_HEADERS 引用 VERSION）=====
 VERSION = os.getenv("APP_VERSION", "6.3")  # 可从环境变量覆盖，便于 CI/CD
-APP_NAME = os.getenv("APP_NAME", "药妆智多星 - Customer Service AI Agent")
+APP_NAME = os.getenv("APP_NAME", "Customer Service AI Agent")
 DESCRIPTION = os.getenv(
     "APP_DESCRIPTION",
     "面向化妆品企业的多智能体客服系统（企业级增强版）",

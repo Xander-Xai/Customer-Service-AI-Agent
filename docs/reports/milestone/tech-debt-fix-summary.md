@@ -207,7 +207,6 @@ async def _start_periodic_cleanup():
 
 - [生产准备度检查清单](PRODUCTION_READINESS_CHECKLIST.md)
 - [生产运维手册](PRODUCTION_OPERATIONS_GUIDE.md)
-- [最终验收报告](FINAL_ACCEPTANCE_REPORT.md)
 - [快速上线清单](QUICK_LAUNCH_CHECKLIST.md)
 
 ---

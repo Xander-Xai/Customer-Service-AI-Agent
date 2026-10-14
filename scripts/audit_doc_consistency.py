@@ -133,6 +133,10 @@ ACTIVE_EXTRA = [
     Path("README.md"),
     Path("CLAUDE.md"),
     Path("docs/README.md"),
+    # Public-repository data-provenance declaration. It is a CURRENT statement
+    # about what this repository ships, not a dated audit snapshot, so it is
+    # scanned as an active doc (links, env coverage, stale terminology, ...).
+    Path("DATA_PROVENANCE.md"),
 ]
 # Historical root audit snapshots (TOOL_RESULT_CACHE_REUSE_AUDIT.md /
 # TOOL_RESULT_V2_AUDIT_REPORT.md) were moved to docs/reports/audit/ during the
@@ -1950,7 +1954,12 @@ API_REFERENCE_DOC = "docs/reference/api-reference.md"
 # Root-level markdown that is neither README nor CLAUDE.md would sit outside
 # `discover_docs` and therefore escape every guard while still competing with
 # docs/reference/current-state.md.
-ROOT_ALLOWED_MARKDOWN = {"README.md", "CLAUDE.md"}
+#
+# DATA_PROVENANCE.md is the public data-boundary declaration. It is a CURRENT
+# statement about what this repository ships (not a dated audit snapshot), it is
+# in ACTIVE_EXTRA so every guard scans it, and `scripts/
+# check_public_repository_boundary.py` enforces that README keeps linking it.
+ROOT_ALLOWED_MARKDOWN = {"README.md", "CLAUDE.md", "DATA_PROVENANCE.md"}
 
 
 def _capability_is_implemented(root: Path, markers: tuple[str, ...]) -> bool:
@@ -2540,10 +2549,10 @@ def check_no_root_level_audit_snapshots(errors: list[str], root: Path = ROOT) ->
     offenders = sorted(p.name for p in root.glob("*.md") if p.name not in ROOT_ALLOWED_MARKDOWN)
     for name in offenders:
         errors.append(
-            f"root-level markdown {name} escapes the doc guards (only README.md / "
-            f"CLAUDE.md are scanned at the root) and can compete with "
-            f"docs/reference/current-state.md — move it to docs/reports/audit/ "
-            f"with a self-declaring banner line "
+            f"root-level markdown {name} escapes the doc guards (only "
+            f"{sorted(ROOT_ALLOWED_MARKDOWN)} are scanned at the root) and can "
+            f"compete with docs/reference/current-state.md — move it to "
+            f"docs/reports/audit/ with a self-declaring banner line "
             f"('> **HISTORICAL AUDIT SNAPSHOT**' as a blockquote in the preamble), "
             f"or list it in ACTIVE_EXTRA"
         )

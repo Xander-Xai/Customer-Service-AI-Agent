@@ -23,14 +23,14 @@
 [`docs/reference/rag-evaluation.md`](../reference/rag-evaluation.md)）**supersede**，
 不再是"唯一执行规格"。目标不是继续扩充演示场景，而是完成一次 Project Truth Alignment：
 
-    代码事实 → 整改 → 真实测试 → Benchmark Artifact → Claim Matrix → 对外描述 → 工程问答口径
+    代码事实 → 整改 → 真实测试 → Benchmark Artifact → Claim Matrix → 对外描述
 
 本文件用于：
 
 1. 固化 P0/P1/P2 问题的边界、证据、预期架构和验收标准。
 2. 防止修复单个 Bug 时顺便重构无关模块。
 3. 区分当前代码事实、历史文档、外部业务数据和未验证假设。
-4. 规定什么时候可以更新对外指标数字和对外说明。
+4. 规定什么时候可以更新公开文档中的指标数字和实现描述。
 5. 为后续 Codex 执行提供阶段门禁和 Definition of Done。
 
 ### 事实优先级
@@ -100,7 +100,7 @@
 5. LLM 只能提出 Tool Call；Schema、AuthZ、风险和资源归属必须在 Tool/Service 层执行。
 6. 指标先定义再计算；每个数字必须有输入、公式、脚本和 Artifact。
 7. 历史文档是快照，不自动代表当前事实。
-8. 未通过 Phase Gate 前，对外宣称口径不得使用对应的生产化表述。
+8. 未通过 Phase Gate 前，公开文档不得使用对应的生产化表述。
 
 ## 3. P0 Critical Issues
 
@@ -728,7 +728,7 @@ CircuitBreaker：连续失败 N 次 → OPEN → recovery time → HALF_OPEN pro
 
 #### Problem
 
-first_resolution_rate 更接近单轮 session 占比，未检查 resolved、升级或同一 issue 在窗口内重新联系。single-turn 不能自动等于 FCR，因此 FCR 78% 无当前代码证据。
+first_resolution_rate 更接近单轮 session 占比，未检查 resolved、升级或同一 issue 在窗口内重新联系。single-turn 不能自动等于 FCR，因此既有的 FCR 数值无当前代码证据。
 
 #### Evidence
 
@@ -785,14 +785,14 @@ N 小时必须是显式业务参数。
 
 #### Problem
 
-labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或 3 倍。节省比例、AHT 下降比例和人效倍数是不同指标。
+labor_savings_estimate = ai_handled_rate 不能推出任何形式的人工人效提升倍数。节省比例、AHT 下降比例和人效倍数是不同指标。
 
 #### Evidence
 
 - labor_savings_estimate
 - monitoring/benchmark metric implementation
 - 缺少 before/after AHT 或 throughput Artifact
-- 对外发布材料中的 2x/3x claims
+- 既有对外材料中的人效倍数 claim（数值不在本仓库公开）
 
 #### Expected Architecture
 
@@ -928,7 +928,7 @@ labor_savings_estimate = ai_handled_rate 不能推出人工人效提升 2 倍或
 
 #### Problem
 
-仓库可证明存在 5000+ synthetic knowledge base documents 的脚本和真实文档导入器，但不能仅凭 synthetic dataset 证明真实公司沉淀 500+ 文档。FCR、人效等业务数字也缺少当前原始 Artifact。
+仓库可证明存在 synthetic knowledge base 语料生成脚本和真实文档导入器（规模以 `scripts/generate_knowledge_base.py --validate` 的当前输出为准），但不能仅凭 synthetic dataset 证明任何真实业务文档的沉淀规模。FCR、人效等业务数字也缺少当前原始 Artifact。
 
 #### Evidence
 
@@ -962,8 +962,8 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 
 #### Acceptance Criteria
 
-- 可以准确表述“支持真实文档导入，并提供 5000+ 条合成领域知识数据用于测试/演示”。
-- 500+ 真实业务文档只有在有外部证据且标 EXTERNAL 时保留。
+- 可以准确表述“支持真实文档导入，并提供合成领域知识数据用于测试/演示”（规模取脚本当前输出，不硬编码）。
+- 任何真实业务文档规模 Claim 都需要外部证据并标 EXTERNAL。
 - 数据来源、版本和隐私处理可审计。
 
 #### Out of Scope
@@ -974,7 +974,7 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 
 #### Problem
 
-对外描述、README、发布说明和对外说明存在冲突的数字和实现描述：9 个垂直 Agent、Top-3 85%、FCR 78%、人效 2/3 倍、P99 <2s、Coverage >80% 和完整 RAG 链路。没有矩阵时，旧 Claim 会继续传播。
+README、发布说明和历史文档之间存在冲突的数字和实现描述：Agent 数量口径、Top-K 召回、FCR、人效、延迟分位、Coverage 和 RAG 链路描述彼此不一致。没有矩阵时，旧 Claim 会继续传播。（本节不复述这些历史数值本身。）
 
 #### Evidence
 
@@ -1048,46 +1048,25 @@ synthetic、fixture、脱敏业务数据和 external-only data 必须分开标�
 | Project claim | Current status | Safe interim wording | Evidence before PROVEN |
 |---|---|---|---|
 | 9 个垂直 Agent | PARTIAL | 7 个业务域 + ReAct + Response，共 9 个角色 | registry、reachability tests、活文档 |
-| 500+ 真实业务文档 | EXTERNAL/UNVERIFIED | 支持真实文档导入，并提供 5000+ 合成数据用于测试/演示 | 脱敏 manifest 或外部证据 |
-| Top-3 约 85% | UNVERIFIED | 暂不写 | Real RAG Artifact，明确 Hit/Recall |
-| Hit Rate@3 约 80% | PARTIAL | 仅引用历史报告时注明历史快照 | 当前 dataset hash、代码、Artifact |
-| FCR 78%/80% | UNVERIFIED/EXTERNAL | 暂不写 | issue-level FCR、resolution、reopen |
-| 人效 2/3 倍 | UNVERIFIED/EXTERNAL | 暂不写 | before/after AHT 或 throughput |
-| 流式首字 P99 <2s | UNVERIFIED | 暂不写 | Real latency Artifact |
-| LLM 调用降低 40/65% | UNVERIFIED | 暂不写 | Real A/B baseline Artifact |
-| Token 成本下降 25/35% | UNVERIFIED | 暂不写 | Real cost Artifact |
-| 1400+ 测试 | UNVERIFIED | 重跑后填当前 collect 数量 | collect/test-function 统计 |
-| Coverage >80% | FALSE against audit snapshot | 暂不写；快照为 77.79% | CI Gate 真实通过 |
+| 真实业务文档规模 | EXTERNAL/UNVERIFIED | 支持真实文档导入，并提供合成数据用于测试/演示 | 脱敏 manifest 或外部证据 |
+| Top-3 召回率（旧对外口径） | UNVERIFIED | 暂不写 | Real RAG Artifact，明确 Hit/Recall |
+| Hit Rate@3（旧对外口径） | PARTIAL | 仅引用历史报告时注明历史快照 | 当前 dataset hash、代码、Artifact |
+| FCR（旧对外口径） | UNVERIFIED/EXTERNAL | 暂不写 | issue-level FCR、resolution、reopen |
+| 人效倍数（旧对外口径） | UNVERIFIED/EXTERNAL | 暂不写 | before/after AHT 或 throughput |
+| 流式首字延迟分位（旧对外口径） | UNVERIFIED | 暂不写 | Real latency Artifact |
+| LLM 调用量下降（旧对外口径） | UNVERIFIED | 暂不写 | Real A/B baseline Artifact |
+| Token 成本下降（旧对外口径） | UNVERIFIED | 暂不写 | Real cost Artifact |
+| 测试用例总数（旧对外口径） | UNVERIFIED | 重跑后填当前 `pytest --collect-only -q` 数量 | collect/test-function 统计 |
+| Coverage（旧对外口径） | FALSE against audit snapshot | 暂不写；以 CI Gate 当前输出为准 | CI Gate 真实通过 |
 | 完整多阶段 RAG | PARTIAL | 统一 retrieve 后再写完整链路 | unified retrieval tests + trace |
 
 ### Claim Freeze
 
-Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结对外指标数字。冻结不是删除历史材料，而是阻止继续优化未经证据支持的措辞。
+Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结公开指标数字。冻结不是删除历史材料，而是阻止继续优化未经证据支持的措辞。
 
-## 8. Engineering Q&A Alignment
+## 8. Reviewer Follow-up Questions
 
-### 8.1 六张母卡
-
-1. 系统链路：Request → Cache → Router → Retrieval → Collaboration → Agent/Tool → Quality Gate → Response → Metrics。
-2. Router：Rule shortcut → LLM fallback → conflict handling → route accuracy/confusion matrix。
-3. RAG：rewrite/filter/vector/BM25/RRF/rerank → Hit/Recall/MRR/NDCG → bad case/fallback。
-4. Agent：knowledge/prompt/tool/permission boundary → 5 modes → step/deadline/upgrade budget → degrade/human。
-5. Tool + Cache + Reliability：schema → auth → risk → timeout → breaker → result；cacheability → scope → TTL → version；deadline → retry → circuit → fallback。
-6. Evaluation：routing/retrieval/tool/answer、FCR/escalation/CSAT、latency/errors/availability、calls/tokens/cost。
-
-### 8.2 Q1–Q7 aligned wording
-
-| Question | Current aligned answer |
-|---|---|
-| 为什么 LangGraph | 有缓存跳转、Router、协作模式、质量升级和 fallback，需要可观察、可测试的 StateGraph。 |
-| 状态机怎么设计 | Cache → Router → collaboration → mode → ResponseAgent → quality → optional upgrade → End；字段以当前 AgentState 为准。 |
-| 为什么 9 个 Agent | 7 个业务域 + ReAct + Response，不称为 9 个垂直业务 Agent。 |
-| 路由、死循环、超时 | Rule shortcut → LLM fallback；recursion limit；global deadline；mode/tool retry budget；最终 fallback/human。只描述已实现数值。 |
-| Function Calling | 修复前只说已有 Registry/schema/dispatch；修复后再说 Schema → AuthZ → Risk → Timeout → Breaker → Idempotency → Structured Result。 |
-| Agent 评估 | Routing、Retrieval、Tool、Business 四层分开，不混成一个 Agent accuracy。 |
-| 缓存体系 | 先 CachePolicy，再 L1 exact、L2 semantic、L3 lexical；订单/退款/用户信息默认禁止共享缓存。 |
-
-### 8.3 必须新增的追问
+面向代码评审者的追问清单（保留问题本身，不再维护背诵式问答卡）。本仓库不再维护面向外部评审的"对齐话术"；架构事实以 [`docs/architecture.md`](../architecture.md)、[`docs/agent-design.md`](../agent-design.md) 与 [`docs/reference/current-state.md`](../reference/current-state.md) 为准。
 
 1. Prefetch 如何避免错误 scene 知识被复用？
 2. BM25 重启如何恢复？
@@ -1102,7 +1081,7 @@ Phase 1 至 Phase 4 完成并更新 Claim Matrix 前，冻结对外指标数字�
 11. 水平扩容后 L3 内存缓存如何一致？
 12. 为什么选择 RRF，做过哪些 ablation？
 13. Embedding 不可用时为什么不能生成随机向量？
-14. 每个对外指标对应哪个 commit、dataset、config？
+14. 每个公开指标对应哪个 commit、dataset、config？
 
 ## 9. Phase Gates
 
@@ -1205,15 +1184,12 @@ Required outputs：
 - 活文档与当前代码一致，历史文档保留为 snapshot。
 - 每条 PROVEN Claim 都能定位到代码、测试、Artifact。
 - 外部业务数字标 EXTERNAL，未验证数字标 UNVERIFIED，错误表述标 FALSE。
-- Claim Freeze 解除前，不更新 FCR、人效、P99、成本、调用下降和完整 RAG 数字。
-- 工程问答口径 只解释已证明实现；未来设计标 Proposed。
+- Claim Freeze 解除前，不更新 FCR、人效、延迟分位、成本、调用下降和完整 RAG 数字。
+- 公开文档只解释已证明实现；未来设计标 Proposed。
 
 最终事实闭环：
 
-    Code + Tests + Benchmarks → Project Truth → Claim Matrix
-                                      ├── current docs
-                                      ├── project descriptions
-                                      └── Engineering Q&A
+    Code + Tests + Benchmarks → Project Truth → Claim Matrix → current docs
 
-代码是实现事实，测试证明行为，Benchmark 证明数字，Claim Matrix 决定对外描述能写什么，Engineering Q&A 只解释已经被证明的事实。
+代码是实现事实，测试证明行为，Benchmark 证明数字，Claim Matrix 决定公开文档能写什么，文档只解释已经被证明的事实。
 

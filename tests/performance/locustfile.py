@@ -173,7 +173,7 @@ class AdminUser(HttpUser):
 @events.test_start.add_listener
 def on_test_start(environment, **kwargs):
     print("=" * 60)
-    print("  药妆智多星 性能基线测试")
+    print("  Customer Service AI Agent 性能基线测试")
     print("  Target: " + environment.host)
     print("=" * 60)
 

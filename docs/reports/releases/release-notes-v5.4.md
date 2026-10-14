@@ -1,8 +1,8 @@
-# 药妆智多星 v5.4 发布说明
+# Customer Service AI Agent v5.4 发布说明
 
 **发布日期**: 2026-06-16  
-**版本类型**: 企业级增强版（Minor Release）  
-**评分**: 99.0/100（极致级生产就绪，大模型自身评测，不作为正规材料参考依据）  
+**版本类型**: 工程增强（Minor Release）  
+**证据状态**: 生产验证 `NOT_VERIFIED`  
 
 ---
 
@@ -34,14 +34,14 @@
 
 ## 📊 改进成果
 
-| 维度 | v5.3 | v5.4 | 提升 |
-|------|------|------|------|
-| 安全性 | 92/100 | **94/100** | +2 |
-| 监控运维 | 91/100 | **99/100** | +8 |
-| 可维护性 | 90/100 | **94/100** | +4 |
-| **综合评分** | **90.6/100** | **99.0/100** | **+8.4** |
+| 改进面 | v5.3 状态 | v5.4 状态 |
+|------|------|------|
+| 密码哈希 | PBKDF2-SHA256 | **Argon2id**（OWASP 2023 推荐） |
+| 告警 | 单级通知 | **分级通知 + 升级机制** |
+| 业务指标监控 | 无 | **已接入** |
+| 故障排查 | 分散 | **集中手册** |
 
-**投入产出比**: ⭐⭐⭐⭐⭐ 卓越（7小时完成8项改进）
+本版本为工程改进记录，不含自评分数；能力与证据状态见 [docs/production-readiness.md](../../production-readiness.md)。
 
 ---
 
@@ -409,12 +409,11 @@ python3 -c "from auth.service import hash_password; print(hash_password('test')[
 
 如有问题，请查阅：
 - [docs/operations/production-operations-guide.md](../../operations/production-operations-guide.md) - 运维手册
-- [docs/reports/milestone/final-acceptance-report.md](../../milestone/final-acceptance-report.md) - 验收报告
 - GitHub Issues - 提交bug或feature request
 
 ---
 
 **祝使用愉快！🎉**
 
-*药妆智多星开发团队*  
+*Customer Service AI Agent 维护者*  
 *2026-06-16*

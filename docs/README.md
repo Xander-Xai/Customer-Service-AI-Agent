@@ -62,8 +62,6 @@
 ### 👑 维护者
 - 版本变更日志 → [reports/releases/changelog.md](reports/releases/changelog.md)
 - 历史发布说明 → [reports/releases/release-notes-v6.0.md](reports/releases/release-notes-v6.0.md)（不是当前状态入口）
-- 阶段改进报告 → [reports/milestone/](reports/milestone/)
-- 评分分析 → [reports/milestone/score-improvement-analysis.md](reports/milestone/score-improvement-analysis.md)
 - 技术债务清理 → [reports/milestone/tech-debt-fix-summary.md](reports/milestone/tech-debt-fix-summary.md)
 
 ### 🔒 审计者
@@ -241,12 +239,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 
 | 文件 | 说明 |
 |---|---|
-| [phase2-improvements-completed.md](reports/milestone/phase2-improvements-completed.md) | Phase 2 改进完成报告 |
-| [phase3-improvements-completed.md](reports/milestone/phase3-improvements-completed.md) | Phase 3 改进完成报告 |
-| [quick-improvements-completed.md](reports/milestone/quick-improvements-completed.md) | 快速改进完成报告 |
 | [tech-debt-fix-summary.md](reports/milestone/tech-debt-fix-summary.md) | 技术债务清理报告 |
-| [score-improvement-analysis.md](reports/milestone/score-improvement-analysis.md) | 评分改进分析 |
-| [final-acceptance-report.md](reports/milestone/final-acceptance-report.md) | 最终验收报告 |
 
 #### `reports/releases/` — 版本发布说明
 
