@@ -1,0 +1,22 @@
+{
+  "schema": "public-history-baseline/v1",
+  "captured_at": "2026-10-14",
+  "description": "Approved known Git object refs before introducing the delta-only historical boundary gate. This allowlist is immutable unless a separate reviewed baseline refresh verifies each new object.",
+  "refs": [
+    "154a0eeb58823e78d1cc5cc0ee0e4b81c2d219e9",
+    "46b83637b0c6b8e4f3a0af4dcd570d0580cc2c86",
+    "4944044653e406d7d9661ed4a39fa131f9c1375e",
+    "5a381fd12d8292a8f7b2851306993e95e012659e",
+    "821037a4ee939e3b1e567c53c252c6f53924fc0a",
+    "870a85a94e1a72cabdea2c02e9183645326d02bd",
+    "a48552dc9afefd0629345637b19042cedf95cc47",
+    "a888d82a89437101be71197c4890b77d756e5d5b",
+    "b407f24d55772b1bd310724eecca8ecb8615c893",
+    "b96c740d8c65e8ae84e71660f73935ae2b77e5f4",
+    "c906dc27fffb526b5e3ef9269cc8b1d5aeb1fb18",
+    "e19833e222f4f31b8e06ee0388ddf7fc5cc3c28f",
+    "e39f8a18b0a796fcbee2057b44c9efb75ec4ac87",
+    "e5a93930b056433ab41423f23f66cce9fd9125e6",
+    "fc0a1454bf2cd0717a1540490cd56cbd1684ff7e"
+  ]
+}
