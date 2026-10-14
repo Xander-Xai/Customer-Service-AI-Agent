@@ -366,3 +366,70 @@ def test_iter_batch_blobs_handles_multibyte_payloads() -> None:
     got = list(boundary.iter_batch_blobs(stream, [["a" * 40, "docs/x.md"]]))
     assert len(got) == 1
     assert boundary._decode(got[0][2]) == "简历\n"
+
+# ------------------------------ historical regression gates
+
+
+def test_history_delegate_forwards_history_and_delta_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The public-boundary wrapper must not scan only today's secrets."""
+    fake_guard = tmp_path / "check_secrets.py"
+    fake_guard.write_text("# test placeholder\n", encoding="utf-8")
+    monkeypatch.setattr(boundary, "SECRET_GUARD", fake_guard)
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(boundary.subprocess, "run", fake_run)
+    assert boundary.run_secret_guard(tmp_path, history=True, new_only=True) == []
+    assert calls[0][-2:] == ["--history", "--new-only"]
+    assert boundary.run_secret_guard(tmp_path, history=True) == []
+    assert calls[1][-1] == "--history"
+
+
+def test_new_history_finding_is_not_masked_by_known_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A newly committed-then-deleted career file must fail the delta gate."""
+    old_sha, new_sha = "a" * 40, "b" * 40
+    monkeypatch.setattr(boundary, "known_history_blob_ids", lambda: {old_sha})
+
+    def fake_check_output(command: list[str], **kwargs: object) -> bytes:
+        assert command == ["git", "rev-list", "--objects", "--all"]
+        return f"{old_sha} docs/old.md\n{new_sha} docs/new.md\n".encode()
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        assert command == ["git", "cat-file", "--batch"]
+        assert new_sha.encode() in kwargs["input"]
+        assert old_sha.encode() not in kwargs["input"]
+        payload = _batch_stream([(new_sha, b"blob", "# Resume claims\n".encode())])
+        return subprocess.CompletedProcess(command, 0, stdout=payload, stderr=b"")
+
+    monkeypatch.setattr(boundary.subprocess, "check_output", fake_check_output)
+    monkeypatch.setattr(boundary.subprocess, "run", fake_run)
+    delta = boundary.scan_history(new_only=True)
+    assert any("docs/new.md" in f.location for f in delta)
+    assert not any("docs/old.md" in f.location for f in delta)
+
+
+def test_periodic_history_workflow_rejects_new_leaks() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/secret-history-scan.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "continue-on-error: true" not in workflow
+    assert "check_secrets.py --history --new-only" in workflow
+    assert "check_public_repository_boundary.py --history --new-only" in workflow
+
+
+def test_history_baseline_is_pinned_and_not_empty() -> None:
+    import json
+
+    baseline = json.loads(
+        (REPO_ROOT / "scripts/public_history_baseline.json").read_text(encoding="utf-8")
+    )
+    assert baseline["schema"] == "public-history-baseline/v1"
+    assert "fc0a1454bf2cd0717a1540490cd56cbd1684ff7e" in baseline["refs"]
+    assert len(baseline["refs"]) >= 3
