@@ -367,6 +367,7 @@ def test_iter_batch_blobs_handles_multibyte_payloads() -> None:
     assert len(got) == 1
     assert boundary._decode(got[0][2]) == "简历\n"
 
+
 # ------------------------------ historical regression gates
 
 
@@ -379,7 +380,9 @@ def test_history_delegate_forwards_history_and_delta_mode(
     monkeypatch.setattr(boundary, "SECRET_GUARD", fake_guard)
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
         calls.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
@@ -401,7 +404,9 @@ def test_new_history_finding_is_not_masked_by_known_baseline(
         assert command == ["git", "rev-list", "--objects", "--all"]
         return f"{old_sha} docs/old.md\n{new_sha} docs/new.md\n".encode()
 
-    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+    def fake_run(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
         assert command == ["git", "cat-file", "--batch"]
         assert new_sha.encode() in kwargs["input"]
         assert old_sha.encode() not in kwargs["input"]
