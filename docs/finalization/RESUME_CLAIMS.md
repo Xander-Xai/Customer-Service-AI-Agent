@@ -7,11 +7,11 @@
 
 ## 1. The time/version boundary (read first)
 
-Two distinct bodies of work live near this repo:
+Two distinct bodies of work must be separated. This public repository is a **personal independent reproduction** of the enterprise customer-service Agent project the maintainer worked on, plus some subsequent engineering improvements. It is neither copied employer source nor an official or one-to-one mirror of the production system:
 
 - **Enterprise tenure (2024–2025):** the original multi-agent customer-service
   system and its early retrieval/caching work.
-- **Post-departure / 2026 work:** the **distributed Agent Runtime** (PostgreSQL
+- **Post-departure personal reproduction and later additions / 2026 work:** the **distributed Agent Runtime** (PostgreSQL
   checkpoint resume, Redis per-thread locks, Celery workers, at-least-once +
   three-layer idempotency, DLQ), the **Human-in-the-Loop approval governance**,
   the **Agent Eval harness (V1)**, the **real-provider eval lane**, and the
@@ -19,7 +19,7 @@ Two distinct bodies of work live near this repo:
 
 ⚠️ **Do not attribute any 2026 distributed-runtime / HITL / agent-eval work to the
 2024–2025 enterprise role.** On a resume these are separate entries or clearly
-dated personal/open-source work, not part of the earlier employment.
+dated personal independent-reproduction work (with limited later enhancements), not part of the earlier employment.
 
 ---
 
