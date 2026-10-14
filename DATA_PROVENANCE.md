@@ -169,9 +169,20 @@ ERP 凭据、租户标识或接口资料**；`ERP_MODE=real` 需要使用者自�
 运行方式：
 
 ```bash
-python3 scripts/check_public_repository_boundary.py     # 默认：扫描工作区
-python3 scripts/check_public_repository_boundary.py --history   # 含 git 历史（较慢，人工/定期执行）
+python3 scripts/check_public_repository_boundary.py                  # 当前代码树：违规即失败
+python3 scripts/check_public_repository_boundary.py --history        # 全量历史清点：含已知遗留，退出码 2
+python3 scripts/check_public_repository_boundary.py --history --new-only  # 基于已审快照的增量历史门禁
+python3 scripts/check_secrets.py --history --new-only                # 同一快照的新增历史凭据门禁
 ```
+
+
+历史增量门禁的固定基线为 `scripts/public_history_baseline.json` 中经审核的 Git
+对象引用快照。既有的历史残留**不被宣布为安全或被清除**：`--history` 仍可以完整
+列出它们；`--history --new-only` 仅允许这批已知对象保持现状，而**新的可达
+提交／删除后仍留在历史中的违规内容**会使定期 workflow 失败。基线不得随意
+更新为最新主分支或通过 `continue-on-error` 绕过；确需刷新时必须独立审查
+新增对象及其来源。历史扫描范围以执行环境实际获取的 Git refs 为限，
+不等于已清除 GitHub 上所有旧 PR、Release 或第三方副本。
 
 守卫的规则是**可枚举**的：新增一条边界规则，必须同时在
 `tests/unit/test_public_repository_boundary.py` 中补上正例与反例，
