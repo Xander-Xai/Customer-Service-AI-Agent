@@ -8,6 +8,11 @@
 （PostgreSQL checkpoint + Redis 锁 + Celery worker + 工具副作用幂等 ledger）
 与高风险操作的人工审批治理。
 
+**项目来源与实现边界（请先读）**：本仓库是维护者离职后，基于此前参与的企业「药妆智多星」多智能体客服项目经验，对主要架构和业务能力进行的**个人独立复现**；在该复现基础上又做了部分工程改进与可靠性验证（如分布式执行、HITL、幂等和评测治理）。公开仓库**不是**企业原始生产源码、官方项目或生产系统的等价镜像。企业任职期间完成的工作与离职后的复现/改进须分别陈述；本仓源码与测试不能直接证明原企业生产环境采用了后续新增的机制。
+
+> 对外介绍统一使用「**企业项目经验 + 离职后个人独立复现（含部分后续改进）**」，不要将复现实现当作企业原始项目持续开发的版本。
+
+
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
