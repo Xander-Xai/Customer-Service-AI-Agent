@@ -1,4 +1,4 @@
-# 药妆智多星多智能体客服系统
+# Customer Service AI Agent — LangGraph 多智能体客服系统
 
 ## 当前事实入口
 

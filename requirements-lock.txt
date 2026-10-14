@@ -1,5 +1,5 @@
 # ==============================================================
-# 药妆智多星 — 依赖快照 (requirements-lock.txt)
+# Customer Service AI Agent — 依赖快照 (requirements-lock.txt)
 # ==============================================================
 #
 # STATUS: SUPERSEDED / NON-AUTHORITATIVE HISTORICAL SNAPSHOT

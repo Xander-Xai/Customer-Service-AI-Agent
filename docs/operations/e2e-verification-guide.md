@@ -438,14 +438,16 @@ docker compose exec postgres psql -U postgres -d cosmetics_ai -c \
 
 ## 10. 证据表述要点
 
-汇报或演示时这样表述（**只能引用当前运行的实测结果**；没有新 artifact 就不要报当前 PASS 数）：
+在文档、Issue、PR 或任何对外说明中陈述证据时，遵守以下规则：
 
-> "这个项目建立了完整的 E2E 验证链路：provider 认证探针 → 真实 LLM suite
-> （产品咨询、退货路由、RAG 增强、多轮上下文、注入防御等场景）→ 历史教训驱动
-> 的输出层加固。**历史口径**：2026-06 曾有一次真实 LLM E2E 快照跑完当时全部
-> 5 个场景（HISTORICAL SNAPSHOT，不可复用为当前结果）；**当前证据**：provider
-> auth probe 最新留档是 HTTP 401 / BLOCKED_BY_AUTHENTICATION，所以真实调用
-> 当前是阻塞的——我不会把历史结果包装成当前生产验证。测试中发现过两个 Mock
-> 无法覆盖的问题：路由优先级缺陷和小模型注入泄露，都已在输出层修复。"
->
-> （如录屏）"这里有一段 40 秒的录屏，展示了从登录到多轮对话到监控面板的完整流程。"
+1. **只能引用当前运行的实测结果**。没有新的 artifact，就不要报当前的 PASS 数。
+2. **历史快照不可复用为当前结果**。2026-06 曾有一次真实 LLM E2E 快照跑完当时
+   全部 5 个场景，那是 HISTORICAL SNAPSHOT，不能作为今天的验证结论。
+3. **阻塞要写成阻塞**。当前 provider auth probe 的留档是 HTTP 401 /
+   BLOCKED_BY_AUTHENTICATION，真实 LLM 调用当前就是被阻塞的；不得把历史结果
+   表述为当前生产验证。
+4. **区分「测试能证明」和「测试没证明」**。Mock 覆盖不到的行为（路由优先级、
+   小模型注入泄露等）要单独说明，不能因为套件全绿就默认它们安全。
+
+详见 [`docs/limitations.md`](../limitations.md) 与
+[`docs/evaluation/production-evidence.md`](../evaluation/production-evidence.md)。

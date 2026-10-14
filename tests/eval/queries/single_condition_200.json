@@ -638,7 +638,7 @@
   },
   {
     "query_id": "bench_0148",
-    "query": "薇诺雅舒敏保湿面霜适合什么皮肤？",
+    "query": "Aurelane 舒敏保湿面霜适合什么皮肤？",
     "expected_doc_ids": [
       "faq_01752",
       "faq_00040",
@@ -651,7 +651,7 @@
   },
   {
     "query_id": "bench_0149",
-    "query": "薇诺雅烟酰胺精华液多少钱？",
+    "query": "Aurelane 烟酰胺精华液多少钱？",
     "expected_doc_ids": [
       "faq_00309",
       "faq_00611",
@@ -664,7 +664,7 @@
   },
   {
     "query_id": "bench_0150",
-    "query": "薇诺雅玻尿酸面膜多少钱？",
+    "query": "Aurelane 玻尿酸面膜多少钱？",
     "expected_doc_ids": [
       "faq_01513",
       "faq_00607",
@@ -677,7 +677,7 @@
   },
   {
     "query_id": "bench_0151",
-    "query": "薇诺雅防晒霜SPF50多少钱？",
+    "query": "Aurelane 防晒霜SPF50多少钱？",
     "expected_doc_ids": [
       "faq_00523",
       "faq_00172",
@@ -690,7 +690,7 @@
   },
   {
     "query_id": "bench_0152",
-    "query": "薇诺雅视黄醇抗皱眼霜适合什么人用？",
+    "query": "Aurelane 视黄醇抗皱眼霜适合什么人用？",
     "expected_doc_ids": [
       "faq_01494",
       "faq_00164",
@@ -703,7 +703,7 @@
   },
   {
     "query_id": "bench_0153",
-    "query": "薇诺雅积雪草修护乳液成分是什么？",
+    "query": "Aurelane 积雪草修护乳液成分是什么？",
     "expected_doc_ids": [
       "faq_00861",
       "faq_01023",
@@ -716,7 +716,7 @@
   },
   {
     "query_id": "bench_0154",
-    "query": "薇诺雅水杨酸净肤水适合什么皮肤？",
+    "query": "Aurelane 水杨酸净肤水适合什么皮肤？",
     "expected_doc_ids": [
       "faq_01449",
       "faq_01665",
@@ -729,7 +729,7 @@
   },
   {
     "query_id": "bench_0155",
-    "query": "薇诺雅角鲨烷护肤油怎么用？",
+    "query": "Aurelane 角鲨烷护肤油怎么用？",
     "expected_doc_ids": [
       "faq_00970",
       "faq_00666",
@@ -742,7 +742,7 @@
   },
   {
     "query_id": "bench_0156",
-    "query": "薇诺雅熊果苷美白套装价格？",
+    "query": "Aurelane 熊果苷美白套装价格？",
     "expected_doc_ids": [
       "faq_01689",
       "faq_00102",
@@ -755,7 +755,7 @@
   },
   {
     "query_id": "bench_0157",
-    "query": "薇诺雅神经酰胺屏障修复霜多少钱？",
+    "query": "Aurelane 神经酰胺屏障修复霜多少钱？",
     "expected_doc_ids": [
       "faq_01361",
       "faq_01687",
@@ -768,7 +768,7 @@
   },
   {
     "query_id": "bench_0158",
-    "query": "薇诺雅水杨酸控油套装有哪些产品？",
+    "query": "Aurelane 水杨酸控油套装有哪些产品？",
     "expected_doc_ids": [
       "faq_01093",
       "faq_00653",
@@ -781,7 +781,7 @@
   },
   {
     "query_id": "bench_0159",
-    "query": "薇诺雅视黄醇抗老精华多少钱？",
+    "query": "Aurelane 视黄醇抗老精华多少钱？",
     "expected_doc_ids": [
       "faq_01567",
       "faq_00159",
@@ -794,7 +794,7 @@
   },
   {
     "query_id": "bench_0160",
-    "query": "薇诺雅积雪草舒缓面膜怎么用？",
+    "query": "Aurelane 积雪草舒缓面膜怎么用？",
     "expected_doc_ids": [
       "faq_00912",
       "faq_00818",
@@ -976,7 +976,7 @@
   },
   {
     "query_id": "bench_0174",
-    "query": "薇诺雅有什么美白产品？",
+    "query": "Aurelane 有什么美白产品？",
     "expected_doc_ids": [
       "faq_01353",
       "faq_01286",
@@ -989,7 +989,7 @@
   },
   {
     "query_id": "bench_0175",
-    "query": "薇诺雅有什么修复产品？",
+    "query": "Aurelane 有什么修复产品？",
     "expected_doc_ids": [
       "faq_01231",
       "scene_00203",
@@ -1002,7 +1002,7 @@
   },
   {
     "query_id": "bench_0176",
-    "query": "薇诺雅有什么控油产品？",
+    "query": "Aurelane 有什么控油产品？",
     "expected_doc_ids": [
       "faq_01673",
       "faq_01337",
@@ -1015,7 +1015,7 @@
   },
   {
     "query_id": "bench_0177",
-    "query": "薇诺雅面膜有哪些？",
+    "query": "Aurelane 面膜有哪些？",
     "expected_doc_ids": [
       "faq_01212",
       "faq_00522",
@@ -1275,7 +1275,7 @@
   },
   {
     "query_id": "bench_0197",
-    "query": "薇诺雅产品价位怎么样？",
+    "query": "Aurelane 产品价位怎么样？",
     "expected_doc_ids": [
       "faq_01748",
       "faq_01827",

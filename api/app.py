@@ -355,7 +355,9 @@ def create_app(
         await shutdown_api_lock_manager()
         logger.info("httpx 连接池已关闭")
 
-    app = FastAPI(title="药妆智多星多智能体客服系统", version=VERSION, lifespan=lifespan)
+    app = FastAPI(
+        title="Customer Service AI Agent 多智能体客服系统", version=VERSION, lifespan=lifespan
+    )
 
     # ── 存储依赖到 app.state（供路由模块访问）──
     app.state.session_manager = session_manager

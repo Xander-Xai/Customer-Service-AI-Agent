@@ -694,14 +694,14 @@ class TestRuleBasedLLMGenerate:
 
         llm = RuleBasedLLM()
         resp = llm._generate_response("随便聊聊")
-        assert "药妆智多星" in resp
+        assert "Customer Service AI Agent" in resp
 
     def test_generate_response_unknown_type_falls_back_to_general(self):
         from llm.rule_based_llm import RuleBasedLLM
 
         llm = RuleBasedLLM()
         resp = llm._generate_response("hello", "nonexistent_type")
-        assert "药妆智多星" in resp
+        assert "Customer Service AI Agent" in resp
 
 
 class TestRuleBasedLLMInvoke:

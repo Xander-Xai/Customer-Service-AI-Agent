@@ -1224,8 +1224,8 @@ make prod
 
 ### 内部支持
 
-- **运维团队**: ops-team@company.com
-- **开发团队**: dev-team@company.com
+- **运维团队**: ops-team@example.com
+- **开发团队**: dev-team@example.com
 - **紧急联系**: +86-XXX-XXXX-XXXX
 
 ### 外部支持

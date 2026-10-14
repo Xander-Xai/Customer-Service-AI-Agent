@@ -52,7 +52,7 @@ RULE_TEMPLATES = {
     },
     "general": {
         "keywords": [],
-        "response": "您好！我是药妆智多星客服助手 🤖\n\n"
+        "response": "您好！我是 Customer Service AI Agent 客服助手 🤖\n\n"
         "我可以帮您：\n"
         "✅ 查询产品信息和成分\n"
         "✅ 处理订单和物流问题\n"

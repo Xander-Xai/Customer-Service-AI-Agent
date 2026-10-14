@@ -276,7 +276,7 @@ FROM agent_runs WHERE id = '<run_id>';
    （`python3 scripts/replay_dead_run.py` 只处理 DLQ，审批场景按 §3.7.1 手工
    重投队列消息，**不要**改数据库状态）。
 4. **兜底逃逸口**：`WAITING_APPROVAL → DEAD_LETTER` / `CANCELLED` 合法。审批被
-   永久搁置（例如人离职）时用它收口，而不是让 run 无限期悬着。
+   永久搁置（例如审批人长期不可达）时用它收口，而不是让 run 无限期悬着。
 
 > **边界**：`/api/chat` 实时快路径**不在**该治理边界内（无 run 上下文、
 > 无 durable checkpoint）。快路径上的高风险工具不会产生审批记录——不要按

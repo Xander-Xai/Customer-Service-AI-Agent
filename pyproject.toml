@@ -1,7 +1,7 @@
 [project]
 name = "customer-service-ai-agent"
 version = "6.3"
-description = "药妆智多星多智能体客服系统"
+description = "LangGraph-based Customer Service AI Agent — multi-agent orchestration, hybrid RAG, tool execution, durable runtime, HITL and observability."
 requires-python = ">=3.10"
 # SPDX license expression (PEP 639), aligned with the canonical LICENSE file
 # (Apache License 2.0) that GitHub license detection also resolves.

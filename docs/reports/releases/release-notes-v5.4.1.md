@@ -1,4 +1,4 @@
-# 药妆智多星 v5.4.1 增量发布说明
+# Customer Service AI Agent v5.4.1 增量发布说明
 
 **发布日期**: 2026-06-17
 **版本类型**: 补丁版（Patch Release）

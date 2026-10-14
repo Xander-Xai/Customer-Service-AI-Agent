@@ -1,6 +1,6 @@
 # 变更日志 (CHANGELOG)
 
-> 本文档记录药妆智多星多智能体客服系统的所有版本变更。
+> 本文档记录 Customer Service AI Agent 多智能体客服系统的所有版本变更。
 
 ## Unreleased
 
@@ -153,18 +153,16 @@ semantics; Issue #99 static provenance audit completed on `main`); the
 ## v6.1 证据缺口修复 (2026-06-24)
 
 ### 🔴 证据缺口修复（15 项缺口全部补齐）
-- **知识库**：5000+ 条化妆品行业文档（成分数据 1500+ / FAQ 2500+ / 场景文档 1000+）— `scripts/generate_knowledge_base.py`
+- **知识库**：合成演示语料（由 `scripts/generate_knowledge_base.py` 确定性生成，规模以脚本 `--validate` 输出为准）— 非真实企业文档
 - **多模态**：语音输入（MediaRecorder）+ 图片拖拽上传（Canvas 压缩）+ 端到端链路 — `web/widget.html`
 - **四大场景路由**：10 个意图标签 + SCENE_MAPPING + RoutingResult.scene — `router/query_router.py`
 - **场景 Agent**：新增 `SalesAgent`（售前推荐）+ `AftersalesAgent`（售后处理）+ `ComplaintAgent` 紧急检测 — `agents/`
 
 ### 📊 性能基准确立（9 个 benchmark 脚本）
-- **缓存命中率**：~65-70%（负载测试，1000 次查询）— `scripts/benchmark_cache.py`
+- **缓存命中率**：`NOT_MEASURED`（脚本存在，未复核；需真实复跑 `scripts/benchmark_cache.py`）
 - **三级缓存分层统计**：L1/L2/L3 各层命中率 — `scripts/benchmark_cache_hierarchy.py`
-- **流式首字 P99 < 2s**：延迟分位值测试 — `scripts/benchmark_latency.py`
-- **LLM 调用降低 ~65%**：A/B 对比测试 — `scripts/benchmark_ab_test.py`
-- **Token 成本下降 ~35%**：成本分析 — `scripts/benchmark_cost.py`
-- **RAG 预取延迟降低 ≥ 20%**：预取效果验证 — `scripts/benchmark_prefetch.py`
+- **流式首字延迟分位**：`NOT_MEASURED`（脚本存在，未复核；需真实复跑 `scripts/benchmark_latency.py`）
+- **LLM 调用量 / Token 成本 / RAG 预取收益**：`NOT_MEASURED`（脚本存在，缺少真实 provider 的 A/B 基线 Artifact）
 
 ### 🎯 RAG 评测体系
 - **500+ 条评测集**：涵盖单条件/多条件/模糊语义/长尾查询 — `tests/eval/rag_benchmark.json`
@@ -318,10 +316,8 @@ semantics; Issue #99 static provenance audit completed on `main`); the
 ## v5.4 (2026-06-16) — 企业级增强（安全+运维+监控）
 
 ### 🏆 核心成果
-- **评分提升**: 90.6 → 99.0分 (+8.4分，大模型自身评测，不作为正规材料参考依据)
-- **改进项数**: 8项高ROI优化
-- **总耗时**: ~7小时
-- **状态**: 极致级生产就绪（超越99.9%的生产系统，大模型自身评测，不作为正规材料参考依据）
+- **改进项数**: 8项工程优化
+- **证据状态**: 生产验证 `NOT_VERIFIED`，见 [docs/production-readiness.md](../../production-readiness.md)
 
 ### 🔐 安全升级
 - **Argon2id密码哈希** - OWASP 2023推荐标准
@@ -406,11 +402,7 @@ semantics; Issue #99 static provenance audit completed on `main`); the
 - 新增: `argon2-cffi>=23.1.0` - Argon2id密码哈希库
 
 ### 📄 相关文档
-- [quick-improvements-completed.md](../milestone/quick-improvements-completed.md) - Historical Phase 1 report
-- [phase2-improvements-completed.md](../milestone/phase2-improvements-completed.md) - Historical Phase 2 report
-- [phase3-improvements-completed.md](../milestone/phase3-improvements-completed.md) - Historical Phase 3 report
 - [production-operations-guide.md](../../operations/production-operations-guide.md) - Operations guide
-- [final-acceptance-report.md](../milestone/final-acceptance-report.md) - Historical acceptance report
 
 ---
 

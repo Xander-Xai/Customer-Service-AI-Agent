@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "药妆智多星多智能体客服系统",
+    "title": "Customer Service AI Agent 多智能体客服系统",
     "version": "6.3"
   },
   "paths": {
