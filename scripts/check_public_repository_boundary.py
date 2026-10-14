@@ -397,7 +397,10 @@ def known_history_blob_ids() -> set[str]:
     if not present:
         raise RuntimeError("No reviewed historical baseline refs are available")
     output = subprocess.check_output(["git", "rev-list", "--objects", *present])
-    return {line.split(" ", 1)[0] for line in output.decode("utf-8", errors="replace").splitlines()}
+    return {
+        line.split(" ", 1)[0]
+        for line in output.decode("utf-8", errors="replace").splitlines()
+    }
 
 
 def scan_history(new_only: bool = False) -> list[Finding]:
@@ -434,7 +437,9 @@ def scan_history(new_only: bool = False) -> list[Finding]:
     return findings
 
 
-def run_secret_guard(root: Path, history: bool = False, new_only: bool = False) -> list[Finding]:
+def run_secret_guard(
+    root: Path, history: bool = False, new_only: bool = False
+) -> list[Finding]:
     """Delegate to the existing credential scanner instead of duplicating it."""
     if not SECRET_GUARD.is_file():
         return [Finding(str(SECRET_GUARD), "G1-secret-guard-missing", "governance/missing-tool")]
