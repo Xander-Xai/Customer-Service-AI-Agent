@@ -27,6 +27,7 @@ historical blob; it is expected to report the retired files listed in
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -380,15 +381,39 @@ def iter_batch_blobs(stdout: bytes, entries: list[list[str]]) -> Iterator[tuple[
         yield object_id, path, payload
 
 
-def scan_history() -> list[Finding]:
-    """Scan every unique historical blob. Findings here are expected and are
-    the input to an *authorised* history-rewrite decision, not a CI failure by
-    themselves (exit code 2 instead of 1, see ``main``)."""
+def known_history_blob_ids() -> set[str]:
+    """Resolve the reviewed baseline snapshot; missing baseline fails closed."""
+    baseline = Path(__file__).with_name("public_history_baseline.json")
+    refs = json.loads(baseline.read_text(encoding="utf-8"))["refs"]
+    present: list[str] = []
+    for ref in refs:
+        result = subprocess.run(
+            ["git", "cat-file", "-e", f"{ref}^{{object}}"],
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            present.append(ref)
+    if not present:
+        raise RuntimeError("No reviewed historical baseline refs are available")
+    output = subprocess.check_output(["git", "rev-list", "--objects", *present])
+    return {line.split(" ", 1)[0] for line in output.decode("utf-8", errors="replace").splitlines()}
+
+
+def scan_history(new_only: bool = False) -> list[Finding]:
+    """Audit reachable historical blobs; optionally flag only post-baseline ones.
+
+    Full inventory returns a nonzero status for known legacy material; scheduled
+    gate checks only objects not reachable from the immutable reviewed snapshot.
+    """
     findings: list[Finding] = []
     objects = subprocess.check_output(["git", "rev-list", "--objects", "--all"]).decode(
         "utf-8", errors="replace"
     )
     entries = [line.split(" ", 1) for line in objects.splitlines() if " " in line]
+    if new_only:
+        known = known_history_blob_ids()
+        entries = [entry for entry in entries if entry[0] not in known]
     if not entries:
         return findings
     process = subprocess.run(
@@ -409,13 +434,16 @@ def scan_history() -> list[Finding]:
     return findings
 
 
-def run_secret_guard(root: Path) -> list[Finding]:
+def run_secret_guard(root: Path, history: bool = False, new_only: bool = False) -> list[Finding]:
     """Delegate to the existing credential scanner instead of duplicating it."""
     if not SECRET_GUARD.is_file():
         return [Finding(str(SECRET_GUARD), "G1-secret-guard-missing", "governance/missing-tool")]
-    result = subprocess.run(
-        [sys.executable, str(SECRET_GUARD)], cwd=root, capture_output=True, text=True
-    )
+    cmd = [sys.executable, str(SECRET_GUARD)]
+    if history:
+        cmd.append("--history")
+    if new_only:
+        cmd.append("--new-only")
+    result = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
     if result.returncode == 0:
         return []
     return [
@@ -466,7 +494,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="do not delegate to scripts/check_secrets.py (used by the unit tests)",
     )
+    parser.add_argument(
+        "--new-only",
+        action="store_true",
+        help="with --history, block newly reachable historical violations beyond the baseline",
+    )
     args = parser.parse_args(argv)
+    if args.new_only and not args.history:
+        parser.error("--new-only requires --history")
 
     root = ROOT
     findings = check_required_surface(root)
@@ -474,7 +509,11 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_secrets:
         findings.extend(run_secret_guard(root))
     if args.history:
-        history_findings = scan_history()
+        history_findings = scan_history(new_only=args.new_only)
+        if not args.skip_secrets:
+            history_findings.extend(
+                run_secret_guard(root, history=True, new_only=args.new_only)
+            )
     else:
         history_findings = []
 
@@ -500,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {finding.location}: {finding.rule_id} [{finding.category}]")
         if len(history_findings) > 20:
             print(f"- … and {len(history_findings) - 20} more")
-        return 2
+        return 1 if args.new_only else 2
     return 0
 
 
