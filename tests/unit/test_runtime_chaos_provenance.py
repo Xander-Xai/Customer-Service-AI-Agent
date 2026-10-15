@@ -385,15 +385,46 @@ def test_new_artifact_with_provenance_is_consumable(tmp_path: Path, monkeypatch)
     assert reporter.main(["--out", str(tmp_path / "summary.json")]) == 0
 
 
-def test_tracked_chaos_history_is_not_rewritten():
-    """E3：历史 chaos artifact 的工作区内容与 HEAD 一致（未补写 provenance）。"""
-    tracked = subprocess.run(
-        ["git", "-C", str(chaos.REPO_ROOT), "ls-files", "artifacts/runtime"],
+#: provenance 修复**之前**提交的 8 份 chaos 证据。断言只针对这一组已知历史文件：
+#: 将来在干净工作区里新生成并正式入库的 chaos artifact **应该**带
+#: ``code_provenance``（见 artifacts/README.md 的可复现纪律），不能被本用例误伤。
+LEGACY_CHAOS_ARTIFACTS = (
+    "artifacts/runtime/chaos-20261002T053011Z.json",
+    "artifacts/runtime/chaos-20261002T082222Z.json",
+    "artifacts/runtime/chaos-20261002T094500Z.json",
+    "artifacts/runtime/chaos-20261002T100500Z.json",
+    "artifacts/runtime/chaos-20261002T113006Z.json",
+    "artifacts/runtime/chaos-20261002T141717Z.json",
+    "artifacts/runtime/chaos-20261002T143800Z.json",
+    "artifacts/runtime/chaos-20261006T081808Z.json",
+)
+
+
+def _git_out(*args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(chaos.REPO_ROOT), *args],
         capture_output=True,
         text=True,
         check=False,
-    ).stdout.split()
-    for rel in tracked:
-        assert not rel.endswith("chaos-ci.json")
+    ).stdout
+
+
+def test_legacy_chaos_artifacts_are_not_rewritten():
+    """E3：8 份历史产物既没被删除/改名，也没被就地补写溯源字段。
+
+    断言**只**针对 ``LEGACY_CHAOS_ARTIFACTS``。将来在干净工作区里新生成并正式
+    入库的 chaos artifact 应当带 ``code_provenance``（artifacts/README.md 的可复现
+    纪律），因此它必须落在本用例的遍历范围之外 —— 否则一个正确的入库会被误判为
+    "篡改历史"。
+    """
+    tracked = set(_git_out("ls-files", "artifacts/runtime").split())
+    for rel in LEGACY_CHAOS_ARTIFACTS:
+        assert rel in tracked, f"历史产物 {rel} 不应被删除或改名"
         content = json.loads((chaos.REPO_ROOT / rel).read_text(encoding="utf-8"))
         assert "code_provenance" not in content, f"历史产物 {rel} 不得被补写溯源字段"
+
+    modified = _git_out("diff", "--name-only", "HEAD", "--", *LEGACY_CHAOS_ARTIFACTS)
+    assert not modified.strip(), f"历史产物被就地改写: {modified.strip()}"
+
+    fresh_name = "artifacts/runtime/chaos-20990101T000000Z.json"
+    assert fresh_name not in LEGACY_CHAOS_ARTIFACTS
