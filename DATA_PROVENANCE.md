@@ -89,7 +89,31 @@ flake 调查等）。按 [artifacts/README.md](artifacts/README.md) 的规则生
 
 - 数据库连接串只出现 `localhost` 且口令已脱敏；
 - 不包含 token、密钥或任何业务数据；
-- 每份正式证据记录 `commit_sha` / `dirty` / 数据集 hash，便于复核。
+- **provenance 覆盖是部分的，不是逐份齐备。** 以
+  `git ls-tree -r main -- artifacts/` 的当前输出为准，已跟踪的 **354** 份 JSON
+  构成如下**互斥**分组（合计 354）：
+
+  | 分组 | 份数 | 位置 / 说明 |
+  |---|---:|---|
+  | 带 `tested_code_sha` + `artifact_commit_sha` + `generated_at` | 9 | `artifacts/distributed-runtime/*/report.json`（schema 值 `distributed-runtime-evidence/v2`） |
+  | 带 schema 标识但不带 `tested_code_sha` | 16 | 含上表 9 份中余下 7 份带 `generated_at` 的，以及 9 份仅带 schema 的 |
+  | 无任何 schema 标识 | 329 | `flake-investigation/` 320、`runtime/chaos-*` 8、`observability/` 1 |
+
+  带 schema 的 25 份由 `distributed-runtime-evidence/v2`×9、`v1`×1、
+  `runtime-suite-diagnostics/v1`×4、`crash-kill-gate-probe/v1`×2 及 8 个单例构成；
+  **带 `code_provenance` 块的是 0 份**。329 份无 schema 的**生成于 provenance
+  契约之前**，它们**按原样保留、不重写**：可追溯性由提交历史本身保证，而不是
+  由 artifact 内的自述字段保证。
+- **`code_provenance` 只由部分生成器写入，尚未成为全库强制不变量。** 调用
+  `core/code_provenance.collect_code_provenance()` 的生成器只有 6 个：
+  `scripts/report_distributed_runtime.py`（`make runtime-report`）、
+  `evaluate_agent.py`（`make agent-eval`）、`evaluate_agent_real.py`、
+  `evaluate_rag_reviewed_gold.py`、`measure_performance.py`、`run_rag_ablation.py`。
+  这些会写入 `publication_status` / `dirty` / `tracked_diff_sha256`。
+  **已知缺口**：`make runtime-chaos` 走 `scripts/test_worker_crash_recovery.py`，
+  直接 `json.dumps` 写出结果，**不**附该块，因此新生成的
+  `artifacts/runtime/chaos-*.json` 仍不满足该约定。在补齐之前，本文件不把
+  「新证据必带 provenance」表述为已成立的规则。
 
 ### 2.5 凭据与配置
 
@@ -141,19 +165,47 @@ ERP 凭据、租户标识或接口资料**；`ERP_MODE=real` 需要使用者自�
 | `.env.example` / Docker / CI / Compose | 仅占位符；无真实凭据 |
 | 跟踪文件全量关键词扫描 | 已移除内部产品代号、自评验收材料、背诵式问答卡与对外业务指标数值 |
 | 评测资产（`tests/eval/`） | 全部为合成/构造数据，无人工真实标注来源的企业数据 |
+| Git 历史（**仅公开引用**：普通 `git clone` 的引用集） | 2026-10-15 复核：`--history` 报告 **1025** 处命中，全部为**文字类**残留（内部代号 / 职业措辞 / 自评评分 / 正式材料措辞 / 对外指标措辞）；凭据扫描 **0** 命中 |
+| Git 历史（含本机私有分支与 backup tag） | 同一命令在本机 clone 上报告 **1218** 处。**命中数不等于泄漏数**：差额来自未发布的本地引用，不构成公开暴露 |
+
+> **复核方法（可重放）**：结果**随引用集变化**。`--history` 走
+> `git rev-list --all`，因此凡是额外抓取了 `refs/pull/*`、未发布的本地分支或
+> backup tag 的 clone，都会得到更大的数字。要复现「公开克隆者实际能看到什么」，
+> 用一次**普通 clone**（默认只抓 `refs/heads/*` 与 `refs/tags/*`，不含
+> `refs/pull/*`）再运行：
+>
+> ```bash
+> git clone https://github.com/Xander-Xai/Customer-Service-AI-Agent.git
+> cd Customer-Service-AI-Agent
+> python3 scripts/check_public_repository_boundary.py --history --skip-secrets
+> ```
+>
+> 注意 `--mirror` **不可**用于此复现：它是裸仓库、没有检出工作树，
+> `make` 与脚本都无法直接运行。CI（`Historical secret scan`）用的就是这个形态；
+> `--new-only` 门禁在公开引用集上通过，在带本地私有分支的 clone 上会误报。
+> 上表 1025 是**删除陈旧分支之后**的实测值；删除前为 1034，差额 9 处正是
+> `docs/clarify-independent-reproduction-20261014` 带来的。
 
 **已知的例外与残留**（如实声明）：
 
 1. **Git 历史仍包含已删除的旧文件。** `docs/finalization/INTERVIEW_GUIDE.md`
    与 `docs/finalization/RESUME_CLAIMS.md` 曾在公开分支上提交过，其对象在
    历史中仍可通过已知 SHA 访问。本仓库**未**执行历史重写（未经授权）。
-2. **历史 tag / release 描述仍包含旧的内部产品代号。** 已发布的
-   `v1.0.0` / `v1.0.1` release 描述与 `v1.0.0` / `v1.0.1` / `v6.3` tag 指向的
-   提交未做重写。
+2. **历史 tag 指向的提交仍包含旧的内部产品代号。** `v1.0.0` / `v1.0.1` /
+   `v6.3` tag 指向的提交未做重写。**Release 描述已于 2026-10-15 修正**：
+   `v1.0.0` 描述中的内部代号改为中性项目名（版本号、发布时间、tag 指向与
+   技术变更事实均未改动），`v1.0.1` 描述经检查原本就不含代号。
 3. **本文件不覆盖外部系统。** 本仓库的检查不扫描第三方 SaaS、镜像仓库、
    包注册表或已分发的容器镜像内容。
+4. **GitHub 对已关闭 PR 保留 `refs/pull/N/head`。** 2026-10-15 审计发现：
+   已关闭且从未合并的分支 `docs/clarify-independent-reproduction-20261014`
+   （PR #7，tip `b407f24`）仍在发布状态，并以 HTTP 200 直接提供上述两份
+   职业材料（`main` 与三个 release tag 均为 404）。该分支**已删除**，
+   `git ls-remote --heads` 与 GitHub API 均确认引用消失。提交本身仍可通过
+   `refs/pull/7/head` 取得，因此本条与第 1 条一样，只能由**经授权的**历史
+   重写彻底消除。
 
-如需彻底消除第 1、2 项，需要一次**经授权的**历史重写或 tag 迁移操作；
+如需彻底消除第 1、4 项，需要一次**经授权的**历史重写或 tag 迁移操作；
 该操作会影响所有已有 clone，属于破坏性变更，不在常规治理范围内自动执行。
 
 ---
