@@ -73,7 +73,7 @@ Supplementary dimensions also covered by the acceptance suite, and admissible wh
 | Command | Artifact | Schema | Provenance fields |
 |---|---|---|---|
 | `make runtime-verify` | `artifacts/distributed-runtime/<UTC ts>/report.json` | `distributed-runtime-evidence/v2` | `tested_code_sha`, `generated_at`, `overall_status`, `checks` |
-| `make runtime-chaos` | `artifacts/runtime/chaos-<ts>.json` | ad hoc | step log + result; **no git SHA / schema version** — weakest provenance in the repository, treat as a step trace rather than a formal artifact |
+| `make runtime-chaos` | `artifacts/runtime/chaos-<ts>.json` | ad hoc | step log + result + top-level `code_provenance` (`commit_sha` / `dirty` / `tracked_diff_sha256` / `untracked_source_sha256` / `publication_status`). Still **no schema version**: treat it as a step trace whose *tested code* is now identifiable. Artifacts committed **before** the provenance fix (the 8 tracked `artifacts/runtime/chaos-*.json`) have no `code_provenance` and are **not** rewritten |
 | `make runtime-e2e` | pytest output (no committed artifact) | — | CI job `.github/workflows/ci.yml::runtime-e2e` (postgres + redis service containers) |
 
 `scripts/verify_distributed_runtime.py` is **fail-closed**: exit `0` only when every check

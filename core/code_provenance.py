@@ -20,6 +20,9 @@
   证据必须在代码提交后、干净工作区里重新生成。
 * 若生成 artifact 的过程修改了被测源文件，``publication_status`` 必须标为
   ``UNPUBLISHABLE``。
+* ``commit_sha`` 读不到（git 缺失 / 不是仓库 / 无 HEAD）时**必须**标为
+  ``UNAVAILABLE``：没有 commit 就没有"这段代码对应哪个版本"这个事实，
+  此时 ``dirty=False`` 只意味着"diff 读出来是空的"，**不是**"代码干净"。
 * 不写入任何 token / 密钥 / 敏感业务数据 —— 只记录哈希与版本号。
 """
 
@@ -59,6 +62,7 @@ _SOURCE_SUFFIXES = frozenset(
 REPRODUCIBLE = "REPRODUCIBLE"
 DIRTY_WORKTREE = "DIRTY_WORKTREE_NOT_REPRODUCIBLE"
 UNPUBLISHABLE = "UNPUBLISHABLE_GENERATOR_MUTATED_SOURCES"
+UNAVAILABLE = "PROVENANCE_UNAVAILABLE"
 
 
 def _run_git(repo_root: Path, *args: str) -> tuple[int, str]:
@@ -170,6 +174,13 @@ def collect_code_provenance(
             dataset_sha256 = None
 
     notes: list[str] = []
+    if commit_sha is None:
+        notes.append(
+            "git identity unavailable: commit_sha could not be read (git missing, "
+            "not a repository, or no HEAD). This artifact cannot be tied to any commit "
+            "and is NOT reproducible evidence; dirty=False here only means the diff "
+            "read back empty."
+        )
     if dirty:
         notes.append(
             "dirty worktree: commit_sha alone does NOT identify the tested code. "
@@ -179,7 +190,10 @@ def collect_code_provenance(
     if generator_mutated_sources:
         notes.append("the generator mutated tested sources; this artifact is not publishable.")
 
-    if generator_mutated_sources:
+    if commit_sha is None:
+        # 优先级最高：连 commit 都没有，"干净工作区"这个结论本身就无从谈起。
+        publication_status = UNAVAILABLE
+    elif generator_mutated_sources:
         publication_status = UNPUBLISHABLE
     elif dirty:
         publication_status = DIRTY_WORKTREE
@@ -202,6 +216,7 @@ def collect_code_provenance(
 __all__ = [
     "DIRTY_WORKTREE",
     "REPRODUCIBLE",
+    "UNAVAILABLE",
     "UNPUBLISHABLE",
     "CodeProvenance",
     "collect_code_provenance",

@@ -31,10 +31,16 @@
    artifact 会带 `code_provenance.publication_status =
    DIRTY_WORKTREE_NOT_REPRODUCIBLE` —— 那只说明"跑过"，不构成可复现证据。
    每个支持的报告生成器都记录 `commit_sha` / `dirty` / `tracked_diff_sha256` /
-   `untracked_source_sha256`（见 `core/code_provenance.py`）。
-2. **不要批量提交每次运行的时间戳目录。** 重复的临时运行交给本地输出目录
+   `untracked_source_sha256`（见 `core/code_provenance.py`）。读不到 commit
+   （非 git 目录 / 无 HEAD）时标 `PROVENANCE_UNAVAILABLE`，**不**退化成
+   `REPRODUCIBLE`。
+2. **溯源覆盖是按生成器逐个兑现的，不是全库既成事实。** `make runtime-chaos`
+   自 2026-10-15 起在报告顶层写出 `code_provenance`；在此**之前**提交的
+   `artifacts/runtime/chaos-*.json` 没有该字段，也**不会**被补写或重新生成
+   （见 [DATA_PROVENANCE.md](../DATA_PROVENANCE.md) §2.4）。
+3. **不要批量提交每次运行的时间戳目录。** 重复的临时运行交给本地输出目录
    （`--out`）或 CI Artifacts；只有经过确认、用于公开陈述的正式证据才入库。
-3. **不写敏感数据。** 证据里不得出现 token / 密钥 / 真实业务数据。
+4. **不写敏感数据。** 证据里不得出现 token / 密钥 / 真实业务数据。
 
 ## 复现命令
 
