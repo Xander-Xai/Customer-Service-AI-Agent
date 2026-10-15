@@ -12,7 +12,12 @@
     7. 副作用工具**只调用一次**
 
 输出结构化证据 JSON 到 stdout，并以退出码表达结论：
-  0 = PASS   2 = FAIL（附失败原因）
+  0 = PASS   1 = FAIL（附失败原因）
+
+报告顶层 ``code_provenance`` 记录**实际受测源码状态**（commit / dirty /
+内容指纹 / ``publication_status``），见 ``core/code_provenance.py``：
+只写 ``git rev-parse HEAD`` 不够——脏工作区里那串 SHA 并不代表被测代码。
+该块与混沌判定解耦：采集失败不会改变 ``result`` 或退出码。
 
 用法::
 
@@ -32,6 +37,7 @@ import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -46,6 +52,11 @@ PROVIDER = "tests.integration.side_effect_provider:provide"
 VISIBILITY_TIMEOUT = 5
 LEASE_SECONDS = 3
 BLOCK_SECONDS = 25
+
+#: 与 ``core.code_provenance.UNAVAILABLE`` 同值。这里必须写字面量，是因为本函数
+#: 存在的目的正是"连采集器都 import 不了"的场景 —— 那时无法引用那个常量。
+#: ``tests/unit/test_runtime_chaos_provenance.py`` 断言两者一致。
+UNAVAILABLE_STATUS = "PROVENANCE_UNAVAILABLE"
 
 
 def redis_keys(prefix: str) -> tuple[str, ...]:
@@ -347,12 +358,47 @@ def _ledger(engine, thread_id: str):
         ).fetchone()
 
 
+def _unavailable_provenance(reason: str) -> dict:
+    """采集不可用时的**如实**表示：绝不编造 commit，也不谎称可复现。"""
+    return {
+        "commit_sha": None,
+        "dirty": None,
+        "tracked_diff_sha256": None,
+        "untracked_source_sha256": None,
+        "tool_versions": {},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dataset_sha256": None,
+        "publication_status": UNAVAILABLE_STATUS,
+        "notes": [f"code provenance collection unavailable: {reason}"],
+    }
+
+
+def code_provenance() -> dict:
+    """采集本报告对应的源码状态（commit / dirty / 内容指纹）。
+
+    与 ``run()`` 严格解耦：这里抛出的任何异常都被收敛成 UNAVAILABLE 块，
+    既不会把 PASS 变成 FAIL，也不会伪造成功证据。git 缺失 / 非仓库 / 无 HEAD
+    由公共收集器自己判成 ``PROVENANCE_UNAVAILABLE``（``commit_sha`` 为 None）。
+    """
+    try:
+        from core.code_provenance import collect_code_provenance
+    except Exception as exc:  # pragma: no cover - 采集器无法导入的极端环境
+        return _unavailable_provenance(f"collector import failed: {type(exc).__name__}: {exc}")
+    try:
+        return collect_code_provenance(REPO_ROOT).to_dict()
+    except Exception as exc:  # pragma: no cover - 采集器自身异常
+        return _unavailable_provenance(f"collection failed: {type(exc).__name__}: {exc}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Worker 崩溃恢复混沌验收")
     parser.add_argument("--output", default="", help="把证据 JSON 写入该文件")
     args = parser.parse_args()
 
     report = run()
+    # 业务判定已定稿之后再补溯源：stdout 与 --output 共用同一份 text，因此两处
+    # 内容必然逐字节一致，也不会出现"写盘版本比 stdout 多/少字段"。
+    report["code_provenance"] = code_provenance()
     text = json.dumps(report, ensure_ascii=False, indent=2)
     print(text)
     if args.output:

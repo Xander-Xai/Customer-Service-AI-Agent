@@ -15,6 +15,7 @@ import pytest
 from core.code_provenance import (
     DIRTY_WORKTREE,
     REPRODUCIBLE,
+    UNAVAILABLE,
     UNPUBLISHABLE,
     collect_code_provenance,
 )
@@ -94,6 +95,34 @@ def test_untracked_non_source_artifact_does_not_mark_dirty(git_repo: Path):
 def test_generator_mutating_sources_is_unpublishable(git_repo: Path):
     prov = collect_code_provenance(git_repo, generator_mutated_sources=True)
     assert prov.publication_status == UNPUBLISHABLE
+
+
+def test_non_git_directory_is_unavailable_not_reproducible(tmp_path: Path):
+    # 没有 commit 就没有"这段代码对应哪个版本"。此时 diff 读出来是空的，
+    # dirty=False 只说明"读不到差异"，**不能**升级为 REPRODUCIBLE ——
+    # 那会让一份无法溯源的 artifact 冒充可复现证据。
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    (plain / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    prov = collect_code_provenance(plain)
+    assert prov.commit_sha is None
+    assert prov.publication_status == UNAVAILABLE
+    assert prov.publication_status != REPRODUCIBLE
+    assert any("unavailable" in note for note in prov.notes)
+
+
+def test_repository_without_head_is_unavailable(tmp_path: Path):
+    # git init 但从未 commit：`rev-parse HEAD` 失败，同样不得声称可复现。
+    unborn = tmp_path / "unborn"
+    unborn.mkdir()
+    _git(unborn, "init", "-q")
+    (unborn / "app.py").write_text("x = 1\n", encoding="utf-8")
+
+    prov = collect_code_provenance(unborn)
+    assert prov.commit_sha is None
+    assert prov.publication_status == UNAVAILABLE
+    assert prov.publication_status != REPRODUCIBLE
 
 
 def test_no_secrets_in_provenance(git_repo: Path):

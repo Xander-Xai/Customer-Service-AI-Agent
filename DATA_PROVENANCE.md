@@ -101,19 +101,34 @@ flake 调查等）。按 [artifacts/README.md](artifacts/README.md) 的规则生
 
   带 schema 的 25 份由 `distributed-runtime-evidence/v2`×9、`v1`×1、
   `runtime-suite-diagnostics/v1`×4、`crash-kill-gate-probe/v1`×2 及 8 个单例构成；
-  **带 `code_provenance` 块的是 0 份**。329 份无 schema 的**生成于 provenance
-  契约之前**，它们**按原样保留、不重写**：可追溯性由提交历史本身保证，而不是
-  由 artifact 内的自述字段保证。
-- **`code_provenance` 只由部分生成器写入，尚未成为全库强制不变量。** 调用
-  `core/code_provenance.collect_code_provenance()` 的生成器只有 6 个：
+  **在被跟踪的这 354 份中，带 `code_provenance` 块的是 0 份**。329 份无 schema 的
+  **生成于 provenance 契约之前**，它们**按原样保留、不重写**：可追溯性由提交历史
+  本身保证，而不是由 artifact 内的自述字段保证。
+- **`code_provenance` 由生成器写入，尚未成为全库强制不变量。** 调用
+  `core/code_provenance.collect_code_provenance()` 的生成器共 7 个：
   `scripts/report_distributed_runtime.py`（`make runtime-report`）、
   `evaluate_agent.py`（`make agent-eval`）、`evaluate_agent_real.py`、
-  `evaluate_rag_reviewed_gold.py`、`measure_performance.py`、`run_rag_ablation.py`。
-  这些会写入 `publication_status` / `dirty` / `tracked_diff_sha256`。
-  **已知缺口**：`make runtime-chaos` 走 `scripts/test_worker_crash_recovery.py`，
-  直接 `json.dumps` 写出结果，**不**附该块，因此新生成的
-  `artifacts/runtime/chaos-*.json` 仍不满足该约定。在补齐之前，本文件不把
-  「新证据必带 provenance」表述为已成立的规则。
+  `evaluate_rag_reviewed_gold.py`、`measure_performance.py`、
+  `run_rag_ablation.py`，以及 `scripts/test_worker_crash_recovery.py`
+  （`make runtime-chaos`）。这些会写入 `publication_status` / `dirty` /
+  `tracked_diff_sha256` / `untracked_source_sha256`。
+  - **`make runtime-chaos` 的缺口已于 2026-10-15 补齐**（`scripts/
+    test_worker_crash_recovery.py::main` 现在把 `code_provenance` 放在报告顶层）。
+    验证口径：①`tests/unit/test_runtime_chaos_provenance.py` 覆盖 PASS / FAIL /
+    脏工作区 / git 不可用 / 旧产物兼容；②在真实 PostgreSQL + Redis + 多进程
+    Celery 上执行 `make runtime-chaos` 得到 `result=PASS`、8 个步骤、
+    `code_provenance.publication_status=DIRTY_WORKTREE_NOT_REPRODUCIBLE`
+    （当次运行确有未提交改动，如实标注）。
+  - **该声明只覆盖"经此修改后的生成器所产生的报告"**：上述 8 份历史
+    `artifacts/runtime/chaos-*.json` **仍然没有** `code_provenance`，也**不会**被
+    补写或重新生成。仓库内不存在"所有 artifact 都带溯源"这一事实。
+  - 采集器与混沌判定严格解耦：采集失败只会让 `code_provenance.publication_status`
+    变成 `PROVENANCE_UNAVAILABLE` 并附 note，**不会**改变 `result` 或退出码。
+  - `publication_status` 的取值语义（`core/code_provenance.py`）：
+    `REPRODUCIBLE`（已提交且干净）/ `DIRTY_WORKTREE_NOT_REPRODUCIBLE`（有未提交
+    改动，`commit_sha` 不足以指代被测代码）/ `UNPUBLISHABLE_GENERATOR_MUTATED_SOURCES`
+    （生成器改动了被测源）/ `PROVENANCE_UNAVAILABLE`（读不到 `commit_sha`，例如
+    非 git 目录或无 HEAD —— 此时**不得**声称可复现）。
 
 ### 2.5 凭据与配置
 
