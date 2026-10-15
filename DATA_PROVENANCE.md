@@ -89,7 +89,15 @@ flake 调查等）。按 [artifacts/README.md](artifacts/README.md) 的规则生
 
 - 数据库连接串只出现 `localhost` 且口令已脱敏；
 - 不包含 token、密钥或任何业务数据；
-- 每份正式证据记录 `commit_sha` / `dirty` / 数据集 hash，便于复核。
+- **provenance 覆盖是部分的，不是逐份齐备。** 以
+  `git ls-tree -r main -- artifacts/` 的当前输出为准：已跟踪的 354 份 JSON 中，
+  9 份 `distributed-runtime-evidence/*` 记录 `tested_code_sha` + `artifact_commit_sha`，
+  16 份记录 `generated_at`，其余（`flake-investigation/` 320 份、`runtime/chaos-*` 8 份、
+  `observability/` 1 份）**生成于 provenance 契约之前**，既无 `code_provenance`
+  块也无 schema 标识。这些历史证据**按原样保留、不重写**：它们的可追溯性由提交
+  历史本身保证，而不是由 artifact 内的自述字段保证。`core/code_provenance.py`
+  之后新增的报告生成器会写入 `publication_status` / `dirty` /
+  `tracked_diff_sha256`，**新证据必须**带该块。
 
 ### 2.5 凭据与配置
 
@@ -141,19 +149,36 @@ ERP 凭据、租户标识或接口资料**；`ERP_MODE=real` 需要使用者自�
 | `.env.example` / Docker / CI / Compose | 仅占位符；无真实凭据 |
 | 跟踪文件全量关键词扫描 | 已移除内部产品代号、自评验收材料、背诵式问答卡与对外业务指标数值 |
 | 评测资产（`tests/eval/`） | 全部为合成/构造数据，无人工真实标注来源的企业数据 |
+| Git 历史（**仅公开引用**：`main` + 发布分支 + 全部 tag） | 2026-10-15 复核：`--history` 报告 **1034** 处命中，全部为**文字类**残留（内部代号 / 职业措辞 / 自评评分 / 正式材料措辞 / 对外指标措辞）；凭据扫描 **0** 命中 |
+| Git 历史（含本机私有分支与 backup tag） | 同一命令在本机 clone 上报告 **1218** 处。**命中数不等于泄漏数**：差额来自未发布的本地引用，不构成公开暴露 |
+
+> **复核方法（可重放）**：`make public-boundary-history` 用的是 `git rev-list --all`，
+> 因此结果**随本机引用集变化**——带着未发布的本地分支和 backup tag 运行会得到更大的数字。
+> 要得到「公开克隆者实际能看到什么」，应在只含公开引用的 clone 中运行：
+> `git clone --mirror <url>` 后删除 `refs/pull/*`，再执行 `--history`。
+> CI（`Historical secret scan`）正是这一形态；`--new-only` 门禁在公开引用集上通过，
+> 在带本地私有分支的 clone 上会误报。
 
 **已知的例外与残留**（如实声明）：
 
 1. **Git 历史仍包含已删除的旧文件。** `docs/finalization/INTERVIEW_GUIDE.md`
    与 `docs/finalization/RESUME_CLAIMS.md` 曾在公开分支上提交过，其对象在
    历史中仍可通过已知 SHA 访问。本仓库**未**执行历史重写（未经授权）。
-2. **历史 tag / release 描述仍包含旧的内部产品代号。** 已发布的
-   `v1.0.0` / `v1.0.1` release 描述与 `v1.0.0` / `v1.0.1` / `v6.3` tag 指向的
-   提交未做重写。
+2. **历史 tag 指向的提交仍包含旧的内部产品代号。** `v1.0.0` / `v1.0.1` /
+   `v6.3` tag 指向的提交未做重写。**Release 描述已于 2026-10-15 修正**：
+   `v1.0.0` 描述中的内部代号改为中性项目名（版本号、发布时间、tag 指向与
+   技术变更事实均未改动），`v1.0.1` 描述经检查原本就不含代号。
 3. **本文件不覆盖外部系统。** 本仓库的检查不扫描第三方 SaaS、镜像仓库、
    包注册表或已分发的容器镜像内容。
+4. **GitHub 对已关闭 PR 保留 `refs/pull/N/head`。** 2026-10-15 审计发现：
+   已关闭且从未合并的分支 `docs/clarify-independent-reproduction-20261014`
+   （PR #7，tip `b407f24`）仍在发布状态，并以 HTTP 200 直接提供上述两份
+   职业材料（`main` 与三个 release tag 均为 404）。该分支**已删除**，
+   `git ls-remote --heads` 与 GitHub API 均确认引用消失。提交本身仍可通过
+   `refs/pull/7/head` 取得，因此本条与第 1 条一样，只能由**经授权的**历史
+   重写彻底消除。
 
-如需彻底消除第 1、2 项，需要一次**经授权的**历史重写或 tag 迁移操作；
+如需彻底消除第 1、4 项，需要一次**经授权的**历史重写或 tag 迁移操作；
 该操作会影响所有已有 clone，属于破坏性变更，不在常规治理范围内自动执行。
 
 ---
