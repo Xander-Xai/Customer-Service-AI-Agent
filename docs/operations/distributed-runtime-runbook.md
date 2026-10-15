@@ -84,6 +84,8 @@ RUNTIME_REDIS_URL=redis://...  make runtime-chaos
 | `steps[].recovered.attempt` / `worker_switched` | 重投后 attempt 与接管 worker |
 | `steps[].side_effect_deduplicated.idem:counter` | 最终副作用写入次数（必须 **1**，即去重生效） |
 | `steps[].side_effect_deduplicated.ledger_hits` | 第二次调用命中 ledger（必须 ≥1） |
+| `code_provenance.commit_sha` / `dirty` | **被测代码**是谁；`dirty=true` 时该 SHA 不代表被测代码 |
+| `code_provenance.publication_status` | `REPRODUCIBLE` 才可作公开证据；`DIRTY_WORKTREE…` / `PROVENANCE_UNAVAILABLE` 只说明"跑过" |
 
 ---
 
