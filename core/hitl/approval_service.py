@@ -387,16 +387,43 @@ class ApprovalService:
 
             expires_at = _aware(row.expires_at)
             if expires_at is not None and now >= expires_at:
-                # 超时按拒绝收敛，并明确落 EXPIRED（可与「明确拒绝」区分统计）
-                row.status = STATUS_EXPIRED
-                row.reviewed_at = now
-                row.reviewer_id = reviewer_id
-                row.decision = {
-                    "decision": "expired",
-                    "reason": "approval TTL elapsed before a human decision",
-                }
-                row.updated_at = now
+                # 超时按拒绝收敛，并明确落 EXPIRED（可与「明确拒绝」区分统计）。
+                #
+                # 必须是 CAS（``WHERE status='PENDING'``），与下面正常决策路径和
+                # ``expire()`` 一致：``HumanApproval`` 既无 version_id_col 也无 DB
+                # CHECK 约束，用 ORM 属性赋值 + commit 发出的是
+                # ``UPDATE ... WHERE approval_id=:pk``（无状态谓词）。并发下若另一方
+                # 已在「读完 PENDING」与「写回」之间提交 APPROVED，这条无条件 flush
+                # 会把 APPROVED 覆写成 EXPIRED —— 那是状态机禁止的终态→终态边，且
+                # ``consume_resume`` 只认 APPROVED/REJECTED，已批准的决策永远送不到
+                # 工具，run 就此永久停在 WAITING_APPROVAL。
+                result = session.execute(
+                    update(HumanApproval)
+                    .where(
+                        HumanApproval.approval_id == approval_id,
+                        HumanApproval.status == STATUS_PENDING,
+                    )
+                    .values(
+                        status=STATUS_EXPIRED,
+                        reviewed_at=now,
+                        reviewer_id=reviewer_id,
+                        decision={
+                            "decision": "expired",
+                            "reason": "approval TTL elapsed before a human decision",
+                        },
+                        updated_at=now,
+                    )
+                )
                 session.commit()
+                if result.rowcount == 0:
+                    # 并发下已被另一方决策：不得覆写既有终态，原样返回。
+                    session.refresh(row)
+                    logger.warning(
+                        "[HITL] 过期收敛时发现审批已被决策 approval=%s current=%s",
+                        approval_id,
+                        row.status,
+                    )
+                    return _to_dict(row), False
                 session.refresh(row)
                 _record_expired()
                 logger.warning(

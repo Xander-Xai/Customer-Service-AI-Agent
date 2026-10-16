@@ -243,7 +243,9 @@ Two layers; **CAS strictness and tool idempotency were not relaxed**:
   of the DB call.
 - `reconcile_stuck_runs` reclaims expired-lease `RUNNING` runs, reusing the
   existing atomic `takeover_running` predicate — no new trust boundary. Tool
-  side effects remain exactly-once via the ledger.
+  side effects stay deduplicated within this repository's ledger (not
+  end-to-end exactly-once: that additionally requires the downstream system to
+  honour the same idempotency key).
 - Attempt-exhausted stale runs go to `DEAD_LETTER` rather than looping forever.
 - `transition_stale_running` keeps "still expired" in the same `UPDATE`, so a
   run whose lease was renewed between scan and write is never killed.

@@ -2994,3 +2994,64 @@ def test_guard_aj_real_repo_mermaid_is_renderable():
     errors: list[str] = []
     audit.check_mermaid_diagram_structure(docs, errors, root=REAL_ROOT)
     assert errors == []
+
+
+# ------------------------------- AK. exactly-once claim scope (tool side effects)
+
+
+# The ledger guarantees that *this repository* does not initiate the same
+# operation_key twice. End-to-end exactly-once additionally needs the downstream
+# to honour the same idempotency key, so every "side effect == exactly once"
+# phrasing below is an over-claim that the guard must block.
+OVERCLAIM_SAMPLES = [
+    "3. **副作用必须恰好一次.** 用 operation_key + 原子 claim 换。",
+    "由 worker 续跑，并给每一次工具副作用加**恰好一次**的幂等记账。",
+    "- 恢复后副作用**恰好一次**（重复投递同一决策也不重复扣款）；",
+    "退款/改单**恰好一次**；换 run_id 会绕过这个幂等键。",
+    "    G->>G: 执行副作用（恰好一次）",
+    "副作用恰好一次，靠的是 executor 的 consume_resume。",
+    "端到端：run 挂起 -> 审批 -> 恢复 -> 恰好一次副作用",
+    "在任意次重试中恒定）→ 恰好一次。",
+    "  Tool side effects remain exactly-once via the ledger.",
+    "Exactly-once side effects are guaranteed by the ledger.",
+]
+
+
+@pytest.mark.parametrize("sample", OVERCLAIM_SAMPLES)
+def test_guard_ak_detects_exactly_once_overclaim(tmp_repo: Path, sample: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{sample}\n")
+    errors: list[str] = []
+    audit.check_exactly_once_claim_scope([doc], errors, root=tmp_repo)
+    assert errors, f"over-claim not detected: {sample}"
+    assert "exactly-once over-claim" in errors[0]
+
+
+# These are all statements the repository legitimately makes: explicit denials,
+# the delivery/event-stream notion (which is genuinely not exactly-once), and the
+# hedged positive claim. None of them may be flagged.
+NON_OVERCLAIM_SAMPLES = [
+    "- at-least-once，明确不是 exactly-once：`task_acks_late` + `visibility_timeout`。",
+    "事件流**不是** exactly-once——单连接内不重复，但用较旧 `Last-Event-ID` 重连会重放。",
+    "端到端 exactly-once | NOT PROVIDED | 本仓库不提供、不宣称",
+    "或「副作用 exactly-once」。  # 准确的能力描述是「重复投递下副作用去重」，"
+    "而不是「副作用恰好执行一次」",
+    "去重（counter==1；非端到端 exactly-once）",
+    "3. **副作用必须可去重，且要写清楚去重到哪一层.** ledger 让**本仓**不重复发起。",
+    "外部系统端到端 exactly-once **NOT PROVIDED**（需下游接受同一把幂等键）。",
+]
+
+
+@pytest.mark.parametrize("sample", NON_OVERCLAIM_SAMPLES)
+def test_guard_ak_allows_hedged_and_negated_statements(tmp_repo: Path, sample: str):
+    doc = write(tmp_repo, "docs/design/x.md", f"{sample}\n")
+    errors: list[str] = []
+    audit.check_exactly_once_claim_scope([doc], errors, root=tmp_repo)
+    assert errors == [], f"false positive on: {sample}"
+
+
+def test_guard_ak_real_repo_has_no_exactly_once_overclaim():
+    """The real checkout must satisfy the guard (no false positives in 57 docs)."""
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_exactly_once_claim_scope(docs, errors, root=REAL_ROOT)
+    assert errors == []

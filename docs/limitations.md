@@ -123,6 +123,8 @@ escalation 的真实实现只有两处，都不是"转交"：
 | `/api/chat` 快路径 | **明确不在治理边界内** | 快路径无 run 上下文（`core/hitl/gate.py::is_ungoverned_side_effect`）。补偿措施是**拒绝**无治理的副作用调用，而不是放行 |
 | 并发审批 | **Implemented** | 真实 PostgreSQL 下 N 个并发决策**恰好一个赢家**（`UPDATE ... WHERE status=PENDING` 的数据库级 CAS），见 `tests/integration/runtime/test_hitl_approval_concurrency.py` |
 | 审批恢复的重复副作用防护 | **Implemented / 已测** | `consume_resume`（`resumed_at IS NULL` 原子认领）+ side-effect ledger（`run_id:approval:{approval_id}`）双保险。重复投递、崩溃后重投递均不重复执行。测试：`tests/integration/runtime/test_hitl_resume_fault_injection.py`（6 场景） |
+| `decide()` 的 TTL 过期分支也是 CAS | **Implemented（本轮修复）** | 此前只有正常决策路径是 `WHERE status='PENDING'` 的数据库级 CAS；过期分支用 ORM 属性赋值 + `commit()`，发出的是**无状态谓词**的 `UPDATE ... WHERE approval_id=:pk`（`HumanApproval` 无 `version_id_col`、无 DB CHECK）。并发下会把已 `APPROVED` **覆写**成 `EXPIRED` —— 状态机禁止的终态→终态边；且 `consume_resume` 只认 `APPROVED/REJECTED`，已批准的决策永远送不到工具，run 永久停在 `WAITING_APPROVAL`（安全但需人工介入）。两条路径现在都是 CAS，CAS 失败时返回既有终态。回归：`tests/unit/test_runtime_review_findings.py::TestApprovalExpiryIsCas` |
+| 未预期异常不得被 ACK | **Implemented（本轮修复）** | `execute_run` 的外层 `except Exception` 曾把「逃逸以触发 broker 重投」的 `raise` 写在 `with contextlib.suppress(Exception)` **内部**，异常被自己吞掉，控制流落到 `return FAILED` —— 等于 **ACK 了一个没有任何待投递消息**的 `QUEUED/RETRYING` run。告警指标照常上报（`record_retry_publication_failure`），恢复机制却是死的，与同文件 `RetryPublicationError` 分支的意图直接矛盾。回归：`tests/unit/test_runtime_review_findings.py::TestStrandedRunMustNotBeAcked` |
 | **审批恢复的 liveness 边界** | **Partial（已知，已测）** | 若 worker 在**认领决策之后、run 收敛之前**崩溃，`resumed_at` 已被消费，重投递**不会**重新消费 → run 停在 `WAITING_APPROVAL`（安全但需运维介入）。**无自动 re-issue 机制**。复现：`TestCrashDuringResume`；见 `make runtime-report` 的 `remaining_risks` |
 | 待审批通知 | **Designed** | 只有轮询队列，**没有 push / 邮件 / IM 主动通知** |
 | 真实 ERP 退款/改单 | **NOT_VERIFIED** | `tools/hitl_staging_tools.py` 是确定性 staging 工具，验证的是**治理机制**，不是金蝶 ERP 的正确性。无企业 staging 环境 |
@@ -147,6 +149,8 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **大规模 queue backlog** | **NOT_VERIFIED** | 无压测与容量模型 |
 | **K8s autoscaling / multi-region** | **NOT_VERIFIED** | 无 K8s manifest |
 | 卡死 run 兜底扫描 | **Partial** | `scripts/reconcile_stuck_runs.py` 是**手动 / cron 脚本**，没接 Celery Beat，也无 CI 契约保证会跑。扫描现覆盖 `RETRYING`/`QUEUED` **及 lease 已过期的 `RUNNING`**（P0 修复）；扫描是全局的 `ORDER BY lease_expires_at LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口 |
+| **失去所有权 = 只挡状态提交，不中止执行** | **Partial（已披露的已知边界）** | owner CAS 让旧 worker **无法提交 AgentRun 状态**，但**没有 fencing token，也没有强制 abort**：lease 过期被接管后，旧 worker 的图协程仍会跑完，心跳只停止续租而不取消执行（`runtime/executor.py::_heartbeat_loop`）。它对同一 `thread_id` 的 checkpoint 写入与外部工具副作用**不受 owner CAS 保护**，仍只依赖 side-effect ledger 的幂等 |
+| attempt 预算的绕过路径 | **Partial** | `RunService.mark_running` 的 **worker 接管路径**（`repository.takeover_running`）没有 `max_attempts` 比较——`attempt+1` 无条件发生。因此 broker 重复投递可以把 run 推到 `max_attempts + 1` 并在其后继续执行。reconciler 侧有预算闸门（`runtime/retry.py:94`），但它没被调度（上一行），所以这条绕过路径在自动路径上很少被走到 |
 | **正确性语义是 at-least-once，不是 exactly-once** | 设计如此 | `acks_late` + `reject_on_worker_lost` + `visibility_timeout`。正确性靠三层幂等（run / thread / 工具） |
 | Run 事件流 | **不是真相源** | Redis Stream → SSE，best-effort 可续读，**非 exactly-once**。断线会丢事件（可续读，但非完整） |
 | DLQ 重放 | **需人工** | 复用原 `run_id`（避免绕过工具幂等键），无自动重放策略 |
@@ -297,6 +301,12 @@ escalation 的真实实现只有两处，都不是"转交"：
 | ~~HITL fail-closed 启动校验~~ | — | **已完成**（§2）：启动校验 + side_effect 兜底 + 并发审批真实 PG 验证 |
 | ~~原生工具超时~~ | — | **已完成**（§4）；副作用超时的「冒泡而非降级」语义已锁定 |
 | 工具并行 / 熔断 / 重试 | 需先定义"读可重试、写不可重试"的边界；并行还需先确认副作用工具的调用序语义 | 未开始 |
+| 强制中止失去所有权的 worker（fencing） | 需先定 fencing 语义：单调 token 让下游可拒陈旧 owner，还是 heartbeat 取消图协程 | 未开始（§3「失去所有权 = 只挡状态提交」）。**不做**也不能宣称 stale-worker fencing |
+| attempt 预算在 worker 接管路径上的闸门 | 无前置（语义已清楚：接管也不得越过 `max_attempts`） | 未开始（§3「attempt 预算的绕过路径」） |
+| runtime 时间参数交叉校验 | 无前置 | 未开始：`validate_distributed_runtime_settings` 只校验锁 TTL vs task time limit，**未**校验 `AGENT_RUN_LEASE_SECONDS` 与 `AGENT_RUN_VISIBILITY_TIMEOUT` 相对 task time limit 的关系（两者默认值都等于 task time limit，接管窗口与提交窗口可能重叠） |
+| side-effect claim TTL 变成配置项 | 无前置 | 未开始：`DEFAULT_CLAIM_TTL_SECONDS = 60` 硬编码（`runtime/side_effects.py:50`）。`TOOL_EXECUTION_TIMEOUT_SECONDS > 60` 时第二个 executor 可在第一个仍在飞行中接管并重放同一次写，而第一个的 `mark_succeeded(owner=...)` 只返回 `False` —— 重复对外不可见 |
+| 非 HITL 副作用工具的 `operation_key` 稳定性 | 需先定「节点重放」契约 | 未开始：`tool_call_id` 来自 LLM，checkpoint 中途崩溃后节点重放会拿到**新的** LLM tool_call id → 新的 `operation_key` → ledger 去重失效。HITL 路径已用 `approval:{approval_id}` 修复（`core/hitl/gate.py`），非 HITL 路径没有等价物。已披露于 [design/agent-runtime.md](design/agent-runtime.md) §7 前提条件 1 |
+| `reconcile_stuck_runs` 接入调度 | 需决定 beat / CronJob / 外部调度 | 未开始（§3）。这是当前**唯一**能收敛「ACK 后无待投递消息」的自动机制 |
 | Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
 | ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |

@@ -17,13 +17,16 @@ from __future__ import annotations
 import pytest
 
 from runtime.statuses import (
+    ADMINISTRATIVE_TRANSITIONS,
     APPROVAL_RESUMABLE_STATUSES,
     EXECUTABLE_STATUSES,
     TERMINAL_STATUSES,
     InvalidRunTransition,
     RunStatus,
     can_transition,
+    ensure_declared_transition,
     ensure_transition,
+    is_declared_transition,
     is_terminal,
     parse_status,
 )
@@ -51,6 +54,43 @@ class TestRegistration:
     def test_every_status_has_a_transition_entry(self):
         for status in RunStatus:
             assert status in can_transition.__globals__["ALLOWED_TRANSITIONS"], status
+
+
+class TestAdministrativeTransitions:
+    """运维性 / 非进展性迁移必须**显式声明**，而不是绕过状态表。
+
+    这些边都是真实执行的（人工重放、thread 竞争退避、RUNNING 接管）。它们此前
+    直接调用 ``_transition`` 而不经过 ``ensure_transition``，使
+    ``ALLOWED_TRANSITIONS`` 作为「唯一真相源」的声明与实际行为不符。
+    """
+
+    def test_redrive_edge_is_declared(self):
+        assert RunStatus.QUEUED in ADMINISTRATIVE_TRANSITIONS[RunStatus.DEAD_LETTER]
+        assert is_declared_transition(RunStatus.DEAD_LETTER, RunStatus.QUEUED)
+
+    @pytest.mark.parametrize("status", [RunStatus.QUEUED, RunStatus.RETRYING, RunStatus.RUNNING])
+    def test_self_edges_are_declared(self, status):
+        assert is_declared_transition(status, status)
+
+    def test_admin_table_does_not_weaken_the_terminal_contract(self):
+        """「终态没有自动出口」必须继续成立且可测。
+
+        ``DEAD_LETTER`` 的「终态」含义是「没有任何自动路径会再捞起它」，
+        不是「人永远不能重放」——重放是显式人工动作。
+        """
+        for terminal in TERMINAL_STATUSES:
+            for target in RunStatus:
+                if target in ADMINISTRATIVE_TRANSITIONS.get(terminal, frozenset()):
+                    # 唯一的例外就是显式重放，且只有 DEAD_LETTER 有
+                    assert (terminal, target) == (RunStatus.DEAD_LETTER, RunStatus.QUEUED)
+                    continue
+                assert can_transition(terminal, target) is False, (terminal, target)
+
+    def test_undeclared_edges_are_rejected(self):
+        with pytest.raises(InvalidRunTransition):
+            ensure_declared_transition(RunStatus.SUCCEEDED, RunStatus.QUEUED)
+        with pytest.raises(InvalidRunTransition):
+            ensure_declared_transition(RunStatus.DEAD_LETTER, RunStatus.RUNNING)
 
 
 class TestTransitions:

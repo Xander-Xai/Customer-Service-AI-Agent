@@ -1094,8 +1094,11 @@ def validate_hitl_settings(
         errors.append(
             "HITL_ENABLED=true 但没有任何规则会产生 HIGH 风险判定"
             "（HITL_HIGH_RISK_TOOLS 为空 且 HITL_HIGH_AMOUNT_THRESHOLD<=0）"
-            "—— 所有工具都将被判为 LOW，审批闸门形同虚设且不会报错。"
-            "请至少配置 HITL_HIGH_RISK_TOOLS（逗号分隔的工具名）或设置金额阈值；"
+            "—— 实际后果：执行期兜底会把**每个**声明了 side_effect=True 且未声明"
+            "risk_level 的工具判为 HIGH（fail-closed，只读工具不受影响），"
+            "也就是说治理面是「所有写操作」而非你预期的白名单，且在工具真正被调用前"
+            "完全不可见。请显式配置 HITL_HIGH_RISK_TOOLS（逗号分隔的工具名）"
+            "或设置金额阈值，把治理面写进配置而不是靠兜底；"
             "若确实不需要该治理，请显式设置 HITL_ENABLED=false。"
         )
     if ttl_seconds <= 0:

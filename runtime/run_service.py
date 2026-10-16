@@ -26,6 +26,7 @@ from .statuses import (
     TERMINAL_STATUSES,
     InvalidRunTransition,
     RunStatus,
+    ensure_declared_transition,
     ensure_transition,
     parse_status,
 )
@@ -594,6 +595,7 @@ class RunService:
         }
         if reset_attempts:
             fields["attempt"] = 0
+        ensure_declared_transition(RunStatus.DEAD_LETTER, RunStatus.QUEUED, run_id)
         queued = self._transition(
             run_id,
             RunStatus.QUEUED,
@@ -617,6 +619,7 @@ class RunService:
         cur = parse_status(run["status"])
         if cur not in EXECUTABLE_STATUSES:
             return run
+        ensure_declared_transition(cur, cur, run_id)
         now = _utcnow()
         return self._transition(
             run_id,

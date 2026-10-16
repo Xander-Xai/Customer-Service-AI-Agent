@@ -560,6 +560,217 @@ class TestExtractCheckpointId:
 
 
 # ---------------------------------------------------------------------------
+# K. The "escape to force redelivery" re-raise was swallowed by suppress()
+#
+# Finding (audit 2026-10-16): the outer ``except Exception`` handler in
+# ``execute_run`` detected "the run is parked in RETRYING/QUEUED but no message
+# is coming" and re-raised on purpose, so that Celery would NOT ACK the task and
+# the broker would redeliver it. The bare ``raise`` sat **inside**
+# ``with contextlib.suppress(Exception)``, so it was swallowed and control fell
+# through to ``return RunStatus.FAILED.value`` -- a normal return, i.e. an ACK.
+#
+# The failure direction is the worst kind: the alert metric still fired, so the
+# operators saw "retry publication failure" while the recovery mechanism the
+# comment describes was structurally dead, and the run stayed stranded.
+# ---------------------------------------------------------------------------
+
+
+class TestStrandedRunMustNotBeAcked:
+    @pytest.mark.unit
+    async def test_unexpected_error_with_queued_run_escapes_instead_of_returning(self):
+        """run 停在 QUEUED/RETRYING 时，未预期异常必须逃逸（Celery 不 ACK）。"""
+        from runtime.executor import execute_run
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+        from runtime.thread_lock import InMemoryThreadLock
+        from tests.unit.runtime_helpers import (
+            FakeRuntime,
+            dispose,
+            make_sqlite_session_factory,
+            runtime_provider,
+        )
+
+        class _ExplodingRunService(RunService):
+            """在 run 仍处于 QUEUED 时抛出未预期异常（模拟 DB/网络瞬时故障）。"""
+
+            def mark_running(self, *args, **kwargs):
+                raise RuntimeError("simulated infrastructure failure while claiming the run")
+
+        session_factory, engine, path = make_sqlite_session_factory()
+        try:
+            service = _ExplodingRunService(
+                repository=AgentRunRepository(session_factory=session_factory)
+            )
+            run = service.create_run(query="q", session_id="T-stranded")
+            assert service.get_run(run["id"])["status"] == "QUEUED"
+
+            with pytest.raises(RuntimeError, match="simulated infrastructure failure"):
+                await execute_run(
+                    run["id"],
+                    service=service,
+                    runtime_provider=runtime_provider(FakeRuntime(lambda **kw: {"response": "ok"})),
+                    dispatcher=None,
+                    lock_manager=InMemoryThreadLock(),
+                    worker_id="w-stranded",
+                )
+
+            # 关键断言：不能被记成 FAILED（那等于 ACK 后遗忘），必须原地保留等重投
+            assert service.get_run(run["id"])["status"] == "QUEUED"
+        finally:
+            dispose(engine, path)
+
+
+# ---------------------------------------------------------------------------
+# L. ``decide()`` TTL branch must be a CAS, not an unconditional flush
+#
+# Finding (audit 2026-10-16): the non-expired path of ``decide()`` correctly uses
+# ``UPDATE ... WHERE status='PENDING'``, but the TTL-expired branch assigned ORM
+# attributes and called ``session.commit()``. ``HumanApproval`` has no
+# ``version_id_col`` and no DB CHECK constraint, so that flush emits
+# ``UPDATE human_approvals ... WHERE approval_id = :pk`` with no status guard.
+#
+# Interleaving: reviewer A's approve commits APPROVED after B's SELECT but before
+# B's flush -> B overwrites APPROVED with EXPIRED. That is a terminal -> terminal
+# edge the declared state machine forbids, and because ``consume_resume`` only
+# selects APPROVED/REJECTED, the already-approved decision can never be
+# delivered and the run stays in WAITING_APPROVAL forever.
+#
+# The sibling ``expire()`` helper already has the correct CAS shape; the fix is
+# to make the in-``decide`` expiry branch use it too.
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalExpiryIsCas:
+    @staticmethod
+    def _build(monkeypatch):
+        from core.hitl.approval_service import ApprovalService
+        from tests.unit.runtime_helpers import make_sqlite_session_factory
+
+        monkeypatch.setattr("core.config.HITL_APPROVAL_TTL_SECONDS", 1.0)
+        factory, engine, path = make_sqlite_session_factory()
+        return ApprovalService(session_factory=factory), engine, path
+
+    @pytest.mark.unit
+    def test_late_expiry_does_not_clobber_a_concurrent_approval(self, monkeypatch):
+        """A second, late-arriving decision must never overwrite an existing terminal row."""
+        from datetime import timedelta
+
+        from core.hitl.approval_service import (
+            DECISION_APPROVE,
+            STATUS_APPROVED,
+            ApprovalService,
+        )
+        from tests.unit.runtime_helpers import dispose
+
+        svc, engine, path = self._build(monkeypatch)
+        try:
+            rec = svc.create_or_get(
+                run_id="run-exp-cas",
+                thread_id="thread-1",
+                action="staging_refund",
+                risk_level="high",
+                proposal={"order_id": "O-CAS", "amount": 100},
+                user_id="customer-1",
+                agent="order_agent",
+            )
+            approval_id = rec["approval_id"]
+            before = _aware_utc(rec["expires_at"]) - timedelta(seconds=1)
+            after = _aware_utc(rec["expires_at"]) + timedelta(seconds=1)
+
+            # Reproduce the interleaving deterministically: _guard_reviewer is the
+            # last hook decide() calls after its SELECT and before its write, so a
+            # competing approval committed here lands exactly in the race window.
+            competing = ApprovalService(session_factory=svc._session_factory)
+            original_guard = ApprovalService._guard_reviewer
+
+            def _approve_first(self, record, reviewer_id):
+                # Only intercept the outer call; the competing service must keep
+                # the real guard, otherwise the hook recurses into itself.
+                if self is not svc:
+                    return original_guard(self, record, reviewer_id)
+                competing.decide(
+                    approval_id,
+                    reviewer_id="sup-fast",
+                    decision=DECISION_APPROVE,
+                    now=before,
+                )
+
+            monkeypatch.setattr(ApprovalService, "_guard_reviewer", _approve_first)
+
+            # The late decision arrives after the TTL. The expiry branch loses the
+            # CAS, so decide() must converge to "already decided" instead of
+            # clobbering -- and must NOT report ApprovalExpired, because nothing
+            # actually expired.
+            record, newly = svc.decide(
+                approval_id,
+                reviewer_id="sup-late",
+                decision=DECISION_APPROVE,
+                now=after,
+            )
+            assert newly is False
+            assert record["status"] == STATUS_APPROVED
+
+            assert svc.require(approval_id)["status"] == STATUS_APPROVED, (
+                "an existing APPROVED decision must not be overwritten by a late "
+                "TTL-expiry branch (terminal -> terminal edge)"
+            )
+            assert svc.require(approval_id)["reviewer_id"] == "sup-fast"
+        finally:
+            dispose(engine, path)
+
+    @pytest.mark.unit
+    def test_late_decision_reports_existing_terminal_state_instead_of_expiry(self, monkeypatch):
+        """When the CAS loses, decide() must return the existing terminal record."""
+        from datetime import timedelta
+
+        from core.hitl.approval_service import DECISION_APPROVE, STATUS_APPROVED, ApprovalService
+        from tests.unit.runtime_helpers import dispose
+
+        svc, engine, path = self._build(monkeypatch)
+        try:
+            rec = svc.create_or_get(
+                run_id="run-exp-cas2",
+                thread_id="thread-1",
+                action="staging_refund",
+                risk_level="high",
+                proposal={"order_id": "O-CAS2", "amount": 100},
+                user_id="customer-1",
+                agent="order_agent",
+            )
+            approval_id = rec["approval_id"]
+            before = _aware_utc(rec["expires_at"]) - timedelta(seconds=1)
+            after = _aware_utc(rec["expires_at"]) + timedelta(seconds=1)
+
+            svc.decide(approval_id, reviewer_id="sup-a", decision=DECISION_APPROVE, now=before)
+
+            competing = ApprovalService(session_factory=svc._session_factory)
+            monkeypatch.setattr(
+                ApprovalService,
+                "_guard_reviewer",
+                lambda self, record, reviewer_id: competing.decide(
+                    approval_id, reviewer_id="sup-b", decision=DECISION_APPROVE, now=before
+                ),
+            )
+
+            record, newly = svc.decide(
+                approval_id, reviewer_id="sup-c", decision=DECISION_APPROVE, now=after
+            )
+            assert newly is False
+            assert record["status"] == STATUS_APPROVED
+            assert svc.require(approval_id)["status"] == STATUS_APPROVED
+        finally:
+            dispose(engine, path)
+
+
+def _aware_utc(value):
+    from datetime import timezone
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+# ---------------------------------------------------------------------------
 # PR #28 round 2 — Celery failure-ack semantics (the retry-durability fix was
 # incomplete: raising RetryPublicationError does NOT by itself cause redelivery)
 # ---------------------------------------------------------------------------

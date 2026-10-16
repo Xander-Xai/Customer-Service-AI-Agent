@@ -535,6 +535,13 @@ async def execute_run(
         raise
     except Exception as e:  # pragma: no cover - 未预期错误：标记失败避免卡死
         logger.error("execute_run 未预期异常 run_id=%s: %s", run_id, type(e).__name__)
+        # 「run 停在 RETRYING/QUEUED 却没有任何调度器会来捞它」必须让异常逃逸出
+        # 任务：Celery 只在异常逃逸时才不 ACK（task_acks_on_failure_or_timeout=False），
+        # broker 才会重投。因此这个决定要在 suppress 之外做 —— 之前把 `raise` 写在
+        # `with contextlib.suppress(Exception)` 内部，异常被自己吞掉，控制流落到
+        # 下面的 `return FAILED`，结果是 **ACK 了一个没有任何待投递消息的 run**：
+        # 告警指标照常上报，恢复机制却是死的，run 永久滞留。
+        stranded = False
         with contextlib.suppress(Exception):
             latest = svc.get_run(run_id)
             if latest is not None and latest["status"] == RunStatus.RUNNING.value:
@@ -554,14 +561,15 @@ async def execute_run(
                 RunStatus.RETRYING.value,
                 RunStatus.QUEUED.value,
             ):
-                # 同样不能 ACK：状态在等重投/退避，却没有任何调度器在跑。
+                stranded = True
                 logger.error(
                     "run 停在 %s 但无待执行投递，逃逸以触发 redelivery: run_id=%s",
                     latest["status"],
                     run_id,
                 )
-                metrics.record_retry_publication_failure()
-                raise
+        if stranded:
+            metrics.record_retry_publication_failure()
+            raise
         return RunStatus.FAILED.value
 
 

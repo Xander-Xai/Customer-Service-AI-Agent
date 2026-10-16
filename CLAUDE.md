@@ -235,7 +235,9 @@ make db-downgrade # 回滚迁移
 - **幂等双防线（缺一不可）**：审批防「不该做的被做了」；side-effect ledger 防
   「做了一次被重做」。已批准执行走
   `operation_key = run_id:approval:{approval_id}`（由 `approval_id` 派生，
-  在任意次重试中恒定）→ 恰好一次。**复用** `runtime/side_effects.py` 的原子
+  在任意次重试中恒定）→ **本仓不重复发起**。**边界**：外部系统端到端
+  exactly-once **NOT PROVIDED**（需下游接受同一把幂等键）——不得因为有 ledger
+  就宣称外部副作用绝对 exactly-once。**复用** `runtime/side_effects.py` 的原子
   `claim`（PR #28），不重复实现。
 - **新非终态 `WAITING_APPROVAL`**（`runtime/statuses.py`）：**不进**
   `EXECUTABLE_STATUSES`（通用轮询不捞起，否则忙循环）；`→ RUNNING`

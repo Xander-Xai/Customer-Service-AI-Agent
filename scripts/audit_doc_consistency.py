@@ -1274,6 +1274,63 @@ ERP_DISCLAIMER_RE = re.compile(
     r"非\s*真实\s*ERP"
 )
 
+#: Phrasings that assert a tool side effect is executed exactly once.
+#:
+#: What the ledger actually guarantees is narrower: it prevents **this repository**
+#: from initiating the same ``operation_key`` twice. End-to-end exactly-once
+#: additionally requires the downstream system to honour the same idempotency key
+#: — the canonical statement of that boundary is ``docs/design/agent-runtime.md``
+#: §7 and ``CLAUDE.md``. Attaching "exactly once" to the side effect itself is the
+#: over-claim this guard exists to block, in either language.
+#:
+#: Deliberately a denylist of *shapes* rather than a proximity heuristic: a
+#: "look for a hedge within N lines" rule produces false positives on the very
+#: documents that state the boundary correctly (``agent-runtime.md`` §7 quotes
+#: the phrase in order to deny it), and a CI guard that cries wolf gets disabled.
+EXACTLY_ONCE_OVERCLAIM_RES = (
+    # 副作用 … 恰好一次 / 恰好一次 … 副作用（双向，覆盖 "副作用恰好一次"、
+    # "副作用必须恰好一次"、"恰好一次**副作用"）
+    re.compile(r"副作用[^。；\n]{0,24}恰好一次"),
+    re.compile(r"恰好一次[^。；\n]{0,24}副作用"),
+    # 具体写操作对象 + 恰好一次（退款/改单/扣款/写入）
+    re.compile(r"(?:退款|改单|扣款|写入)[^。；\n]{0,20}恰好一次"),
+    # "保证/确保 … 恰好一次"：把 ledger 说成端到端保证
+    re.compile(r"(?:保证|确保)[^。；\n]{0,20}恰好一次"),
+    # 结论式 "→ 恰好一次"：没有主语，但正是本仓旧文档用来收尾的形状
+    re.compile(r"(?:→|=>)\s*\**恰好一次"),
+    # English
+    re.compile(
+        r"side[\s\-]?effects?[^.\n]{0,40}(?:remain|stay|are|is|via|guarantee\w*)\s*exactly[\s\-]?once",
+        re.IGNORECASE,
+    ),
+    re.compile(r"exactly[\s\-]?once[^.\n]{0,30}(?:refund|charge|side[\s\-]?effect)", re.IGNORECASE),
+)
+
+
+def check_exactly_once_claim_scope(docs: list[Path], errors: list[str], root: Path = ROOT) -> None:
+    """No active document may claim tool side effects are exactly-once.
+
+    A local idempotency ledger is not an end-to-end delivery guarantee: if the
+    downstream system applied the write and this process died before
+    ``mark_succeeded``, the lease takeover re-issues it. Claiming otherwise
+    invites operators to treat a replayed refund as safe.
+    """
+    for path in docs:
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            for pattern in EXACTLY_ONCE_OVERCLAIM_RES:
+                if pattern.search(line):
+                    errors.append(
+                        f"exactly-once over-claim for tool side effects in "
+                        f"{path.relative_to(root)}:{line_no} — the local ledger "
+                        f"prevents this repo from initiating the same operation_key twice, "
+                        f"but end-to-end exactly-once is NOT PROVIDED (the downstream "
+                        f"must honour the same idempotency key); see "
+                        f"docs/design/agent-runtime.md §7 for the canonical wording: "
+                        f"{line.strip()[:120]}"
+                    )
+                    break
+
+
 #: Approval surface that must exist when the approval router is wired in.
 HITL_APPROVAL_PATHS = (
     "/api/approvals",
@@ -2772,6 +2829,9 @@ def main() -> int:
     check_hitl_enabled_default(docs, errors)
     check_hitl_fastpath_not_claimed(docs, errors)
     check_real_erp_write_not_verified(docs, errors)
+    # Tool side effects are deduplicated by the local ledger, never delivered
+    # exactly-once end-to-end.
+    check_exactly_once_claim_scope(docs, errors)
     check_approval_surface_present(errors)
     # MCP main-state and RAG current-blocker drift guards (issue #103).
     check_mcp_main_state_drift(docs, errors)
@@ -2803,6 +2863,7 @@ def main() -> int:
         f"mermaid diagram structure, "
         f"generated-only OpenAPI counts, AgentRun state-machine completeness, "
         f"HITL_ENABLED default, HITL fast-path coverage, real-ERP-write evidence, "
+        f"exactly-once claim scope, "
         f"approval API surface, MCP main-state drift, RAG current-blocker drift, "
         f"RAG unresolved-blocker drift, Agent Eval V1 truth + active-file formatting"
     )

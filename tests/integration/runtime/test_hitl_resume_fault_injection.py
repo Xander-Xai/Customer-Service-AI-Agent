@@ -1,11 +1,11 @@
-"""审批恢复的故障注入：重复投递 + Worker 崩溃下的**恰好一次**副作用。
+"""审批恢复的故障注入：重复投递 + Worker 崩溃下的**不重复发起**副作用。
 
 为什么需要本文件
 ----------------
 ``test_hitl_langgraph_interrupt.py`` 验证的是 LangGraph ``interrupt`` /
 ``Command(resume)`` 语义（真图 + 真 checkpoint）。``test_hitl_approval_flow.py``
 验证审批服务的并发/持久化性质。但**两者都没有走 ``runtime/executor.py`` 的真实
-恢复路径**：审批恢复的副作用恰好一次，靠的是 executor 的
+恢复路径**：审批恢复的副作用在本仓 ledger 层只发起一次，靠的是 executor 的
 ``consume_resume``（``resumed_at IS NULL`` 原子认领）+ ``runtime.side_effects``
 ledger + 审批 ID 派生的 ``operation_key`` 三者叠加。任何一环断链，都会在
 "worker 崩溃 / at-least-once 重投递"下变成**重复扣款**。

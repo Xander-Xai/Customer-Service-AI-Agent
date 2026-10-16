@@ -343,12 +343,22 @@ make mcp-verify
       完全不受影响，因此普通问答与订单查询的执行路径不变。
     - 两层互补：启动校验管「配置**根本不可能**产生 HIGH」，执行期兜底管
       「**个别工具**没被覆盖」。只做其中一层都不够。
-  - **并发审批**：`decide()` 是 `UPDATE ... WHERE status=PENDING` 的**数据库级
-    CAS**；`consume_resume()` 是 `WHERE resumed_at IS NULL`。真实 PostgreSQL +
+  - **并发审批**：`decide()` 的两条写入路径（正常决策、TTL 过期收敛）现在**都是**
+    `UPDATE ... WHERE status=PENDING` 的**数据库级 CAS**；`consume_resume()` 是
+    `WHERE resumed_at IS NULL`。真实 PostgreSQL +
     真实线程下 N 个并发决策**恰好一个赢家**、N 个并发恢复**恰好一份载荷**：
     `tests/integration/runtime/test_hitl_approval_concurrency.py`。
     「worker 恢复不得绕过审批」的落点是：**没有任何决策时 `consume_resume`
     返回 None**，恢复路径拿不到任何执行许可。
+  - **TTL 过期分支曾是漏网的非 CAS 写入（本轮修复）**：`decide()` 的正常决策路径
+    一直是 CAS，但 TTL 过期分支用 ORM 属性赋值 + `commit()`，发出的是
+    `UPDATE ... WHERE approval_id = :pk`（`HumanApproval` 无 `version_id_col`、
+    无 DB CHECK 约束）。并发下若另一方的 `APPROVED` 在「读完 PENDING」与「写回」
+    之间提交，这条无条件 flush 会把 `APPROVED` 覆写成 `EXPIRED` —— 状态机禁止的
+    **终态→终态**边；且 `consume_resume` 只选 `APPROVED/REJECTED`，已批准的决策
+    永远送不到工具，run 就此永久停在 `WAITING_APPROVAL`。现在过期分支同样 CAS，
+    CAS 失败时返回既有终态而不覆写。回归：
+    `tests/unit/test_runtime_review_findings.py::TestApprovalExpiryIsCas`。
 - **取消（协作式）**：`POST /api/runs/{run_id}/cancel` 立即置 `CANCELLED`。
   未开始的 run 不会再被执行；**已进入 RUNNING 的 run 不会被强行中断**，
   调用方需轮询确认终态。
@@ -462,11 +472,36 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     DLQ 重放 / reconciler / 管理 API）**不**要求匹配 worker。
     证据：`tests/unit/test_agent_run_runtime.py` + 真实 PostgreSQL 下的
     `tests/integration/runtime/test_worker_ownership_cas.py`。
+  - **未预期异常不得被 ACK（已修）**：`execute_run` 的外层 `except Exception`
+    分支原本要把「run 停在 `QUEUED/RETRYING` 却没有任何待投递消息」这一情形
+    用 `raise` 逃逸出任务（Celery 只在异常逃逸时才不 ACK，
+    `task_acks_on_failure_or_timeout=False`），但那个 `raise` 写在
+    `with contextlib.suppress(Exception)` **内部**，异常被自己吞掉，控制流落到
+    `return RunStatus.FAILED.value` —— 等于 **ACK 了一个永远不会再被投递的 run**。
+    告警指标照常上报（`record_retry_publication_failure`），恢复机制却是死的，
+    与同文件 `RetryPublicationError` 分支的意图直接矛盾。现在该决定在 suppress
+    之外做出。回归：`tests/unit/test_runtime_review_findings.py::TestStrandedRunMustNotBeAcked`。
+  - **运维性 / 非进展性迁移显式声明（已修）**：`ALLOWED_TRANSITIONS` 被文档称作
+    业务状态机的唯一真相源，但人工重放（`DEAD_LETTER → QUEUED`）、thread 竞争退避
+    （`QUEUED/RETRYING → 自身`）与 RUNNING 接管（`RUNNING → 自身`）三条真实执行的
+    边此前**绕过** `ensure_transition`，使该声明与实际行为不符。现拆成
+    `runtime/statuses.py::ADMINISTRATIVE_TRANSITIONS` 并由
+    `ensure_declared_transition()` 把关；「终态没有**自动**出口」这条契约继续成立且
+    可测。回归：`tests/unit/test_hitl_run_status.py::TestAdministrativeTransitions`。
   - 仍**没有** fencing token，且**没有**强制中止：pause 超过 TTL 的旧 worker
     **不会被强制 abort**，其协程可能继续跑完；它的**外部节点副作用**也不受
     owner CAS 保护（仍依赖 side-effect ledger 的幂等）。也就是说本层解决的是
     「stale worker 不能提交 AgentRun 状态」，**不是**完整的 stale-worker fencing，
     更不是 exactly-once（投递仍是 at-least-once）。
+  - **`mark_running` 接管路径没有 attempt 预算闸门**：`repository.takeover_running`
+    的 `attempt = attempt + 1` 是无条件的，`RunService.mark_running` 不比较
+    `max_attempts`。因此 broker 重复投递可把 run 推到 `max_attempts + 1` 并在其后
+    继续执行。reconciler 侧有预算闸门（`runtime/retry.py`），但它未被调度（见下）。
+  - **`reconcile_stuck_runs` 未接入任何调度器**：`runtime/celery_app.py` 没有
+    `beat_schedule`，也没有 CronJob manifest。它是当前**唯一**能收敛
+    「ACK 后无待投递消息」的自动机制，因此是编排层面的运维前置条件。
+    `--dry-run` 只打印 `list_recoverable_runs` 的结果，看不到 `--apply` 会走的
+    stale-`RUNNING` 回收与 attempt 耗尽落 DLQ 两条路径。
   - **Run 事件流（新增）**：worker 写 Redis Stream `agent:run:{run_id}:events`
     （`runtime/events.py`），API 通过 `GET /api/runs/{run_id}/events` 以 SSE 转发，
     支持 `Last-Event-ID` 断点续读。事件负载走**字段白名单**，query/用户标识/凭据
