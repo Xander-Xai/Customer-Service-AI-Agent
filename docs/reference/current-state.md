@@ -176,6 +176,9 @@ make test-mcp
 
 # MCP 端到端契约 evidence artifact（schema mcp-contract-evidence/v1）
 make mcp-verify
+
+# Celery 投递语义（真实 Redis broker + 真实 worker 子进程；每场景独立 worker）
+make runtime-delivery
 ```
 
 ## 稳定的架构事实
@@ -493,15 +496,32 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     owner CAS 保护（仍依赖 side-effect ledger 的幂等）。也就是说本层解决的是
     「stale worker 不能提交 AgentRun 状态」，**不是**完整的 stale-worker fencing，
     更不是 exactly-once（投递仍是 at-least-once）。
-  - **`mark_running` 接管路径没有 attempt 预算闸门**：`repository.takeover_running`
-    的 `attempt = attempt + 1` 是无条件的，`RunService.mark_running` 不比较
-    `max_attempts`。因此 broker 重复投递可把 run 推到 `max_attempts + 1` 并在其后
-    继续执行。reconciler 侧有预算闸门（`runtime/retry.py`），但它未被调度（见下）。
-  - **`reconcile_stuck_runs` 未接入任何调度器**：`runtime/celery_app.py` 没有
-    `beat_schedule`，也没有 CronJob manifest。它是当前**唯一**能收敛
-    「ACK 后无待投递消息」的自动机制，因此是编排层面的运维前置条件。
-    `--dry-run` 只打印 `list_recoverable_runs` 的结果，看不到 `--apply` 会走的
-    stale-`RUNNING` 回收与 attempt 耗尽落 DLQ 两条路径。
+  - **broker 投递语义（**实测**，本轮修正了此前的错误表述）**：`make runtime-delivery`
+    用真实 Redis broker + 真实 Celery 5.6.3 worker 子进程逐类测出——
+    普通 Exception / `RetryPublicationError` / 软时间上限 / 硬时间上限全部走
+    `Request.on_failure` 的 **`reject(requeue=False)`**（消息被**丢弃**，不重投）；
+    只有 `WorkerLostError`（worker 进程被杀）触发重投，且**立即**重投无退避；
+    `Reject(requeue=True)` 同样立即重投（实测 5 秒 80 次）。
+    结论：**「让异常逃逸以触发 broker 重新投递」不成立**——逃逸与否都不改变消息被
+    丢弃的事实。此前 `runtime/celery_app.py`、`runtime/executor.py`、
+    `runtime/retry.py` 的注释与一个单元测试的 docstring 都写成了「拒绝并重新投递」，
+    已更正。证据：`tests/integration/runtime/test_celery_delivery_semantics.py`。
+  - **恢复闭环 = 数据库 AgentRun + 周期 reconciler（本轮补齐）**：队列消息只是
+    **唤醒信号**，而唤醒信号随时可能丢（broker 重启、消息被清理、进程在 publish 前
+    被杀）。因此承重结构是 `beat_schedule` → `runtime.reconcile_stuck_runs`，由 compose
+    里**独立的 `beat` service** 驱动（`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`，默认
+    30s；刻意不内嵌 `worker -B`，因为 worker 可被 `--scale` 成多副本）。
+    实测真实 beat 进程按周期投递该任务；beat 的 healthcheck 判据是 schedule 文件仍在
+    被写（mtime 在 `max(120s, 4x 周期)` 内）。
+    **边界**：`beat` 停摆 = 滞留 run 无自动恢复，只能手工
+    `python3 scripts/reconcile_stuck_runs.py --apply`；`--dry-run` 只打印
+    `list_recoverable_runs` 的结果，看不到 `--apply` 会走的 stale-`RUNNING` 回收与
+    attempt 耗尽落 DLQ 两条路径。
+  - **attempt 预算在领取点强制（本轮修复）**：`mark_running` 的两条领取/接管路径都在
+    写状态**之前**比较 `max_attempts`；超预算拒绝领取并**终态**落 DLQ。必须终态：
+    `list_recoverable_runs` 不比较预算，只拒绝执行会让被调度的 reconciler 无限重投。
+  - `PENDING` run 仍不被 reconciler 覆盖：两阶段入队在 `mark_queued` 之前被杀会永久
+    滞留（本轮未修，见 [limitations.md](../limitations.md) §3）。
   - **Run 事件流（新增）**：worker 写 Redis Stream `agent:run:{run_id}:events`
     （`runtime/events.py`），API 通过 `GET /api/runs/{run_id}/events` 以 SSE 转发，
     支持 `Last-Event-ID` 断点续读。事件负载走**字段白名单**，query/用户标识/凭据

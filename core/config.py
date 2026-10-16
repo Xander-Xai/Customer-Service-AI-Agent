@@ -803,6 +803,20 @@ AGENT_RUN_RETRY_BASE_DELAY = _float_env("AGENT_RUN_RETRY_BASE_DELAY", 2.0)
 AGENT_RUN_RETRY_MAX_DELAY = _float_env("AGENT_RUN_RETRY_MAX_DELAY", 60.0)
 AGENT_RUN_RETRY_JITTER = _float_env("AGENT_RUN_RETRY_JITTER", 0.3)
 
+# 卡死 run 兜底扫描的调度周期。
+#
+# **为什么必须有它（实测依据）**：Celery 只在 `WorkerLostError`（worker 进程被杀）
+# 时才把消息重新投递。普通 Exception、`RetryPublicationError`、软/硬超时时间上限
+# 全部落到 `Request.on_failure` 的 `self.reject(requeue=False)` 分支——**消息被丢弃，
+# 不重投**（真实 Redis + Celery 5.6.3 实测，见
+# tests/integration/runtime/test_celery_delivery_semantics.py）。因此「让异常逃逸以
+# 触发 redelivery」这个前提是错的：逃逸只是把消息丢掉，run 会停在
+# QUEUED/RETRYING 且**没有任何消息会再来**。
+#
+# 所以恢复闭环的承重结构是「数据库里的 AgentRun + 定时扫描」，队列消息只是唤醒信号，
+# 而唤醒信号随时可能丢。扫描未调度 = 没有恢复闭环。
+AGENT_RUN_RECONCILE_INTERVAL_SECONDS = _float_env("AGENT_RUN_RECONCILE_INTERVAL_SECONDS", 30.0)
+
 # ---------------------------------------------------------------------------
 # Human-in-the-loop（高风险工具副作用的人工审批治理）
 # ---------------------------------------------------------------------------

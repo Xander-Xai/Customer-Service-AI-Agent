@@ -148,9 +148,11 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **真实用户流量下的行为** | **NOT_VERIFIED** | — |
 | **大规模 queue backlog** | **NOT_VERIFIED** | 无压测与容量模型 |
 | **K8s autoscaling / multi-region** | **NOT_VERIFIED** | 无 K8s manifest |
-| 卡死 run 兜底扫描 | **Partial** | `scripts/reconcile_stuck_runs.py` 是**手动 / cron 脚本**，没接 Celery Beat，也无 CI 契约保证会跑。扫描现覆盖 `RETRYING`/`QUEUED` **及 lease 已过期的 `RUNNING`**（P0 修复）；扫描是全局的 `ORDER BY lease_expires_at LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口 |
+| **broker 不为普通失败重新投递** | **实测确认（VERIFIED_LOCAL）** | `make runtime-delivery`（真实 Redis broker + 真实 Celery 5.6.3 worker 子进程）确认：普通 Exception、`RetryPublicationError`、软/硬时间上限全部走 `Request.on_failure` 的 `reject(requeue=False)`——**消息被丢弃**。只有 `WorkerLostError` 重投，且**立即**重投无退避；`Reject(requeue=True)` 同样立即重投（实测 5 秒 80 次）。本仓库此前把「让异常逃逸以触发 broker 重新投递」当恢复手段，那个前提是错的，已全部更正 |
+| 卡死 run 兜底扫描 | **Implemented（本轮从 Partial 升级）** | 恢复闭环的承重结构：数据库 AgentRun + 周期 reconciler，由**独立 `celery beat` service** 驱动（`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`，默认 30s）。实测 beat 进程按周期投递 `runtime.reconcile_stuck_runs`；beat 的 healthcheck 判据是 schedule 文件仍在被写。未被调度 = 没有恢复闭环。**剩余限制**：扫描是全局 `ORDER BY ... LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口（最终收敛，非单轮命中） |
 | **失去所有权 = 只挡状态提交，不中止执行** | **Partial（已披露的已知边界）** | owner CAS 让旧 worker **无法提交 AgentRun 状态**，但**没有 fencing token，也没有强制 abort**：lease 过期被接管后，旧 worker 的图协程仍会跑完，心跳只停止续租而不取消执行（`runtime/executor.py::_heartbeat_loop`）。它对同一 `thread_id` 的 checkpoint 写入与外部工具副作用**不受 owner CAS 保护**，仍只依赖 side-effect ledger 的幂等 |
-| attempt 预算的绕过路径 | **Partial** | `RunService.mark_running` 的 **worker 接管路径**（`repository.takeover_running`）没有 `max_attempts` 比较——`attempt+1` 无条件发生。因此 broker 重复投递可以把 run 推到 `max_attempts + 1` 并在其后继续执行。reconciler 侧有预算闸门（`runtime/retry.py:94`），但它没被调度（上一行），所以这条绕过路径在自动路径上很少被走到 |
+| attempt 预算在 worker 接管路径上的绕过 | **Implemented（本轮修复）** | `RunService.mark_running` 的两条领取路径（`RUNNING` 接管、`QUEUED/RETRYING` 领取）现在都在写状态**之前**比较 `max_attempts`；超预算则拒绝领取并**终态**落 DLQ。终态收敛是必需的：`list_recoverable_runs` 不比较 `max_attempts`，若只「拒绝执行」而不落 DLQ，被调度的 reconciler 会无限重投它。回归：`tests/unit/test_runtime_review_findings.py::TestAttemptBudgetTerminalConvergence` |
+| `PENDING` run 不被 reconciler 覆盖 | **Partial（已知）** | `list_recoverable_runs` 只扫 `QUEUED`/`RETRYING`/过期 lease 的 `RUNNING`。两阶段入队（`PENDING` → publish → `mark_queued`）若在 `mark_queued` 之前进程被杀，该 run 永久停在 `PENDING`，无任何自动恢复手段。本轮未修（属独立缺陷面，见 roadmap） |
 | **正确性语义是 at-least-once，不是 exactly-once** | 设计如此 | `acks_late` + `reject_on_worker_lost` + `visibility_timeout`。正确性靠三层幂等（run / thread / 工具） |
 | Run 事件流 | **不是真相源** | Redis Stream → SSE，best-effort 可续读，**非 exactly-once**。断线会丢事件（可续读，但非完整） |
 | DLQ 重放 | **需人工** | 复用原 `run_id`（避免绕过工具幂等键），无自动重放策略 |
@@ -303,10 +305,13 @@ escalation 的真实实现只有两处，都不是"转交"：
 | 工具并行 / 熔断 / 重试 | 需先定义"读可重试、写不可重试"的边界；并行还需先确认副作用工具的调用序语义 | 未开始 |
 | 强制中止失去所有权的 worker（fencing） | 需先定 fencing 语义：单调 token 让下游可拒陈旧 owner，还是 heartbeat 取消图协程 | 未开始（§3「失去所有权 = 只挡状态提交」）。**不做**也不能宣称 stale-worker fencing |
 | attempt 预算在 worker 接管路径上的闸门 | 无前置（语义已清楚：接管也不得越过 `max_attempts`） | 未开始（§3「attempt 预算的绕过路径」） |
-| runtime 时间参数交叉校验 | 无前置 | 未开始：`validate_distributed_runtime_settings` 只校验锁 TTL vs task time limit，**未**校验 `AGENT_RUN_LEASE_SECONDS` 与 `AGENT_RUN_VISIBILITY_TIMEOUT` 相对 task time limit 的关系（两者默认值都等于 task time limit，接管窗口与提交窗口可能重叠） |
+
 | side-effect claim TTL 变成配置项 | 无前置 | 未开始：`DEFAULT_CLAIM_TTL_SECONDS = 60` 硬编码（`runtime/side_effects.py:50`）。`TOOL_EXECUTION_TIMEOUT_SECONDS > 60` 时第二个 executor 可在第一个仍在飞行中接管并重放同一次写，而第一个的 `mark_succeeded(owner=...)` 只返回 `False` —— 重复对外不可见 |
 | 非 HITL 副作用工具的 `operation_key` 稳定性 | 需先定「节点重放」契约 | 未开始：`tool_call_id` 来自 LLM，checkpoint 中途崩溃后节点重放会拿到**新的** LLM tool_call id → 新的 `operation_key` → ledger 去重失效。HITL 路径已用 `approval:{approval_id}` 修复（`core/hitl/gate.py`），非 HITL 路径没有等价物。已披露于 [design/agent-runtime.md](design/agent-runtime.md) §7 前提条件 1 |
-| `reconcile_stuck_runs` 接入调度 | 需决定 beat / CronJob / 外部调度 | 未开始（§3）。这是当前**唯一**能收敛「ACK 后无待投递消息」的自动机制 |
+| ~~`reconcile_stuck_runs` 接入调度~~ | — | **已完成**（§3）：独立 `celery beat` service + `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`。它是当前**唯一**能收敛「消息被 broker 丢弃」的自动机制，`beat` 停摆即无自动恢复 |
+| 覆盖 `PENDING` 滞留 run | 无前置（语义已清楚） | 未开始（§3「`PENDING` run 不被 reconciler 覆盖」）：两阶段入队在 `mark_queued` 之前被杀会永久滞留 |
+| beat 单点 | 需决定 beat HA 方式 | 未开始：beat 是单实例（刻意如此，避免多副本重复调度）。beat 停摆期间滞留 run 不收敛，只能手工 `scripts/reconcile_stuck_runs.py --apply`；beat healthcheck 会变 unhealthy，但不自动重启（与 worker 同样的边界） |
+| `visibility_timeout` vs 任务时长交叉校验 | 无前置 | 未开始：`AGENT_RUN_LEASE_SECONDS` 与 `AGENT_RUN_VISIBILITY_TIMEOUT` 均未与 `AGENT_RUN_TASK_TIME_LIMIT` 做交叉校验（两者默认值都等于 task time limit） |
 | Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
 | ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |
@@ -330,6 +335,9 @@ make metrics-exposure-check     # 契约测试：告警/Grafana 引用的每个�
 make monitoring-token           # 生成 Prometheus 抓取凭据（fail-closed）
 make alert-rules-test           # 官方 promtool：规则语法 + 真会 firing + 不 latching
 make metrics-exposure-verify    # 真实 Prometheus 端到端（DLQ 告警实际 FIRING）
+
+# Celery 投递语义（真实 Redis broker + 真实 worker 子进程）
+make runtime-delivery          # ACK / reject / requeue / 是否真的重新投递
 ```
 
 关键证据 artifact（可逐个打开复查）：

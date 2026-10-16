@@ -341,9 +341,17 @@ async def execute_run(
                 return str(latest["status"]) if latest else "MISSING"
 
             if running is None:
-                # 其他 worker 持有有效 lease：重复投递，不重复执行
-                logger.info("run=%s 已由其他 worker 持有 lease，跳过", run_id)
-                return RunStatus.RUNNING.value
+                # mark_running 返回 None 有两种含义，**不能**一律当成「别人持有 lease」：
+                #   1. 重复投递：他人持有有效 lease -> 当前状态就是 RUNNING；
+                #   2. attempt 预算耗尽：run 已被落 DEAD_LETTER（终态收敛）。
+                # 读回真实状态上报，避免把 DEAD_LETTER 报成 RUNNING。
+                latest = svc.get_run(run_id)
+                current = str(latest["status"]) if latest else "MISSING"
+                if current == RunStatus.RUNNING.value:
+                    logger.info("run=%s 已由其他 worker 持有 lease，跳过", run_id)
+                else:
+                    logger.info("run=%s 领取被拒（当前状态 %s），不再执行", run_id, current)
+                return current
 
             exec_started = time.perf_counter()
             metrics.inc_worker_active()
@@ -528,19 +536,30 @@ async def execute_run(
                     await lock.release(thread_id, owner)
     except RetryPublicationError:
         # 重试消息投递失败：run 已经在 RETRYING/QUEUED 等一条**不会到来**的消息。
-        # 这里绝不能 ACK，也不能把它改成 FAILED（那会丢掉一次合法重试机会）。
-        # 逃逸出任务 -> Celery acks_late 不 ACK -> broker 重新投递 -> 租约到期后被接管。
-        logger.error("重试投递失败，让任务逃逸以触发 broker redelivery: run_id=%s", run_id)
+        # 这里绝不能把它改成 FAILED（那会丢掉一次合法重试机会）。
+        #
+        # 刻意**不**把异常逃逸当成「broker 会重新投递」：实测（Celery 5.6.3 +
+        # 真实 Redis）普通异常与 RetryPublicationError 都落在
+        # ``Request.on_failure`` 的 ``reject(requeue=False)`` 分支——消息被丢弃，
+        # 不重投。所以真正的恢复来自数据库里的 AgentRun + 周期 reconciler
+        # （beat_schedule -> runtime.reconcile_stuck_runs）。
+        # 本分支仍然 raise：它让「这次投递失败了」在 worker 日志与 task-failed
+        # 事件里可见，而不是静默成功返回——但它**不是**恢复手段。
+        logger.error(
+            "重试投递失败，run 交由周期 reconciler 恢复（本次消息会被丢弃）: run_id=%s",
+            run_id,
+        )
         metrics.record_retry_publication_failure()
         raise
     except Exception as e:  # pragma: no cover - 未预期错误：标记失败避免卡死
         logger.error("execute_run 未预期异常 run_id=%s: %s", run_id, type(e).__name__)
-        # 「run 停在 RETRYING/QUEUED 却没有任何调度器会来捞它」必须让异常逃逸出
-        # 任务：Celery 只在异常逃逸时才不 ACK（task_acks_on_failure_or_timeout=False），
-        # broker 才会重投。因此这个决定要在 suppress 之外做 —— 之前把 `raise` 写在
-        # `with contextlib.suppress(Exception)` 内部，异常被自己吞掉，控制流落到
-        # 下面的 `return FAILED`，结果是 **ACK 了一个没有任何待投递消息的 run**：
-        # 告警指标照常上报，恢复机制却是死的，run 永久滞留。
+        # 「run 停在 RETRYING/QUEUED 却没有任何消息会来」时**不能**记成 FAILED：
+        # run 仍在合法退避中，记 FAILED 会丢掉一次合法重试机会；而记成功则会让
+        # 没有任何人知道它滞留了。
+        #
+        # 注意 Celery 对普通异常一律 reject(requeue=False)（消息丢弃、不重投），
+        # 逃逸与否都不改变这一点——之前的实现把「逃逸 -> broker 重投」当成恢复
+        # 手段，那个前提是错的。恢复由周期 reconciler 完成；这里只负责不写错状态。
         stranded = False
         with contextlib.suppress(Exception):
             latest = svc.get_run(run_id)
@@ -563,7 +582,7 @@ async def execute_run(
             ):
                 stranded = True
                 logger.error(
-                    "run 停在 %s 但无待执行投递，逃逸以触发 redelivery: run_id=%s",
+                    "run 停在 %s 但没有待执行投递，交由周期 reconciler 恢复: run_id=%s",
                     latest["status"],
                     run_id,
                 )

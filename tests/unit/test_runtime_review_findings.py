@@ -614,7 +614,13 @@ class TestStrandedRunMustNotBeAcked:
                     worker_id="w-stranded",
                 )
 
-            # 关键断言：不能被记成 FAILED（那等于 ACK 后遗忘），必须原地保留等重投
+            # 关键断言：不能被记成 FAILED——run 仍在合法退避中，记 FAILED 会丢掉
+            # 一次合法重试机会。原地保留，由周期 reconciler 恢复。
+            #
+            # 注意（2026-10 审计修正）：逃逸**不是**恢复手段。实测 Celery 对普通异常
+            # 一律 reject(requeue=False)，消息被丢弃、不重投；逃逸与否都不改变这一点。
+            # 本断言守的是「不写错状态」，恢复由 TestDeliverySemanticsContract 里
+            # 的 beat_schedule + reconciler 契约承担。
             assert service.get_run(run["id"])["status"] == "QUEUED"
         finally:
             dispose(engine, path)
@@ -793,19 +799,25 @@ def test_celery_does_not_ack_failed_tasks():
 
 
 @pytest.mark.unit
-def test_retry_publication_failure_depends_on_rejection_not_acks_late():
-    """Documents the mechanism so the flag is not 'simplified' away later.
+def test_retry_publication_failure_escapes_without_marking_the_run_failed():
+    """``RetryPublicationError`` 必须逃逸，且不能把 run 记成 FAILED。
 
-    If this flag were True, ``execute_run`` raising ``RetryPublicationError`` would be
-    ACKed and the run would sit in RETRYING with no replacement message — the exact
-    silent-stuck failure the reconciler is the backstop for.
+    2026-10 审计**修正**了本测试原先的前提。原 docstring 断言
+    「异常逃逸 + ``task_acks_on_failure_or_timeout=False`` 能让 broker 重新投递」，
+    这是错的：实测（Celery 5.6.3 + 真实 Redis broker）普通异常走
+    ``Request.on_failure`` 的 ``reject(requeue=False)``——消息被**丢弃**、不重投。
+    ``acks_on_failure_or_timeout`` 只影响「失败时不写 result 状态」，
+    并不带来重新投递。
+
+    真正的恢复路径是「数据库 AgentRun + 周期 reconciler」，见
+    :func:`test_delivery_semantics_recovery_relies_on_scheduled_reconciler`。
     """
     from runtime.celery_app import celery_app
     from runtime.executor import RetryPublicationError
 
-    # the escape hatch exists...
+    # the escape hatch exists and is an ordinary RuntimeError subclass
     assert issubclass(RetryPublicationError, RuntimeError)
-    # ...and it only achieves redelivery because failures are not ACKed
+    # 因此它落在 reject(requeue=False) 分支——保留这个开关仅为「失败不 ACK」
     assert not celery_app.conf.task_acks_on_failure_or_timeout
 
 
@@ -921,3 +933,178 @@ class TestWaitForTimeoutContract:
         started = time.monotonic()
         mod._wait_for(lambda: False, 0)
         assert time.monotonic() - started < 1.0, "regression test must not wait"
+
+
+# ---------------------------------------------------------------------------
+# M. Celery delivery semantics — the recovery loop's load-bearing contract
+#
+# Audit finding (2026-10-17), established by reading Celery 5.6.3's
+# ``Request.on_failure`` and then confirmed empirically against a real Redis
+# broker with a real worker process
+# (tests/integration/runtime/test_celery_delivery_semantics.py):
+#
+#   failure kind              broker action            redelivered?
+#   ------------------------  ----------------------  -------------
+#   success                   acknowledge()            n/a
+#   ordinary Exception        reject(requeue=False)   NO  <- discarded
+#   RetryPublicationError     reject(requeue=False)   NO  <- discarded
+#   SoftTimeLimitExceeded     reject(requeue=False)   NO  <- discarded
+#   TimeLimitExceeded (hard)  child SIGKILLed         NO within the window
+#   WorkerLostError           reject(requeue=True)    YES
+#   Reject(requeue=True)      reject(requeue=True)    YES, and IMMEDIATELY
+#
+# Consequences this file pins down:
+#   1. Escaping an exception is NOT a redelivery mechanism. The old comments
+#      and the old version of ``test_retry_publication_failure_...`` said it was.
+#   2. The only reliable recovery is the durable AgentRun row plus a scheduled
+#      reconciler. Without the schedule there is no recovery loop at all.
+#   3. Neither redelivery path has backoff, so bare ``Reject(requeue=True)``
+#      is not an acceptable recovery strategy (measured: 80 redeliveries in 5s).
+# ---------------------------------------------------------------------------
+
+
+class TestDeliverySemanticsContract:
+    @pytest.mark.unit
+    def test_recovery_relies_on_scheduled_reconciler_not_broker_redelivery(self):
+        """``beat_schedule`` 必须真的排了 reconciler —— 这是恢复闭环的承重结构。
+
+        若有人删掉这条 schedule，broker 侧的普通异常路径又不会重投，
+        滞留 run 就彻底没有任何自动恢复手段。
+        """
+        from runtime.celery_app import celery_app
+
+        schedule = celery_app.conf.beat_schedule
+        assert "reconcile-stuck-runs" in schedule, (
+            "reconciler 未被调度：普通异常/超时的消息被 broker 丢弃且不重投，"
+            "没有周期扫描就没有恢复闭环"
+        )
+        entry = schedule["reconcile-stuck-runs"]
+        assert entry["task"] == "runtime.reconcile_stuck_runs"
+        assert float(entry["schedule"]) > 0
+
+    @pytest.mark.unit
+    def test_reconcile_task_is_registered_on_the_app(self):
+        import runtime.tasks  # noqa: F401  # `imports=` 是惰性的，需先解析才会注册
+        from runtime.celery_app import celery_app
+
+        assert "runtime.reconcile_stuck_runs" in celery_app.tasks
+
+    @pytest.mark.unit
+    def test_reconcile_interval_is_configurable_and_bounded(self):
+        import core.config as config
+
+        assert config.AGENT_RUN_RECONCILE_INTERVAL_SECONDS > 0
+        from runtime.celery_app import celery_app
+
+        got = float(celery_app.conf.beat_schedule["reconcile-stuck-runs"]["schedule"])
+        # max(1.0, ...) 的下界保证不会把 beat 压成忙循环
+        assert got >= 1.0
+
+    @pytest.mark.unit
+    def test_beat_is_not_embedded_in_the_worker_command(self):
+        """内嵌 beat（worker -B）在多副本下会让每个副本各调度一次。"""
+        import yaml
+
+        compose = yaml.safe_load(
+            (PROJECT_ROOT / "deploy" / "compose" / "docker-compose.yml").read_text(encoding="utf-8")
+        )
+        services = compose["services"]
+        assert "beat" in services, "缺少独立 beat service，恢复闭环没有被驱动"
+        worker_cmd = services["worker"]["command"]
+        assert (
+            "-B" not in worker_cmd and "--beat" not in worker_cmd
+        ), "worker 命令里内嵌了 beat：worker 可被 --scale 成多副本，会重复调度"
+
+    @pytest.mark.unit
+    def test_broker_semantics_are_not_claimed_as_the_recovery_mechanism(self):
+        """防止把「异常逃逸」重新写回「会触发 broker 重新投递」。"""
+
+        offenders = []
+        for rel in ("runtime/executor.py", "runtime/retry.py", "runtime/celery_app.py"):
+            text = (PROJECT_ROOT / rel).read_text(encoding="utf-8")
+            for i, line in enumerate(text.splitlines(), start=1):
+                # 只抓「断言该说法」的形状：逃逸 + 触发 + 重新投递。
+                # 明确否定它（「刻意不把异常逃逸当成…」）是必须保留的正确表述，
+                # 因此比较前先去掉 markdown 强调标记，避免「**不**」骗过否定检测。
+                bare = line.replace("*", "").replace("_", "")
+                if "逃逸" in bare and "触发" in bare and "重新投递" in bare:
+                    if any(neg in bare for neg in ("不是", "不", "非", "错")):
+                        continue
+                    offenders.append(f"{rel}:{i}: {line.strip()}")
+        assert offenders == [], (
+            "仍有注释把「异常逃逸」当成 broker 重新投递的恢复手段：\n" + "\n".join(offenders)
+        )
+
+    @pytest.mark.unit
+    def test_attempt_budget_is_enforced_at_the_claim_point(self):
+        """预算必须在领取/接管**之前**判定，否则重投可以突破 max_attempts。
+
+        ``repository.takeover_running`` 的 ``attempt = attempt + 1`` 是无条件的；
+        ``mark_recoverable`` 类路径若不先挡住，broker 崩溃重投能把 run 推到预算外
+        继续执行。
+        """
+        import inspect
+
+        from runtime.run_service import RunService
+
+        src = inspect.getsource(RunService.mark_running)
+        gate_at = src.find('next_attempt > int(run["max_attempts"])')
+        takeover_at = src.find("self.repo.takeover_running(")
+        # 领取路径的写状态调用（_transition(...) 换行），用稳定的成员名定位
+        claim_at = src.find("from_statuses={cur}")
+        assert gate_at != -1, "mark_running 里没有 attempt 预算闸门"
+        assert takeover_at != -1
+        assert claim_at != -1
+        assert gate_at < takeover_at, "预算闸门必须在 takeover_running 之前"
+        assert gate_at < claim_at, "预算闸门必须在领取写状态之前"
+
+
+class TestAttemptBudgetTerminalConvergence:
+    @pytest.mark.unit
+    async def test_exhausted_budget_dead_letters_instead_of_looping(self):
+        """预算耗尽必须**终态**收敛，否则 reconciler 会无限重投它。
+
+        ``list_recoverable_runs`` 不比较 ``max_attempts``；一个停在 QUEUED/RETRYING
+        且预算已耗尽的 run 会被它反复捞起。落 DEAD_LETTER 后不再出现在扫描结果里。
+        """
+        from runtime.executor import execute_run
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+        from runtime.thread_lock import InMemoryThreadLock
+        from tests.unit.runtime_helpers import (
+            FakeRuntime,
+            dispose,
+            make_sqlite_session_factory,
+            runtime_provider,
+        )
+
+        session_factory, engine, path = make_sqlite_session_factory()
+        try:
+            service = RunService(repository=AgentRunRepository(session_factory=session_factory))
+            run = service.create_run(query="q", session_id="T-budget", max_attempts=1)
+            # 模拟「预算已被 broker 重复投递耗尽」：attempt 已达上限
+            from runtime.statuses import RunStatus
+
+            service.repo.transition(
+                run["id"],
+                from_statuses={RunStatus.QUEUED},
+                to_status=RunStatus.QUEUED,
+                attempt=1,
+            )
+            status = await execute_run(
+                run["id"],
+                service=service,
+                runtime_provider=runtime_provider(FakeRuntime(lambda **kw: {"response": "ok"})),
+                dispatcher=None,
+                lock_manager=InMemoryThreadLock(),
+                worker_id="w-budget",
+            )
+            stored = service.get_run(run["id"])
+            assert stored["status"] == "DEAD_LETTER"
+            assert status == "DEAD_LETTER", "执行器必须上报真实状态，而不是假装 RUNNING"
+            assert stored["attempt"] == 1, "预算耗尽时不得递增 attempt"
+            assert service.get_dead_letter(run["id"]) is not None
+            # 图从未被执行：不能有副作用发生
+            assert stored.get("result") in (None, {})
+        finally:
+            dispose(engine, path)

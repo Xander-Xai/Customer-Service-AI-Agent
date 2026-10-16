@@ -39,6 +39,7 @@ python -c "import celery, psycopg, langgraph, prometheus_client; print('deps OK'
 make runtime-e2e      # tests/integration/runtime（checkpoint / 线程模型 / 队列 / 重试 / DLQ / 幂等 / 事件流）
 make runtime-chaos    # worker kill -9 → lease 过期 → checkpoint 续跑 → 本 Agent 侧副作用去重（counter==1；非端到端 exactly-once）
 make runtime-verify   # 机器可读证据 artifacts/distributed-runtime/<ts>/report.json
+make runtime-delivery # Celery 投递语义真实验收（ACK / reject / requeue / 重新投递）
 make runtime-replay-help
 ```
 
@@ -98,10 +99,28 @@ SELECT status, attempt, next_retry_at, worker_id, error_code
 FROM agent_runs WHERE id = '<run_id>';
 ```
 
-- `next_retry_at` 非空 → 因 thread lease 竞争或退避被推迟，等 broker countdown。
+- `next_retry_at` 非空 → 因 thread lease 竞争或退避被推迟，**等周期 reconciler**
+  （不是等 broker——见下）。
 - `error_code = 'DISPATCH_FAILED'` → 入队失败（broker 不可达）。
 - 无 worker 在消费：`celery -A runtime.celery_app:celery_app inspect active`。
   生产要求 `AGENT_RUN_DISPATCH=celery`；`inline` 只用于开发（生产 fail-fast）。
+
+> **broker 不会为普通失败重新投递。** 实测（`make runtime-delivery`，Celery 5.6.3
+> + 真实 Redis broker）：普通 Exception、`RetryPublicationError`、软/硬时间上限
+> 全部落在 `Request.on_failure` 的 `reject(requeue=False)`——**消息被丢弃**。
+> 只有 `WorkerLostError`（worker 进程被杀）才重新投递。因此 run 停在
+> `QUEUED`/`RETRYING` 时，队列里**可能一条消息都没有**，恢复靠 beat 周期扫描。
+>
+> 先确认 beat 活着（它是恢复闭环的驱动器）：
+>
+> ```bash
+> docker compose ps beat            # 应当 Up (healthy)
+> docker compose logs beat --tail 30 | grep 'reconcile-stuck-runs'
+> ```
+>
+> `beat` 的 liveness 判据是 schedule 文件是否还在被写：文件存在且 mtime 在
+> `max(120s, 4x AGENT_RUN_RECONCILE_INTERVAL_SECONDS)` 之内。beat 挂了 = 滞留 run
+> 没有任何自动恢复手段，只能手工 `python3 scripts/reconcile_stuck_runs.py --apply`。
 
 ### 3.2 Run 卡在 `RUNNING`
 
@@ -112,9 +131,15 @@ SELECT id, worker_id, task_id, lease_expires_at, heartbeat_at
 FROM agent_runs WHERE status = 'RUNNING';
 ```
 
-`heartbeat_at` 停止推进且 `lease_expires_at` 已过期 → 该 worker 已死。等
-`AGENT_RUN_VISIBILITY_TIMEOUT` 后 broker 重投，新 worker 会接管 lease 并递增
-`attempt`。
+`heartbeat_at` 停止推进且 `lease_expires_at` 已过期 → 该 worker 已死。恢复有两条路：
+
+- 进程被 SIGKILL（`WorkerLostError`）→ broker **立即**重新投递同一条消息
+  （task_id 不变），新 worker 通过 `takeover_running` 原子接管并 `attempt+1`；
+- 进程没死但不再推进（例如被 SIGSTOP、网络分区）→ broker 不会主动做任何事，
+  周期 reconciler 扫到 lease 已过期的 `RUNNING` 后重新投递。
+
+两条路都会消耗 attempt；预算耗尽时 `mark_running` **拒绝领取并落 DLQ**，不会
+在预算外执行。
 
 **排障时不要手工把状态改成 `SUCCEEDED`**：真相源由条件更新保护，手改会破坏 lease
 语义。
@@ -358,6 +383,11 @@ Alertmanager 的通知投递 —— 那是另一段链路，见 §5。
 
 ## 5. 已知限制（值班须知）
 
+0. **broker 不为普通失败重新投递**（实测，`make runtime-delivery`）：普通异常 /
+   `RetryPublicationError` / 软硬时间上限 = `reject(requeue=False)` = 消息丢弃。
+   能重投的只有 `WorkerLostError`，且**立即**重投、无退避。因此恢复完全依赖
+   数据库 AgentRun + beat 周期 reconciler；`beat` 停摆 = 没有自动恢复。
+   另：裸 `Reject(requeue=True)` 同样立即重投（实测 5 秒 80 次），不能当策略。
 1. 无 fencing token：pause 超过 lease TTL 的旧 worker 不会被强制中止。
 2. 单 Redis 互斥，不是 Redlock；Redis 故障转移期间可能双持有。
 3. 认领后崩溃的副作用会被重放（见 §3.5）。

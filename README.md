@@ -663,14 +663,17 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 
 - ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
   （需先定义「读可重试、写不可重试」的边界）。
+- ~~**broker 投递语义核查 + 恢复闭环补齐**~~ **已完成**（`make runtime-delivery`
+  真实 Redis broker + 真实 Celery worker 实测）：普通异常 / `RetryPublicationError` /
+  软硬超时全部 `reject(requeue=False)`——**消息被丢弃、不重投**；只有 worker 进程
+  被杀（`WorkerLostError`）才重投。恢复因此改为「数据库 AgentRun + beat 周期
+  reconciler」（新增独立 `beat` service），并把 attempt 预算闸门补到领取点。
 - **强制中止失去所有权的 worker**：owner CAS 目前只挡**状态提交**，没有 fencing
   token、也不 abort 旧协程——陈旧 worker 的 checkpoint 写入与工具副作用不受
   owner CAS 保护。
-- **`reconcile_stuck_runs` 接入调度**（beat / CronJob）：它是当前**唯一**能收敛
-  「ACK 后无待投递消息」的自动机制，现在是手动脚本。
-- attempt 预算闸门补到 worker 接管路径；runtime 时间参数交叉校验
-  （lease / visibility vs task time limit）；side-effect claim TTL 从硬编码
-  变成配置项。
+- 覆盖 `PENDING` 滞留 run（两阶段入队在 `mark_queued` 前被杀会永久滞留）；
+  `beat` 单点 HA；runtime 时间参数交叉校验（lease / visibility vs task time limit）；
+  side-effect claim TTL 从硬编码变成配置项。
 - Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
 - 持久化 trace 后端（Jaeger / Tempo）接入，tracing 从本地验证升级为可查询。
 

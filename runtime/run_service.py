@@ -20,6 +20,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from core.logger import get_logger
+
 from .repository import AgentRunRepository
 from .statuses import (
     EXECUTABLE_STATUSES,
@@ -30,6 +32,8 @@ from .statuses import (
     ensure_transition,
     parse_status,
 )
+
+logger = get_logger("runtime.service")
 
 
 class RunNotFound(LookupError):
@@ -317,6 +321,13 @@ class RunService:
         if cur == RunStatus.RUNNING:
             if worker_id is None or lease_seconds is None:
                 return run
+            # 预算闸门必须在**接管之前**：``takeover_running`` 的
+            # ``attempt = attempt + 1`` 是无条件的，不在这里挡住，broker 崩溃重投 /
+            # reconciler / 任何重复投递都能把 run 推到 ``max_attempts`` 之后继续执行
+            # —— 预算形同虚设。
+            if next_attempt > int(run["max_attempts"]):
+                self._dead_letter_budget_exhausted(run, cur=cur, now=now, takeover=True)
+                return None
             taken = self.repo.takeover_running(
                 run_id,
                 worker_id=worker_id,
@@ -330,6 +341,9 @@ class RunService:
             return None
 
         ensure_transition(cur, RunStatus.RUNNING, run_id)
+        if next_attempt > int(run["max_attempts"]):
+            self._dead_letter_budget_exhausted(run, cur=cur, now=now, takeover=False)
+            return None
         fields: dict[str, Any] = {
             "attempt": next_attempt,
             "worker_id": worker_id,
@@ -341,6 +355,40 @@ class RunService:
             fields["lease_expires_at"] = now + timedelta(seconds=lease_seconds)
             fields["heartbeat_at"] = now
         return self._transition(run_id, RunStatus.RUNNING, from_statuses={cur}, **fields)
+
+    def _dead_letter_budget_exhausted(
+        self, run: dict[str, Any], *, cur: RunStatus, now: datetime, takeover: bool
+    ) -> None:
+        """attempt 预算耗尽时把 run 收敛到 DEAD_LETTER（终态）。
+
+        必须**终态**收敛而不是「拒绝执行就完事」：一旦 reconciler 被调度，
+        一个停在 QUEUED/RETRYING 且预算已耗尽的 run 会被
+        ``list_recoverable_runs``（它不比较 ``max_attempts``）反复重新投递，
+        变成无界重投循环。落 DLQ 后它不再出现在扫描结果里，循环自然终止，
+        同时留下 ``agent_dead_letters`` 记录供人工
+        ``scripts/replay_dead_run.py`` 重放。
+
+        方向说明：这是 fail-closed——宁可把 run 交给人，也不让它在预算外被执行。
+        """
+        run_id = str(run["id"])
+        attempt = int(run["attempt"])
+        max_attempts = int(run["max_attempts"])
+        logger.warning(
+            "attempt 预算已耗尽，落 DLQ 拒绝执行: run_id=%s attempt=%d/%d takeover=%s",
+            run_id,
+            attempt,
+            max_attempts,
+            takeover,
+        )
+        source = "RUNNING 接管" if takeover else f"{cur.value} 领取"
+        self.mark_dead_letter(
+            run_id,
+            error_code="max_attempts_exhausted_at_claim",
+            error_message=(
+                f"{source}时 attempt 预算已耗尽（{attempt}/{max_attempts}），拒绝再次执行"
+            ),
+            error_type="transient",
+        )
 
     def heartbeat(self, run_id: str, *, worker_id: str, lease_seconds: float) -> bool:
         """续租（仅当前 owner 且 lease 仍存活时生效）。返回是否成功。

@@ -40,10 +40,20 @@ async def reconcile_stuck_runs(
 ) -> list[str]:
     """重新投递"卡住"的 run（RETRYING/QUEUED 且 next_retry_at 已到）。
 
-    为什么需要（defense in depth）：主路径已经在投递失败时让异常逃逸，靠 Celery 的
-    ``acks_late`` 重新投递来恢复。但 still存在 at-least-once 之外的情形让消息彻底消失
-    （broker 重启丢队列、消息被手工清理、inline 模式下进程内存任务丢失）。此时
-    ``next_retry_at`` 已经过期却没有任何调度器，这个扫描器就是那个调度器。
+    为什么需要（**这不是 defense in depth，它是唯一的自动恢复路径**）：实测
+    （Celery 5.6.3 + 真实 Redis broker + 真实 worker）普通 Exception、
+    ``RetryPublicationError``、软/硬时间上限全部落在 ``Request.on_failure`` 的
+    ``reject(requeue=False)`` 分支——**消息被丢弃、不重新投递**。只有
+    ``WorkerLostError``（worker 进程被杀）才触发重投。因此：
+
+    - 「让异常逃逸以触发 broker 重新投递」这个前提**是错的**，不成立；
+    - run 停在 ``RETRYING``/``QUEUED`` 时，队列里**可能一条消息都没有**；
+    - 消息本身随时可能丢（broker 重启、队列被清理、进程在 publish 前被杀）。
+
+    所以恢复闭环 = 数据库里的 AgentRun 状态（``next_retry_at`` / ``attempt``）
+    + **本扫描器被周期调度**（``runtime/celery_app.py::beat_schedule`` 驱动
+    ``runtime.reconcile_stuck_runs``）。本函数未被调度 = 没有恢复闭环。
+    ``scripts/reconcile_stuck_runs.py`` 只是同一逻辑的手动入口。
 
     另外两类也在这里收敛：
 

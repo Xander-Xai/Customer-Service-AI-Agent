@@ -132,7 +132,7 @@ facts: ## 输出当前 runtime 事实 JSON（版本/模型/路径数/基准查�
 # TEST_DISTRIBUTED_DB_URL / TEST_REDIS_URL 覆盖（CI 里指向 service container）。
 # 环境缺失时目标会 FAIL 而不是静默 skip —— 免得"没跑"被当成"通过"。
 
-.PHONY: runtime-e2e runtime-chaos runtime-verify runtime-replay-help mcp-verify
+.PHONY: runtime-e2e runtime-chaos runtime-verify runtime-replay-help runtime-delivery mcp-verify
 
 RUNTIME_DB_URL ?= postgresql://postgres:postgres@localhost:5432/csai_runtime_test
 RUNTIME_REDIS_URL ?= redis://localhost:6379
@@ -158,6 +158,21 @@ runtime-verify: ## 生成 runtime 能力证据报告（结构化 JSON）
 
 runtime-replay-help: ## 查看 DLQ 重放用法
 	@python3 scripts/replay_dead_run.py --help
+
+# Celery 投递语义的**真实**验收：真实 Redis broker + 真实 Celery worker 子进程。
+#
+# 为什么单独一个目标：这个文件回答的是「消息到底会不会被重新投递」——它是恢复
+# 闭环的地基。实测结论（普通异常 / RetryPublicationError / 软硬时间上限都是
+# reject(requeue=False) -> 消息被丢弃、不重投）不能靠读默认值推断，必须实跑。
+# 每个场景跑在独立的新 worker 上，因为 Reject(requeue=True) 会立刻热重投并把
+# 共享 worker 的预取队列灌满，掩盖其它场景。
+.PHONY: runtime-delivery
+runtime-delivery: ## Celery 投递语义真实验收（ACK / reject / requeue / 重新投递）
+	@echo "📮 Celery 投递语义验收（真实 Redis broker + 真实 worker）..."
+	@TEST_DISTRIBUTED_DB_URL="$(RUNTIME_DB_URL)" TEST_REDIS_URL="$(RUNTIME_REDIS_URL)" \
+		python3 -m pytest tests/integration/runtime/test_celery_delivery_semantics.py \
+		-v --tb=short -p no:cacheprovider
+	@echo "✅ runtime-delivery PASS"
 
 mcp-verify: ## 生成 MCP 端到端契约证据报告（结构化 JSON，本地 fake server）
 	@echo "🧾 MCP 端到端契约验证..."

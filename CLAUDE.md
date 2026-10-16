@@ -62,6 +62,7 @@ make rag-eval-649             # 正式 649 全量 4-config ablation → evidence
 make runtime-e2e        # tests/integration/runtime：真实 PG + Redis + 多进程 Celery 验收
 make runtime-chaos      # scripts/test_worker_crash_recovery.py → artifacts/runtime/chaos-<ts>.json
 make runtime-verify     # scripts/verify_distributed_runtime.py → artifacts/distributed-runtime/<ts>/report.json
+make runtime-delivery   # Celery 投递语义真实验收（真实 Redis broker + 真实 worker 子进程）
 make runtime-replay-help # scripts/replay_dead_run.py --help（DLQ 人工重放）
 
 # 指标暴露链（Prometheus 告警闭环；见 docs/limitations.md §1.2）
@@ -184,6 +185,18 @@ make db-downgrade # 回滚迁移
   （`runtime/bootstrap.py::invoke_graph_with_resume`）→ retry 退避 → 用尽
   写 `agent_dead_letters` + `DEAD_LETTER` → `scripts/replay_dead_run.py`
   人工重放（**复用原 run_id**，避免绕过工具幂等键）。
+- **broker 投递语义（实测，非推断）**：`make runtime-delivery`（真实 Redis broker +
+  真实 Celery 5.6.3 worker 子进程，逐类、每场景独立 worker）确认——普通 Exception /
+  `RetryPublicationError` / 软时间上限 / 硬时间上限全部落到 `Request.on_failure`
+  的 `reject(requeue=False)`，**消息被丢弃、不重投**；只有 `WorkerLostError`
+  （worker 进程被杀）触发重投，且**立即**重投无退避；`Reject(requeue=True)` 同样
+  立即重投（实测 5 秒 80 次）。**因此「让异常逃逸以触发 broker 重新投递」是错的**，
+  恢复闭环由「数据库 AgentRun + 周期 reconciler」承担：`beat_schedule` →
+  `runtime.reconcile_stuck_runs`，由 compose 里**独立 `beat` service** 驱动
+  （`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`，默认 30s；不内嵌 `worker -B`，
+  因为 worker 可被 `--scale`）。队列消息只是**唤醒信号**，唤醒信号随时可能丢。
+  attempt 预算在 `mark_running` 的领取点强制（超预算拒绝并终态落 DLQ，否则被调度的
+  reconciler 会无限重投）。证据：`tests/integration/runtime/test_celery_delivery_semantics.py`
 - **Run 事件流**：worker 写 Redis Stream `agent:run:{run_id}:events`，
   API 经 `GET /api/runs/{run_id}/events` 转 SSE（支持 `Last-Event-ID` 续读）。
   定位是**观测通道而非真相源**：best-effort resumable，**不是** exactly-once。
@@ -193,7 +206,7 @@ make db-downgrade # 回滚迁移
 | 层级 | 含义 | 当前状态 |
 |---|---|---|
 | **Level 1 — IMPLEMENTED** | 代码存在且可读 | Postgres checkpoint、Redis session、Redis per-thread lock、AgentRun 真相源、Celery + Redis broker、worker execution、`run_id` dispatch、acks_late / reject_on_worker_lost / visibility_timeout、retry、tool ledger、Prometheus metrics |
-| **Level 2 — CI VERIFIED** | 真实基础设施 + 命令 + artifact | `make runtime-e2e`（真实 PG + Redis + 多进程 Celery）、`make runtime-chaos`（SIGKILL worker 恢复）、`make runtime-verify`（`artifacts/distributed-runtime/<ts>/report.json`，schema `distributed-runtime-evidence/v2`，带 `tested_code_sha` + `generated_at`） |
+| **Level 2 — CI VERIFIED** | 真实基础设施 + 命令 + artifact | `make runtime-e2e`（真实 PG + Redis + 多进程 Celery）、`make runtime-chaos`（SIGKILL worker 恢复）、`make runtime-verify`（`artifacts/distributed-runtime/<ts>/report.json`，schema `distributed-runtime-evidence/v2`，带 `tested_code_sha` + `generated_at`）、`make runtime-delivery`（真实 Redis broker + 真实 Celery worker 子进程逐类测 ACK/reject/requeue/是否真的重新投递） |
 | **Level 3 — 未生产验证** | `NOT_VERIFIED` | 真实生产集群 / 多副本长期稳定 / 真实用户流量 / 真实 ERP 写操作 / 大规模 queue backlog / K8s autoscaling / multi-region |
 
 > **Level 2 ≠ 生产验证。** 本仓库文档与任何对外表述都不得把 Level 2 表述为
