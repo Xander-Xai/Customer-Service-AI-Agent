@@ -48,6 +48,29 @@ class ThreadLockBackendError(TransientError):
     error_type = TRANSIENT
 
 
+class SideEffectOwnershipLost(TransientError):
+    """副作用执行权在飞行中丢失：结果**未知**，不得报告成功。
+
+    何时发生
+    --------
+    ``runtime.side_effects`` 在外部调用返回后写结果时做归属校验（``claim_owner``）。
+    校验失败说明认领已被另一个执行者接管——通常是因为本次执行超出了 claim 租约，
+    而续租也失败了（旧 worker 被 SIGSTOP / 心跳中断 / GC 长停顿）。
+
+    为什么是 transient 而不是 permanent
+    ----------------------------------
+    外部调用**可能已经落地**，只是结果无法确认。可重试是因为下一次尝试会经过
+    ledger：如果对方已经提交成功，本次会直接拿到已存结果而不重复执行；如果对方
+    也失败了，则由新 owner 接管。真正无法确认的情况最终落 DLQ 并由人工核对，
+    不会被静默当成成功。
+
+    旧实现**忽略**了 ``mark_succeeded`` 的 False 返回值，于是外部已写入、ledger
+    仍停在 PENDING，而上层看到的是一次「成功的工具返回」——把结果未知伪装成成功。
+    """
+
+    error_type = TRANSIENT
+
+
 _PERMANENT_BUILTINS = (
     ValueError,
     TypeError,

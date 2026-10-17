@@ -17,6 +17,8 @@ at-least-once delivery + application-level idempotency：同一
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -27,7 +29,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from core.logger import get_logger
@@ -47,7 +49,26 @@ CLAIM_IN_PROGRESS = "in_progress"
 
 #: PENDING 记录的认领租约：租约未过期时**不允许**第二个执行者重复触发副作用，
 #: 必须抛 transient 让 run 退避重投；租约过期（认领后崩溃）才允许接管重放。
+#:
+#: 租约**不是**这个值的函数就能保证安全：单次副作用的执行上界由
+#: ``TOOL_EXECUTION_TIMEOUT_SECONDS`` 决定，因此本值必须大于它（见
+#: ``min_claim_ttl_seconds`` 与 ``core.config.validate_timeout_invariants``）。
+#: 执行期间还会由 :class:`_ClaimRenewer` 周期性续租。
 DEFAULT_CLAIM_TTL_SECONDS = 60.0
+
+#: claim TTL 的**下界**系数：必须大于单次副作用的执行上界，留出续租周期与抖动余量。
+#: 启动期强制（不满足 -> 拒绝启动），运行期也 fail-closed（见
+#: ``execute_idempotent_operation``）。
+CLAIM_TTL_MIN_MARGIN_SECONDS = 30.0
+
+
+def min_claim_ttl_seconds(tool_timeout_seconds: float) -> float:
+    """受保护副作用所需的最小 claim TTL = 工具执行上界 + 余量。
+
+    显式函数而不是到处写字面量：这条不变量同时被启动校验（A4）与运行期 fail-closed
+    使用，两处必须同源，否则会一边收紧一边放行。
+    """
+    return float(tool_timeout_seconds) + CLAIM_TTL_MIN_MARGIN_SECONDS
 
 
 def _utcnow() -> datetime:
@@ -80,8 +101,79 @@ def _new_owner() -> str:
 
 
 def build_tool_idempotency_key(run_id: str, tool_call_id: str) -> str:
-    """工具侧幂等键 = run_id + tool_call_id（接口约定）。"""
+    """工具侧幂等键 = run_id + tool_call_id（接口约定）。
+
+    ⚠️ 这个键**只在 ``tool_call_id`` 稳定时**成立，而 LLM 生成的 tool call id 在
+    **节点重放**时并不稳定（见 :func:`build_replay_stable_operation_key`）。
+
+    - HITL 路径传 ``approval:{approval_id}``：审批 id 恒定，键稳定。**保持不变。**
+    - 非 HITL 路径传 LLM 的 tool call id：重放会变，键随之失效。**不要用于需要
+      跨重放去重的写操作。**
+    """
     return f"{run_id}:{tool_call_id}"
+
+
+#: 重放稳定键的版本前缀。键空间与 ``run_id:tool_call_id`` 隔离，因此
+#: HITL（``approval:``）与历史键不受影响。
+REPLAY_STABLE_KEY_VERSION = "v1"
+
+
+def build_replay_stable_operation_key(
+    *,
+    run_id: str,
+    node_id: str,
+    agent: str,
+    tool_name: str,
+    ordinal: int,
+) -> str:
+    """构造**跨节点重放稳定**的逻辑操作身份（不使用 LLM 的 tool_call_id）。
+
+    为什么不能只用 ``tool_call_id``
+    -------------------------------
+    ``tool_call_id`` 由 LLM 生成。节点在 checkpoint 提交前崩溃并被重放时，LLM 被
+    重新调用，可以产生**不同的** id，于是同一笔逻辑写操作拿到新的
+    ``operation_key``，``tool_side_effects`` 的唯一约束看不到任何重复，副作用执行
+    两次（真实复现见
+    ``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
+
+    为什么不用 ``tool_name + arguments`` 全局去重
+    -------------------------------------------
+    那会把两次**合法**的业务操作合并：用户两次各退款 100 元会被当成同一笔，
+    第二次被静默吞掉。业务身份必须包含作用域。
+
+    五个组成部分各自排除一类错误合并
+    --------------------------------
+    - ``run_id``：不同 run = 用户主动再次发起的新操作，必须独立执行；
+    - ``node_id``：同一 run 内不同图节点发起的同参数调用是不同操作；
+    - ``agent``：同一节点内不同 agent 角色（协作模式下的分工）是不同操作；
+    - ``tool_name``：不同工具不是同一操作；
+    - ``ordinal``：同一节点内**同一工具**的第 n 次逻辑调用。LLM 可以在一个节点里
+      发出多次同类写操作，ordinal 把它们区分开。
+
+    为什么 ordinal 漂移是安全的
+    --------------------------
+    ordinal 由「本节点内该工具的调用序号」得出，LLM 重放时调用序列**可能**变化，
+    于是同一槽位可能对应不同参数。这不会导致重复执行：``claim`` 的
+    ``request_fingerprint`` 会发现同键异参，抛 ``PermanentError``（fail-closed），
+    宁可停下也不误执行。因此 ordinal 的不稳定性只影响「能否完全去重」，不影响
+    「不会重复执行或错误合并」这两个更重要的性质。
+
+    不含 arguments：参数属于指纹（``request_fingerprint``）的职责，混进键里会让
+    「同键异参」无法被检测。
+    """
+    scope = "|".join(
+        [
+            REPLAY_STABLE_KEY_VERSION,
+            run_id,
+            node_id,
+            agent,
+            tool_name,
+            str(int(ordinal)),
+        ]
+    )
+    # 键需要确定性且适合做索引；显式限定分隔符歧义（node/agent 名里可能含 "|"）
+    # 由上游节点名约定保证，digest 让长度不随名称增长。
+    return f"{REPLAY_STABLE_KEY_VERSION}:{hashlib.sha256(scope.encode('utf-8')).hexdigest()}"
 
 
 def request_fingerprint(arguments: dict[str, Any] | None) -> str:
@@ -276,6 +368,72 @@ class SideEffectStore:
         finally:
             session.close()
 
+    def renew_claim(
+        self,
+        tool_name: str,
+        operation_key: str,
+        *,
+        owner: str,
+        claim_ttl_seconds: float,
+    ) -> bool:
+        """原子续租：``owner 匹配 AND status=PENDING AND 租约未过期`` 同一条 UPDATE。
+
+        与 ``AgentRunRepository.renew_lease_owned`` 同一语义：
+
+        - ``owner`` 不匹配 -> 拒绝（已被接管，不能给自己续命）；
+        - 租约**已过期** -> 拒绝。严格 expiry 语义：一个迟到的续租不能复活一个
+          已经被判定为「持有者已死」的认领，否则另一个执行者已经接管，双方都会执行。
+
+        返回是否真的续上了（``rowcount == 1``）。
+        """
+        now = _utcnow()
+        session = self._session()
+        try:
+            result = session.execute(
+                update(ToolSideEffect)
+                .where(
+                    ToolSideEffect.tool_name == tool_name,
+                    ToolSideEffect.operation_key == operation_key,
+                    ToolSideEffect.claim_owner == owner,
+                    ToolSideEffect.status == STATUS_PENDING,
+                    ToolSideEffect.claim_expires_at.isnot(None),
+                    ToolSideEffect.claim_expires_at > now,
+                )
+                .values(claim_expires_at=now + timedelta(seconds=claim_ttl_seconds), updated_at=now)
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
+
+    def commit_result_or_raise(
+        self,
+        *,
+        tool_name: str,
+        operation_key: str,
+        result_reference: Any,
+        owner: str | None,
+    ) -> None:
+        """写成功结果；归属校验失败时抛 :class:`SideEffectOwnershipLost`。
+
+        为什么必须抛
+        ------------
+        外部调用已经返回，但 ledger 写不进结果（执行权已被夺走）意味着**结果未知**。
+        旧实现忽略 ``mark_succeeded`` 的返回值就返回结果，上层于是把一次状态未知的
+        写操作当成成功：ledger 停在 PENDING，用户看到「退款成功」，而实际状态取决于
+        接管者做了什么。
+
+        抛 transient（而不是返回 ``False`` 后继续）是为了让这条路径必然到达上层：
+        重试会经过 ledger（对方已提交就直接复用结果），无法确认则最终落 DLQ 人工核对。
+        """
+        from .errors import SideEffectOwnershipLost
+
+        if not self.mark_succeeded(tool_name, operation_key, result_reference, owner=owner):
+            raise SideEffectOwnershipLost(
+                f"tool {tool_name} operation_key {operation_key} 的执行权已丢失，"
+                "外部调用结果未知；不会报告成功，需经 ledger 重试或人工核对"
+            )
+
     def mark_succeeded(
         self,
         tool_name: str,
@@ -359,6 +517,106 @@ def reset_side_effect_store_for_tests() -> None:
     _default_store = None
 
 
+class _ClaimRenewer:
+    """在副作用**执行期间**周期性延长认领租约。
+
+    为什么必须有它
+    --------------
+    ``claim()`` 用「租约过期」判定持有者已死，从而允许接管重放。若不续租，一次耗时
+    超过 claim TTL 的写操作会在**仍在执行**时被第二个执行者接管，同一笔写操作被发起
+    两次——归属校验只能保护 ledger 状态，无法撤销已经发出的外部调用。
+
+    与 run lease 心跳的类比
+    ----------------------
+    同一个模式：``AgentRunRepository.renew_lease_owned`` + executor 的
+    ``_heartbeat_loop`` 保护 run 的 ownership lease；这里保护单次工具调用的 claim。
+    两者的判定都是「owner 匹配 AND 租约未过期」，因此迟到的续租不能复活一个已被
+    判定失效的租约。
+
+    刻意不做的事
+    ------------
+    - 不吞异常：续租失败（数据库不可用等）只记录日志，**不**中断正在执行的副作用。
+      中断会让「外部已写入、结果未知」变得更难判断；正确处理是在结果提交时由归属
+      校验暴露为 ``SideEffectOwnershipLost``。
+    - 不假设续租一定成功：因此下界校验（``min_claim_ttl_seconds``）与启动期配置
+      校验是必需的，续租只是把窗口推后，不是消除它。
+    """
+
+    #: 续租周期 = TTL / 该系数。取 3 意味着租约有 3 次续租机会后才会过期，
+    #: 足以容忍两次连续的数据库抖动或调度延迟。
+    RENEW_DIVISOR = 3.0
+    #: 续租周期下界，避免 TTL 很小时把数据库打成高频写。
+    MIN_INTERVAL_SECONDS = 0.05
+
+    def __init__(
+        self,
+        store: SideEffectStore,
+        *,
+        tool_name: str,
+        operation_key: str,
+        owner: str | None,
+        claim_ttl_seconds: float,
+    ):
+        self._store = store
+        self._tool_name = tool_name
+        self._operation_key = operation_key
+        self._owner = owner
+        self._ttl = claim_ttl_seconds
+        self._task: asyncio.Task | None = None
+        self._stop = asyncio.Event()
+        self.interval = max(self.MIN_INTERVAL_SECONDS, claim_ttl_seconds / self.RENEW_DIVISOR)
+        self.renewals = 0
+        self.failures = 0
+
+    async def start(self) -> None:
+        # 极短 TTL 或测试里没有真实租约需要续（owner 为 None）时不启动循环。
+        if self._owner is None or self.interval <= 0:
+            return
+        self._task = asyncio.create_task(self._loop(), name="side-effect-claim-renewer")
+
+    async def _loop(self) -> None:
+        while True:
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=self.interval)
+                return  # stop() 已置位
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            except asyncio.CancelledError:  # pragma: no cover - 取消路径
+                return
+            try:
+                ok = self._store.renew_claim(
+                    self._tool_name,
+                    self._operation_key,
+                    owner=self._owner or "",
+                    claim_ttl_seconds=self._ttl,
+                )
+                if ok:
+                    self.renewals += 1
+                else:
+                    self.failures += 1
+                    logger.warning(
+                        "side-effect claim 续租失败（执行权可能已丢失）tool=%s op=%s",
+                        self._tool_name,
+                        self._operation_key,
+                    )
+            except Exception as e:  # noqa: BLE001 - 续租不得影响正在执行的副作用
+                self.failures += 1
+                logger.warning(
+                    "side-effect claim 续租异常 tool=%s op=%s: %s",
+                    self._tool_name,
+                    self._operation_key,
+                    type(e).__name__,
+                )
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._task
+            self._task = None
+
+
 async def execute_idempotent_operation(
     *,
     tool_name: str,
@@ -370,6 +628,7 @@ async def execute_idempotent_operation(
     store: SideEffectStore | None = None,
     claim_ttl_seconds: float = DEFAULT_CLAIM_TTL_SECONDS,
     owner: str | None = None,
+    min_claim_ttl_seconds: float | None = None,
 ) -> Any:
     """通用写操作幂等包裹：同一 ``(tool_name, operation_key)`` 只真正执行一次。
 
@@ -377,11 +636,30 @@ async def execute_idempotent_operation(
     LangGraph 后续失败、整个 run 重试时，第二次调用直接返回已保存结果，
     **不** 再次触发副作用函数。
 
-    并发安全：唯一索引 + ``claim`` 的原子语义兜底；指纹不一致视为业务冲突
-    （``PermanentError``，不重试）；认领租约未过期的重复认领抛 ``TransientError``
-    （退避重投），避免两个 worker 并发执行同一笔写操作。
+    并发安全由三件事共同保证，缺一不可：
+
+    1. **唯一索引 + ``claim`` 的原子语义**（行锁 + 归属校验）；
+    2. **执行期间续租**（``_ClaimRenewer``）：认领租约在工具执行期间被周期性延长，
+       因此「租约过期 = 持有者已死」这个判定不会在工具**仍在执行**时成立。否则第
+       二个执行者会在第一个还没写完时接管并重复发起同一笔写操作
+       （真实复现见 ``tests/integration/runtime/test_side_effect_claim_lease_pg.py``）；
+    3. **归属校验的结果提交**（``commit_result_or_raise``）：写不进结果时抛
+       ``SideEffectOwnershipLost``，把「结果未知」上报，而不是静默返回成功。
+
+    ``claim_ttl_seconds`` 的下界（``min_claim_ttl_seconds``）
+    ------------------------------------------------------
+    续租只是把窗口推后，并不消除它：续租周期、数据库可用性、以及外部调用在
+    ``asyncio.wait_for`` 取消后仍在飞行的情况都要求租约有**下界**。低于下界时
+    fail-closed（``PermanentError``），不创建 ledger 行、不执行副作用。
     """
     from .errors import PermanentError, TransientError
+
+    if min_claim_ttl_seconds is not None and claim_ttl_seconds < min_claim_ttl_seconds:
+        raise PermanentError(
+            f"tool {tool_name} 的 side-effect claim TTL（{claim_ttl_seconds}s）低于受保护"
+            f"副作用执行上界的下界（{min_claim_ttl_seconds}s）；执行期间租约可能过期，"
+            "第二个执行者会重复发起同一笔写操作。已拒绝执行（fail-closed）。"
+        )
 
     store = store or get_side_effect_store()
     fingerprint = request_fingerprint(arguments)
@@ -406,11 +684,20 @@ async def execute_idempotent_operation(
             f"tool {tool_name} operation_key {operation_key} 正在被另一个执行者处理"
         )
 
+    renewer = _ClaimRenewer(
+        store,
+        tool_name=tool_name,
+        operation_key=operation_key,
+        owner=claim.owner,
+        claim_ttl_seconds=claim_ttl_seconds,
+    )
+    await renewer.start()
     try:
         result = operation()
         if hasattr(result, "__await__"):
             result = await result
-    except Exception as e:
+    except BaseException as e:
+        await renewer.stop()
         store.mark_failed(
             tool_name,
             operation_key,
@@ -419,5 +706,11 @@ async def execute_idempotent_operation(
             owner=claim.owner,
         )
         raise
-    store.mark_succeeded(tool_name, operation_key, result, owner=claim.owner)
+    await renewer.stop()
+    store.commit_result_or_raise(
+        tool_name=tool_name,
+        operation_key=operation_key,
+        result_reference=result,
+        owner=claim.owner,
+    )
     return result

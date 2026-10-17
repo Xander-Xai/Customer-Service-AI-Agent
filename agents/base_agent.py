@@ -102,6 +102,40 @@ def _should_gate_tool(
         return True
 
 
+def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, ordinal: int) -> Any:
+    """构造一次写操作调用的**重放稳定**逻辑身份（``tools.LogicalCall``）。
+
+    为什么需要它
+    ------------
+    副作用的 ``operation_key`` 过去是 ``run_id + tool_call_id``，而 ``tool_call_id``
+    由 LLM 生成：节点在 checkpoint 提交前崩溃并重放时，LLM 被重新调用、可能给出
+    不同的 id，于是同一笔写操作拿到新的键，ledger 失效、副作用执行两次
+    （真实复现见 ``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
+
+    ``node_id`` 的取法
+    -----------------
+    图没有把「当前节点名」传给 agent，因此用 **agent 名 + 本 run 内该 agent 的
+    调用序号**（``state["agents_used"]`` 中该名字的出现次数）作为节点身份：
+
+    - ``agents_used`` 是 **checkpointed** state，节点重放时从本节点的输入状态重新
+      开始，序号与首次一致 -> 键跨重放稳定；
+    - 同一 run 内同名 agent 被第二次调用（咨询/层级模式）时序号不同 -> 是不同的
+      逻辑操作，不会被错误合并；
+    - 不同 run（用户主动再次发起）由 ``run_id`` 区分。
+
+    序号漂移（LLM 重放时换了调用序列）退化为 ``request_fingerprint`` 冲突 ->
+    ``PermanentError``（fail-closed），不会重复执行。
+
+    构造失败一律返回 ``None``：调用方随后会因为缺少操作身份而 fail-closed 拒绝
+    执行写操作（见 ``ToolRegistry._idempotent_operation``），这是期望行为。
+    """
+    from tools.tool_registry import LogicalCall
+
+    used = state.get("agents_used") or []
+    invocation = list(used).count(agent) if isinstance(used, list) else 0
+    return LogicalCall(node_id=f"{agent}#{invocation}", agent=agent, ordinal=int(ordinal))
+
+
 def _record_tool_execution(state: dict[str, Any], tool_name: str, *, ok: bool) -> None:
     """把一次**真实发生**的工具执行记进 state（业务结果契约的证据来源）。
 
@@ -755,7 +789,29 @@ class BaseAgent(ABC):
                 )
 
                 # 执行每个工具调用，追加 ToolMessage
+                #
+                # ``_logical_ordinals`` 给出「本节点内、同一工具」的第 n 次调用序号。
+                # 它与 LLM 生成的 tool_call_id 无关，因此节点重放时同一逻辑调用仍然
+                # 拿到同一个序号 -> 写操作的幂等键跨重放稳定（见
+                # ``runtime.side_effects.build_replay_stable_operation_key``）。
+                # 计数器每次进入工具循环重新开始，所以与 checkpoint 回放到本节点的
+                # 起点一致。
+                _logical_ordinals: dict[str, int] = {}
                 for p in parsed_tcs:
+                    _ordinal = _logical_ordinals.get(p["name"], 0)
+                    _logical_ordinals[p["name"]] = _ordinal + 1
+                    _logical_call = None
+                    if self.tool_registry is not None and getattr(
+                        self.tool_registry, "is_side_effect", None
+                    ):
+                        with contextlib.suppress(Exception):
+                            if self.tool_registry.is_side_effect(p["name"]):
+                                _logical_call = _build_logical_call(
+                                    agent=self.name,
+                                    state=state,
+                                    tool_name=p["name"],
+                                    ordinal=_ordinal,
+                                )
                     cache_policy = (
                         self.tool_registry.cache_policy_for(p["name"])
                         if hasattr(self.tool_registry, "cache_policy_for")
@@ -837,6 +893,7 @@ class BaseAgent(ABC):
                                 p["args"],
                                 stream_callback=stream_callback,
                                 tool_call_id=tool_call_id,
+                                logical_call=_logical_call,
                             )
                         elif not cache_hit:
                             result = await self.tool_registry.execute(
@@ -844,6 +901,7 @@ class BaseAgent(ABC):
                                 p["args"],
                                 stream_callback=stream_callback,
                                 tool_call_id=tool_call_id,
+                                logical_call=_logical_call,
                             )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
