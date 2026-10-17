@@ -126,7 +126,8 @@ def classify_exception(exc: BaseException) -> str:
     # isinstance：``tools`` 与 ``runtime`` 是两个独立的包边界，``runtime`` 不应
     # 反向 import ``tools`` 造成单向依赖。它归入 TIMEOUT（可重试）而不是 PERMANENT：
     # 超时意味着外部系统的执行结果**未知**，重试必须经幂等 ledger 去重
-    # （``operation_key = run_id:tool_call_id``），而不是直接放行第二次写入。
+    # （重放稳定 ``operation_key``，见 ``runtime.side_effects``），而不是直接放行
+    # 第二次写入。
     if getattr(exc, "is_tool_timeout", False):
         return TIMEOUT
     if isinstance(exc, asyncio.CancelledError):

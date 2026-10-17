@@ -62,7 +62,7 @@ _EXPIRED_TTL = -1.0
 _BARRIER_TIMEOUT = 60.0
 
 _ROW_COLUMNS = (
-    "status, claim_owner, result_reference, error_type, "
+    "status, claim_owner, result_reference, error_type, error_message, "
     "claim_expires_at IS NULL AS lease_cleared, request_fingerprint"
 )
 
@@ -678,6 +678,56 @@ def test_commit_update_sql_carries_ownership_status_and_lease_predicates(pg_engi
 # ---------------------------------------------------------------------------
 # 契约：owner 缺失不得悄悄绕过归属校验
 # ---------------------------------------------------------------------------
+
+
+@requires_infra
+@pytest.mark.timeout(120)
+def test_failure_record_is_never_lost_to_a_long_error_type(pg_engine, store, new_op):
+    """A recoverable tool failure must always reach the ledger as FAILED.
+
+    Real PostgreSQL reproduction of the defect this guards: ``error_type`` is
+    ``VARCHAR(16)`` but the failure path used to store ``type(e).__name__``.
+    ``ToolExecutionTimeout`` (20 chars) overflowed, the UPDATE raised
+    ``DataError``, and the row was left ``PENDING`` **with a live lease** that
+    nothing can clear. Every retry then hit ``CLAIM_IN_PROGRESS`` and burned the
+    budget into DLQ, while the outcome of the external write was never recorded.
+    """
+    tool, key = new_op()
+
+    class ToolExecutionTimeout(Exception):
+        """20 chars — longer than the column."""
+
+    class AVeryLongExceptionClassNameThatOverflowsTheColumn(Exception):
+        pass
+
+    for boom in (
+        ToolExecutionTimeout("ERP 未在超时内返回"),
+        AVeryLongExceptionClassNameThatOverflowsTheColumn(),
+    ):
+        with pytest.raises(type(boom)) as excinfo:
+            asyncio.run(
+                execute_idempotent_operation(
+                    tool_name=tool,
+                    operation_key=key,
+                    run_id="run-a",
+                    thread_id="T-fence",
+                    arguments={"amount": 100},
+                    operation=(lambda b=boom: (_ for _ in ()).throw(b)),
+                    store=store,
+                    claim_ttl_seconds=_FRESH_TTL,
+                    min_claim_ttl_seconds=1.0,
+                )
+            )
+        assert excinfo.type is type(boom), excinfo.type
+
+        row = read_row(pg_engine, tool, key)
+        assert row["status"] == "FAILED", f"失败没有被记录（error_type 过长导致写入失败）: {row}"
+        # 终态必须清租约：否则行会以「有效认领」滞留 PENDING，重投只会拿到
+        # CLAIM_IN_PROGRESS 并把一次可恢复失败烧成 DLQ。
+        assert row["lease_cleared"] is True, row
+        assert row["error_type"] is not None
+        # 完整类名仍保留在 error_message（Text 列，不裁），信息不丢。
+        assert type(boom).__name__ in row["error_message"], row
 
 
 @requires_infra

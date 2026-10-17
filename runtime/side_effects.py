@@ -72,6 +72,9 @@ CLAIM_SUCCEEDED = "succeeded"
 CLAIM_CONFLICT = "conflict"
 CLAIM_IN_PROGRESS = "in_progress"
 
+#: ``tool_side_effects.error_type`` 的列宽（``db/models.py`` / alembic 004）。
+ERROR_TYPE_MAX_LEN = 16
+
 #: PENDING 记录的认领租约：租约未过期时**不允许**第二个执行者重复触发副作用，
 #: 必须抛 transient 让 run 退避重投；租约过期（认领后崩溃）才允许接管重放。
 #:
@@ -219,6 +222,17 @@ def _serialize_reference(result: Any) -> Any:
     if result is None or isinstance(result, dict | list | str | int | float | bool):
         return result
     return str(result)[:2000]
+
+
+def _clamp_error_type(error_type: str) -> str:
+    """把 ``error_type`` 裁到列宽，保证 ledger 的失败记录**一定能写进去**。
+
+    ``error_type`` 是诊断信息，不是业务状态。让诊断字符串的宽度反过来决定「失败
+    有没有被记下来」是危险的：写入失败会把行留在 ``PENDING`` + 有效租约，之后的
+    重投只会拿到 ``CLAIM_IN_PROGRESS``，一次可恢复的失败被烧成 DLQ，而外部写的
+    结果永远无记录。完整类名另有归宿——``error_message`` 是 ``Text``，不裁。
+    """
+    return (error_type or "")[:ERROR_TYPE_MAX_LEN]
 
 
 @dataclass
@@ -607,6 +621,15 @@ class SideEffectStore:
 
         判定同样在 WHERE 里，因此迟到的失败回调不能把已 SUCCEEDED 的操作改写成
         FAILED（那会让一次真实成功的写操作在 ledger 上变成「失败」并被重新发起）。
+
+        ``error_type`` 会被裁到 :data:`ERROR_TYPE_MAX_LEN`。
+        为什么裁剪是**正确性**要求而不是美观问题：ledger 的失败记录是「重试 /
+        DLQ / 人工对账」的依据，一旦这次写入因为诊断字符串过长而失败，行就会以
+        ``PENDING`` + **有效租约** 滞留——没有任何东西能清掉它，重投只会拿到
+        ``CLAIM_IN_PROGRESS``，一次可恢复的工具失败最终被烧成 DLQ，且外部写是否
+        落地永远没有记录。真实 PostgreSQL 复现（``ToolExecutionTimeout`` 20 字符
+        写入 ``VARCHAR(16)`` -> ``DataError`` -> 行滞留 PENDING）见
+        ``tests/integration/runtime/test_side_effect_commit_fencing_pg.py``。
         """
         now = _utcnow()
         return self._commit_terminal_state(
@@ -616,7 +639,7 @@ class SideEffectStore:
             request_fingerprint=request_fingerprint,
             values={
                 "status": STATUS_FAILED,
-                "error_type": error_type,
+                "error_type": _clamp_error_type(error_type),
                 "error_message": error_message[:2000],
                 "updated_at": now,
                 "claim_expires_at": None,
@@ -777,7 +800,7 @@ async def execute_idempotent_operation(
     ``asyncio.wait_for`` 取消后仍在飞行的情况都要求租约有**下界**。低于下界时
     fail-closed（``PermanentError``），不创建 ledger 行、不执行副作用。
     """
-    from .errors import PermanentError, TransientError
+    from .errors import PermanentError, TransientError, classify_exception
 
     if min_claim_ttl_seconds is not None and claim_ttl_seconds < min_claim_ttl_seconds:
         raise PermanentError(
@@ -823,6 +846,10 @@ async def execute_idempotent_operation(
             result = await result
     except BaseException as e:
         await renewer.stop()
+        # error_type 用 runtime 的**规范分类**（transient|permanent|timeout），与
+        # agent_runs.error_type 同一套枚举：它有界、可聚合、运维真正查询的字段。
+        # 完整类名放进 error_message（Text 列，不裁），信息不丢。
+        #
         # ledger 自身的故障（DB 不可用等）不得**替换**工具的真实异常：运维看到的
         # 应该是业务失败原因，而不是一个基础设施错误。这里已经是失败路径，
         # 不存在「上报成功」的风险，因此记录后照常抛出原始异常。
@@ -830,8 +857,8 @@ async def execute_idempotent_operation(
             store.mark_failed(
                 tool_name,
                 operation_key,
-                error_type=type(e).__name__,
-                error_message=str(e),
+                error_type=classify_exception(e),
+                error_message=f"{type(e).__name__}: {e}",
                 owner=claim.owner,
                 request_fingerprint=fingerprint,
             )
