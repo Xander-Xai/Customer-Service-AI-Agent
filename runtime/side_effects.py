@@ -287,6 +287,13 @@ class SideEffectStore:
         ``owner`` 是本次认领的唯一 token（缺省自动生成）。只有持有当前 ``claim_owner``
         的执行者才能写入成功/失败结果，避免两个执行者互相覆盖。
 
+        **第 3 步的写入安全依赖第 2 步的行锁**——接管（改写 ``claim_owner`` / 状态 /
+        租约）发生在持有 ``SELECT ... FOR UPDATE`` 的同一个事务里，提交时一并释放。
+        这与终态提交不同：终态提交不能靠行锁 + ORM flush（``ToolSideEffect`` 没有
+        ``version_id_col``，flush 只按主键），所以那边必须用条件 UPDATE
+        （:meth:`_commit_terminal_state`）。**不要**把这里改写成「先普通 SELECT 判断、
+        再按主键 UPDATE」——那会把两个执行者同时判为可执行。
+
         返回：
           - ``execute``      只有**一个**调用者会拿到
           - ``succeeded``    已完成，返回历史结果（不重复执行）

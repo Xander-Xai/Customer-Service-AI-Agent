@@ -233,6 +233,14 @@ class ToolSideEffect(Base):
     # 认领所有权：只有持有当前 claim_owner 的执行者才能把这次副作用标记为
     # 成功/失败。否则并发重试可能互相覆盖结果（两个 worker 都在跑同一笔写操作时，
     # 后完成的那个会盖掉先完成的结果）。
+    #
+    # ⚠️ 本表**刻意没有** `version_id_col`。后果必须记住：
+    # 通过 ORM 改这些字段再 `commit()` 时，SQLAlchemy 发出的 UPDATE **只按主键**
+    # （`WHERE tool_side_effects.id = :pk`），任何「先 SELECT 看到的值」都不构成写入
+    # 谓词。因此归属/状态判定必须写在**单条条件 UPDATE 的 WHERE** 里
+    # （`runtime/side_effects.py::SideEffectStore._commit_terminal_state`），或者在
+    # `SELECT ... FOR UPDATE` 行锁内改写（同文件 `claim()`）。真实 PostgreSQL 并发复现
+    # 与修复后证据见 `tests/integration/runtime/test_side_effect_commit_fencing_pg.py`。
     claim_owner = Column(String(64), nullable=True)
     claim_expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
