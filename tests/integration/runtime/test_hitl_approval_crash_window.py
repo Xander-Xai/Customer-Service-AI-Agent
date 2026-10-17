@@ -137,9 +137,9 @@ def test_peek_resume_does_not_resurrect_when_live_pending_exists(approvals, sess
         proposal={"order_id": "O-new", "new_status": "shipped"},
         user_id="customer-1",
     )
-    assert approvals.peek_resume(run_id) is None, (
-        "有未消费 PENDING 时不得用旧决策恢复，否则会跳过第二个审批"
-    )
+    assert (
+        approvals.peek_resume(run_id) is None
+    ), "有未消费 PENDING 时不得用旧决策恢复，否则会跳过第二个审批"
 
 
 def test_build_resume_command_recovers_crash_window(approvals, session_factory):
@@ -176,9 +176,9 @@ def test_reconciler_redispatches_decided_waiting_approval_run(
             reclaim_stale_pending=False,
         )
     )
-    assert run_id in dispatched, (
-        "已决策却滞留在 WAITING_APPROVAL 的 run 必须被 reconciler 捞出（Issue #14）"
-    )
+    assert (
+        run_id in dispatched
+    ), "已决策却滞留在 WAITING_APPROVAL 的 run 必须被 reconciler 捞出（Issue #14）"
 
 
 def test_reconciler_ignores_genuinely_pending_approval(

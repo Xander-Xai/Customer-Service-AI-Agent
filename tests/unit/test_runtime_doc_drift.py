@@ -74,20 +74,44 @@ class TestLimitationsCurrentState:
         for done in (
             "覆盖 `PENDING` 滞留 run",
             "attempt 预算在 worker 接管路径上的闸门",
-            "非 HITL 副作用工具的 `operation_key` 稳定性",
+            # Issue #12 只有 Part B（跨 LLM 轮次 ordinal 重置）算完成；Part A（同类写
+            # 重放顺序变化）仍 OPEN，由 test_partially_completed_roadmap_items_stay_open
+            # 单独守卫——不得因为 Part B 完成就把整条划掉。
+            "非 HITL 副作用工具的 `operation_key` 稳定性（Part B",
             "side-effect claim TTL 早于副作用结束",
             "超时参数交叉校验",
             "强制中止失去所有权的 worker",
         ):
-            lines = [
-                ln
-                for ln in text.splitlines()
-                if ln.startswith(f"| {done}") or ln.startswith(f"| ~~{done}~~")
-            ]
+            lines = [ln for ln in text.splitlines() if ln.startswith("|") and done in ln]
             assert lines, f"roadmap 缺少条目: {done}"
-            assert "~~" in lines[0] and "已完成" in lines[0], (
-                f"roadmap 条目「{done}」已完成，必须划掉并标注已完成，" f"否则读者会以为它仍未开始"
+            row = lines[0]
+            assert "~~" in row and "**已完成**" in row, (
+                f"roadmap 条目「{done}」已完成，必须划掉并标注 **已完成**，"
+                f"否则读者会以为它仍未开始"
             )
+            # 完全完成项必须带完成证据（章节锚点 / 回归用例 / 代码路径之一）。
+            assert any(
+                marker in row for marker in ("§", "tests/", "core/", "回归")
+            ), f"roadmap 条目「{done}」标为完成，必须附完成证据（§ 锚点 / 回归用例 / 代码路径）"
+
+    def test_partially_completed_roadmap_items_stay_open(self, text):
+        """部分完成的条目不得被划掉或标成已完成，且必须保留 Issue 引用与真实风险。
+
+        Issue #12 Part A（同类写操作重放顺序变化导致身份漂移 → 对外部系统可能重复执行）
+        尚未解决，必须作为独立条目保持可见；不得为了绿灯把它并入已完成的 Part B 或
+        写成「已完成」。
+        """
+        rows = [
+            ln
+            for ln in text.splitlines()
+            if ln.startswith("|") and "operation_key" in ln and "Part A" in ln
+        ]
+        assert rows, "Issue #12 Part A 必须作为独立 roadmap 条目保留，不得因 Part B 完成而整体划掉"
+        row = rows[0]
+        assert "~~" not in row, "Part A 仍未解决，不得划掉"
+        assert "已完成" not in row, "Part A 仍未解决，不得标注已完成"
+        assert "#12" in row, "必须保留 Issue #12 引用，便于追踪未完成项"
+        assert "重复执行" in row, "必须保留外部副作用重复执行风险的真实表述"
 
     def test_beat_row_does_not_claim_no_automatic_restart(self, text):
         """compose 里 beat 有 ``restart: unless-stopped``，旧文案说「不自动重启」是错的。"""

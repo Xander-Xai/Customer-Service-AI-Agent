@@ -1440,9 +1440,7 @@ def validate_required_config():
             )
 
     if not _DEV_MODE:
-        errors.extend(
-            validate_app_database_dsn(dev_mode=_DEV_MODE, database_url=DATABASE_URL)
-        )
+        errors.extend(validate_app_database_dsn(dev_mode=_DEV_MODE, database_url=DATABASE_URL))
     elif not _DEV_MODE and not DATABASE_URL.startswith(("postgresql://", "postgres://")):
         # 应用库必须是 PostgreSQL：非 PostgreSQL 方言（SQLite/MySQL）没有行级锁，
         # side-effect ledger 的接管路径无法排除并发重复执行（Issue #13）。注意

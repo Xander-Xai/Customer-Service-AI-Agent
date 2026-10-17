@@ -904,9 +904,7 @@ class AgentRunRepository:
         finally:
             session.close()
 
-    def list_resumable_waiting_approval_runs(
-        self, *, limit: int = 100, now=None
-    ) -> list[str]:
+    def list_resumable_waiting_approval_runs(self, *, limit: int = 100, now=None) -> list[str]:
         """已具备恢复条件、却仍停在 ``WAITING_APPROVAL`` 的 run（Issue #14）。
 
         条件：该 run **有终态审批**（APPROVED/REJECTED/EXPIRED）**且没有**仍在等待

@@ -87,9 +87,9 @@ def test_expired_lease_takeover_is_refused_on_sqlite(sqlite_store):
         claim_ttl_seconds=60.0,
         owner="owner-B",
     )
-    assert second.state == CLAIM_IN_PROGRESS, (
-        "无行级锁的方言不得交出接管执行权；否则并发认领会重复执行同一笔写"
-    )
+    assert (
+        second.state == CLAIM_IN_PROGRESS
+    ), "无行级锁的方言不得交出接管执行权；否则并发认领会重复执行同一笔写"
 
 
 def test_failed_row_retry_is_refused_on_sqlite(sqlite_store):
@@ -157,11 +157,7 @@ class TestAppDatabaseDsnGuard:
         from core.config import validate_app_database_dsn
 
         assert (
-            validate_app_database_dsn(
-                dev_mode=False, database_url="postgresql://u:p@h:5432/db"
-            )
+            validate_app_database_dsn(dev_mode=False, database_url="postgresql://u:p@h:5432/db")
             == []
         )
-        assert (
-            validate_app_database_dsn(dev_mode=False, database_url="postgres://u:p@h/db") == []
-        )
+        assert validate_app_database_dsn(dev_mode=False, database_url="postgres://u:p@h/db") == []

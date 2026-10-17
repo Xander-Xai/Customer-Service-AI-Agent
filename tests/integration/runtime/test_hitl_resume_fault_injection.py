@@ -289,9 +289,9 @@ class TestCrashDuringResume:
         third = asyncio.run(
             execute_run(run_id, service=service, runtime_provider=_async_provider(replay))
         )
-        assert third == RunStatus.SUCCEEDED.value, (
-            "崩溃窗口必须能被自动恢复（Issue #14），而不是永久滞留"
-        )
+        assert (
+            third == RunStatus.SUCCEEDED.value
+        ), "崩溃窗口必须能被自动恢复（Issue #14），而不是永久滞留"
         assert staging_call_count(order_id) == 1, "恢复不得重复执行已完成的副作用"
 
     def test_crash_before_execution_leaves_run_parked_without_side_effect(
@@ -331,9 +331,9 @@ class TestCrashDuringResume:
         status = asyncio.run(
             execute_run(run_id, service=service, runtime_provider=_async_provider(runtime))
         )
-        assert status == RunStatus.SUCCEEDED.value, (
-            "认领后崩溃必须能被恢复并收敛（Issue #14），不得永久滞留"
-        )
+        assert (
+            status == RunStatus.SUCCEEDED.value
+        ), "认领后崩溃必须能被恢复并收敛（Issue #14），不得永久滞留"
         assert staging_call_count(order_id) == 1, "已批准动作必须恰好执行一次"
 
 

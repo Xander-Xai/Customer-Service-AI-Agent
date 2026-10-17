@@ -645,9 +645,7 @@ class ApprovalService:
                 select(HumanApproval)
                 .where(
                     HumanApproval.run_id == run_id,
-                    HumanApproval.status.in_(
-                        [STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED]
-                    ),
+                    HumanApproval.status.in_([STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED]),
                 )
                 .order_by(HumanApproval.requested_at.desc())
                 .limit(1)
