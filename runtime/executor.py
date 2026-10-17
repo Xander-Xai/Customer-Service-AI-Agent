@@ -794,9 +794,15 @@ async def _defer(
 class RetryPublicationError(RuntimeError):
     """延迟重试的**投递失败**：run 已经进入 RETRYING/QUEUED，但消息没发出去。
 
-    这是一个**必须让异常逃逸**的错误：只要吞掉它，Celery 就会 ACK 当前任务，而队列里
-    又没有替代消息，run 会永远停在 RETRYING（既不会重跑，也不会失败）。让异常逃出
-    任务，Celery 的 ``acks_late`` 就会把它重新投递，由租约到期后的接管者重试。
+    这是一个**必须让异常逃逸**的错误：只要吞掉它并正常返回，Celery 就会把本次任务
+    当作成功 ACK，而队列里又没有替代消息，run 会永远停在 RETRYING（既不会重跑，
+    也不会失败）。
+
+    注意（实测的 broker 语义，见
+    ``tests/integration/runtime/test_celery_delivery_semantics.py``）：异常逃逸
+    **不会**让 Redis broker 重新投递——普通异常走 ``reject(requeue=False)``，消息
+    被丢弃。因此逃逸的作用是**避免把失败伪装成成功 ACK**；真正的恢复闭环是
+    「数据库 AgentRun + 周期 reconciler / 租约到期接管」，不是 broker 重投。
     """
 
 
