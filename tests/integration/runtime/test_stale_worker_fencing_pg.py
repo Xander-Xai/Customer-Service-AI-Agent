@@ -367,6 +367,7 @@ def test_fenced_worker_commits_no_terminal_state(svc, monkeypatch):
     monkeypatch.setattr(config, "AGENT_RUN_THREAD_LOCK_ENABLED", False)
 
     import asyncio as _a
+
     from runtime import executor as ex
 
     _a.run(_a.sleep(0.3))  # A 的租约过期
