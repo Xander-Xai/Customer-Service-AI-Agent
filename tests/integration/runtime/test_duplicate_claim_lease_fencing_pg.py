@@ -270,7 +270,13 @@ def test_expired_lease_under_budget_limit_allows_takeover(pg_engine, cleanup_cre
 def test_concurrent_claims_on_expired_lease_at_budget_limit_yield_single_dlq(
     pg_engine, cleanup_created_runs
 ):
-    """并发竞争 + 预算耗尽：DLQ 只能被写一次，且不能出现双份/误杀。"""
+    """并发竞争 + 预算耗尽：DLQ 只能被写一次，且不能出现双份/误杀。
+
+    同时钉住一个并发下真实可达的次序：第一个竞争者收敛到 DEAD_LETTER 之后，第二
+    个才读到终态。后者必须得到 ``None``（benign no-op），而不是
+    ``InvalidRunTransition(DEAD_LETTER -> RUNNING)``——终态是合法且预期的收敛结果。
+    这个次序由 CI 的机器负载暴露过（本地不一定复现），所以显式再断言一遍。
+    """
     from sqlalchemy import text
 
     repo = AgentRunRepository(session_factory=_session_factory(pg_engine))
@@ -294,7 +300,11 @@ def test_concurrent_claims_on_expired_lease_at_budget_limit_yield_single_dlq(
         return await asyncio.gather(_claim("worker-B"), _claim("worker-C"))
 
     results = asyncio.run(_main())
-    assert all(r is None for r in results)
+    assert all(r is None for r in results), "两个竞争者都不得取得执行权"
+
+    # 收敛之后才到达的重复投递：必须是 benign no-op，不是异常
+    late = svc.mark_running(run_id, worker_id="worker-D", task_id=None, lease_seconds=180.0)
+    assert late is None, "已收敛的 run 上重复投递必须返回 None 而不是抛异常"
 
     after = svc.get_run(run_id)
     assert after["status"] == RunStatus.DEAD_LETTER.value
@@ -303,6 +313,48 @@ def test_concurrent_claims_on_expired_lease_at_budget_limit_yield_single_dlq(
             text("SELECT count(*) FROM agent_dead_letters WHERE run_id = :r"), {"r": run_id}
         ).scalar()
     assert rows == 1, "DLQ 记录必须恰好一条（agent_dead_letters.run_id 唯一）"
+
+
+@requires_infra
+def test_duplicate_claim_on_each_terminal_state_is_a_benign_noop(pg_engine, cleanup_created_runs):
+    """终态上的重复投递一律返回 None，不抛 ``InvalidRunTransition``。
+
+    ``DEAD_LETTER -> RUNNING`` 确实不在 ``ALLOWED_TRANSITIONS`` 里，但对**领取**语义
+    来说这不是「非法迁移」，而是「这次投递不该执行」。报成状态机错误既不准确，也会
+    打断任何不恰好捕获该异常的调用方。
+    """
+    from sqlalchemy import update
+
+    from db.models import AgentRun
+
+    repo = AgentRunRepository(session_factory=_session_factory(pg_engine))
+    svc = RunService(repository=repo)
+    thread = f"terminal-dup-{uuid.uuid4().hex[:8]}"
+
+    for terminal in (RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED):
+        run_id = _seed_running(
+            repo,
+            attempt=1,
+            max_attempts=1,
+            lease_seconds=-1.0,
+            worker_id="A",
+            thread_id=f"{thread}-{terminal.value}",
+        )
+        # 直接收敛到目标终态，绕开各自的业务前置条件
+        session = repo._session()  # noqa: SLF001
+        try:
+            session.execute(
+                update(AgentRun)
+                .where(AgentRun.id == run_id)
+                .values(status=terminal.value, lease_expires_at=None)
+            )
+            session.commit()
+        finally:
+            session.close()
+
+        claimed = svc.mark_running(run_id, worker_id="dup", task_id=None, lease_seconds=180.0)
+        assert claimed is None, f"{terminal.value} 上的重复领取必须是 benign no-op"
+        assert svc.get_run(run_id)["status"] == terminal.value
 
 
 @requires_infra

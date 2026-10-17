@@ -339,6 +339,7 @@ class RunService:
           判定在 ``repository.dead_letter_stale_running`` 的
           ``lease_expires_at <= now AND attempt >= max_attempts`` 里。
         - **RUNNING + 过期 lease + 预算未耗尽**：原子接管（attempt+1）。
+        - **已终态**（收敛晚于本次投递）：返回 None（benign no-op），不抛异常。
 
         QUEUED/RETRYING 领取走 ``repository.claim_executable``：状态 + 预算 +
         ``attempt + 1`` 同一条 UPDATE，落败者**不消耗预算**。预算耗尽由
@@ -379,6 +380,16 @@ class RunService:
                 now=now,
             )
             # 3) 别人持有有效 lease / 并发竞争输了 / 已终态 -> benign no-op
+            return None
+
+        if cur in TERMINAL_STATUSES:
+            # 重复投递**晚于**收敛：run 已经是 SUCCEEDED / FAILED / DEAD_LETTER /
+            # CANCELLED。正确答案是「本次投递不执行」，而不是抛
+            # ``InvalidRunTransition`` —— 终态是合法且预期的收敛结果，把它报成
+            # 「非法状态迁移」既不准确，也会打断任何不恰好捕获该异常的调用方。
+            # 并发下这是真实可达的：两个重复投递里，第一个把预算耗尽的 run 收敛到
+            # DEAD_LETTER，第二个随后才读到终态。
+            logger.info("run=%s 已处于终态 %s，重复投递不执行", run_id, cur.value)
             return None
 
         ensure_transition(cur, RunStatus.RUNNING, run_id)
