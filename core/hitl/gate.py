@@ -18,7 +18,8 @@ Side Effect」建立一条企业可用的治理边界：
 ------------------------
 1. **审批**：防「不该做的被做了」——未获批准不执行。
 2. **幂等 ledger**：防「做了一次被重做」——worker 崩溃 / at-least-once 重投递后，
-   同一 ``run_id:approval:{approval_id}`` 只真正触发一次外部写操作。
+   同一 ``run_id:approval:{approval_id}`` 在**本仓 ledger 层**只会被发起一次外部写。
+   边界：外部系统端到端 exactly-once **NOT PROVIDED**（需下游接受同一把幂等键）。
 
 已验证的 LangGraph 语义（langgraph 1.2.12 / Python 3.10，本仓库实测）
 --------------------------------------------------------------------

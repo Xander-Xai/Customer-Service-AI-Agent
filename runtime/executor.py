@@ -79,7 +79,22 @@ def _build_resume_command(run_id: str) -> Any:
     try:
         from core.hitl.approval_service import get_approval_service
 
-        decision = get_approval_service().consume_resume(run_id)
+        svc_approval = get_approval_service()
+        decision = svc_approval.consume_resume(run_id)
+        if decision is None:
+            # Issue #14 崩溃窗口恢复：决策可能已被上一次执行消费，但 worker 在
+            # ``mark_resumed_running`` 之前崩溃，run 仍停在 WAITING_APPROVAL。
+            # 审批记录是终态且被保留，因此可只读重建 payload；重复恢复由
+            # ``mark_resumed_running`` 的 CAS 与 side-effect ledger（
+            # ``run_id:approval:{approval_id}``）双保险兜底，不会重复执行高风险写。
+            decision = svc_approval.peek_resume(run_id)
+            if decision is not None:
+                logger.warning(
+                    "审批决策此前已被消费但 run 未离开 WAITING_APPROVAL，"
+                    "按 Issue #14 恢复窗口重建载荷 run_id=%s approval=%s",
+                    run_id,
+                    decision.get("approval_id"),
+                )
     except Exception as e:  # pragma: no cover - 审批服务不可用时不误恢复
         logger.error(
             "读取审批决策失败 run_id=%s err=%s（不恢复，保持等待）",
@@ -341,9 +356,17 @@ async def execute_run(
                 return str(latest["status"]) if latest else "MISSING"
 
             if running is None:
-                # 其他 worker 持有有效 lease：重复投递，不重复执行
-                logger.info("run=%s 已由其他 worker 持有 lease，跳过", run_id)
-                return RunStatus.RUNNING.value
+                # mark_running 返回 None 有两种含义，**不能**一律当成「别人持有 lease」：
+                #   1. 重复投递：他人持有有效 lease -> 当前状态就是 RUNNING；
+                #   2. attempt 预算耗尽：run 已被落 DEAD_LETTER（终态收敛）。
+                # 读回真实状态上报，避免把 DEAD_LETTER 报成 RUNNING。
+                latest = svc.get_run(run_id)
+                current = str(latest["status"]) if latest else "MISSING"
+                if current == RunStatus.RUNNING.value:
+                    logger.info("run=%s 已由其他 worker 持有 lease，跳过", run_id)
+                else:
+                    logger.info("run=%s 领取被拒（当前状态 %s），不再执行", run_id, current)
+                return current
 
             exec_started = time.perf_counter()
             metrics.inc_worker_active()
@@ -362,6 +385,7 @@ async def execute_run(
             if started_at is not None and queued_at is not None:
                 metrics.observe_queue_wait((started_at - queued_at).total_seconds())
 
+            fence_guard = _FenceGuard()
             heartbeat_task = asyncio.create_task(
                 _heartbeat_loop(
                     svc,
@@ -372,8 +396,13 @@ async def execute_run(
                     lock=lock,
                     thread_id=thread_id,
                     lock_ttl_seconds=cfg.AGENT_RUN_THREAD_LOCK_TTL_SECONDS,
+                    guard=fence_guard,
                 )
             )
+            # 工具级第二道防线：副作用工具在执行前复核 ownership（见
+            # ``ToolRegistry.set_execution_fence``）。协作式取消有窗口，心跳周期内
+            # ownership 可能已经易主；这一层把「窗口内仍能发起写」也堵住。
+            _install_execution_fence(svc, run_id, owner, fence_guard)
             tokens = set_run_context(run_id, thread_id, task_id)
             # Lightweight tracing: ONE span per execution attempt, opened after the
             # run context exists so run/thread/task correlation attributes are
@@ -429,7 +458,22 @@ async def execute_run(
                             "无法恢复人工审批（human-in-the-loop 需要该参数支持）"
                         )
                     run_kwargs["resume_command"] = resume_command
-                result = await runtime.run(**run_kwargs)
+                # 协作式 fencing：ownership 丢失时取消图执行（见 ``_FenceGuard``）。
+                _run_task = asyncio.create_task(
+                    runtime.run(**run_kwargs), name="agent-run-execution"
+                )
+                result = await _supervise_execution(_run_task, fence_guard)
+            except ExecutionFenced as fenced:
+                # 执行到一半发现 ownership 已丢失：图已被 fencing 取消。
+                # **不写任何终态** —— 本 worker 已无权写（owner CAS 也会拒绝）。
+                # 交给持有执行权的 worker 或 reconciler 收敛；这里读回当前状态返回。
+                logger.warning(
+                    "ownership 丢失，已取消图执行且不提交终态 run_id=%s reason=%s",
+                    run_id,
+                    fenced.reason,
+                )
+                latest = svc.get_run(run_id)
+                return str(latest["status"]) if latest else "MISSING"
             except Exception as e:
                 error_type = classify_exception(e)
                 error_code = type(e).__name__
@@ -528,13 +572,36 @@ async def execute_run(
                     await lock.release(thread_id, owner)
     except RetryPublicationError:
         # 重试消息投递失败：run 已经在 RETRYING/QUEUED 等一条**不会到来**的消息。
-        # 这里绝不能 ACK，也不能把它改成 FAILED（那会丢掉一次合法重试机会）。
-        # 逃逸出任务 -> Celery acks_late 不 ACK -> broker 重新投递 -> 租约到期后被接管。
-        logger.error("重试投递失败，让任务逃逸以触发 broker redelivery: run_id=%s", run_id)
+        # 这里绝不能把它改成 FAILED（那会丢掉一次合法重试机会）。
+        #
+        # 刻意**不**把异常逃逸当成「broker 会重新投递」：实测（Celery 5.6.3 +
+        # 真实 Redis）普通异常与 RetryPublicationError 都落在
+        # ``Request.on_failure`` 的 ``reject(requeue=False)`` 分支——消息被丢弃，
+        # 不重投。所以真正的恢复来自数据库里的 AgentRun + 周期 reconciler
+        # （beat_schedule -> runtime.reconcile_stuck_runs）。
+        # 本分支仍然 raise：它让「这次投递失败了」在 worker 日志与 task-failed
+        # 事件里可见，而不是静默成功返回——但它**不是**恢复手段。
+        logger.error(
+            "重试投递失败，run 交由周期 reconciler 恢复（本次消息会被丢弃）: run_id=%s",
+            run_id,
+        )
         metrics.record_retry_publication_failure()
         raise
     except Exception as e:  # pragma: no cover - 未预期错误：标记失败避免卡死
-        logger.error("execute_run 未预期异常 run_id=%s: %s", run_id, type(e).__name__)
+        logger.error(
+            "execute_run 未预期异常 run_id=%s: %s",
+            run_id,
+            type(e).__name__,
+            exc_info=True,
+        )
+        # 「run 停在 RETRYING/QUEUED 却没有任何消息会来」时**不能**记成 FAILED：
+        # run 仍在合法退避中，记 FAILED 会丢掉一次合法重试机会；而记成功则会让
+        # 没有任何人知道它滞留了。
+        #
+        # 注意 Celery 对普通异常一律 reject(requeue=False)（消息丢弃、不重投），
+        # 逃逸与否都不改变这一点——之前的实现把「逃逸 -> broker 重投」当成恢复
+        # 手段，那个前提是错的。恢复由周期 reconciler 完成；这里只负责不写错状态。
+        stranded = False
         with contextlib.suppress(Exception):
             latest = svc.get_run(run_id)
             if latest is not None and latest["status"] == RunStatus.RUNNING.value:
@@ -554,14 +621,15 @@ async def execute_run(
                 RunStatus.RETRYING.value,
                 RunStatus.QUEUED.value,
             ):
-                # 同样不能 ACK：状态在等重投/退避，却没有任何调度器在跑。
+                stranded = True
                 logger.error(
-                    "run 停在 %s 但无待执行投递，逃逸以触发 redelivery: run_id=%s",
+                    "run 停在 %s 但没有待执行投递，交由周期 reconciler 恢复: run_id=%s",
                     latest["status"],
                     run_id,
                 )
-                metrics.record_retry_publication_failure()
-                raise
+        if stranded:
+            metrics.record_retry_publication_failure()
+            raise
         return RunStatus.FAILED.value
 
 
@@ -741,9 +809,15 @@ async def _defer(
 class RetryPublicationError(RuntimeError):
     """延迟重试的**投递失败**：run 已经进入 RETRYING/QUEUED，但消息没发出去。
 
-    这是一个**必须让异常逃逸**的错误：只要吞掉它，Celery 就会 ACK 当前任务，而队列里
-    又没有替代消息，run 会永远停在 RETRYING（既不会重跑，也不会失败）。让异常逃出
-    任务，Celery 的 ``acks_late`` 就会把它重新投递，由租约到期后的接管者重试。
+    这是一个**必须让异常逃逸**的错误：只要吞掉它并正常返回，Celery 就会把本次任务
+    当作成功 ACK，而队列里又没有替代消息，run 会永远停在 RETRYING（既不会重跑，
+    也不会失败）。
+
+    注意（实测的 broker 语义，见
+    ``tests/integration/runtime/test_celery_delivery_semantics.py``）：异常逃逸
+    **不会**让 Redis broker 重新投递——普通异常走 ``reject(requeue=False)``，消息
+    被丢弃。因此逃逸的作用是**避免把失败伪装成成功 ACK**；真正的恢复闭环是
+    「数据库 AgentRun + 周期 reconciler / 租约到期接管」，不是 broker 重投。
     """
 
 
@@ -768,6 +842,148 @@ async def _call_dispatcher(dispatcher: Dispatcher | None, run_id: str, countdown
         ) from e
 
 
+class ExecutionFenced(RuntimeError):
+    """执行过程中 ownership 丢失，图已被 fencing 取消。
+
+    不是业务失败：本次执行无权提交任何终态，正确处置是**什么都不写**，让持有执行权
+    的 worker（或 reconciler）收敛这个 run。因此 ``execute_run`` 捕获它后返回当前
+    状态，而不是 ``mark_failed``。
+
+    刻意**不**继承 ``runtime.errors.AgentRunError``：分类器会把它当成 transient 并
+    走 ``mark_retrying``，而「我已经没有执行权」与「本次执行失败」是两回事——前者
+    不该消耗重试预算，也不该由本 worker 写任何状态。
+    """
+
+    def __init__(self, reason: str | None = None):
+        self.reason = reason
+        super().__init__(f"执行被 fencing 取消（ownership 已丢失）: {reason}")
+
+
+class _FenceGuard:
+    """执行期 fencing：ownership 丢失时**取消**正在跑的图。
+
+    为什么需要它
+    ------------
+    owner CAS 只约束「能不能提交 AgentRun 状态」，不约束「还在不在执行」。
+    ``_heartbeat_loop`` 在 ``renewed is False``（lease 已被接管）时直接 return，
+    而与它并行的 ``await runtime.run(...)`` 没有任何东西去取消它——于是失去执行权的
+    worker 继续跑图、继续写 checkpoint、继续调用工具。把「无法提交状态」当成
+    「不再执行」是一个真实的错误结论。
+
+    本 guard 是现有架构内**协作式取消**：不引入新组件、新协议或 fencing token，
+    只是把心跳的失效信号接到图执行的任务上。
+
+    明确**不能**做到的事（不要把它说成完全修复）
+    ------------------------------------------
+    - 无法回收「取消之前已经发出」的外部调用。取消是协作式的：如果外部写已经在飞行，
+      它仍可能落地。A1（重放稳定操作身份）+ A2（claim 租约与归属校验）把这类重复的
+      概率压到很低，但**不能**归零。
+    - 无法阻止 ``side_effect=False`` 却实际写外部系统的工具：那类工具本来就不受
+      ledger 治理，仓库无法证明它们安全。
+    - 无法阻止 checkpoint 并发写：一个已经进入图节点内部的 worker 仍可能在被取消
+      前写入 checkpoint。LangGraph checkpointer 的并发语义由框架保证，本仓库不额外
+      加锁。
+    - 无法对抗「卡在 C 扩展 / 同步阻塞调用」的执行：那种情况下 asyncio 的取消无法
+      在该调用返回前生效（受 ``AGENT_RUN_TASK_TIME_LIMIT`` 硬时间上限兜底）。
+
+    因此它是「把窗口收窄并可观测」，不是 fencing token 的等价物。
+    """
+
+    def __init__(self) -> None:
+        self._lost = asyncio.Event()
+        self._reason: str | None = None
+
+    @property
+    def ownership_lost(self) -> bool:
+        return self._lost.is_set()
+
+    @property
+    def reason(self) -> str | None:
+        return self._reason
+
+    def signal_ownership_lost(self, reason: str) -> None:
+        """由心跳循环调用：ownership 已失效，执行必须停止。"""
+        self._reason = reason
+        self._lost.set()
+
+    async def wait(self) -> None:
+        """等待 ownership 丢失；未丢失时永不返回。
+
+        supervision 协程用它与图执行赛跑；`asyncio.wait` 的 FIRST_COMPLETED 让两者
+        谁先完成都立刻返回，不引入额外延迟。
+        """
+        await self._lost.wait()
+
+    async def cancel_execution(self, task: asyncio.Task[Any]) -> None:
+        """取消图执行任务并等待它真正停下（而不是只发出取消信号）。"""
+        if task.done():
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+def _install_execution_fence(
+    svc: RunService, run_id: str, worker_id: str, guard: _FenceGuard
+) -> None:
+    """把「是否仍有执行权」装进 ToolRegistry（工具级第二道防线）。
+
+    判定复用与状态提交**完全相同**的谓词（``heartbeat`` = owner 匹配 + lease 未过期），
+    所以工具看到的「我还有没有执行权」与提交时看到的是同一个事实，不会出现两套标准。
+
+    判定失败（数据库异常）一律视为**没有执行权**（fail-closed）：宁可拒绝一次写操作，
+    也不在无法确认所有权时发起外部写。
+    """
+    registry = getattr(svc, "tool_registry", None)
+    if registry is None or not hasattr(registry, "set_execution_fence"):
+        return
+
+    def _owns_execution() -> bool:
+        if guard.ownership_lost:
+            return False
+        try:
+            return svc.owns_execution(run_id, worker_id=worker_id)
+        except Exception:  # noqa: BLE001 - 无法确认即视为没有执行权
+            return False
+
+    registry.set_execution_fence(_owns_execution)
+
+
+async def _supervise_execution(run_task: asyncio.Task[Any], guard: _FenceGuard) -> Any:
+    """监督图执行；ownership 丢失时取消它并抛 :class:`ExecutionFenced`。
+
+    返回 ``runtime.run()`` 的**返回值**，不是 task —— 把 task 当结果传给
+    ``mark_succeeded`` 会让 JSON 序列化失败（Task 不可序列化）。
+
+    异常语义：
+
+    - 图自己抛错 -> 原样传播，调用方既有的错误分类路径不变；
+    - ownership 丢失 -> 抛 ``ExecutionFenced``，调用方**不写任何终态**（它已无权写）。
+    """
+
+    async def _watch() -> None:
+        await guard.wait()
+        metrics.record_ownership_lost_execution()
+        logger.warning("ownership 已丢失，取消图执行 reason=%s", guard.reason)
+        await guard.cancel_execution(run_task)
+
+    watcher = asyncio.create_task(_watch(), name="run-fence-supervisor")
+    try:
+        await asyncio.wait({run_task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+        # 判定**必须看 fence 信号，不能看 `run_task in done`**：watcher 是先取消
+        # 图、再返回的，所以它返回时 `run_task` 通常也已经在 done 集合里。此时按
+        # 成员关系分支会走 `run_task.result()`，而那正是被取消的任务 —— 抛出的
+        # `CancelledError` 会一路逃出 `execute_run`（它不是 `ExecutionFenced`，
+        # 也不属于 `Exception`），把「失去执行权」变成一次未处理取消。
+        if guard.ownership_lost:
+            raise ExecutionFenced(guard.reason)
+        return run_task.result()
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await watcher
+
+
 async def _heartbeat_loop(
     svc: RunService,
     run_id: str,
@@ -778,6 +994,7 @@ async def _heartbeat_loop(
     lock: Any = None,
     thread_id: str | None = None,
     lock_ttl_seconds: float | None = None,
+    guard: _FenceGuard | None = None,
 ) -> None:
     """执行期间续租：同时维护 DB ownership lease 与 Redis thread lock TTL。
 
@@ -845,7 +1062,11 @@ async def _heartbeat_loop(
             consecutive_errors = 0
             metrics.record_worker_heartbeat(bool(renewed))
             if not renewed:
-                # lease 已被接管 / 已失效：停止续租，不与新 owner 竞争。
+                # lease 已被接管 / 已失效：停止续租，不与新 owner 竞争，
+                # 并**通知执行中的图停下**（否则旧 worker 会继续跑图、写 checkpoint、
+                # 调用工具——owner CAS 只保护状态提交，不保护执行）。
+                if guard is not None:
+                    guard.signal_ownership_lost("lease 续租被拒：已被接管或已过期")
                 return
     except asyncio.CancelledError:
         return

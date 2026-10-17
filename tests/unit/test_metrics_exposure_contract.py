@@ -99,6 +99,27 @@ _PROMQL_NON_METRIC = {
     "nan",
 }
 
+#: Prometheus 自己产生的指标（由抓取产生，不由应用 ``/metrics`` 暴露）。
+#:
+#: 规则可以合法引用它们（例如 ``up`` 判断目标是否被抓取），所以它们不是「应用暴露
+#: 缺失」。此前缺少这个分类，使得任何用了 label matcher 的规则都会被误报为
+#: 「引用了从未暴露的指标」。
+_PROMETHEUS_INTERNAL = {
+    "up",
+    "scrape_duration_seconds",
+    "scrape_samples_scraped",
+    "scrape_samples_post_metric_relabeling",
+    "scrape_series_added",
+    "scrape_timeout_seconds",
+    "prometheus_tsdb_head_series",
+    "prometheus_tsdb_head_chunks",
+}
+
+#: label matcher 内的内容：``{outcome="error"}`` / ``{job=~".*"}``。
+#: 里面的标识符是 **label 名**，不是 metric 名。提取前必须剥掉，否则 ``outcome``
+#: / ``job`` 会被当成指标并报成「从未暴露」。
+_LABEL_MATCHER_RE = re.compile(r"\{[^{}]*\}")
+
 _METRIC_NAME_RE = re.compile(r"\b([a-zA-Z_:][a-zA-Z0-9_:]*)\b")
 
 
@@ -118,8 +139,35 @@ def _parse_promql_identifiers(expr: str) -> set[str]:
     要抓的那类断链，却会被自己的解析 bug 伪装成断链。
     """
     text = re.sub(r'"[^"]*"', " ", expr)  # 字符串字面量
+    # 先剥掉 label matcher：其中的标识符是 label 名而非 metric 名。
+    text = _LABEL_MATCHER_RE.sub(" ", text)
     candidates = {m for m in _METRIC_NAME_RE.findall(text) if m.lower() not in _PROMQL_NON_METRIC}
+    candidates = {c for c in candidates if c.lower() not in _PROMETHEUS_INTERNAL}
     return {c for c in candidates if not c.isdigit()}
+
+
+def _registered_family_names() -> set[str]:
+    """**已注册**的 metric family 名（不管当前有没有样本）。
+
+    为什么需要它
+    ------------
+    一个带 label 的指标（``Counter(..., ["outcome"])``）在**还没有任何一次观测**时
+    不会产生任何时间序列，因此 ``/metrics`` 里看不到它。此前本守卫只读 exposition，
+    于是把「已注册但尚未产生数据」误判成「从未暴露」，让任何依赖带 label 指标的
+    告警规则都无法通过——而这恰恰是「刚启动、还没扫描过一次」时的真实状态。
+
+    已注册 == 可达：真正要抓的断链是「规则引用了一个**没人注册**的指标」，那种情况
+    在两个来源里都不会出现。
+    """
+    names: set[str] = set()
+    try:
+        from prometheus_client import REGISTRY
+
+        for collector in list(REGISTRY._collector_to_names):  # noqa: SLF001
+            names.update(REGISTRY._collector_to_names[collector])
+    except Exception:  # noqa: BLE001 - prometheus 不可用时退化为只看 exposition
+        return names
+    return names
 
 
 def _registry_metric_names() -> set[str]:
@@ -131,8 +179,8 @@ def _registry_metric_names() -> set[str]:
     """
     from api.routes.monitoring import _registry_exposition
 
+    names: set[str] = _registered_family_names()
     exposition = _registry_exposition().decode("utf-8", "replace")
-    names: set[str] = set()
     for line in exposition.splitlines():
         if not line or line.startswith("#"):
             continue

@@ -31,7 +31,7 @@ Service Mesh / Redis Cluster / PostgreSQL HA / 微服务拆仓。理由见
 | `thread_id` | 一条**会话/状态时间线** | LangGraph `configurable.thread_id`（当前 == `session_id`） | 整个会话，多轮复用 |
 | `run_id` | 一次**图执行** | `agent_runs.id`（UUID4） | 单次执行 |
 | `job_id` | 一次**队列投递** | Celery task id / `agent_runs.task_id` | 可多次（retry、重投、replay 各自一次） |
-| `idempotency_key` | 防止**副作用重复** | `tool_side_effects.operation_key = run_id:tool_call_id` | 一次业务操作 |
+| `idempotency_key` | 防止**副作用重复** | `tool_side_effects.operation_key`：非 HITL 为 `build_replay_stable_operation_key(run, node, agent, tool, ordinal)`（不含 LLM 输出）；HITL 为 `run_id:approval:{approval_id}` | 一次逻辑业务操作 |
 
 铁律：
 
@@ -196,7 +196,8 @@ error_type / error_code / entered_at）。
 **重放**：`python scripts/replay_dead_run.py <run_id>`（或
 `RunService.requeue_dead_letter`）。
 
-> 重放刻意**复用原 `run_id`**：工具幂等键是 `run_id:tool_call_id`，换新 run_id 会让
+> 重放刻意**复用原 `run_id`**：工具幂等键（重放稳定键 `build_replay_stable_operation_key`、
+> HITL 的 `run_id:approval:{approval_id}`）以 `run_id` 为分量，换新 run_id 会让
 > 重放绕过 ledger，把已经成功的退款/改单**再执行一次**。规范里 `job_id` 是"一次队列
 > 投递"，重放正是新的一次投递。原始 DLQ 历史不被改写。
 
@@ -219,12 +220,21 @@ error_type / error_code / entered_at）。
 
 去重的**前提条件**必须讲清楚，否则容易被读成 exactly-once：
 
-1. `tool_call_id` 必须在重投后**稳定**（真实系统里来自 LLM tool_call id 或业务操作 id）；
-   它不稳定 = 去重失效。
-2. 必须在**认领之前**的租约窗口内完成（或崩溃后由接管者重做）；
-   `PENDING` 租约过期后接管会**重放**该次写操作 —— 见 §14 限制 3。
-3. 下游若已成功但本进程在 `mark_succeeded` 之前崩溃，会重放。
-   要端到端去重，下游必须接受 idempotency key。
+1. 操作身份必须在**重投与节点重放后都稳定**。
+   - 非 HITL：**不能**用 LLM 生成的 `tool_call_id`。节点在 checkpoint 提交前崩溃后
+     重放时 LLM 被重新调用、可能给出新 id，于是同一笔写拿到新键、ledger 去重失效、
+     副作用执行两次（真实复现见
+     `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。现用
+     `build_replay_stable_operation_key(run_id, node_id, agent, tool_name, ordinal)`：
+     五个维度都不含 LLM 输出。刻意**不**按 `tool_name + arguments` 做全局去重——
+     那会把两次合法的 100 元退款合并成一次。序号（ordinal）漂移时退化为指纹冲突 →
+     `PermanentError`，即 fail-closed 而不是重复执行。
+   - HITL：`approval:{approval_id}`，审批 id 恒定，语义未变。
+2. 认领租约必须覆盖**受保护副作用的执行上界**。租约在执行期间由 `_ClaimRenewer`
+   续租；TTL 下界（工具超时 + 余量）在启动时强制（`validate_timeout_invariants`），
+   运行期也 fail-closed。租约过期后接管会**重放**该次写 —— 见 §14 限制 3。
+3. 下游若已成功但本进程在提交结果之前崩溃，会重放；要端到端去重，下游必须接受
+   idempotency key。本仓库**不**提供端到端 exactly-once。
 
 因此准确的能力描述是「**重复投递下副作用去重**」，而不是「副作用恰好执行一次」
 或「副作用 exactly-once」。
@@ -234,7 +244,9 @@ error_type / error_code / entered_at）。
 at-least-once 投递 ⇒ 不能依赖 exactly-once ⇒ 副作用自身必须幂等。
 
 ```
-operation_key = hash-free 约定:  run_id + ":" + tool_call_id
+operation_key 约定:
+  非 HITL  run_id + ":" + sha256(version|run_id|node_id|agent|tool_name|ordinal)
+  HITL     run_id + ":approval:" + approval_id
 指纹           = sha256(canonical_json(arguments))
 ```
 

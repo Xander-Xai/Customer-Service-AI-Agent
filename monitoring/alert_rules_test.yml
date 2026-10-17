@@ -60,3 +60,86 @@ tests:
       - eval_time: 30m
         alertname: AgentRunDeadLetterDetected
         exp_alerts: []
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 恢复闭环（reconciler）停滞告警 —— 五个必须覆盖的场景
+#
+# 关键点：**beat 存活与扫描成功是两个正交信号**。beat 的健康检查只看 schedule 文件
+# mtime，进程活着就一直更新，所以「beat 活着但扫描一直失败」时它是绿的。这里用
+# 「最近一次成功扫描距今多久」而不是失败计数，因此调度停止与扫描失败都能被发现。
+#
+# 本段的 exp_annotations 由 scripts/sync_alert_rule_test_annotations.py 从
+# alert_rules.yml 生成，不要手工改文案。
+# ═══════════════════════════════════════════════════════════════════════════
+
+  # ── 场景 1：正常扫描 -> 绝不触发 ──────────────────────────────────────────
+  # gauge 跟随 wall-clock 递增，因此 time() - gauge 恒为 0。
+  - interval: 1m
+    input_series:
+      - series: 'agent_reconcile_last_success_timestamp_seconds'
+        values: '0+60x60'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: AgentReconcileStalled
+        exp_alerts: []
+
+  # ── 场景 2：时间戳停更（beat 不再调度，或扫描一直失败）-> 必须触发 ────────
+  - interval: 1m
+    input_series:
+      - series: 'agent_reconcile_last_success_timestamp_seconds'
+        values: '100+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AgentReconcileStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "恢复调和任务长时间未成功执行"
+              description: "最近一次成功的 reconcile 扫描距今超过 360s（约为扫描间隔的 12 倍），或该指标从未出现。beat 进程存活不等于恢复闭环在工作：beat 的健康检查只看 schedule 文件 mtime，扫描本身失败时它仍为绿色。滞留的 RUNNING/QUEUED/PENDING run 不会被收敛——它们不会被重新投递，也不会落 DLQ。排查：curl -s metrics 端点并 grep agent_reconcile；确认 beat service 存活且数据库可达；检查 agent_reconcile_scan_total 中 outcome=error 的计数。"
+              runbook_url: "https://github.com/Xander-Xai/Customer-Service-AI-Agent/blob/main/docs/operations/distributed-runtime-runbook.md#recover-loop-stalled"
+
+  # ── 场景 3：指标从未出现（beat 刚部署 / 尚未成功扫描过一次）-> 必须触发 ──
+  # absent() 分支。没有它，刚上线时会有一段无监控窗口：闭环可能从一开始就是断的。
+  - interval: 1m
+    input_series:
+      - series: 'up{job="app",instance="a"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: AgentReconcileStalled
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "恢复调和任务长时间未成功执行"
+              description: "最近一次成功的 reconcile 扫描距今超过 360s（约为扫描间隔的 12 倍），或该指标从未出现。beat 进程存活不等于恢复闭环在工作：beat 的健康检查只看 schedule 文件 mtime，扫描本身失败时它仍为绿色。滞留的 RUNNING/QUEUED/PENDING run 不会被收敛——它们不会被重新投递，也不会落 DLQ。排查：curl -s metrics 端点并 grep agent_reconcile；确认 beat service 存活且数据库可达；检查 agent_reconcile_scan_total 中 outcome=error 的计数。"
+              runbook_url: "https://github.com/Xander-Xai/Customer-Service-AI-Agent/blob/main/docs/operations/distributed-runtime-runbook.md#recover-loop-stalled"
+
+  # ── 场景 4：扫描持续失败（beat 仍调度，但扫描抛错）-> 失败计数告警触发 ────
+  - interval: 1m
+    input_series:
+      - series: 'agent_reconcile_scan_total{outcome="error"}'
+        values: '0+1x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AgentReconcileScanFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              outcome: "error"
+            exp_annotations:
+              summary: "恢复调和扫描持续失败"
+              description: "过去 10 分钟出现 10 次失败的 reconcile 扫描。beat 仍在调度，但扫描本身在失败——最常见原因是数据库不可达。恢复闭环此刻是断的：滞留 run 不会被重新投递。"
+
+  # ── 场景 5：历史失败过一次、之后无新增 -> 失败计数告警不得 latching ──────
+  # 若有人把 increase(...[10m]) > 0 改成 > 0，这里会立刻失败：计数器停在 12
+  # 不再增长但表达式恒真，告警永久挂着。
+  - interval: 1m
+    input_series:
+      - series: 'agent_reconcile_scan_total{outcome="error"}'
+        values: '12+0x60'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: AgentReconcileScanFailing
+        exp_alerts: []

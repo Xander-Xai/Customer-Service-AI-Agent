@@ -87,7 +87,7 @@ flowchart TD
         DEFER["HIGH 风险 → 摘出到 pending_actions<br/><b>不执行</b>，回一句提示给模型"]
         EXEC["③ execute_raw 统一执行边界"]
         LEDGER{"④ 有 Run 上下文<br/>且工具 side_effect=True?"}
-        SAFE["ledger 原子 claim<br/>operation_key = run_id:tool_call_id"]
+        SAFE["ledger 原子 claim + 条件 UPDATE 提交<br/>重放稳定 operation_key"]
         CALLSIDE["执行 → mark_succeeded 存结果"]
         FAIL["执行抛错 → mark_failed + re-raise<br/><b>绝不当成成功记账</b>"]
         NOOP["无 Run 上下文 → 显式拒绝文案<br/>不静默降级为非幂等直调"]
@@ -201,7 +201,7 @@ ERP 查询一次可能返回几百条记录，全塞进 prompt 会：
 模型只能用 `recover_tool_result(reference_id)`，而这仍受 scope 校验。
 否则一次 prompt injection 就能捞走别的用户的工具结果。
 
-### 2.3 工具副作用必须恰好一次
+### 2.3 工具副作用必须可去重（本仓 ledger 层，不是端到端 exactly-once）
 
 `runtime/side_effects.py` 的原子 claim（`:140-277`）修复的是一个**真实的双重执行缺陷**
 （`:152-156` 记录）：旧的 `SELECT → 判断 → UPDATE` 会让两个 worker
@@ -224,6 +224,12 @@ lease 信息**全部缺失时判定为"未过期"**（`:62-63`）——宁可重
 **为什么 `CLAIM_CONFLICT` 是永久错误？** 同一个 `operation_key` 却有不同的
 `request_fingerprint`，说明调用方逻辑有问题，重试一万次也一样。
 把它归为可重试错误会造成 DLQ 里躺满本来就不该重跑的任务。
+
+**去重到哪一层（不得越界宣称）**：以上机制保证的是**本仓 ledger 不会让同一个
+`operation_key` 的写操作被发起两次**。若进程在外部系统已写入、但在本仓
+`mark_succeeded` 之前崩溃，lease 过期后的接管**仍会再次发起**该写。
+端到端 exactly-once **NOT PROVIDED** —— 需要下游 API 接受同一把幂等键。
+完整对照见 [design/agent-runtime.md](design/agent-runtime.md)。
 
 ### 2.4 审批通过后的执行，幂等键必须与"重试"无关
 

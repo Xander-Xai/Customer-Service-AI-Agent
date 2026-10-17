@@ -1,0 +1,1615 @@
+{
+  "schema": "runtime-suite-diagnostics/v1",
+  "captured_at": "2026-10-17T09:24:42.610588+00:00",
+  "phase": "at_failure",
+  "nodeid": "tests/integration/runtime/test_tool_idempotency.py::test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill",
+  "outcome": "failed",
+  "host": "Ydxx.localdomain",
+  "pid": 641617,
+  "visible_worker_processes": [],
+  "queues": {},
+  "redis": {
+    "broker_global_keys": {
+      "unacked": {
+        "type": "none",
+        "size": null
+      },
+      "unacked_index": {
+        "type": "none",
+        "size": null
+      }
+    },
+    "test_queues": {},
+    "production_queue": {
+      "agent_runs": 7
+    }
+  },
+  "postgres": {
+    "runs_by_status": {
+      "CANCELLED": 1250,
+      "DEAD_LETTER": 374,
+      "FAILED": 501,
+      "QUEUED": 36,
+      "RUNNING": 98,
+      "SUCCEEDED": 1086,
+      "WAITING_APPROVAL": 62
+    },
+    "non_terminal_runs": [
+      {
+        "id": "e00580ca-753f-48c2-a834-6dad14221d52",
+        "thread_id": "thread-hitl-07412a52",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:05:15.501437+00:00"
+      },
+      {
+        "id": "202c14b4-2aab-4e3e-926d-ab723d3091c4",
+        "thread_id": "thread-hitl-4332de5a",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-02T12:05:27.787749+00:00"
+      },
+      {
+        "id": "714d1929-7643-4b1d-a117-41de4713cdde",
+        "thread_id": "thread-e4d18b40",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:02.833672+00:00"
+      },
+      {
+        "id": "08fb5300-55a8-42ad-9ad5-ea79405d2533",
+        "thread_id": "thread-2d8b36ca",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:03.133368+00:00"
+      },
+      {
+        "id": "35790f44-d60d-4e34-a927-d3dab3be6c8c",
+        "thread_id": "thread-74464404",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:03.209939+00:00"
+      },
+      {
+        "id": "5f5d8922-4414-40ec-bd0e-85b825c4a2be",
+        "thread_id": "thread-b6d46607",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:51.641089+00:00"
+      },
+      {
+        "id": "6c285124-3d74-4a42-863d-a2bae1443bbc",
+        "thread_id": "thread-ab277179",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:51.958175+00:00"
+      },
+      {
+        "id": "a9f0c5ef-aee5-447d-98ed-cc645cc25a06",
+        "thread_id": "thread-f51a86ef",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:24:52.074940+00:00"
+      },
+      {
+        "id": "e160dd4c-7c84-48b9-9f19-75d4cd8cfa48",
+        "thread_id": "thread-edb2799f",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:25:33.601423+00:00"
+      },
+      {
+        "id": "f362779f-1af2-43ca-aaa5-22d387f0abed",
+        "thread_id": "thread-6a668b16",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:25:34.004772+00:00"
+      },
+      {
+        "id": "2b781087-9f5a-4f96-af5c-6ca1b4c9b33f",
+        "thread_id": "thread-3ce66211",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T08:25:34.138603+00:00"
+      },
+      {
+        "id": "bdd81042-a334-4fd6-9ba7-e59eb645575e",
+        "thread_id": "thread-52ca026d",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T09:46:36.357048+00:00"
+      },
+      {
+        "id": "1eff494b-9574-4523-baa9-0729b8b280f0",
+        "thread_id": "thread-a2a2cf4d",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T09:46:36.698761+00:00"
+      },
+      {
+        "id": "10ef2ed5-03ad-404d-80d4-3be198a5b7f0",
+        "thread_id": "thread-e2c96317",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T09:46:36.811609+00:00"
+      },
+      {
+        "id": "742a9c97-3adc-42ce-ba43-4b34b59606f1",
+        "thread_id": "thread-362ed003",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T16:48:27.789798+00:00"
+      },
+      {
+        "id": "f10a08f4-77b4-4bc1-a7c9-8c8961b07ff7",
+        "thread_id": "thread-04914fe9",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T16:48:28.016486+00:00"
+      },
+      {
+        "id": "42272948-856d-48b9-b5d2-7aa3d44cdec9",
+        "thread_id": "thread-53de1732",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T16:48:28.087552+00:00"
+      },
+      {
+        "id": "81652079-e20c-4e15-aaea-29628b4d6d7d",
+        "thread_id": "thread-fb13d010",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:35:31.148531+00:00"
+      },
+      {
+        "id": "bca8b7f3-38ba-4aa9-9fbe-808ee7088352",
+        "thread_id": "thread-6f1fa1d0",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:35:31.500403+00:00"
+      },
+      {
+        "id": "11dcd0e2-f71f-40dc-92fb-b9954fa71c97",
+        "thread_id": "thread-06dba470",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:35:31.616535+00:00"
+      },
+      {
+        "id": "98fc76e0-03d9-404d-8dc8-0c7e97016620",
+        "thread_id": "thread-4bfc6b3b",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:53:09.452471+00:00"
+      },
+      {
+        "id": "bb9397b0-0dd4-4a78-96bb-88d17b2400be",
+        "thread_id": "thread-10c98116",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:53:09.756796+00:00"
+      },
+      {
+        "id": "94a8e309-ca2d-49cf-a55b-f4ee3b2a2e7e",
+        "thread_id": "thread-16b607a6",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-10T17:53:09.854593+00:00"
+      },
+      {
+        "id": "09b7fd73-ccdb-449a-beb1-4f1219edc3f6",
+        "thread_id": "thread-1564b5f2",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-14T16:04:01.816330+00:00"
+      },
+      {
+        "id": "d4b23aee-b0b3-4d24-b4f7-d7adf1299e4e",
+        "thread_id": "thread-345bcd49",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-14T16:04:02.125207+00:00"
+      },
+      {
+        "id": "9b9e6c44-49d7-429b-9d32-7d182ef24ace",
+        "thread_id": "thread-3e1592ad",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-14T16:04:02.246049+00:00"
+      },
+      {
+        "id": "42831d6f-c96d-4447-b4c7-1e4311d80abb",
+        "thread_id": "thread-d72e54e3",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-15T09:35:12.864286+00:00"
+      },
+      {
+        "id": "b77e0d89-7fd1-4ee0-a8e1-bd6a4190d3a8",
+        "thread_id": "thread-f1fa4072",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-15T09:35:13.119038+00:00"
+      },
+      {
+        "id": "51a7743b-8ebe-4ee0-91ae-2ce75d1459dd",
+        "thread_id": "thread-1c3c54f5",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-15T09:35:13.197636+00:00"
+      },
+      {
+        "id": "a756fefc-5f3a-4b95-b31f-26e999d95234",
+        "thread_id": "thread-87aae950",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:07:00.116732+00:00"
+      },
+      {
+        "id": "b106b6cd-7620-48ca-9e10-7b0b039191d6",
+        "thread_id": "thread-933f60cc",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:07:00.357214+00:00"
+      },
+      {
+        "id": "8fb84cda-db51-4b99-adb7-47923a0c035f",
+        "thread_id": "thread-0e75c8ba",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:07:00.428742+00:00"
+      },
+      {
+        "id": "408cbc35-f68e-4b49-8240-b8d0dff8e73e",
+        "thread_id": "thread-c5481714",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:59:17.010043+00:00"
+      },
+      {
+        "id": "30332276-7805-4226-8526-1b8179fd4d5a",
+        "thread_id": "thread-7140e6e9",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:59:17.251807+00:00"
+      },
+      {
+        "id": "51d1a7d0-1bd2-4058-8d83-6a8debfb91a3",
+        "thread_id": "thread-f2040413",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T16:59:17.322859+00:00"
+      },
+      {
+        "id": "b8b2fcdf-3cba-4f43-9886-8855cf582b38",
+        "thread_id": "thread-09c30aec",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:04:45.258622+00:00"
+      },
+      {
+        "id": "1ecc4fae-c8dd-4447-877e-064c7249d7da",
+        "thread_id": "thread-1531d59e",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:04:45.618308+00:00"
+      },
+      {
+        "id": "cbc7fbfe-cb87-4bcb-9b40-570340489bd0",
+        "thread_id": "thread-72df650b",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:04:45.746510+00:00"
+      },
+      {
+        "id": "f9be59df-55f2-4957-8748-6532e823f95b",
+        "thread_id": "thread-8c5f6104",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:35:16.827794+00:00"
+      },
+      {
+        "id": "485953bc-fd83-4a59-872d-51f626397712",
+        "thread_id": "thread-b27d1f9a",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:35:17.037660+00:00"
+      },
+      {
+        "id": "56102020-4ecc-4227-a482-e12c1bd535bc",
+        "thread_id": "thread-c12cb731",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-16T19:35:17.107435+00:00"
+      },
+      {
+        "id": "5ae4b9ae-cab4-4aea-9de5-f90fd6ce7d52",
+        "thread_id": "takeover-5e4db39e",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T03:24:45.968986+00:00"
+      },
+      {
+        "id": "6b90d9ff-52e5-400a-b1e3-a6c818bb2fb1",
+        "thread_id": "race-take-0f7587c0",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T03:24:46.061864+00:00"
+      },
+      {
+        "id": "01c23b71-a1b9-40d0-aa73-9704b6fbdc06",
+        "thread_id": "same-id-f9d1d38a",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-A",
+        "updated_at": "2026-10-17T03:24:46.746098+00:00"
+      },
+      {
+        "id": "c483c79a-7c39-4cd7-83be-511abeaff3b5",
+        "thread_id": "thread-9ad80866",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:24:50.670520+00:00"
+      },
+      {
+        "id": "e6f27b50-f2da-456b-9ee9-2f4108f2e17b",
+        "thread_id": "thread-7b051be0",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:24:51.032158+00:00"
+      },
+      {
+        "id": "c6608189-ad0d-44d3-aa36-fc626c6f0db1",
+        "thread_id": "thread-ff0f0d60",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:24:51.147828+00:00"
+      },
+      {
+        "id": "630cf8b1-dc69-4e3e-af55-162b66189e2f",
+        "thread_id": "s-bc50c9b2",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "w-1",
+        "updated_at": "2026-10-17T03:24:51.708679+00:00"
+      },
+      {
+        "id": "1f5d1a9d-03c8-4477-9db2-30d95d6bcec1",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T03:26:09.615550+00:00"
+      },
+      {
+        "id": "31e302ac-8eef-418f-87b4-27d8c6522da2",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:09.686349+00:00"
+      },
+      {
+        "id": "683c3e4b-3c61-4a71-8579-c1dade48e502",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:09.757246+00:00"
+      },
+      {
+        "id": "9e2ff1ef-0963-45e1-85b3-7bb68378db3d",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:09.836609+00:00"
+      },
+      {
+        "id": "30102574-0ecb-4c89-a102-c0dbdfa348a3",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:09.914821+00:00"
+      },
+      {
+        "id": "bab4a5ae-5df6-4e8d-9211-15c91d78f0e3",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:10.024456+00:00"
+      },
+      {
+        "id": "8c62d8d5-48a8-46f4-afea-37c343678ba7",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:10.264911+00:00"
+      },
+      {
+        "id": "3de57dcc-497e-498b-b6aa-ea0b2918c966",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:26:10.400607+00:00"
+      },
+      {
+        "id": "ae8739b9-d878-41ac-b034-03ac5bcc7126",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:26:10.458185+00:00"
+      },
+      {
+        "id": "5d7a7d50-7ec0-46c1-80fe-2b64cdc13bd0",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:26:10.514903+00:00"
+      },
+      {
+        "id": "c817f84c-84ff-4c9a-935a-f822372809e2",
+        "thread_id": "thread-0a7774cb",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:43.470776+00:00"
+      },
+      {
+        "id": "face4cb0-17e4-4525-b1bc-4ea183c18829",
+        "thread_id": "thread-b4cd018d",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:43.781911+00:00"
+      },
+      {
+        "id": "78e68274-3f22-444d-b730-c1e7daccae2c",
+        "thread_id": "thread-2b1a7f57",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:43.877889+00:00"
+      },
+      {
+        "id": "17109b3f-176b-4f82-bb7b-a045bfb98d6e",
+        "thread_id": "T-gate2-7bd870f7a6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:56.168308+00:00"
+      },
+      {
+        "id": "537aa5b2-2e84-4304-b9eb-0523d73e0be5",
+        "thread_id": "T-gate2-7bd870f7a6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:56.180649+00:00"
+      },
+      {
+        "id": "23cce877-261c-465e-a7fa-bf964f6e391a",
+        "thread_id": "T-gate2-7bd870f7a6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:31:56.193982+00:00"
+      },
+      {
+        "id": "e51c7f7d-9600-456f-8747-91a4768bb9f4",
+        "thread_id": "T-gate10-80e14f9f1b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:32:03.764364+00:00"
+      },
+      {
+        "id": "d5bdefd3-8061-4ffb-88c3-14a227771cfe",
+        "thread_id": "T-gate10k-e88bea8836",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:32:03.923223+00:00"
+      },
+      {
+        "id": "b7003abb-3eed-47d3-8b22-f3a0d3ff372d",
+        "thread_id": "T-pending-62fab8f7c9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T03:32:04.114273+00:00"
+      },
+      {
+        "id": "ab65e890-9159-4770-8035-55892cdbe05a",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T03:32:55.542249+00:00"
+      },
+      {
+        "id": "f9c2fedc-2cae-41eb-96d6-4d86f2434690",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:55.606673+00:00"
+      },
+      {
+        "id": "88de52b1-7f06-4f4d-83a8-1e02d85e219d",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:55.667862+00:00"
+      },
+      {
+        "id": "9f76cdc7-f28b-467b-953d-cf321dcd9b05",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:55.729720+00:00"
+      },
+      {
+        "id": "73f09bc1-006c-4809-b3cd-065f443155df",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:55.793577+00:00"
+      },
+      {
+        "id": "627f0cfd-9903-4e4b-b882-0b0c3e3c9d4b",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:55.865688+00:00"
+      },
+      {
+        "id": "aebd81e7-ed9a-47f1-9506-a5a0bddc68bd",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:32:55.921038+00:00"
+      },
+      {
+        "id": "601cf8dd-35f8-4917-9b19-ecccf3b65b5a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:56.054525+00:00"
+      },
+      {
+        "id": "cc869246-3a4b-4bba-a168-5bcb5389e391",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:32:56.111781+00:00"
+      },
+      {
+        "id": "47d9c80b-377c-42f0-9e2e-7200781a1639",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:32:56.183834+00:00"
+      },
+      {
+        "id": "aa1daa39-1c29-4d56-8fef-089841baa1e2",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T03:32:56.244373+00:00"
+      },
+      {
+        "id": "418462e1-29d4-4538-8ec4-7af4f07772e7",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T03:32:56.295374+00:00"
+      },
+      {
+        "id": "7e21ca85-2cd5-4d21-9786-353aff990a54",
+        "thread_id": "thread-d9c72388",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:02.055309+00:00"
+      },
+      {
+        "id": "7ae12811-bc7a-4b22-ae51-1e3a032421e9",
+        "thread_id": "thread-e784d332",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:02.341156+00:00"
+      },
+      {
+        "id": "2a3b920a-7f69-45d2-9b51-bb739b375f18",
+        "thread_id": "thread-59a85622",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:02.429210+00:00"
+      },
+      {
+        "id": "e563a41f-6036-4728-830c-f6a2a7828be5",
+        "thread_id": "T-gate2-c7f2cc32db",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:14.748356+00:00"
+      },
+      {
+        "id": "9219abc1-eef6-41d4-a886-de9adf783770",
+        "thread_id": "T-gate2-c7f2cc32db",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:14.770377+00:00"
+      },
+      {
+        "id": "d31a724a-2072-4a23-ac59-adda409d8bd5",
+        "thread_id": "T-gate2-c7f2cc32db",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:14.790294+00:00"
+      },
+      {
+        "id": "4a740132-eb77-4b5a-8fb5-c7484c5f7eb9",
+        "thread_id": "T-gate10-961a8c28d8",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:22.093330+00:00"
+      },
+      {
+        "id": "fa7a2de2-3ac6-46fd-a238-630971bc2843",
+        "thread_id": "T-gate10k-2125fef246",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:22.220364+00:00"
+      },
+      {
+        "id": "a54ea345-4395-4637-94f9-c69669327472",
+        "thread_id": "T-pending-f12b92412c",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:02:22.408695+00:00"
+      },
+      {
+        "id": "258a9987-681d-491f-a7db-004b22c677ea",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T04:03:15.238740+00:00"
+      },
+      {
+        "id": "acfc20ea-ffa7-4f88-83b2-fe687415aa36",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.312146+00:00"
+      },
+      {
+        "id": "ab22990d-8898-4f61-8672-1a855a7702a3",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.379206+00:00"
+      },
+      {
+        "id": "5ce755ee-e93a-4d65-828d-3a7de78c7191",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.458416+00:00"
+      },
+      {
+        "id": "1ad72b12-bdd2-432d-abc6-f735ed54bff0",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.525803+00:00"
+      },
+      {
+        "id": "e4ef1163-e344-4e8d-b6ea-2be57989b7cf",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.613815+00:00"
+      },
+      {
+        "id": "f1f18f61-1f5c-4ca5-9c78-f6d3bb10204e",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:03:15.720019+00:00"
+      },
+      {
+        "id": "ce611bdd-272c-41dd-9883-b7828630f8c7",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:15.907326+00:00"
+      },
+      {
+        "id": "d0942400-95ea-4283-ba39-f4f88000da92",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:03:15.994059+00:00"
+      },
+      {
+        "id": "5fd648c4-f2e3-4804-a492-521b1cb8a096",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:03:16.048309+00:00"
+      },
+      {
+        "id": "3aba5472-c0a5-411b-abb7-131bc8725419",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:03:16.106877+00:00"
+      },
+      {
+        "id": "fe0220d6-9744-462b-be80-8d94424e04ca",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:03:16.191679+00:00"
+      },
+      {
+        "id": "eb610bd7-14c3-4fb0-891b-f7c5bc7f19ff",
+        "thread_id": "thread-49da6088",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:27.770672+00:00"
+      },
+      {
+        "id": "4ac3b584-803f-4d2b-93a9-a5ec8146d38a",
+        "thread_id": "thread-33b63937",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:28.069293+00:00"
+      },
+      {
+        "id": "436ce20e-9239-482f-a07a-8dd5ef81c5fb",
+        "thread_id": "thread-1712fda1",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:28.180641+00:00"
+      },
+      {
+        "id": "6632133b-6b48-411f-8c23-33a7ad718191",
+        "thread_id": "T-gate2-ce1814b5b0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:40.778632+00:00"
+      },
+      {
+        "id": "72142529-914a-459d-a294-dd8128376718",
+        "thread_id": "T-gate2-ce1814b5b0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:40.790607+00:00"
+      },
+      {
+        "id": "db964e42-c28e-4be2-b811-eb7883bba586",
+        "thread_id": "T-gate2-ce1814b5b0",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:40.801536+00:00"
+      },
+      {
+        "id": "5827e44e-126f-43cb-bc24-c35a16439099",
+        "thread_id": "T-gate10-3839e35a57",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:48.300386+00:00"
+      },
+      {
+        "id": "6c769e63-462f-47c8-939b-6df7717a8f11",
+        "thread_id": "T-gate10k-1fb6a103e3",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:48.421815+00:00"
+      },
+      {
+        "id": "8b04abb1-f70b-4a12-b94c-a91cfd13abd7",
+        "thread_id": "T-pending-9ac9ecab9f",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:06:48.578985+00:00"
+      },
+      {
+        "id": "dd245766-b649-4454-9c84-d01899e9870f",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T04:07:40.351936+00:00"
+      },
+      {
+        "id": "eae20b2e-f5c6-43d0-8485-d508c266c771",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.420276+00:00"
+      },
+      {
+        "id": "24f33554-6e5b-4c44-bd34-d5cf845f1b9a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.478756+00:00"
+      },
+      {
+        "id": "8b667c72-63a2-4d92-9566-09808435e7d8",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.542982+00:00"
+      },
+      {
+        "id": "32dd20a6-4f7b-45cc-8202-1e6d376e91a0",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.620177+00:00"
+      },
+      {
+        "id": "e92f2f6a-3078-4631-9664-c02e80c28e65",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.686366+00:00"
+      },
+      {
+        "id": "35e3015c-925a-4e1d-a161-c521012c720e",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:07:40.744996+00:00"
+      },
+      {
+        "id": "5bae010a-7a41-462c-9a7e-788b92facc02",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:40.889992+00:00"
+      },
+      {
+        "id": "f6bce00e-c343-4e57-b350-518de84ff9d0",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:07:40.941814+00:00"
+      },
+      {
+        "id": "54090a35-fa77-42bd-b77a-9e2a833cb3c2",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:07:40.986031+00:00"
+      },
+      {
+        "id": "a1548162-e665-471e-ada6-c203128c9e01",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:07:41.033815+00:00"
+      },
+      {
+        "id": "513c14aa-e1d9-42e0-939f-b0d00cfb561c",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:07:41.082358+00:00"
+      },
+      {
+        "id": "06340126-16c0-4595-97e8-2425256b0532",
+        "thread_id": "thread-3a940499",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:44.902690+00:00"
+      },
+      {
+        "id": "8ff1f009-0269-40de-82c9-06fda53b24af",
+        "thread_id": "thread-9d07405f",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:45.136443+00:00"
+      },
+      {
+        "id": "f6e3ea1a-272b-4ee1-b205-e2494b96a4a5",
+        "thread_id": "thread-c57f1c33",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:45.222992+00:00"
+      },
+      {
+        "id": "a9b71f0b-6520-42e1-98fb-8aba1d7d0225",
+        "thread_id": "T-gate2-a3acc145cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:57.198004+00:00"
+      },
+      {
+        "id": "4569ef93-41d8-4984-9d74-2b8472c0e60d",
+        "thread_id": "T-gate2-a3acc145cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:57.220976+00:00"
+      },
+      {
+        "id": "1e460881-4911-42e1-967b-7fc969270f51",
+        "thread_id": "T-gate2-a3acc145cd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:26:57.232722+00:00"
+      },
+      {
+        "id": "10526375-b546-4a2b-bdbe-1dcc8671eecc",
+        "thread_id": "T-gate10-adf7a87406",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:27:04.478509+00:00"
+      },
+      {
+        "id": "19e05648-2e1e-49c7-a999-8f2a98673d95",
+        "thread_id": "T-gate10k-f8639a4bdb",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:27:04.578430+00:00"
+      },
+      {
+        "id": "19de321b-a11e-4807-b2d2-6c53a48c24d0",
+        "thread_id": "T-pending-3b66e83c61",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T04:27:04.711021+00:00"
+      },
+      {
+        "id": "2fa41e70-7035-4aa1-8334-7ea6630f07cd",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T04:27:58.849536+00:00"
+      },
+      {
+        "id": "295a765f-6214-4d4a-a5a7-37d1a6d3359f",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:58.929880+00:00"
+      },
+      {
+        "id": "67b2a177-8f34-484c-9e8a-246146db181c",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:59.019979+00:00"
+      },
+      {
+        "id": "24ec867e-d1ad-4aec-93d4-f095e1cda0da",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:59.091097+00:00"
+      },
+      {
+        "id": "61f382ae-a527-446d-b8d4-837bba4ba3bc",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:59.160347+00:00"
+      },
+      {
+        "id": "c4ba88f3-4c42-403b-b95b-fd048e810dd2",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:59.277246+00:00"
+      },
+      {
+        "id": "ea1fe043-d85b-4705-b8f5-c32d4b98dda7",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:27:59.388024+00:00"
+      },
+      {
+        "id": "9bca44b3-31d6-4845-981f-f8c2a1dbed3a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:27:59.571022+00:00"
+      },
+      {
+        "id": "99b6a0dc-60f7-42c9-afd0-16abba75d0f1",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:27:59.636632+00:00"
+      },
+      {
+        "id": "48070af2-349d-4aa6-a25a-453c91bcb738",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:27:59.706450+00:00"
+      },
+      {
+        "id": "bcdd6363-3cea-406b-9bc5-85a7b085a8c9",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T04:28:00.436252+00:00"
+      },
+      {
+        "id": "d9c8daae-5295-40d5-baca-8d54181fd6b5",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T04:28:00.521975+00:00"
+      },
+      {
+        "id": "839c28c1-b227-459e-a00b-18fb45d5819a",
+        "thread_id": "thread-172ccc0a",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:43.990112+00:00"
+      },
+      {
+        "id": "5f310caf-d7c7-431c-93bd-43cfd2ed9d82",
+        "thread_id": "thread-31c08ea0",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:44.284136+00:00"
+      },
+      {
+        "id": "e58341b3-2ad9-4cf0-8741-f95fba9e6da2",
+        "thread_id": "thread-016b4d8e",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:44.387264+00:00"
+      },
+      {
+        "id": "b9a5837c-bb84-4c18-b2fd-77972f3c416e",
+        "thread_id": "T-gate2-fa6563b258",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:56.778786+00:00"
+      },
+      {
+        "id": "00e47e38-4e11-4d0b-89b3-cffe5646703d",
+        "thread_id": "T-gate2-fa6563b258",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:56.797860+00:00"
+      },
+      {
+        "id": "4c340ef1-0727-4e58-992e-4d837896d089",
+        "thread_id": "T-gate2-fa6563b258",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:27:56.810394+00:00"
+      },
+      {
+        "id": "341dabde-6e56-485e-98c4-6d2a6c071a48",
+        "thread_id": "T-gate10-bf4a68dfe6",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:28:04.239172+00:00"
+      },
+      {
+        "id": "d1fc56a6-c5ba-4e40-948b-afd72fcf0634",
+        "thread_id": "T-gate10k-24566be854",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:28:04.344629+00:00"
+      },
+      {
+        "id": "aa0785b9-66bc-4ced-be30-ec7c1e382417",
+        "thread_id": "T-pending-46b49518f9",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T05:28:04.479733+00:00"
+      },
+      {
+        "id": "407a5eea-e5fd-49b3-9e40-08501a22f68e",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T05:28:59.848689+00:00"
+      },
+      {
+        "id": "d1e0e77c-f3f3-43b7-99e5-2c7fa3288963",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:28:59.920857+00:00"
+      },
+      {
+        "id": "d3d2ef9c-9e55-4eff-ba15-3a220aa72079",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:28:59.997052+00:00"
+      },
+      {
+        "id": "fcdaaa0b-eb2e-4998-a8c8-eeeb47bfa7ca",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:29:00.072879+00:00"
+      },
+      {
+        "id": "39377bf8-ff1f-406b-a802-762bb77fcb7a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:29:00.171122+00:00"
+      },
+      {
+        "id": "5cc2c782-9c56-400c-b986-620701ebc193",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:29:00.257064+00:00"
+      },
+      {
+        "id": "aae86cf9-186c-4955-8dd2-83a437a1f347",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T05:29:00.316111+00:00"
+      },
+      {
+        "id": "d16d702a-2461-47ca-862d-da13d790e2f7",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:29:00.449731+00:00"
+      },
+      {
+        "id": "5ed0e26f-9665-4bc3-ba38-2dfc9c81ce49",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T05:29:00.516231+00:00"
+      },
+      {
+        "id": "7680289a-7201-45ff-97c1-a6db70d65720",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T05:29:00.569409+00:00"
+      },
+      {
+        "id": "0716172e-44df-46b7-bb4e-cb89db61a978",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T05:29:00.625975+00:00"
+      },
+      {
+        "id": "311120ff-e24d-4e2a-8ecb-c51441f63f6b",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T05:29:00.682432+00:00"
+      },
+      {
+        "id": "cac602e8-2928-4496-adea-04b9ccb2c466",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T08:46:00.747527+00:00"
+      },
+      {
+        "id": "25a920fd-dd79-4e4d-9647-11b2613cd6e3",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:00.828109+00:00"
+      },
+      {
+        "id": "4f6ba541-72e7-4abe-8229-d590a6f8a184",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:00.944073+00:00"
+      },
+      {
+        "id": "739787f1-4159-4d25-8098-fa1ae0f6bd89",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:01.033820+00:00"
+      },
+      {
+        "id": "9edd946e-fce8-4473-af10-7c00a69a9c92",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:01.131605+00:00"
+      },
+      {
+        "id": "a6b3f423-842a-457e-b507-5d2024633017",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:01.200954+00:00"
+      },
+      {
+        "id": "04a9789d-b206-44e7-8ddb-bcee0bd60e36",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T08:46:01.282488+00:00"
+      },
+      {
+        "id": "4907649d-65da-40cc-92d9-79f90ba9e9e5",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:01.558412+00:00"
+      },
+      {
+        "id": "c73e6216-f2ee-44e5-ac12-57043f85da7b",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T08:46:01.623221+00:00"
+      },
+      {
+        "id": "a54216f1-d31d-43f1-93aa-2dc25dda47bb",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T08:46:01.679674+00:00"
+      },
+      {
+        "id": "90cefd5e-7be2-4d66-a0d0-709db461cbf4",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T08:46:01.729091+00:00"
+      },
+      {
+        "id": "89755599-d664-4e70-bbcf-e3585211d0d6",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T08:46:01.797694+00:00"
+      },
+      {
+        "id": "73232e10-c04b-495e-8dee-e191d3293913",
+        "thread_id": "thread-512d3f45",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:06:16.357484+00:00"
+      },
+      {
+        "id": "1ec995ba-4302-4e34-88c0-626f232bde0a",
+        "thread_id": "thread-60836861",
+        "status": "WAITING_APPROVAL",
+        "attempt": 2,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:06:16.670129+00:00"
+      },
+      {
+        "id": "0c76ae4f-0d06-4bff-a7fe-0de06ba9ae81",
+        "thread_id": "thread-357d2b7b",
+        "status": "WAITING_APPROVAL",
+        "attempt": 1,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:06:16.783683+00:00"
+      },
+      {
+        "id": "1bbc3256-15c8-4396-96d4-c34eac4206fd",
+        "thread_id": "T-gate2-008166cb5a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:07:58.162733+00:00"
+      },
+      {
+        "id": "f392de8a-cd0b-4903-9d7c-0b027c29d505",
+        "thread_id": "T-gate2-008166cb5a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:07:58.180022+00:00"
+      },
+      {
+        "id": "003387e8-7ab0-4af8-bb57-4ddc64f1f499",
+        "thread_id": "T-gate2-008166cb5a",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:07:58.190378+00:00"
+      },
+      {
+        "id": "8e1f647c-9afe-4dde-9aeb-870cdc3b22b6",
+        "thread_id": "T-gate10-549e3033af",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:08:05.268504+00:00"
+      },
+      {
+        "id": "f326eeff-a5e6-4e46-9423-247fba77d5c9",
+        "thread_id": "T-gate10k-95e003558b",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:08:05.346475+00:00"
+      },
+      {
+        "id": "279a45a8-6ffe-445c-b23c-4c325cae9d68",
+        "thread_id": "T-pending-3350b067fd",
+        "status": "QUEUED",
+        "attempt": 0,
+        "worker_id": null,
+        "updated_at": "2026-10-17T09:08:05.450111+00:00"
+      },
+      {
+        "id": "e148a700-c1cb-4605-8b31-7a1ef4d6f864",
+        "thread_id": "s-worker-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "worker-B",
+        "updated_at": "2026-10-17T09:10:48.727202+00:00"
+      },
+      {
+        "id": "fbed13f4-5b71-4490-a838-ad955788eba4",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:48.813484+00:00"
+      },
+      {
+        "id": "dff63ad3-3572-4753-b2be-259f5771e01a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:48.894094+00:00"
+      },
+      {
+        "id": "fd74b4df-fc0c-4a49-b07f-2c6524d5cb3f",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:48.973414+00:00"
+      },
+      {
+        "id": "048bcc4e-af03-4149-ab8d-1d9861510839",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:49.051315+00:00"
+      },
+      {
+        "id": "1a85c22f-5da7-43a6-8f5b-79e69c65b91e",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:49.141008+00:00"
+      },
+      {
+        "id": "d75c4846-551a-4b68-b05e-ca9b4f5993b2",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T09:10:49.221282+00:00"
+      },
+      {
+        "id": "b7ecc030-a569-433a-8942-d67441a61352",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:49.368682+00:00"
+      },
+      {
+        "id": "54cecc23-b4f7-4b0b-8485-f5fa23448e14",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T09:10:49.439043+00:00"
+      },
+      {
+        "id": "b0e4142e-d424-43fa-8d55-492544665306",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T09:10:49.498998+00:00"
+      },
+      {
+        "id": "c3967460-0844-486b-9de5-078eb214fe06",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 2,
+        "worker_id": "B",
+        "updated_at": "2026-10-17T09:10:49.578313+00:00"
+      },
+      {
+        "id": "821d1eac-92d8-4de7-aeeb-0bc212cf184a",
+        "thread_id": "s-A",
+        "status": "RUNNING",
+        "attempt": 1,
+        "worker_id": "A",
+        "updated_at": "2026-10-17T09:10:49.644250+00:00"
+      }
+    ],
+    "checkpoints_rows": 44,
+    "checkpoint_writes_rows": 129
+  },
+  "extra": {
+    "when": "makereport(call), before teardown fixtures",
+    "note": "state at the moment of failure, with the failing test's own rows and broker keys still present",
+    "failure_text": "E   AssertionError: run 未进入终态: ('RUNNING', 1, 'Ydxx:641645:1e31e3bd')\n    assert None is not None"
+  }
+}

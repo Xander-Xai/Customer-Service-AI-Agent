@@ -387,16 +387,43 @@ class ApprovalService:
 
             expires_at = _aware(row.expires_at)
             if expires_at is not None and now >= expires_at:
-                # 超时按拒绝收敛，并明确落 EXPIRED（可与「明确拒绝」区分统计）
-                row.status = STATUS_EXPIRED
-                row.reviewed_at = now
-                row.reviewer_id = reviewer_id
-                row.decision = {
-                    "decision": "expired",
-                    "reason": "approval TTL elapsed before a human decision",
-                }
-                row.updated_at = now
+                # 超时按拒绝收敛，并明确落 EXPIRED（可与「明确拒绝」区分统计）。
+                #
+                # 必须是 CAS（``WHERE status='PENDING'``），与下面正常决策路径和
+                # ``expire()`` 一致：``HumanApproval`` 既无 version_id_col 也无 DB
+                # CHECK 约束，用 ORM 属性赋值 + commit 发出的是
+                # ``UPDATE ... WHERE approval_id=:pk``（无状态谓词）。并发下若另一方
+                # 已在「读完 PENDING」与「写回」之间提交 APPROVED，这条无条件 flush
+                # 会把 APPROVED 覆写成 EXPIRED —— 那是状态机禁止的终态→终态边，且
+                # ``consume_resume`` 只认 APPROVED/REJECTED，已批准的决策永远送不到
+                # 工具，run 就此永久停在 WAITING_APPROVAL。
+                result = session.execute(
+                    update(HumanApproval)
+                    .where(
+                        HumanApproval.approval_id == approval_id,
+                        HumanApproval.status == STATUS_PENDING,
+                    )
+                    .values(
+                        status=STATUS_EXPIRED,
+                        reviewed_at=now,
+                        reviewer_id=reviewer_id,
+                        decision={
+                            "decision": "expired",
+                            "reason": "approval TTL elapsed before a human decision",
+                        },
+                        updated_at=now,
+                    )
+                )
                 session.commit()
+                if result.rowcount == 0:
+                    # 并发下已被另一方决策：不得覆写既有终态，原样返回。
+                    session.refresh(row)
+                    logger.warning(
+                        "[HITL] 过期收敛时发现审批已被决策 approval=%s current=%s",
+                        approval_id,
+                        row.status,
+                    )
+                    return _to_dict(row), False
                 session.refresh(row)
                 _record_expired()
                 logger.warning(
@@ -569,6 +596,62 @@ class ApprovalService:
             if claimed.rowcount == 0:
                 return None  # 已被另一 worker 消费
             session.refresh(row)
+            payload = dict(row.decision or {})
+            payload["approval_id"] = row.approval_id
+            payload["reviewer_id"] = row.reviewer_id
+            payload["action"] = row.action
+            payload["risk_level"] = row.risk_level
+            return payload
+        finally:
+            session.close()
+
+    def peek_resume(self, run_id: str, *, now: datetime | None = None) -> dict[str, Any] | None:
+        """**只读**地重建一个**已被消费**的审批决策载荷（崩溃窗口恢复）。
+
+        为什么需要
+        ----------
+        ``consume_resume`` 是破坏性的（写 ``resumed_at``），并在 worker 把 run 从
+        ``WAITING_APPROVAL`` 迁到 ``RUNNING`` **之前**执行（``runtime/executor.py``）。
+        若 worker 在两步之间崩溃，决策已被消费、run 仍停在 ``WAITING_APPROVAL``，
+        下次派发 ``consume_resume`` 返回 None -> run 被永久卡住（Issue #14）。
+
+        本方法是那一窗口的**可恢复读取**：审批决策是终态且被保留（``human_approvals``
+        不会因消费而删除），因此可以随时重建同一 payload。重建**不是**重复执行：
+        真正执行高风险写的幂等由 ``tool_side_effects``（``run_id:approval:{id}``）
+        兜底；而 run 状态迁移仍由 ``mark_resumed_running`` 的 CAS 保证只有一个赢家。
+
+        安全前提（避免复活过期决策）
+        ---------------------------
+        仅当该 run **没有任何未消费的 PENDING 审批**时才重建。否则一个仍合法等待
+        第二个审批决策的 run，会被错误地按第一个（已应用）决策恢复。``consume_resume``
+        已经处理「有未消费的已决策审批」与「PENDING 已过期」两种情形；走到这里的
+        只剩「存在已消费决策、且没有在等的 PENDING」这一种，正是崩溃窗口的形状。
+        """
+        session = self._session()
+        try:
+            live_pending = session.execute(
+                select(HumanApproval.approval_id)
+                .where(
+                    HumanApproval.run_id == run_id,
+                    HumanApproval.status == STATUS_PENDING,
+                    HumanApproval.resumed_at.is_(None),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if live_pending is not None:
+                return None
+
+            row = session.execute(
+                select(HumanApproval)
+                .where(
+                    HumanApproval.run_id == run_id,
+                    HumanApproval.status.in_([STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED]),
+                )
+                .order_by(HumanApproval.requested_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
             payload = dict(row.decision or {})
             payload["approval_id"] = row.approval_id
             payload["reviewer_id"] = row.reviewer_id

@@ -1,0 +1,49 @@
+
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_old_owner_cannot_overwrite_new_owner_with_succeeded-20261017T141325Z.json
+F..
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_expired_unclaimed_lease_cannot_be_resurrected_by_la-20261017T141325Z.json
+F.
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_late_failure_callback_cannot_rewrite_a_succeeded_op-20261017T141326Z.json
+F.
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_ledger_failure_does_not_mask_the_original_tool_exce-20261017T141326Z.json
+F.
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_commit_update_sql_carries_ownership_status_and_leas-20261017T141326Z.json
+F
+[runtime-diagnostics] at-failure artifact: /home/dev/projects/customer-service-ai-agent/artifacts/runtime-diagnostics/suite-at_failure-failed-tests_integration_runtime_test_side_effect_commit_fencing_pg.py_test_missing_owner_is_rejected_instead_of_bypassing_the_-20261017T141327Z.json
+F                                                              [100%]
+=================================== FAILURES ===================================
+E   AssertionError: 旧 owner 的迟到提交被接受了
+    assert True is False
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:266: AssertionError: 旧 owner 的迟到提交被接受了
+E   AssertionError: assert True is False
+     +  where True = mark_succeeded('staging_refund', 'commit-fence-7e5c7a06f88c', 'resurrected', owner='owner-A')
+     +    where mark_succeeded = <runtime.side_effects.SideEffectStore object at 0x7aa87f91ae30>.mark_succeeded
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:395: AssertionError: assert True is False
+E   AssertionError: assert True is False
+     +  where True = mark_failed('staging_refund', 'commit-fence-8448588d516d', error_type='CancelledError', error_message='worker died', owner='owner-A')
+     +    where mark_failed = <runtime.side_effects.SideEffectStore object at 0x7aa87f9b92d0>.mark_failed
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:468: AssertionError: assert True is False
+E   test_side_effect_commit_fencing_pg.test_ledger_failure_does_not_mask_the_original_tool_exception.<locals>._ToolBoom: ERP returned 500
+
+During handling of the above exception, another exception occurred:
+E   RuntimeError: ledger commit exploded
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:176: RuntimeError: ledger commit exploded
+E   AssertionError: UPDATE 缺少所有权谓词: UPDATE tool_side_effects SET status=%(status)s, result_reference=%(result_reference)s::JSON, claim_expires_at=%(claim_expires_at)s, updated_at=%(updated_at)s, finished_at=%(finished_at)s WHERE tool_side_effects.id = %(tool_side_effects_id)s
+    assert 'claim_owner' in 'update tool_side_effects set status=%(status)s, result_reference=%(result_reference)s::json, claim_expires_at=%(claim...res_at)s, updated_at=%(updated_at)s, finished_at=%(finished_at)s where tool_side_effects.id = %(tool_side_effects_id)s'
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:666: AssertionError: UPDATE 缺少所有权谓词: UPDATE tool_side_effects SET status=%(status)s, result_reference=%(result_reference)s::JSON, claim_expires_at=%(claim_expires_at)s, updated_at=%(updated_at)s, finished_at=%(finished_at)s WHERE tool_side_effects.id = %(tool_side_effects_id)s
+E   Failed: DID NOT RAISE <class 'Exception'>
+/home/dev/projects/customer-service-ai-agent/tests/integration/runtime/test_side_effect_commit_fencing_pg.py:695: Failed: DID NOT RAISE <class 'Exception'>
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_old_owner_cannot_turn_new_owner_success_into_failed
+PASSED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_concurrent_commits_have_exactly_one_winner
+PASSED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_renewed_claim_commits_successfully
+PASSED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_ledger_commit_failure_never_reports_external_success
+PASSED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_distinct_logical_operations_never_merge
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_old_owner_cannot_overwrite_new_owner_with_succeeded
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_expired_unclaimed_lease_cannot_be_resurrected_by_late_commit
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_late_failure_callback_cannot_rewrite_a_succeeded_operation
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_ledger_failure_does_not_mask_the_original_tool_exception
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_commit_update_sql_carries_ownership_status_and_lease_predicates
+FAILED tests/integration/runtime/test_side_effect_commit_fencing_pg.py::test_missing_owner_is_rejected_instead_of_bypassing_the_check
+6 failed, 5 passed in 3.12s

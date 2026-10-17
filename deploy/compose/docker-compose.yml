@@ -325,6 +325,73 @@ services:
     networks:
       - cs-network
 
+  # ===== Celery Beat（滞留 run 周期 reconciler 的驱动器）=====
+  # 恢复闭环的承重结构，不是可选组件。
+  #
+  # 实测（Celery 5.6.3 + 真实 Redis）：普通 Exception / RetryPublicationError /
+  # 软硬时间上限全部落到 reject(requeue=False) —— **消息被丢弃、不重投**。只有
+  # WorkerLostError（worker 进程被杀）才重新投递。因此「让异常逃逸以触发 broker
+  # 重新投递」不成立，run 会停在 RETRYING/QUEUED 且没有消息会再来。
+  #
+  # 队列消息只是**唤醒信号**，唤醒信号随时可能丢（broker 重启、消息被清理、
+  # 进程在 publish 前被杀）。真正的恢复靠数据库里的 AgentRun + 这个周期扫描。
+  #
+  # 为什么必须是**独立** service 而不是 worker -B：worker 可以被 --scale 成多
+  # 副本，内嵌 beat 会让每个副本各调度一次（reconciler 幂等，但白白多跑，且
+  # 规模越大越明显）。独立 service 保证恰好一个调度者。
+  beat:
+    build: ../..
+    command: >
+      celery -A runtime.celery_app:celery_app beat
+      --loglevel=${WORKER_LOG_LEVEL:-info}
+      --schedule=/tmp/celerybeat-schedule
+    environment:
+      # 与 worker 同角色：不需要 API 凭据 / CORS / ADMIN_PASSWORD。
+      - SERVICE_ROLE=worker
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LOG_LEVEL=INFO
+      - LOG_DIR=/app/logs
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      - DATABASE_URL=${DATABASE_URL:-}
+      - SESSION_STORAGE_BACKEND=${SESSION_STORAGE_BACKEND:-redis}
+      - LANGGRAPH_CHECKPOINT_BACKEND=${LANGGRAPH_CHECKPOINT_BACKEND:-postgres}
+      - AGENT_EXECUTION_MODE=queued
+      - AGENT_RUN_QUEUE=${AGENT_RUN_QUEUE:-agent_runs}
+      - AGENT_RUN_RECONCILE_INTERVAL_SECONDS=${AGENT_RUN_RECONCILE_INTERVAL_SECONDS:-30}
+      - CELERY_BROKER_URL=${CELERY_BROKER_URL:-}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    # beat 同样不能沿用镜像级 HTTP 探针（curl localhost:8000/api/health）——
+    # 它不监听任何 HTTP 端口，那样容器恒为 unhealthy。
+    #
+    # liveness 信号用「schedule 文件是否在最近被写过」：celery beat 每个 tick 都会
+    # 更新 `--schedule` 指定的文件，所以 mtime 停滞 == beat 不再调度。阈值取
+    # max(120s, 4x 周期)，容忍一次慢 tick / 调度抖动。
+    #
+    # 语义边界：它验证 beat **进程仍在 tick**，不等价于「reconciler 每次都成功捞到
+    # 滞留 run」——后者由 runtime 层指标与 DLQ 可观测性负责。
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c "import os,sys,time;
+          p='/tmp/celerybeat-schedule';
+          sys.exit(0 if os.path.exists(p)
+          and time.time()-os.path.getmtime(p)
+          < max(120, 4*${AGENT_RUN_RECONCILE_INTERVAL_SECONDS:-30}) else 1)"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # beat 冷启动只需连 broker，不建 checkpoint pool
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - cs-network
+
   # ===== P0-5: PostgreSQL 数据库 =====
   postgres:
     image: postgres:15-alpine

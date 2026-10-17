@@ -560,6 +560,223 @@ class TestExtractCheckpointId:
 
 
 # ---------------------------------------------------------------------------
+# K. The "escape to force redelivery" re-raise was swallowed by suppress()
+#
+# Finding (audit 2026-10-16): the outer ``except Exception`` handler in
+# ``execute_run`` detected "the run is parked in RETRYING/QUEUED but no message
+# is coming" and re-raised on purpose, so that Celery would NOT ACK the task and
+# the broker would redeliver it. The bare ``raise`` sat **inside**
+# ``with contextlib.suppress(Exception)``, so it was swallowed and control fell
+# through to ``return RunStatus.FAILED.value`` -- a normal return, i.e. an ACK.
+#
+# The failure direction is the worst kind: the alert metric still fired, so the
+# operators saw "retry publication failure" while the recovery mechanism the
+# comment describes was structurally dead, and the run stayed stranded.
+# ---------------------------------------------------------------------------
+
+
+class TestStrandedRunMustNotBeAcked:
+    @pytest.mark.unit
+    async def test_unexpected_error_with_queued_run_escapes_instead_of_returning(self):
+        """run 停在 QUEUED/RETRYING 时，未预期异常必须逃逸（Celery 不 ACK）。"""
+        from runtime.executor import execute_run
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+        from runtime.thread_lock import InMemoryThreadLock
+        from tests.unit.runtime_helpers import (
+            FakeRuntime,
+            dispose,
+            make_sqlite_session_factory,
+            runtime_provider,
+        )
+
+        class _ExplodingRunService(RunService):
+            """在 run 仍处于 QUEUED 时抛出未预期异常（模拟 DB/网络瞬时故障）。"""
+
+            def mark_running(self, *args, **kwargs):
+                raise RuntimeError("simulated infrastructure failure while claiming the run")
+
+        session_factory, engine, path = make_sqlite_session_factory()
+        try:
+            service = _ExplodingRunService(
+                repository=AgentRunRepository(session_factory=session_factory)
+            )
+            run = service.create_run(query="q", session_id="T-stranded")
+            assert service.get_run(run["id"])["status"] == "QUEUED"
+
+            with pytest.raises(RuntimeError, match="simulated infrastructure failure"):
+                await execute_run(
+                    run["id"],
+                    service=service,
+                    runtime_provider=runtime_provider(FakeRuntime(lambda **kw: {"response": "ok"})),
+                    dispatcher=None,
+                    lock_manager=InMemoryThreadLock(),
+                    worker_id="w-stranded",
+                )
+
+            # 关键断言：不能被记成 FAILED——run 仍在合法退避中，记 FAILED 会丢掉
+            # 一次合法重试机会。原地保留，由周期 reconciler 恢复。
+            #
+            # 注意（2026-10 审计修正）：逃逸**不是**恢复手段。实测 Celery 对普通异常
+            # 一律 reject(requeue=False)，消息被丢弃、不重投；逃逸与否都不改变这一点。
+            # 本断言守的是「不写错状态」，恢复由 TestDeliverySemanticsContract 里
+            # 的 beat_schedule + reconciler 契约承担。
+            assert service.get_run(run["id"])["status"] == "QUEUED"
+        finally:
+            dispose(engine, path)
+
+
+# ---------------------------------------------------------------------------
+# L. ``decide()`` TTL branch must be a CAS, not an unconditional flush
+#
+# Finding (audit 2026-10-16): the non-expired path of ``decide()`` correctly uses
+# ``UPDATE ... WHERE status='PENDING'``, but the TTL-expired branch assigned ORM
+# attributes and called ``session.commit()``. ``HumanApproval`` has no
+# ``version_id_col`` and no DB CHECK constraint, so that flush emits
+# ``UPDATE human_approvals ... WHERE approval_id = :pk`` with no status guard.
+#
+# Interleaving: reviewer A's approve commits APPROVED after B's SELECT but before
+# B's flush -> B overwrites APPROVED with EXPIRED. That is a terminal -> terminal
+# edge the declared state machine forbids, and because ``consume_resume`` only
+# selects APPROVED/REJECTED, the already-approved decision can never be
+# delivered and the run stays in WAITING_APPROVAL forever.
+#
+# The sibling ``expire()`` helper already has the correct CAS shape; the fix is
+# to make the in-``decide`` expiry branch use it too.
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalExpiryIsCas:
+    @staticmethod
+    def _build(monkeypatch):
+        from core.hitl.approval_service import ApprovalService
+        from tests.unit.runtime_helpers import make_sqlite_session_factory
+
+        monkeypatch.setattr("core.config.HITL_APPROVAL_TTL_SECONDS", 1.0)
+        factory, engine, path = make_sqlite_session_factory()
+        return ApprovalService(session_factory=factory), engine, path
+
+    @pytest.mark.unit
+    def test_late_expiry_does_not_clobber_a_concurrent_approval(self, monkeypatch):
+        """A second, late-arriving decision must never overwrite an existing terminal row."""
+        from datetime import timedelta
+
+        from core.hitl.approval_service import (
+            DECISION_APPROVE,
+            STATUS_APPROVED,
+            ApprovalService,
+        )
+        from tests.unit.runtime_helpers import dispose
+
+        svc, engine, path = self._build(monkeypatch)
+        try:
+            rec = svc.create_or_get(
+                run_id="run-exp-cas",
+                thread_id="thread-1",
+                action="staging_refund",
+                risk_level="high",
+                proposal={"order_id": "O-CAS", "amount": 100},
+                user_id="customer-1",
+                agent="order_agent",
+            )
+            approval_id = rec["approval_id"]
+            before = _aware_utc(rec["expires_at"]) - timedelta(seconds=1)
+            after = _aware_utc(rec["expires_at"]) + timedelta(seconds=1)
+
+            # Reproduce the interleaving deterministically: _guard_reviewer is the
+            # last hook decide() calls after its SELECT and before its write, so a
+            # competing approval committed here lands exactly in the race window.
+            competing = ApprovalService(session_factory=svc._session_factory)
+            original_guard = ApprovalService._guard_reviewer
+
+            def _approve_first(self, record, reviewer_id):
+                # Only intercept the outer call; the competing service must keep
+                # the real guard, otherwise the hook recurses into itself.
+                if self is not svc:
+                    return original_guard(self, record, reviewer_id)
+                competing.decide(
+                    approval_id,
+                    reviewer_id="sup-fast",
+                    decision=DECISION_APPROVE,
+                    now=before,
+                )
+
+            monkeypatch.setattr(ApprovalService, "_guard_reviewer", _approve_first)
+
+            # The late decision arrives after the TTL. The expiry branch loses the
+            # CAS, so decide() must converge to "already decided" instead of
+            # clobbering -- and must NOT report ApprovalExpired, because nothing
+            # actually expired.
+            record, newly = svc.decide(
+                approval_id,
+                reviewer_id="sup-late",
+                decision=DECISION_APPROVE,
+                now=after,
+            )
+            assert newly is False
+            assert record["status"] == STATUS_APPROVED
+
+            assert svc.require(approval_id)["status"] == STATUS_APPROVED, (
+                "an existing APPROVED decision must not be overwritten by a late "
+                "TTL-expiry branch (terminal -> terminal edge)"
+            )
+            assert svc.require(approval_id)["reviewer_id"] == "sup-fast"
+        finally:
+            dispose(engine, path)
+
+    @pytest.mark.unit
+    def test_late_decision_reports_existing_terminal_state_instead_of_expiry(self, monkeypatch):
+        """When the CAS loses, decide() must return the existing terminal record."""
+        from datetime import timedelta
+
+        from core.hitl.approval_service import DECISION_APPROVE, STATUS_APPROVED, ApprovalService
+        from tests.unit.runtime_helpers import dispose
+
+        svc, engine, path = self._build(monkeypatch)
+        try:
+            rec = svc.create_or_get(
+                run_id="run-exp-cas2",
+                thread_id="thread-1",
+                action="staging_refund",
+                risk_level="high",
+                proposal={"order_id": "O-CAS2", "amount": 100},
+                user_id="customer-1",
+                agent="order_agent",
+            )
+            approval_id = rec["approval_id"]
+            before = _aware_utc(rec["expires_at"]) - timedelta(seconds=1)
+            after = _aware_utc(rec["expires_at"]) + timedelta(seconds=1)
+
+            svc.decide(approval_id, reviewer_id="sup-a", decision=DECISION_APPROVE, now=before)
+
+            competing = ApprovalService(session_factory=svc._session_factory)
+            monkeypatch.setattr(
+                ApprovalService,
+                "_guard_reviewer",
+                lambda self, record, reviewer_id: competing.decide(
+                    approval_id, reviewer_id="sup-b", decision=DECISION_APPROVE, now=before
+                ),
+            )
+
+            record, newly = svc.decide(
+                approval_id, reviewer_id="sup-c", decision=DECISION_APPROVE, now=after
+            )
+            assert newly is False
+            assert record["status"] == STATUS_APPROVED
+            assert svc.require(approval_id)["status"] == STATUS_APPROVED
+        finally:
+            dispose(engine, path)
+
+
+def _aware_utc(value):
+    from datetime import timezone
+
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+# ---------------------------------------------------------------------------
 # PR #28 round 2 — Celery failure-ack semantics (the retry-durability fix was
 # incomplete: raising RetryPublicationError does NOT by itself cause redelivery)
 # ---------------------------------------------------------------------------
@@ -582,19 +799,25 @@ def test_celery_does_not_ack_failed_tasks():
 
 
 @pytest.mark.unit
-def test_retry_publication_failure_depends_on_rejection_not_acks_late():
-    """Documents the mechanism so the flag is not 'simplified' away later.
+def test_retry_publication_failure_escapes_without_marking_the_run_failed():
+    """``RetryPublicationError`` 必须逃逸，且不能把 run 记成 FAILED。
 
-    If this flag were True, ``execute_run`` raising ``RetryPublicationError`` would be
-    ACKed and the run would sit in RETRYING with no replacement message — the exact
-    silent-stuck failure the reconciler is the backstop for.
+    2026-10 审计**修正**了本测试原先的前提。原 docstring 断言
+    「异常逃逸 + ``task_acks_on_failure_or_timeout=False`` 能让 broker 重新投递」，
+    这是错的：实测（Celery 5.6.3 + 真实 Redis broker）普通异常走
+    ``Request.on_failure`` 的 ``reject(requeue=False)``——消息被**丢弃**、不重投。
+    ``acks_on_failure_or_timeout`` 只影响「失败时不写 result 状态」，
+    并不带来重新投递。
+
+    真正的恢复路径是「数据库 AgentRun + 周期 reconciler」，见
+    :func:`test_delivery_semantics_recovery_relies_on_scheduled_reconciler`。
     """
     from runtime.celery_app import celery_app
     from runtime.executor import RetryPublicationError
 
-    # the escape hatch exists...
+    # the escape hatch exists and is an ordinary RuntimeError subclass
     assert issubclass(RetryPublicationError, RuntimeError)
-    # ...and it only achieves redelivery because failures are not ACKed
+    # 因此它落在 reject(requeue=False) 分支——保留这个开关仅为「失败不 ACK」
     assert not celery_app.conf.task_acks_on_failure_or_timeout
 
 
@@ -710,3 +933,291 @@ class TestWaitForTimeoutContract:
         started = time.monotonic()
         mod._wait_for(lambda: False, 0)
         assert time.monotonic() - started < 1.0, "regression test must not wait"
+
+
+# ---------------------------------------------------------------------------
+# M. Celery delivery semantics — the recovery loop's load-bearing contract
+#
+# Audit finding (2026-10-17), established by reading Celery 5.6.3's
+# ``Request.on_failure`` and then confirmed empirically against a real Redis
+# broker with a real worker process
+# (tests/integration/runtime/test_celery_delivery_semantics.py):
+#
+#   failure kind              broker action            redelivered?
+#   ------------------------  ----------------------  -------------
+#   success                   acknowledge()            n/a
+#   ordinary Exception        reject(requeue=False)   NO  <- discarded
+#   RetryPublicationError     reject(requeue=False)   NO  <- discarded
+#   SoftTimeLimitExceeded     reject(requeue=False)   NO  <- discarded
+#   TimeLimitExceeded (hard)  child SIGKILLed         NO within the window
+#   WorkerLostError           reject(requeue=True)    YES
+#   Reject(requeue=True)      reject(requeue=True)    YES, and IMMEDIATELY
+#
+# Consequences this file pins down:
+#   1. Escaping an exception is NOT a redelivery mechanism. The old comments
+#      and the old version of ``test_retry_publication_failure_...`` said it was.
+#   2. The only reliable recovery is the durable AgentRun row plus a scheduled
+#      reconciler. Without the schedule there is no recovery loop at all.
+#   3. Neither redelivery path has backoff, so bare ``Reject(requeue=True)``
+#      is not an acceptable recovery strategy (measured: 80 redeliveries in 5s).
+# ---------------------------------------------------------------------------
+
+
+class TestDeliverySemanticsContract:
+    @pytest.mark.unit
+    def test_recovery_relies_on_scheduled_reconciler_not_broker_redelivery(self):
+        """``beat_schedule`` 必须真的排了 reconciler —— 这是恢复闭环的承重结构。
+
+        若有人删掉这条 schedule，broker 侧的普通异常路径又不会重投，
+        滞留 run 就彻底没有任何自动恢复手段。
+        """
+        from runtime.celery_app import celery_app
+
+        schedule = celery_app.conf.beat_schedule
+        assert "reconcile-stuck-runs" in schedule, (
+            "reconciler 未被调度：普通异常/超时的消息被 broker 丢弃且不重投，"
+            "没有周期扫描就没有恢复闭环"
+        )
+        entry = schedule["reconcile-stuck-runs"]
+        assert entry["task"] == "runtime.reconcile_stuck_runs"
+        assert float(entry["schedule"]) > 0
+
+    @pytest.mark.unit
+    def test_reconcile_task_is_registered_on_the_app(self):
+        import runtime.tasks  # noqa: F401  # `imports=` 是惰性的，需先解析才会注册
+        from runtime.celery_app import celery_app
+
+        assert "runtime.reconcile_stuck_runs" in celery_app.tasks
+
+    @pytest.mark.unit
+    def test_reconcile_interval_is_configurable_and_bounded(self):
+        import core.config as config
+
+        assert config.AGENT_RUN_RECONCILE_INTERVAL_SECONDS > 0
+        from runtime.celery_app import celery_app
+
+        got = float(celery_app.conf.beat_schedule["reconcile-stuck-runs"]["schedule"])
+        # max(1.0, ...) 的下界保证不会把 beat 压成忙循环
+        assert got >= 1.0
+
+    @pytest.mark.unit
+    def test_beat_is_not_embedded_in_the_worker_command(self):
+        """内嵌 beat（worker -B）在多副本下会让每个副本各调度一次。"""
+        import yaml
+
+        compose = yaml.safe_load(
+            (PROJECT_ROOT / "deploy" / "compose" / "docker-compose.yml").read_text(encoding="utf-8")
+        )
+        services = compose["services"]
+        assert "beat" in services, "缺少独立 beat service，恢复闭环没有被驱动"
+        worker_cmd = services["worker"]["command"]
+        assert (
+            "-B" not in worker_cmd and "--beat" not in worker_cmd
+        ), "worker 命令里内嵌了 beat：worker 可被 --scale 成多副本，会重复调度"
+
+    @pytest.mark.unit
+    def test_broker_semantics_are_not_claimed_as_the_recovery_mechanism(self):
+        """防止把「异常逃逸」重新写回「会触发 broker 重新投递」。"""
+
+        offenders = []
+        for rel in ("runtime/executor.py", "runtime/retry.py", "runtime/celery_app.py"):
+            text = (PROJECT_ROOT / rel).read_text(encoding="utf-8")
+            for i, line in enumerate(text.splitlines(), start=1):
+                # 只抓「断言该说法」的形状：逃逸 + 触发 + 重新投递。
+                # 明确否定它（「刻意不把异常逃逸当成…」）是必须保留的正确表述，
+                # 因此比较前先去掉 markdown 强调标记，避免「**不**」骗过否定检测。
+                bare = line.replace("*", "").replace("_", "")
+                if "逃逸" in bare and "触发" in bare and "重新投递" in bare:
+                    if any(neg in bare for neg in ("不是", "不", "非", "错")):
+                        continue
+                    offenders.append(f"{rel}:{i}: {line.strip()}")
+        assert offenders == [], (
+            "仍有注释把「异常逃逸」当成 broker 重新投递的恢复手段：\n" + "\n".join(offenders)
+        )
+
+    @pytest.mark.unit
+    def test_pending_grace_and_queued_orphan_grace_are_one_value(self):
+        """QUEUED 孤儿分支与 PENDING 分支的宽限期必须是**同一个**常量。
+
+        两者描述的是同一类不确定性（消息是否已发出不可知）。用两个各自硬编码的
+        magic number 会让两者的实际检测延迟悄悄漂移，而延迟承诺写在
+        ``docs/reference/runtime-state-convergence.md`` 第 4 节。
+        """
+        import inspect
+
+        from runtime import repository, retry
+
+        assert repository.ORPHAN_GRACE_SECONDS == 60
+        sig = inspect.signature(retry.reconcile_stuck_runs)
+        default = sig.parameters["pending_grace_seconds"].default
+        assert (
+            default == repository.ORPHAN_GRACE_SECONDS
+        ), "PENDING 宽限期默认值必须复用 ORPHAN_GRACE_SECONDS，不能各写一个数字"
+
+    @pytest.mark.unit
+    def test_reconcile_outcome_signal_is_distinct_from_beat_liveness(self):
+        """必须有「reconciler 成功执行」的可观测信号，不能只有 beat 存活。
+
+        beat 的健康检查只看 schedule 文件 mtime（进程活着就一直更新），所以
+        「beat 活着但扫描每次都失败」时健康检查仍是绿的，而恢复闭环已经断了。
+        """
+        import inspect
+
+        from core import monitoring
+        from runtime import metrics
+        from runtime.tasks import reconcile_stuck_runs_task
+
+        assert hasattr(monitoring, "agent_reconcile_scan_total")
+        assert hasattr(monitoring, "agent_reconcile_last_success_timestamp_seconds")
+        assert hasattr(monitoring, "agent_run_stale_reclaimed_total")
+        src = inspect.getsource(reconcile_stuck_runs_task)
+        assert "record_reconcile_scan(False)" in src, "扫描失败必须留下可查询信号"
+        assert "record_reconcile_success" in src, "成功扫描必须刷新时间戳"
+        assert inspect.getsource(metrics.record_reconcile_scan)
+
+    @pytest.mark.unit
+    def test_dead_letter_write_is_not_lease_unconditional(self):
+        """禁止出现「只判 RUNNING、不带 lease 谓词」的 DLQ 更新。
+
+        这是本轮修复的缺陷本体：``attempt == max_attempts`` 是最后一次正常执行的
+        常态，只判 status 的 DLQ 写入会误杀持有有效 lease、正在跑图的 run。
+        """
+        import inspect
+
+        from runtime import repository
+
+        dl_src = inspect.getsource(repository.AgentRunRepository.dead_letter_stale_running)
+        assert "AgentRun.lease_expires_at <= now" in dl_src
+        assert "AgentRun.attempt >= AgentRun.max_attempts" in dl_src
+        # 状态迁移与 DLQ 行必须同事务
+        helper = inspect.getsource(repository.AgentRunRepository._dead_letter_conditionally)
+        assert "_attach_dead_letter" in helper
+        assert helper.index("_attach_dead_letter") < helper.index("session.commit()")
+
+    @pytest.mark.unit
+    def test_attempt_budget_is_enforced_inside_the_claim_update(self):
+        """预算必须在**领取的那条 UPDATE** 里判定，不能放在 Python 里先判。
+
+        历史形态（本文件曾断言的源码顺序）是 ``mark_running`` 里先 SELECT 出
+        ``attempt``、在 Python 里比 ``max_attempts``、耗尽就无条件
+        ``RUNNING -> DEAD_LETTER``。``attempt == max_attempts`` 是**最后一次正常
+        执行**的常态，于是任何重复投递都会把持有有效 lease、正在跑图的 run 打成
+        DEAD_LETTER —— 已证实的缺陷。
+
+        现在的契约更强：预算谓词与 lease 谓词、状态谓词**同在一条 UPDATE 内**，
+        由数据库一次性判定。行为级证据见
+        ``tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py``。
+        """
+        import inspect
+
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+
+        # 服务层不得再做「先 SELECT 再判预算」：它只能消费数据库层的原子结果。
+        src = inspect.getsource(RunService.mark_running)
+        assert (
+            "next_attempt" not in src
+        ), "mark_running 里不应再有 Python 侧预算判定（attempt+1 已下沉到 SQL）"
+        for call in ("self.repo.takeover_running(", "self.repo.claim_executable("):
+            assert call in src, f"mark_running 必须走原子领取原语 {call}"
+        assert "from_statuses={RunStatus.RUNNING}" in src and (
+            "require_expired_lease=True" in src
+        ), "RUNNING 的预算耗尽收敛必须要求 lease 已过期"
+
+        # 预算谓词在 repository 层，且必须与状态/lease 谓词同一条 UPDATE。
+        take = inspect.getsource(AgentRunRepository.takeover_running)
+        assert (
+            "AgentRun.attempt < AgentRun.max_attempts" in take
+        ), "takeover_running 必须在同一条 UPDATE 里带预算谓词"
+        for method in (
+            "dead_letter_stale_running",
+            "dead_letter_exhausted_executable",
+            "claim_executable",
+        ):
+            body = inspect.getsource(getattr(AgentRunRepository, method))
+            assert "max_attempts" in body, f"{method} 必须带预算谓词"
+
+        # 三条 RUNNING 收敛路径都不允许出现「无 lease 条件的 RUNNING -> DEAD_LETTER」。
+        dl_stale = inspect.getsource(AgentRunRepository.dead_letter_stale_running)
+        assert (
+            "AgentRun.lease_expires_at <= now" in dl_stale
+        ), "RUNNING -> DEAD_LETTER 必须带 lease 过期谓词，否则会误杀正在执行的 run"
+
+    @pytest.mark.unit
+    def test_pending_recovery_uses_conditional_transition_not_blanket_dispatch(self):
+        """PENDING 恢复必须是「条件迁移 + 宽限期」，不是无脑重投。"""
+        import inspect
+
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+
+        promote = inspect.getsource(AgentRunRepository.promote_pending_to_queued)
+        assert (
+            "AgentRun.status == RunStatus.PENDING.value" in promote
+        ), "PENDING -> QUEUED 必须是 status 谓词下的条件迁移"
+        assert "grace_seconds" in inspect.getsource(
+            AgentRunRepository.list_stale_pending_runs
+        ), "PENDING 扫描必须带宽限期"
+        scan = inspect.getsource(RunService.list_stale_pending_runs)
+        assert "grace_seconds" in scan
+        # 宽限期默认值必须与 QUEUED 孤儿分支同一口径（同一常量，不各写一个数字）
+        from runtime.repository import ORPHAN_GRACE_SECONDS
+
+        assert "ORPHAN_GRACE_SECONDS" in inspect.getsource(
+            AgentRunRepository.list_stale_pending_runs
+        ), "PENDING 宽限期必须复用 ORPHAN_GRACE_SECONDS"
+        assert "ORPHAN_GRACE_SECONDS" in inspect.getsource(
+            AgentRunRepository.list_recoverable_runs
+        ), "QUEUED 孤儿分支也必须复用同一常量"
+        assert ORPHAN_GRACE_SECONDS == 60
+
+
+class TestAttemptBudgetTerminalConvergence:
+    @pytest.mark.unit
+    async def test_exhausted_budget_dead_letters_instead_of_looping(self):
+        """预算耗尽必须**终态**收敛，否则 reconciler 会无限重投它。
+
+        ``list_recoverable_runs`` 不比较 ``max_attempts``；一个停在 QUEUED/RETRYING
+        且预算已耗尽的 run 会被它反复捞起。落 DEAD_LETTER 后不再出现在扫描结果里。
+        """
+        from runtime.executor import execute_run
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+        from runtime.thread_lock import InMemoryThreadLock
+        from tests.unit.runtime_helpers import (
+            FakeRuntime,
+            dispose,
+            make_sqlite_session_factory,
+            runtime_provider,
+        )
+
+        session_factory, engine, path = make_sqlite_session_factory()
+        try:
+            service = RunService(repository=AgentRunRepository(session_factory=session_factory))
+            run = service.create_run(query="q", session_id="T-budget", max_attempts=1)
+            # 模拟「预算已被 broker 重复投递耗尽」：attempt 已达上限
+            from runtime.statuses import RunStatus
+
+            service.repo.transition(
+                run["id"],
+                from_statuses={RunStatus.QUEUED},
+                to_status=RunStatus.QUEUED,
+                attempt=1,
+            )
+            status = await execute_run(
+                run["id"],
+                service=service,
+                runtime_provider=runtime_provider(FakeRuntime(lambda **kw: {"response": "ok"})),
+                dispatcher=None,
+                lock_manager=InMemoryThreadLock(),
+                worker_id="w-budget",
+            )
+            stored = service.get_run(run["id"])
+            assert stored["status"] == "DEAD_LETTER"
+            assert status == "DEAD_LETTER", "执行器必须上报真实状态，而不是假装 RUNNING"
+            assert stored["attempt"] == 1, "预算耗尽时不得递增 attempt"
+            assert service.get_dead_letter(run["id"]) is not None
+            # 图从未被执行：不能有副作用发生
+            assert stored.get("result") in (None, {})
+        finally:
+            dispose(engine, path)

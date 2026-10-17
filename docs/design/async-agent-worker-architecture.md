@@ -67,7 +67,7 @@ flowchart TD
 | `run_id` | 单轮 Graph 执行（== `agent_runs.id`） | 每次请求 |
 | `task_id` | 队列消息 / worker 执行 ID（Celery task id） | 入队时 |
 | `AgentRun` | 业务运行记录（`agent_runs` 行），状态真相源 | 落库时 |
-| `idempotency_key`（工具侧） | 有副作用 tool 的幂等键，`operation_key = run_id:tool_call_id` | tool 调用边界 |
+| `idempotency_key`（工具侧） | 有副作用 tool 的幂等键。默认 `build_replay_stable_operation_key`（**对节点重放稳定**）；HITL 为 `run_id:approval:{approval_id}` | tool 调用边界 |
 
 ## 已实现（第一阶段 foundation）
 

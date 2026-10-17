@@ -102,6 +102,40 @@ ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.CANCELLED: frozenset(),
 }
 
+#: 显式声明的**非进展性 / 运维性**迁移，与 ``ALLOWED_TRANSITIONS`` 分开。
+#:
+#: 这些边都是真实执行的（此前它们绕过了 ``ensure_transition``，导致本表作为
+#: 「唯一真相源」的声明与实际行为不符）：
+#:
+#: - ``DEAD_LETTER -> QUEUED``：人工重放（``requeue_dead_letter`` /
+#:   ``scripts/replay_dead_run.py``）。**没有任何自动路径**会做这件事。
+#: - ``QUEUED -> QUEUED`` / ``RETRYING -> RETRYING`` / ``RUNNING -> RUNNING``：
+#:   不改变业务阶段的推进——thread 竞争退避（``defer_run``）与 RUNNING 接管
+#:   （``takeover_running``，在同一条 UPDATE 里 attempt+1）。
+#:
+#: 保持独立而不是并进 ``ALLOWED_TRANSITIONS``，是为了让「终态没有自动出口」这句话
+#: 继续成立且可测（见 ``tests/unit/test_hitl_run_status.py``）；``DEAD_LETTER`` 的
+#: 「终态」含义是「没有任何东西会自己再捞起它」，不是「人永远不能重放」。
+ADMINISTRATIVE_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
+    RunStatus.DEAD_LETTER: frozenset({RunStatus.QUEUED}),
+    RunStatus.QUEUED: frozenset({RunStatus.QUEUED}),
+    RunStatus.RETRYING: frozenset({RunStatus.RETRYING}),
+    RunStatus.RUNNING: frozenset({RunStatus.RUNNING}),
+}
+
+
+def is_declared_transition(src: RunStatus, dst: RunStatus) -> bool:
+    """``ALLOWED_TRANSITIONS`` 与 ``ADMINISTRATIVE_TRANSITIONS`` 的并集。"""
+    return dst in ALLOWED_TRANSITIONS.get(
+        src, frozenset()
+    ) or dst in ADMINISTRATIVE_TRANSITIONS.get(src, frozenset())
+
+
+def ensure_declared_transition(src: RunStatus, dst: RunStatus, run_id: str = "") -> None:
+    """未在任一表中声明的迁移直接拒绝——表才是真相源，而不是文档。"""
+    if not is_declared_transition(src, dst):
+        raise InvalidRunTransition(run_id, src.value, dst.value)
+
 
 class InvalidRunTransition(ValueError):
     """非法状态迁移。"""

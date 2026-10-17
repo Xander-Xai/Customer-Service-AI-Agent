@@ -85,6 +85,31 @@ class ToolExecutionTimeout(Exception):
         self.timeout_seconds = timeout_seconds
 
 
+@dataclass(frozen=True)
+class LogicalCall:
+    """一次**逻辑**工具调用的、与 LLM 输出无关的稳定身份。
+
+    由调用方（Agent 工具循环）在**执行副作用之前**构造并传入。它刻意不含
+    ``tool_call_id``：后者由 LLM 生成，节点重放时会变，而写操作的幂等键必须跨
+    重放稳定（见 ``runtime.side_effects.build_replay_stable_operation_key``）。
+
+    字段语义
+    --------
+    - ``node_id``：发起调用的图节点。协作模式下同名节点可能跑多次，但那是不同的
+      逻辑调用，需要不同的 ``ordinal``。
+    - ``agent``：发起调用的 agent 角色。
+    - ``ordinal``：**本节点内、同一工具**的第 n 次调用（从 0 开始）。区分一个节点里
+      的多次同类写操作。
+
+    调用方应保证同一节点内同一工具的调用顺序可重放；不可重放时退化的后果是
+    ``request_fingerprint`` 冲突 -> ``PermanentError``（fail-closed），不会重复执行。
+    """
+
+    node_id: str
+    agent: str
+    ordinal: int
+
+
 @dataclass
 class ToolDefinition:
     """工具定义（JSON Schema 格式，兼容 OpenAI Function Calling）"""
@@ -127,6 +152,36 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
+        #: 执行权复核回调（``() -> bool``）。由 worker 装入（见
+        #: ``runtime.executor._install_execution_fence``）。``None`` 表示不启用
+        #: 复核（例如测试与实时快路径），此时只走原有的操作身份治理。
+        self._execution_fence: Callable[[], bool] | None = None
+
+    def set_execution_fence(self, fence: Callable[[], bool] | None) -> None:
+        """装入「我是否仍持有执行权」的只读判定。
+
+        用于**副作用工具执行前**的第二道防线：owner CAS 保护状态提交，协作式取消
+        保护图执行，但两者之间仍有窗口（心跳周期内 ownership 可能已经易主）。
+        这里在发起外部写之前再确认一次。
+
+        语义：
+        - 只对 ``side_effect=True`` 的工具有效，只读工具完全不受影响；
+        - 判定抛异常时按「没有执行权」处理（fail-closed）；
+        - 判定为否时**拒绝执行**，返回可解释的拒绝文案，而不是照写。
+        """
+        self._execution_fence = fence
+
+    def _execution_fence_allows(self, tool_name: str) -> bool:
+        """副作用工具的执行权复核。缺省允许（未启用复核时保持既有行为）。"""
+        if self._execution_fence is None:
+            return True
+        try:
+            return bool(self._execution_fence())
+        except Exception as e:  # noqa: BLE001 - 无法确认即视为没有执行权
+            logger.warning(
+                "执行权复核失败，按无执行权处理 tool=%s: %s", tool_name, type(e).__name__
+            )
+            return False
 
     def register(
         self,
@@ -190,10 +245,15 @@ class ToolRegistry:
         arguments: dict[str, Any],
         stream_callback: Callable | None = None,  # v6.0: 转发给工具 handler
         tool_call_id: str | None = None,
+        logical_call: LogicalCall | None = None,
     ) -> str:
         """执行指定工具，返回字符串结果"""
         result = await self.execute_raw(
-            name, arguments, stream_callback=stream_callback, tool_call_id=tool_call_id
+            name,
+            arguments,
+            stream_callback=stream_callback,
+            tool_call_id=tool_call_id,
+            logical_call=logical_call,
         )
         return str(result) if result is not None else "查询完成，无结果"
 
@@ -203,11 +263,23 @@ class ToolRegistry:
         arguments: dict[str, Any],
         stream_callback: Callable | None = None,
         tool_call_id: str | None = None,
+        logical_call: LogicalCall | None = None,
     ) -> Any:
         """执行工具并保留结构化返回值，供 Context Engineering 使用。"""
         tool = self._tools.get(name)
         if not tool:
             return f"错误：工具 '{name}' 不存在"
+
+        # 执行权 fencing（第二道防线）：失去 ownership 的 worker 不得再发起外部写。
+        # 只读工具不受影响；失败一律 fail-closed。
+        if tool.side_effect and not self._execution_fence_allows(name):
+            logger.warning(
+                "已失去执行权，拒绝执行写操作工具 tool=%s（协作式取消的窗口内兜底）", name
+            )
+            return (
+                f"错误：本 worker 已失去该 run 的执行权，写操作工具 '{name}' 已拒绝执行，"
+                "以避免与新执行者重复写入。请等待当前 run 由持有执行权的 worker 完成。"
+            )
 
         # Fail-closed governance boundary (Issue #123). This is the single choke
         # point every realtime transport (REST / SSE / WS / multimodal) and the
@@ -248,7 +320,7 @@ class ToolRegistry:
             },
         ):
             return await self._execute_raw_inner(
-                tool, name, arguments, stream_callback, tool_call_id
+                tool, name, arguments, stream_callback, tool_call_id, logical_call
             )
 
     def _ungoverned_side_effect_refusal(
@@ -283,10 +355,15 @@ class ToolRegistry:
         arguments: dict[str, Any],
         stream_callback: Callable | None,
         tool_call_id: str | None,
+        logical_call: LogicalCall | None = None,
     ) -> Any:
         """``execute_raw`` proper, with the span wrapper peeled off."""
         idempotent_op, refusal = self._idempotent_operation(
-            tool, arguments, tool_call_id, stream_callback=stream_callback
+            tool,
+            arguments,
+            tool_call_id,
+            stream_callback=stream_callback,
+            logical_call=logical_call,
         )
         if refusal is not None:
             # 异步 Run 中的写操作无法构造可靠的持久化幂等保护 -> FAIL CLOSED。
@@ -316,6 +393,7 @@ class ToolRegistry:
         tool_call_id: str | None,
         *,
         stream_callback: Callable | None = None,
+        logical_call: LogicalCall | None = None,
     ) -> tuple[Callable[[], Any] | None, str | None]:
         """为副作用工具构造幂等执行闭包；返回 ``(operation, refusal)``。
 
@@ -350,10 +428,9 @@ class ToolRegistry:
         if not run_id:
             # 实时快路径：由统一执行边界的治理判定处理（Issue #123）。
             return None, None
-        if not tool_call_id:
-            return None, self._missing_precondition_refusal(tool.name, "缺少 tool_call_id")
         try:
             from runtime.side_effects import (
+                build_replay_stable_operation_key,
                 build_tool_idempotency_key,
                 execute_idempotent_operation,
             )
@@ -362,10 +439,33 @@ class ToolRegistry:
                 "side-effect ledger 不可用，拒绝在 Run 上下文中裸执行副作用: %s", tool.name
             )
             return None, self._missing_precondition_refusal(tool.name, "幂等 ledger 不可用")
-        try:
-            operation_key = build_tool_idempotency_key(run_id, tool_call_id)
-        except Exception:
-            return None, self._missing_precondition_refusal(tool.name, "幂等操作键构造失败")
+
+        if logical_call is not None:
+            # 重放稳定路径：优先。没有它，同一笔写操作会因为 LLM 在节点重放时换了
+            # tool_call_id 而被执行两次（见 runtime/side_effects.py 的说明）。
+            try:
+                operation_key = build_replay_stable_operation_key(
+                    run_id=run_id,
+                    node_id=logical_call.node_id,
+                    agent=logical_call.agent,
+                    tool_name=tool.name,
+                    ordinal=logical_call.ordinal,
+                )
+            except Exception:
+                return None, self._missing_precondition_refusal(
+                    tool.name, "重放稳定幂等操作键构造失败"
+                )
+        elif tool_call_id:
+            # 兼容路径：tool_call_id 稳定时（例如 HITL 传 ``approval:{id}``）同样安全。
+            try:
+                operation_key = build_tool_idempotency_key(run_id, tool_call_id)
+            except Exception:
+                return None, self._missing_precondition_refusal(tool.name, "幂等操作键构造失败")
+        else:
+            # 没有重放稳定身份、也没有 tool_call_id -> 无法证明重放时不会重复执行。
+            return None, self._missing_precondition_refusal(
+                tool.name, "缺少 logical_call 与 tool_call_id"
+            )
         thread_id = get_current_thread_id()
 
         async def _run():

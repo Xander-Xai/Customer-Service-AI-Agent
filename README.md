@@ -92,7 +92,8 @@ LLM 说"我觉得该退款"不构成授权。
 
 分布式执行必然是 at-least-once：worker 崩了，任务会被重新投递。
 如果幂等没做对，**一次崩溃就变成两次扣款**。
-"恰好一次"不是框架给你的，是你自己要用 ledger 换来的。
+"不重复发起"不是框架给你的，是你自己要用 ledger 换来的——而且只在**本仓 ledger 层**成立；
+端到端 exactly-once 还要下游接受同一把幂等键。
 
 ### 4. 状态散落在四个互不相干的地方
 
@@ -118,7 +119,8 @@ LLM 说"我觉得该退款"不构成授权。
 
 > 一句话：**一个同步快路径 + 异步耐久路径并存的企业客服 Agent 服务。**
 > 快路径用 LangGraph 实时编排多 Agent 回答请求；长任务落库入队，
-> 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用加**恰好一次**的幂等记账。
+> 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用加**去重记账**
+> （本仓 ledger 保证不重复执行；端到端 exactly-once 需要下游接受幂等键）。
 
 针对上面六个问题：
 
@@ -138,8 +140,12 @@ LLM 说"我觉得该退款"不构成授权。
    embedding 挂 → 语义缓存失效并显式标记 degraded，**不静默退化成词面命中**。
    无治理上下文的写操作 → 拒绝执行。
 2. **AgentRun 表是唯一真相源.** Celery result backend 不是（`task_ignore_result=True`）。
-3. **副作用必须恰好一次.** 用 `operation_key = run_id:tool_call_id` + 原子 claim 换，
-   而不是假装消息队列是 exactly-once。
+3. **副作用必须可去重，且要写清楚去重到哪一层.** 用**重放稳定**
+   `operation_key`（`build_replay_stable_operation_key`，非 HITL；HITL 用
+   `run_id:approval:{approval_id}`）+ 原子 claim 换，而不是假装消息队列是
+   exactly-once。**不能用 `run_id:tool_call_id`**：`tool_call_id` 由 LLM 生成，节点
+   重放时会变，同一笔逻辑写操作换键后会被执行两次。**边界**：ledger 让**本仓**不重复发起同一次写；外部系统的
+   exactly-once 需要下游接受同一把幂等键——本仓**不提供、不宣称**端到端保证。
 4. **没证据就不写数字.** 正式检索指标当前**不可测**（gold 不是相关度标注），
    所以本仓库不发布任何 Hit@K / MRR 百分比。用随机同类别文档当 gold 算出来的数字
    **比没有数字更糟**。
@@ -643,7 +649,13 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 - ~~**监控序列化闭环**：让 DLQ 告警规则真正可触发。~~ **已完成**
   （`GET /metrics` + 多进程聚合 + 抓取凭据；真实 Prometheus 上告警实际 FIRING）。
   剩余：Alertmanager 实际投递端到端、整套 compose 栈验证。
-- ~~**HITL 配置 fail-closed**~~ **已完成**（启动校验 + side-effect 兜底）。
+- ~~**HITL 配置 fail-closed**~~ **已完成**（启动校验 + side_effect 兜底）。
+- ~~**未预期异常 ACK 掉滞留 run**~~ **已完成**（`runtime/executor.py`：逃逸以触发
+  broker 重投的 `raise` 曾写在 `contextlib.suppress` 内部被吞掉，等于 ACK 了一个
+  没有待投递消息的 `QUEUED/RETRYING` run）。
+- ~~**审批 TTL 过期分支的并发覆写**~~ **已完成**（`core/hitl/approval_service.py`：
+  过期收敛曾是唯一一条非 CAS 写入，可把并发已 `APPROVED` 覆写成 `EXPIRED`，
+  让已批准的决策永远送不到工具）。
 - **生产凭据/证书/ERP/CORS**：替换全部占位符，接入真实 TLS、金蝶 ERP 与 `CORS_ORIGINS`。
 - ~~**告警可执行性契约测试**~~ **已完成**
   （`tests/unit/test_metrics_exposure_contract.py` 断言告警与 Grafana 引用的每个
@@ -653,7 +665,17 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 
 - ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
   （需先定义「读可重试、写不可重试」的边界）。
-- `reconcile_stuck_runs` 接入调度（beat / CronJob），卡死 run 兜底从文档变为运行。
+- ~~**broker 投递语义核查 + 恢复闭环补齐**~~ **已完成**（`make runtime-delivery`
+  真实 Redis broker + 真实 Celery worker 实测）：普通异常 / `RetryPublicationError` /
+  软硬超时全部 `reject(requeue=False)`——**消息被丢弃、不重投**；只有 worker 进程
+  被杀（`WorkerLostError`）才重投。恢复因此改为「数据库 AgentRun + beat 周期
+  reconciler」（新增独立 `beat` service），并把 attempt 预算闸门补到领取点。
+- **强制中止失去所有权的 worker**：owner CAS 目前只挡**状态提交**，没有 fencing
+  token、也不 abort 旧协程——陈旧 worker 的 checkpoint 写入与工具副作用不受
+  owner CAS 保护。
+- 覆盖 `PENDING` 滞留 run（两阶段入队在 `mark_queued` 前被杀会永久滞留）；
+  `beat` 单点 HA；runtime 时间参数交叉校验（lease / visibility vs task time limit）；
+  side-effect claim TTL 从硬编码变成配置项。
 - Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
 - 持久化 trace 后端（Jaeger / Tempo）接入，tracing 从本地验证升级为可查询。
 

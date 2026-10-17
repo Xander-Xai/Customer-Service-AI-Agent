@@ -1,0 +1,84 @@
+{
+  "result": "PASS",
+  "run_id": "chaos-845cfcd2",
+  "thread_id": "T-chaos-845cfcd2",
+  "queue": "agent_runs_test_845cfcd2",
+  "steps": [
+    {
+      "step": 1,
+      "action": "create_run",
+      "run_id": "chaos-845cfcd2",
+      "ok": true
+    },
+    {
+      "step": 2,
+      "action": "enqueue",
+      "queue": "agent_runs_test_845cfcd2",
+      "ok": true
+    },
+    {
+      "step": 3,
+      "action": "side_effect_applied",
+      "idem:counter": 1,
+      "ok": true
+    },
+    {
+      "step": 4,
+      "action": "checkpoint_persisted",
+      "checkpoints": 2,
+      "worker_id": "Ydxx:1129267:058768ca",
+      "ok": true
+    },
+    {
+      "step": 5,
+      "action": "sigkill_worker_group",
+      "ok": true
+    },
+    {
+      "step": 6,
+      "action": "reconcile_stale_running",
+      "detail": "lease 过期后由生产同款 reconciler 重新投递",
+      "ok": true
+    },
+    {
+      "step": 7,
+      "action": "recovered",
+      "status": "SUCCEEDED",
+      "attempt": 2,
+      "worker_id": "Ydxx:1129358:6030a584",
+      "worker_switched": true,
+      "ok": true
+    },
+    {
+      "step": 8,
+      "action": "side_effect_deduplicated",
+      "idem:counter": 1,
+      "tool_invocations": 2,
+      "ledger_hits": 1,
+      "ledger": {
+        "tool_name": "increment_counter",
+        "operation_key": "chaos-845cfcd2:T-chaos-845cfcd2:refund",
+        "status": "SUCCEEDED"
+      },
+      "ok": true
+    }
+  ],
+  "code_provenance": {
+    "commit_sha": "970cb1afd85a62ea930fccb90e5d3408643ba6b3",
+    "dirty": false,
+    "tracked_diff_sha256": null,
+    "untracked_source_sha256": null,
+    "tool_versions": {
+      "python": "3.10.12",
+      "langgraph": "1.2.12",
+      "langchain-core": "1.6.6",
+      "fastapi": "0.137.1",
+      "qdrant-client": "1.18.0",
+      "celery": "5.6.3"
+    },
+    "generated_at": "2026-10-17T15:48:00.901754+00:00",
+    "dataset_sha256": null,
+    "publication_status": "REPRODUCIBLE",
+    "notes": []
+  }
+}

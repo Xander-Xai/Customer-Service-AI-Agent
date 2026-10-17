@@ -10,17 +10,29 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from db.database import get_db_session
 from db.models import AgentDeadLetter, AgentRun
 
-from .statuses import RunStatus, parse_status
+from .statuses import TERMINAL_STATUSES, RunStatus, parse_status
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+#: 「可能丢消息」的两种状态的共同宽限期（秒）。
+#:
+#: ``QUEUED``（``next_retry_at IS NULL``，即单阶段入队 publish 结果未知）与
+#: ``PENDING``（两阶段入队，确认未提交）是**同一类不确定性**：消息可能已发出，也可能
+#: 没发出，数据库这边无法区分。两种状态用**同一个**宽限期，才能保证两者的实际检测
+#: 延迟一致（= 本值 + 一次扫描间隔），也避免两个 magic number 悄悄漂移。
+#:
+#: 实测延迟关系见 ``docs/reference/runtime-state-convergence.md`` 第 4 节：扫描间隔
+#: （``AGENT_RUN_RECONCILE_INTERVAL_SECONDS``，默认 30s）**不是**恢复时间。
+ORPHAN_GRACE_SECONDS = 60
 
 
 def to_dict(run: AgentRun) -> dict[str, Any]:
@@ -76,6 +88,106 @@ class AgentRunRepository:
 
     def _session(self):
         return self._session_factory()
+
+    # ---- 原子「收敛到 DEAD_LETTER」原语 ----
+
+    @staticmethod
+    def _attach_dead_letter(
+        session: Any,
+        row: AgentRun,
+        *,
+        error_code: str | None,
+        error_message: str | None,
+        error_type: str | None,
+        now: datetime,
+    ) -> None:
+        """在**同一个事务**里写 ``agent_dead_letters`` 行。
+
+        调用方已经通过条件 UPDATE 独占了这行 run（``status`` 随之变成终态，
+        第二个竞争者的 ``rowcount`` 会是 0），所以这里先查后插不会与并发写者
+        打架；``agent_dead_letters.run_id`` 的唯一约束是兜底。
+
+        既有行**不可变**：重复补写返回原行，保留首次进入 DLQ 时的
+        ``attempt_count`` / ``error_code`` / ``entered_at``（重放后再次进入 DLQ
+        不能覆盖历史证据，见 ``RunService.requeue_dead_letter``）。
+        """
+        existing = session.execute(
+            select(AgentDeadLetter).where(AgentDeadLetter.run_id == row.id)
+        ).scalar_one_or_none()
+        if existing is not None:
+            return
+        session.add(
+            AgentDeadLetter(
+                run_id=row.id,
+                thread_id=row.thread_id,
+                attempt_count=int(row.attempt or 0),
+                max_attempts=int(row.max_attempts or 1),
+                error_type=error_type,
+                error_code=error_code,
+                error_message=(error_message or "")[:2000] or None,
+                worker_id=row.worker_id,
+                entered_at=now,
+                created_at=now,
+            )
+        )
+
+    def _dead_letter_conditionally(
+        self,
+        *,
+        run_id: str,
+        predicates: list[Any],
+        error_code: str,
+        error_message: str,
+        error_type: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """条件 UPDATE -> DEAD_LETTER，并在**同一事务**写 DLQ 行。
+
+        为什么必须同一事务
+        ------------------
+        状态迁移与 DLQ 记录分开两次提交会留下一个**不可恢复**的窗口：状态已是终态
+        （不再被任何扫描器捞起）而 DLQ 行缺失，于是这个 run 既不会重投、也没有
+        ``agent_dead_letters`` 记录供人工 ``scripts/replay_dead_run.py`` 重放——
+        它变成静默消失。同事务让两者同生共死。
+
+        返回 ``None`` = 谓词不成立（已被接走 / 已续租 / 已终态），调用方必须当成
+        benign no-op。
+        """
+        values = {
+            "status": RunStatus.DEAD_LETTER.value,
+            "error_code": error_code,
+            "error_message": (error_message or "")[:2000] or None,
+            "error_type": error_type,
+            "last_error": (error_message or "")[:2000] or None,
+            "lease_expires_at": None,
+            "finished_at": now,
+            "updated_at": now,
+        }
+        session = self._session()
+        try:
+            row = session.execute(
+                update(AgentRun).where(*predicates).values(**values).returning(AgentRun)
+            ).scalar_one_or_none()
+            if row is None:
+                session.rollback()
+                return None
+            # commit 之前先把快照取出来：commit 之后 session 可能 expire 该实例
+            snapshot = to_dict(row)
+            self._attach_dead_letter(
+                session,
+                row,
+                error_code=error_code,
+                error_message=error_message,
+                error_type=error_type,
+                now=now,
+            )
+            session.commit()
+            return snapshot
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     def create(
         self,
@@ -271,6 +383,37 @@ class AgentRunRepository:
             session.close()
         return self.get(run_id)
 
+    def owns_execution(self, run_id: str, *, worker_id: str, now: datetime | None = None) -> bool:
+        """只读地判断「当前执行者是否仍持有执行权」。
+
+        谓词与 ``transition_owned`` **完全一致**：
+        ``id = run_id AND status = RUNNING AND worker_id = :me AND lease_expires_at > now``。
+
+        刻意**不做**任何写入。特别地不能用 ``renew_lease_owned`` 代替：它会把
+        ``lease_expires_at`` 改成 ``now + lease_seconds``，用 ``lease_seconds=0``
+        去做「只读检查」会**主动把自己的租约置为过期**，把一次查询变成一次自伤。
+
+        工具在执行前的 ownership 复核用它（见 ``runtime.executor``）。判定与状态
+        提交同源，因此不会出现两套「我还有没有执行权」的标准。
+        """
+        now = now or _utcnow()
+        session = self._session()
+        try:
+            count = session.execute(
+                select(func.count())
+                .select_from(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.RUNNING.value,
+                    AgentRun.worker_id == worker_id,
+                    AgentRun.lease_expires_at.isnot(None),
+                    AgentRun.lease_expires_at > now,
+                )
+            ).scalar()
+            return bool(count)
+        finally:
+            session.close()
+
     def renew_lease_owned(
         self,
         run_id: str,
@@ -316,10 +459,11 @@ class AgentRunRepository:
         lease_seconds: float,
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
-        """原子 RUNNING takeover：只有「当前 owner 已失效」时才接管。
+        """原子 RUNNING takeover：只有「当前 owner 已失效」**且**预算未耗尽时才接管。
 
-        谓词：``status = RUNNING AND (worker_id = :new OR worker_id IS NULL
-        OR lease_expires_at IS NULL OR lease_expires_at <= :now)``。
+        谓词：``status = RUNNING AND attempt < max_attempts AND
+        (worker_id = :new OR worker_id IS NULL OR lease_expires_at IS NULL
+        OR lease_expires_at <= :now)``。
 
         这一点很关键：旧实现先 SELECT 看到「lease 过期」，再用一个只判
         ``status = RUNNING`` 的 UPDATE 写入。两个竞争者 B 和 C 可以读到同一份
@@ -327,6 +471,16 @@ class AgentRunRepository:
         B 成功写入即把 ``worker_id`` 改成 B、lease 变成未来时刻，于是 C 的谓词
         立刻不再成立，只有一个人能接管。``attempt`` 在 SQL 内 ``+ 1``，不依赖
         之前的快照。
+
+        预算谓词为什么必须在这条 UPDATE 里（而不是服务层先判）
+        ------------------------------------------------------
+        服务层「先 SELECT 判预算、再 UPDATE」留下的窗口正是本次修复的缺陷：
+        ``attempt == max_attempts`` 是**最后一次正常执行**的常态，此时一条只判
+        ``status = RUNNING`` 的预算耗尽写入会把持有有效 lease、正在跑图的 run
+        打成 ``DEAD_LETTER``。把 ``attempt < max_attempts`` 放进同一条 UPDATE 后，
+        「能否接管」与「预算是否允许」由数据库一次性判定：预算耗尽时这里必然
+        返回 ``None``，调用方再走 lease 谓词门控的 DLQ 收敛（见
+        :meth:`dead_letter_stale_running`），那条路径要求 lease 已过期。
 
         返回更新后的 run；未取得所有权返回 ``None``。
         """
@@ -338,6 +492,7 @@ class AgentRunRepository:
                 .where(
                     AgentRun.id == run_id,
                     AgentRun.status == RunStatus.RUNNING.value,
+                    AgentRun.attempt < AgentRun.max_attempts,
                     or_(
                         AgentRun.worker_id == worker_id,
                         AgentRun.worker_id.is_(None),
@@ -429,19 +584,117 @@ class AgentRunRepository:
         时间，其间一个活着的 worker 可能刚刚续上 lease。只按 ``status=RUNNING``
         更新就会把一个正在正常执行的 run 误改终态。续租一旦成功，谓词立刻不成立，
         这次写入被挡下——与 ``takeover_running`` 是同一种「判定与写入原子化」。
+
+        ``require_attempt_exhausted=True`` 追加 ``attempt >= max_attempts``。
+        该谓词是**列对列**比较，不依赖任何 Python 快照，因此
+        「扫描时看到预算耗尽」与「写入时仍预算耗尽」之间没有 TOCTOU。
         """
         now = now or _utcnow()
+        predicates: list[Any] = [
+            AgentRun.id == run_id,
+            AgentRun.status == RunStatus.RUNNING.value,
+            AgentRun.lease_expires_at.isnot(None),
+            AgentRun.lease_expires_at <= now,
+        ]
+        if fields.pop("require_attempt_exhausted", False):
+            predicates.append(AgentRun.attempt >= AgentRun.max_attempts)
         values: dict[str, Any] = {"status": to_status.value, "updated_at": now}
         values.update(fields)
+        session = self._session()
+        try:
+            result = session.execute(update(AgentRun).where(*predicates).values(**values))
+            session.commit()
+            if result.rowcount == 0:
+                return None
+        finally:
+            session.close()
+        return self.get(run_id)
+
+    def dead_letter_stale_running(
+        self,
+        run_id: str,
+        *,
+        now: datetime | None = None,
+        error_code: str,
+        error_message: str,
+        error_type: str = "transient",
+    ) -> dict[str, Any] | None:
+        """原子收敛「lease 已过期 + 预算已耗尽」的 RUNNING 到 DEAD_LETTER。
+
+        全部判定在**同一条 UPDATE** 的 WHERE 里：
+
+        - ``id = run_id``
+        - ``status = RUNNING``
+        - ``lease_expires_at IS NOT NULL AND lease_expires_at <= now``（owner 已被
+          证明失效；**仍持有有效 lease 的 run 绝不会被改写**）
+        - ``attempt >= max_attempts``（预算耗尽，不再执行）
+
+        DLQ 行在同事务写入（见 :meth:`_dead_letter_conditionally`）。
+
+        返回 ``None`` 表示谓词不成立：run 已被接管 / 刚续上租 / 已终态 / 预算未
+        耗尽。调用方必须把它当 benign no-op。
+        """
+        now = now or _utcnow()
+        return self._dead_letter_conditionally(
+            run_id=run_id,
+            predicates=[
+                AgentRun.id == run_id,
+                AgentRun.status == RunStatus.RUNNING.value,
+                AgentRun.lease_expires_at.isnot(None),
+                AgentRun.lease_expires_at <= now,
+                AgentRun.attempt >= AgentRun.max_attempts,
+            ],
+            error_code=error_code,
+            error_message=error_message,
+            error_type=error_type,
+            now=now,
+        )
+
+    def claim_executable(
+        self,
+        run_id: str,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        worker_id: str | None,
+        task_id: str | None,
+        lease_seconds: float | None,
+        set_started_at: bool,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """原子 QUEUED/RETRYING -> RUNNING 领取（含预算谓词 + SQL 内 attempt+1）。
+
+        三个判定在同一条 UPDATE 内：``status IN (...)``、``attempt < max_attempts``、
+        写入 ``attempt = attempt + 1``。因此
+
+        - 并发重复投递里**恰好一个** worker 拿到执行权（``rowcount == 1``）；
+        - 落败者的投递**不消耗预算**（attempt 只在获胜的 UPDATE 里 +1）；
+        - 预算耗尽时这里必然返回 ``None``，由调用方走
+          :meth:`dead_letter_exhausted_executable` 原子收敛。
+
+        返回 ``None`` = 未取得执行权（并发竞争输了 / 预算耗尽 / 状态已变）。
+        """
+        now = now or _utcnow()
+        values: dict[str, Any] = {
+            "status": RunStatus.RUNNING.value,
+            "attempt": AgentRun.attempt + 1,
+            "worker_id": worker_id,
+            "task_id": task_id,
+            "updated_at": now,
+        }
+        if set_started_at:
+            values["started_at"] = now
+        if lease_seconds is not None:
+            values["lease_expires_at"] = now + timedelta(seconds=lease_seconds)
+            values["heartbeat_at"] = now
+        allowed = [s.value for s in from_statuses]
         session = self._session()
         try:
             result = session.execute(
                 update(AgentRun)
                 .where(
                     AgentRun.id == run_id,
-                    AgentRun.status == RunStatus.RUNNING.value,
-                    AgentRun.lease_expires_at.isnot(None),
-                    AgentRun.lease_expires_at <= now,
+                    AgentRun.status.in_(allowed),
+                    AgentRun.attempt < AgentRun.max_attempts,
                 )
                 .values(**values)
             )
@@ -451,6 +704,144 @@ class AgentRunRepository:
         finally:
             session.close()
         return self.get(run_id)
+
+    def dead_letter_exhausted_executable(
+        self,
+        run_id: str,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        now: datetime | None = None,
+        error_code: str,
+        error_message: str,
+        error_type: str = "transient",
+    ) -> dict[str, Any] | None:
+        """原子收敛「预算已耗尽」的 QUEUED/RETRYING 到 DEAD_LETTER。
+
+        预算耗尽必须**终态**收敛：``list_recoverable_runs`` 不比较
+        ``max_attempts``，一个停在 QUEUED/RETRYING 且预算耗尽的 run 会被它反复
+        重新投递，形成无界重投循环。
+
+        谓词 ``status IN (...) AND attempt >= max_attempts`` 是条件比较，不依赖
+        扫描时的 Python 快照。DLQ 行同事务写入。
+        """
+        now = now or _utcnow()
+        allowed = [s.value for s in from_statuses]
+        return self._dead_letter_conditionally(
+            run_id=run_id,
+            predicates=[
+                AgentRun.id == run_id,
+                AgentRun.status.in_(allowed),
+                AgentRun.attempt >= AgentRun.max_attempts,
+            ],
+            error_code=error_code,
+            error_message=error_message,
+            error_type=error_type,
+            now=now,
+        )
+
+    def cancel_if_not_terminal(self, run_id: str, *, now: datetime | None = None) -> bool:
+        """原子取消：``id = run_id AND status NOT IN (终态)`` -> CANCELLED。
+
+        不做「先 SELECT 读状态、再用该状态做 CAS」：读与写之间 run 可能已经从
+        PENDING 被 promote 成 QUEUED（或从 QUEUED 被 worker 领取成 RUNNING），
+        于是基于旧快照的 CAS 落空并抛 ``InvalidRunTransition``——一个纯粹的并发
+        假失败。
+
+        取消对**每个非终态**都合法，所以谓词可以直接写成「不是终态」，
+        完全不需要预先知道当前状态。
+        """
+        now = now or _utcnow()
+        terminal = [s.value for s in TERMINAL_STATUSES]
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status.notin_(terminal),
+                )
+                .values(
+                    status=RunStatus.CANCELLED.value,
+                    lease_expires_at=None,
+                    next_retry_at=None,
+                    finished_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
+
+    # ---- PENDING 两阶段入队恢复 ----
+
+    def list_stale_pending_runs(
+        self,
+        *,
+        limit: int = 100,
+        now: datetime | None = None,
+        grace_seconds: int = ORPHAN_GRACE_SECONDS,
+    ) -> list[str]:
+        """``PENDING`` 且已落库 ``grace_seconds`` 仍未变的 run。
+
+        宽限期（不是无条件扫描）
+        ----------------------
+        ``PENDING`` 的语义是「已落库、投递结果未知」。进程可能在**消息仍在投递
+        途中**这个窗口内被打断，此时立即重投只会制造一次多余投递。所以必须给一个
+        宽限期：``updated_at``（PENDING 期间不会被别的路径改写，故等价于
+        ``created_at``）早于 ``now - grace`` 才算「陈旧」。
+
+        这样 PENDING 的实际恢复延迟是 ``grace + 一次扫描间隔``，不是扫描间隔本身。
+        """
+        now = now or _utcnow()
+        cutoff = now - timedelta(seconds=max(0, int(grace_seconds)))
+        stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.status == RunStatus.PENDING.value,
+                AgentRun.updated_at <= cutoff,
+            )
+            .order_by(AgentRun.updated_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [row[0] for row in session.execute(stmt).all()]
+        finally:
+            session.close()
+
+    def promote_pending_to_queued(self, run_id: str, *, now: datetime | None = None) -> bool:
+        """条件迁移 ``PENDING -> QUEUED``，返回是否真的迁移了。
+
+        谓词 ``status = PENDING``：这是「必须先确认入库、再发消息」的**条件迁移**
+        原语。
+
+        - 两个 reconciler 同时扫到同一个陈旧 PENDING：只有一个 UPDATE 成功，
+          只有一个投递（另一个看到 False 后跳过）；
+        - PENDING 已被取消 / 已被 ``mark_queued`` 处理 / 已被别处改写：谓词不成立，
+          **不会**发出消息；
+        - 迁移成功但随后投递失败：run 停在 QUEUED 且 ``next_retry_at IS NULL``，
+          由 ``list_recoverable_runs`` 的 QUEUED 孤儿分支兜底，最终一定收敛。
+        """
+        now = now or _utcnow()
+        session = self._session()
+        try:
+            result = session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.PENDING.value,
+                )
+                .values(
+                    status=RunStatus.QUEUED.value,
+                    queued_at=now,
+                    updated_at=now,
+                )
+            )
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
 
     def touch_queued(self, run_id: str, when: datetime) -> None:
         """刷新 queued_at（重放重新投递时使用）。"""
@@ -466,7 +857,11 @@ class AgentRunRepository:
             session.close()
 
     def list_recoverable_runs(
-        self, *, limit: int = 100, now=None, orphan_grace_seconds: int = 60
+        self,
+        *,
+        limit: int = 100,
+        now=None,
+        orphan_grace_seconds: int = ORPHAN_GRACE_SECONDS,
     ) -> list[str]:
         """RETRYING/QUEUED 且已到重投时刻的 run（等待重投但无人调度）。
 
@@ -499,6 +894,57 @@ class AgentRunRepository:
                         AgentRun.created_at <= grace_cutoff,
                     ),
                 ),
+            )
+            .order_by(AgentRun.created_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [row[0] for row in session.execute(stmt).all()]
+        finally:
+            session.close()
+
+    def list_resumable_waiting_approval_runs(self, *, limit: int = 100, now=None) -> list[str]:
+        """已具备恢复条件、却仍停在 ``WAITING_APPROVAL`` 的 run（Issue #14）。
+
+        条件：该 run **有终态审批**（APPROVED/REJECTED/EXPIRED）**且没有**仍在等待
+        的未消费 ``PENDING`` 审批。这精确刻画「决策已落定但恢复没发生」的形态：
+
+        - 决策已做、``dispatch`` 丢失 —— 审批 API 投递失败时 run 会停在此态；
+        - worker 在 ``consume_resume`` 与 ``mark_resumed_running`` 之间崩溃 ——
+          决策被消费但 run 未迁移；
+        - 审批 ``expire()``（TTL 到期）后无人投递。
+
+        满足条件的 run 由 :func:`runtime.retry.reconcile_stuck_runs` 重新投递；
+        worker 侧 ``mark_resumed_running`` 的 CAS 保证多投只有一个执行者，副作用仍由
+        ledger 去重。**不**在此处改状态：恢复语义属于 worker 的 ``WAITING_APPROVAL
+        -> RUNNING`` 迁移（见 ``RunService.mark_resumed_running``）。
+        """
+        from db.models import HumanApproval
+
+        decided = (
+            select(HumanApproval.approval_id)
+            .where(
+                HumanApproval.run_id == AgentRun.id,
+                HumanApproval.status.in_(["APPROVED", "REJECTED", "EXPIRED"]),
+            )
+            .exists()
+        )
+        live_pending = (
+            select(HumanApproval.approval_id)
+            .where(
+                HumanApproval.run_id == AgentRun.id,
+                HumanApproval.status == "PENDING",
+                HumanApproval.resumed_at.is_(None),
+            )
+            .exists()
+        )
+        stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.status == RunStatus.WAITING_APPROVAL.value,
+                decided,
+                ~live_pending,
             )
             .order_by(AgentRun.created_at.asc())
             .limit(max(1, int(limit)))

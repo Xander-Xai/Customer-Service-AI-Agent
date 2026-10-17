@@ -105,6 +105,16 @@ def record_ownership_lost_commit() -> None:
     _inc("agent_run_ownership_lost_commit_total")
 
 
+def record_ownership_lost_execution() -> None:
+    """失去 ownership 后**取消了正在执行的图**。
+
+    与 ``record_ownership_lost_commit`` 区分：那个是「提交被 owner CAS 拒绝」
+    （执行完了才发现没权提交），这个是「执行到一半发现没权，于是主动停下」。后者
+    才是 fencing 生效的证据；前者只说明 CAS 兜住了状态。
+    """
+    _inc("agent_run_ownership_lost_execution_total")
+
+
 def record_stale_run_reclaimed() -> None:
     """reconciler 重新投递了 lease 已过期的 RUNNING run。"""
     _inc("agent_run_stale_reclaimed_total")
@@ -113,6 +123,28 @@ def record_stale_run_reclaimed() -> None:
 def record_stale_run_dead_lettered() -> None:
     """reconciler 把预算耗尽的过期 RUNNING run 落入了 DLQ。"""
     _inc("agent_run_stale_dead_letter_total")
+
+
+def record_reconcile_scan(success: bool) -> None:
+    """记录一次 reconciler 扫描的**执行结果**（不是 beat 是否存活）。
+
+    与 beat 健康检查正交：beat 的健康检查只看 schedule 文件 mtime，进程活着
+    就一直是绿的；而这里记录扫描本身是否成功执行完。两者都为绿才意味着恢复闭环
+    真的在跑（``beat 活着 + 扫描失败`` = 闭环已断但健康检查看不出来）。
+    """
+    _inc("agent_reconcile_scan_total", outcome="success" if success else "error")
+
+
+def record_reconcile_success(timestamp_seconds: float) -> None:
+    """记录最近一次**成功**扫描的 Unix 时间戳（便于直接算恢复闭环是否停滞）。"""
+    try:
+        from core import monitoring
+
+        metric = getattr(monitoring, "agent_reconcile_last_success_timestamp_seconds", None)
+        if metric is not None:
+            metric.set(timestamp_seconds)
+    except Exception:
+        pass
 
 
 def record_run_failure() -> None:
