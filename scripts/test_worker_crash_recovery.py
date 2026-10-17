@@ -29,7 +29,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import contextlib
 import json
 import os
@@ -142,55 +141,48 @@ def kill_worker_group(proc: subprocess.Popen) -> None:
         log.close()
 
 
-def _recover_via_reconciler(engine, run_id: str, queue: str) -> list[str]:
-    """等 lease 真的过期，然后用**生产同款** reconciler 重新投递该 run。"""
+def _recover_via_reconciler(engine, run_id: str, queue: str) -> None:
+    """等 lease 真的过期，然后**只**把这一条 run 重新投递到本 lane 的队列。
+
+    为什么不用 ``runtime.retry.reconcile_stuck_runs``
+    -----------------------------------------------
+    那个函数是**全表**扫描：它会把共享库里**所有**过期 lease 的 RUNNING / 陈旧的
+    QUEUED / PENDING 全部重新投递。把它的 dispatcher 指向本 lane 的队列，就等于把
+    无关的 run 倒进这条队列——它们会被本 lane 的 worker 执行，而 provider 从**环境
+    变量**读取 ``SIDE_EFFECT_KEY_PREFIX``，于是它们的副作用全部记到本 lane 的计数器上。
+
+    症状非常具体：在跑完 runtime-e2e 套件之后执行 chaos，计数器会从 1 涨到 9~11
+    （套件留下的 run 数量），而恢复本身是正确的（attempt=2）。这不是重复执行缺陷，
+    是本 lane 把别人的 run 也执行了。
+
+    正确做法：只做 reconciler 对**这一行**会做的事——确认 lease 已过期，然后投递。
+    「能不能接管」仍然由 worker 侧的 ``mark_running`` 原子判定（``takeover_running``
+    带 lease + 预算谓词），所以这里不需要、也不应该代替那个判定。
+    """
+    from datetime import timezone as _tz
+
     from celery import Celery
-    from sqlalchemy.orm import sessionmaker
-
-    from runtime.repository import AgentRunRepository
-    from runtime.retry import reconcile_stuck_runs
-    from runtime.run_service import RunService
-
-    svc = RunService(
-        repository=AgentRunRepository(
-            session_factory=sessionmaker(bind=engine, expire_on_commit=False)
-        )
-    )
-
     from sqlalchemy import text as _text
 
     def _lease():
         with engine.connect() as conn:
-            return conn.execute(
+            value = conn.execute(
                 _text("SELECT lease_expires_at FROM agent_runs WHERE id=:id"), {"id": run_id}
             ).scalar()
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=_tz.utc)
+        return value
 
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if _row(engine, run_id) is None:
             raise ChaosFailure(f"run 消失：{run_id}")
         lease = _lease()
-        if lease is None:
-            break
-        if lease.tzinfo is None:
-            from datetime import timezone as _tz
-
-            lease = lease.replace(tzinfo=_tz.utc)
-        if lease.timestamp() <= time.time():
+        if lease is None or lease.timestamp() <= time.time():
             break
         time.sleep(0.5)
 
-    async def _dispatcher(target_run_id: str, countdown: float | None = None) -> str:
-        return str(
-            Celery(broker=REDIS_URL)
-            .send_task("runtime.execute_agent_run", args=[target_run_id], queue=queue)
-            .id
-        )
-
-    delivered = asyncio.run(reconcile_stuck_runs(svc, dispatcher=_dispatcher))
-    if run_id not in delivered:
-        raise ChaosFailure(f"reconciler 未重新投递该 run（delivered={delivered}）")
-    return delivered
+    Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
 
 def wait_for(predicate, timeout: float, label: str):

@@ -129,66 +129,43 @@ def _start_worker(env: dict[str, str], log_path: str) -> subprocess.Popen:
 
 
 def _recover_via_reconciler(db_url: str, run_id: str, queue: str) -> None:
-    """用**生产同款** reconciler 恢复一个 lease 已过期的 RUNNING。
+    """等 lease 真的过期，然后**只**把这一条 run 重新投递到本 lane 的队列。
 
-    先真实等待 lease 过期（过期判定本身是被测对象之一，不用伪造时间），再调用
-    ``runtime.retry.reconcile_stuck_runs``，dispatcher 指向本 lane 的队列。
+    刻意**不**调用 ``runtime.retry.reconcile_stuck_runs``：它是全表扫描，会把共享
+    库里所有滞留 run 倒进本 lane 的队列。它们会被本 lane 的 worker 执行，而 provider
+    从环境变量读 ``SIDE_EFFECT_KEY_PREFIX``，于是无关 run 的副作用被记到本 lane 的
+    计数器上，让「副作用恰好执行一次」这条断言在跑过整套 runtime-e2e 之后失效。
 
-    为什么必须走 reconciler 而不是等 broker 再投一次
-    ------------------------------------------------
-    本用例把整个 worker 进程组杀掉，因此父进程不在，没人把 ``WorkerLostError``
-    翻译成重投——而实测（``make runtime-delivery``）普通失败一律 ``reject(requeue=False)``，
-    消息直接丢弃。生产里真正提供恢复的就是 reconciler，因此这里必须验证它。
-
-    反过来说：把 visibility 设成小于任务时长来「制造第二次投递」是**错误配置**
-    （``AGENT_RUN_VISIBILITY_TIMEOUT`` 必须大于 ``AGENT_RUN_TASK_TIME_LIMIT``，
-    否则消息在旧执行者仍在运行时重新可见 = 同一 run 并发执行），本仓库已在启动时
-    拒绝该组合。
+    「能不能接管」仍由 worker 侧的 ``mark_running`` 原子判定（lease + 预算谓词），
+    这里只负责等 lease 过期并投递。
     """
-    import asyncio
     import time as _time
 
+    from celery import Celery
     from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import text as _text
 
-    from runtime.repository import AgentRunRepository
-    from runtime.retry import reconcile_stuck_runs
-    from runtime.run_service import RunService
-
-    # 必须显式绑定本 lane 的真实 PostgreSQL：用默认 RunService 会落到默认 SQLite，
-    # 于是读到的 run 永远是 None。
     engine = create_engine(db_url)
-    svc = RunService(
-        repository=AgentRunRepository(
-            session_factory=sessionmaker(bind=engine, expire_on_commit=False)
-        )
-    )
+
+    def _lease():
+        with engine.connect() as conn:
+            value = conn.execute(
+                _text("SELECT lease_expires_at FROM agent_runs WHERE id=:id"), {"id": run_id}
+            ).scalar()
+        if value is not None and value.tzinfo is None:
+            from datetime import timezone as _tz
+
+            value = value.replace(tzinfo=_tz.utc)
+        return value
 
     deadline = _time.monotonic() + 30
     while _time.monotonic() < deadline:
-        row = svc.get_run(run_id)
-        if row is None:
-            raise AssertionError("run 消失：reconciler 无法恢复一个不存在的 run")
-        lease = row.get("lease_expires_at")
-        if lease is not None and lease.tzinfo is None:
-            from datetime import timezone as _tz
-
-            lease = lease.replace(tzinfo=_tz.utc)
+        lease = _lease()
         if lease is None or lease.timestamp() <= _time.time():
             break
         _time.sleep(0.5)
 
-    async def _dispatcher(target_run_id: str, countdown: float | None = None) -> str:
-        from celery import Celery
-
-        return str(
-            Celery(broker=REDIS_URL)
-            .send_task("runtime.execute_agent_run", args=[target_run_id], queue=queue)
-            .id
-        )
-
-    delivered = asyncio.run(reconcile_stuck_runs(svc, dispatcher=_dispatcher))
-    assert run_id in delivered, f"reconciler 未重新投递该 run（delivered={delivered}）"
+    Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
 
 def _stop_worker(proc: subprocess.Popen) -> None:
