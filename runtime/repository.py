@@ -904,6 +904,59 @@ class AgentRunRepository:
         finally:
             session.close()
 
+    def list_resumable_waiting_approval_runs(
+        self, *, limit: int = 100, now=None
+    ) -> list[str]:
+        """已具备恢复条件、却仍停在 ``WAITING_APPROVAL`` 的 run（Issue #14）。
+
+        条件：该 run **有终态审批**（APPROVED/REJECTED/EXPIRED）**且没有**仍在等待
+        的未消费 ``PENDING`` 审批。这精确刻画「决策已落定但恢复没发生」的形态：
+
+        - 决策已做、``dispatch`` 丢失 —— 审批 API 投递失败时 run 会停在此态；
+        - worker 在 ``consume_resume`` 与 ``mark_resumed_running`` 之间崩溃 ——
+          决策被消费但 run 未迁移；
+        - 审批 ``expire()``（TTL 到期）后无人投递。
+
+        满足条件的 run 由 :func:`runtime.retry.reconcile_stuck_runs` 重新投递；
+        worker 侧 ``mark_resumed_running`` 的 CAS 保证多投只有一个执行者，副作用仍由
+        ledger 去重。**不**在此处改状态：恢复语义属于 worker 的 ``WAITING_APPROVAL
+        -> RUNNING`` 迁移（见 ``RunService.mark_resumed_running``）。
+        """
+        from db.models import HumanApproval
+
+        decided = (
+            select(HumanApproval.approval_id)
+            .where(
+                HumanApproval.run_id == AgentRun.id,
+                HumanApproval.status.in_(["APPROVED", "REJECTED", "EXPIRED"]),
+            )
+            .exists()
+        )
+        live_pending = (
+            select(HumanApproval.approval_id)
+            .where(
+                HumanApproval.run_id == AgentRun.id,
+                HumanApproval.status == "PENDING",
+                HumanApproval.resumed_at.is_(None),
+            )
+            .exists()
+        )
+        stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.status == RunStatus.WAITING_APPROVAL.value,
+                decided,
+                ~live_pending,
+            )
+            .order_by(AgentRun.created_at.asc())
+            .limit(max(1, int(limit)))
+        )
+        session = self._session()
+        try:
+            return [row[0] for row in session.execute(stmt).all()]
+        finally:
+            session.close()
+
     # ---- Dead letter ----
 
     def add_dead_letter(

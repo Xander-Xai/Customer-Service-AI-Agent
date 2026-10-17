@@ -182,13 +182,23 @@ def build_replay_stable_operation_key(
     - ``ordinal``：同一节点内**同一工具**的第 n 次逻辑调用。LLM 可以在一个节点里
       发出多次同类写操作，ordinal 把它们区分开。
 
-    为什么 ordinal 漂移是安全的
-    --------------------------
-    ordinal 由「本节点内该工具的调用序号」得出，LLM 重放时调用序列**可能**变化，
-    于是同一槽位可能对应不同参数。这不会导致重复执行：``claim`` 的
-    ``request_fingerprint`` 会发现同键异参，抛 ``PermanentError``（fail-closed），
-    宁可停下也不误执行。因此 ordinal 的不稳定性只影响「能否完全去重」，不影响
-    「不会重复执行或错误合并」这两个更重要的性质。
+    为什么 ordinal 漂移**不是**完整幂等
+    ----------------------------------
+    ordinal 是「本节点内该工具」的调用序号，不是逻辑操作的身份。重放时 LLM 若
+    产生不同的调用序列，可能把同一笔写移到**另一个槽位**：
+
+    - 插入**另一种只读工具**（例如重放时先查一次 ``query_order``）不影响该写工具的
+      槽位：计数器按工具名分槽（``agents/base_agent.py``），``query_order`` 有自己
+      的计数；
+    - 但**同一写工具**的调用序列发生重排（插入/交换另一次同类写）时，同一笔写会换到
+      不同 ordinal，于是拿到**不同的 operation_key**。此时 ``request_fingerprint``
+      的同键异参检查看不到它（两次落在两个不同的键上），该写可能被**重复执行**。
+
+    因此 ordinal 的不稳定性只保证「同一槽位内的漂移 fail-closed（同键异参抛
+    ``PermanentError``）」，**不保证**「不会重复执行」。需要跨任意写序列重放的
+    严格去重时，必须由调用方提供稳定的逻辑操作身份（HITL 路径用
+    ``approval:{approval_id}`` 即属此类），不得依赖 ordinal。真实复现与残余风险见
+    ``docs/limitations.md`` 与 Issue #12。
 
     不含 arguments：参数属于指纹（``request_fingerprint``）的职责，混进键里会让
     「同键异参」无法被检测。
@@ -312,7 +322,8 @@ class SideEffectStore:
           - ``execute``      只有**一个**调用者会拿到
           - ``succeeded``    已完成，返回历史结果（不重复执行）
           - ``conflict``     同 key 不同参数
-          - ``in_progress``  另一执行者持有未过期认领
+          - ``in_progress``  另一执行者持有未过期认领；**或**当前方言无行级锁、
+            无法安全接管（非 PostgreSQL 的过期/FAILED 行一律 fail-closed 到此态）
         """
         owner = owner or _new_owner()
         now = _utcnow()
@@ -396,6 +407,30 @@ class SideEffectStore:
 
             lease_expired = _claim_lease_expired(row, claim_ttl_seconds)
             if row.status == STATUS_PENDING and not lease_expired:
+                return SideEffectClaim(CLAIM_IN_PROGRESS, owner=None)
+
+            # 接管（租约过期 = 原持有者已死；FAILED = 允许重试）只在**能提供行级
+            # 互斥**的方言上安全：PostgreSQL 的 ``SELECT ... FOR UPDATE`` 把竞争者
+            # 串行化，接管写入与判定在同一事务里提交。
+            #
+            # SQLite（及任何忽略 ``FOR UPDATE`` 的方言）**没有**这个保证：两个认领者
+            # 可以同时读到同一条过期行、同时判定可接管、同时拿到 ``CLAIM_EXECUTE``，
+            # 于是同一笔写执行两次（Issue #13）。此处 fail-closed：拒绝交出执行权，
+            # 返回 ``in_progress``（调用方 A/B 会当作可重试的 ``TransientError``，
+            # 最终进 DLQ 而**不会**重复执行）。首次插入仍走上面的唯一约束分支，
+            # 那条路径的互斥由数据库唯一约束提供，与方言无关。
+            #
+            # 生产另有启动期硬约束禁止非 PostgreSQL 应用库（见
+            # ``core/config.py::validate_required_config``），两层互补。
+            if dialect != "postgresql":
+                logger.warning(
+                    "side-effect claim 拒绝在非 PostgreSQL 方言上接管（dialect=%r "
+                    "tool=%s op=%s）：该方言无行级锁，无法排除并发接管重复执行。"
+                    "已 fail-closed 返回 in_progress。",
+                    dialect or "<unknown>",
+                    tool_name,
+                    operation_key,
+                )
                 return SideEffectClaim(CLAIM_IN_PROGRESS, owner=None)
 
             # 接管（租约过期 = 原持有者已死；FAILED = 允许重试）

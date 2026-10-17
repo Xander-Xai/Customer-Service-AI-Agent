@@ -118,10 +118,24 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 
 ### 2.5 WAITING_APPROVAL（人工审批）
 
-**保持既有保守策略，本轮不变更。** 不自动重发：审批已被 claim、但 worker 随后崩溃的
-窗口里，审批载荷可能已被消费而副作用尚未提交，自动重发无法证明「不会重复执行
-副作用」。保留人工 Runbook + 审批 TTL 到期按拒绝处理。合法迁移集合以
-`runtime/statuses.py::ALLOWED_TRANSITIONS` 为准（`→ RUNNING` 不递增 `attempt`）。
+**Issue #14 已修复：决策已落定但未恢复的 run 会被自动收敛。**
+
+- **仍在等待人工决策**（`PENDING` 未过期）的 run **不自动重发**——没有决策可恢复。
+- **决策已落定**（`APPROVED` / `REJECTED` / `EXPIRED`）却因 worker 在
+  `consume_resume` 与 `mark_resumed_running` 之间崩溃、或 `dispatch` 丢失而滞留的
+  run，由 `reconcile_stuck_runs` 通过
+  `RunService.list_resumable_waiting_approval_runs` 重新投递（有终态审批且**无**未消费
+  `PENDING`）。`_build_resume_command` 先 `consume_resume`，返回 `None` 时回退到
+  `ApprovalService.peek_resume` **只读重建**载荷（审批是终态且被保留）。
+- **不重复执行高危写**：run 状态迁移由 `mark_resumed_running`
+  的 `WHERE status='WAITING_APPROVAL'` CAS 保证只有一个赢家；副作用由 ledger 的
+  `operation_key = run_id:approval:{approval_id}` 去重。双重保险下重复恢复 = no-op。
+- 合法迁移集合以 `runtime/statuses.py::ALLOWED_TRANSITIONS` 为准（`→ RUNNING`
+  不递增 `attempt`；`WAITING_APPROVAL` **不进** `EXECUTABLE_STATUSES`，仍只由专门
+  的恢复扫描器而非通用重试队列捞起）。
+
+**边界**：`/api/chat` 快路径没有 run 上下文，不在该治理/恢复边界内；修复前的
+「永久滞留」行为见 Issue #14 与 `tests/integration/runtime/test_hitl_resume_fault_injection.py`。
 
 ### 2.6 CANCELLED / 终态
 
@@ -186,7 +200,8 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 
 - **不是 broker-native DLX。** 没有 RabbitMQ/Redis 死信交换机，也没有自动重投队列；
   闭环是「数据库 AgentRun 状态机 + 周期扫描器 + 人工重放脚本」。
-- **不覆盖 `WAITING_APPROVAL`。** 见 2.5。
+- **`WAITING_APPROVAL` 的收敛边界。** 仍在等待人工决策的 run 不在自动扫描范围；
+  **决策已落定的**滞留 run 由专门扫描器收敛（见 2.5 / §4 表），不再是本项覆盖缺口。
 - **人工重放是唯一出口。** `DEAD_LETTER` 没有自动出口；`requeue_dead_letter` 复用原
   `run_id`。
 - **`operation_key` 的稳定性来自键的构造，不是来自 `run_id` 恒定。**
@@ -201,6 +216,17 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
     于是同一笔逻辑写操作拿到新键、唯一约束看不到重复、**副作用执行两次**（真实复现
     见 `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。
     `build_tool_idempotency_key` 现在**只**用于 `tool_call_id` 本身稳定的场景。
+- **非 HITL 重放稳定键的残余风险（Issue #12）。** `build_replay_stable_operation_key`
+  的 `ordinal` 是「本节点内该工具的调用序号」，不是逻辑操作身份：同一写工具的调用
+  序列在重放时**重排**（插入/交换另一次同类写）会让同一笔写换槽位、拿到新键，从而可能
+  **重复执行**；同一槽位的漂移则由 `request_fingerprint` fail-closed。要跨任意重排严格
+  去重，必须由调用方提供稳定身份（HITL 的 `approval:{approval_id}` 即属此类）。
+  见 `runtime/side_effects.py` docstring 与 `docs/limitations.md`。
+- **非 PostgreSQL 方言（Issue #13）。** 无行级锁的方言（SQLite/MySQL）上，ledger 的
+  **接管**路径（租约过期 / FAILED 重试）一律 fail-closed 返回 `in_progress`，不交出
+  执行权；首次插入的互斥由唯一约束提供，与方言无关。生产另由
+  `core/config.py::validate_app_database_dsn` 拒绝非 PostgreSQL 应用库（堵住
+  「PG checkpoint + SQLite 应用库」）。
 - **DLQ 落终态后不再被扫描。** 这是有意的（终态收敛才能终止无界重投），代价是
   恢复完全依赖人工——所以 DLQ 写入与状态迁移必须同事务，否则会静默丢失。
 - **外部系统端到端 exactly-once：`NOT PROVIDED`。** ledger 只保证本仓不重复发起，
@@ -220,6 +246,7 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 | `PENDING` 两阶段入队被打断 | `updated_at <= now - 60s` | **60 ～ 90s** | `pending_grace_seconds`（默认 60）+ `RECONCILE_INTERVAL` |
 | `RUNNING` worker 崩溃（lease 过期） | `lease_expires_at <= now` | **lease TTL**（`AGENT_RUN_LEASE_SECONDS`，默认 180s）+ 0 ～ 30s | `AGENT_RUN_LEASE_SECONDS` + `RECONCILE_INTERVAL` |
 | `RUNNING` 被误判（心跳抖动） | 同上 | 同上 | 同上 |
+| `WAITING_APPROVAL` 决策已落定但未恢复（崩溃窗口 / dispatch 丢失） | 存在终态审批且无未消费 `PENDING` | 0 ～ 一个扫描间隔（30s）*（下次扫描即捞起）* | `AGENT_RUN_RECONCILE_INTERVAL_SECONDS` + `list_resumable_waiting_approval_runs` |
 
 关键点：
 

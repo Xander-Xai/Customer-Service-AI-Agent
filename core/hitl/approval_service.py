@@ -605,6 +605,64 @@ class ApprovalService:
         finally:
             session.close()
 
+    def peek_resume(self, run_id: str, *, now: datetime | None = None) -> dict[str, Any] | None:
+        """**只读**地重建一个**已被消费**的审批决策载荷（崩溃窗口恢复）。
+
+        为什么需要
+        ----------
+        ``consume_resume`` 是破坏性的（写 ``resumed_at``），并在 worker 把 run 从
+        ``WAITING_APPROVAL`` 迁到 ``RUNNING`` **之前**执行（``runtime/executor.py``）。
+        若 worker 在两步之间崩溃，决策已被消费、run 仍停在 ``WAITING_APPROVAL``，
+        下次派发 ``consume_resume`` 返回 None -> run 被永久卡住（Issue #14）。
+
+        本方法是那一窗口的**可恢复读取**：审批决策是终态且被保留（``human_approvals``
+        不会因消费而删除），因此可以随时重建同一 payload。重建**不是**重复执行：
+        真正执行高风险写的幂等由 ``tool_side_effects``（``run_id:approval:{id}``）
+        兜底；而 run 状态迁移仍由 ``mark_resumed_running`` 的 CAS 保证只有一个赢家。
+
+        安全前提（避免复活过期决策）
+        ---------------------------
+        仅当该 run **没有任何未消费的 PENDING 审批**时才重建。否则一个仍合法等待
+        第二个审批决策的 run，会被错误地按第一个（已应用）决策恢复。``consume_resume``
+        已经处理「有未消费的已决策审批」与「PENDING 已过期」两种情形；走到这里的
+        只剩「存在已消费决策、且没有在等的 PENDING」这一种，正是崩溃窗口的形状。
+        """
+        session = self._session()
+        try:
+            live_pending = session.execute(
+                select(HumanApproval.approval_id)
+                .where(
+                    HumanApproval.run_id == run_id,
+                    HumanApproval.status == STATUS_PENDING,
+                    HumanApproval.resumed_at.is_(None),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if live_pending is not None:
+                return None
+
+            row = session.execute(
+                select(HumanApproval)
+                .where(
+                    HumanApproval.run_id == run_id,
+                    HumanApproval.status.in_(
+                        [STATUS_APPROVED, STATUS_REJECTED, STATUS_EXPIRED]
+                    ),
+                )
+                .order_by(HumanApproval.requested_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            payload = dict(row.decision or {})
+            payload["approval_id"] = row.approval_id
+            payload["reviewer_id"] = row.reviewer_id
+            payload["action"] = row.action
+            payload["risk_level"] = row.risk_level
+            return payload
+        finally:
+            session.close()
+
     def mark_resumed(self, approval_id: str, *, now: datetime | None = None) -> None:
         """显式标记已消费（兼容不需要 payload 的调用方）。"""
         now = now or _utcnow()

@@ -79,7 +79,22 @@ def _build_resume_command(run_id: str) -> Any:
     try:
         from core.hitl.approval_service import get_approval_service
 
-        decision = get_approval_service().consume_resume(run_id)
+        svc_approval = get_approval_service()
+        decision = svc_approval.consume_resume(run_id)
+        if decision is None:
+            # Issue #14 崩溃窗口恢复：决策可能已被上一次执行消费，但 worker 在
+            # ``mark_resumed_running`` 之前崩溃，run 仍停在 WAITING_APPROVAL。
+            # 审批记录是终态且被保留，因此可只读重建 payload；重复恢复由
+            # ``mark_resumed_running`` 的 CAS 与 side-effect ledger（
+            # ``run_id:approval:{approval_id}``）双保险兜底，不会重复执行高风险写。
+            decision = svc_approval.peek_resume(run_id)
+            if decision is not None:
+                logger.warning(
+                    "审批决策此前已被消费但 run 未离开 WAITING_APPROVAL，"
+                    "按 Issue #14 恢复窗口重建载荷 run_id=%s approval=%s",
+                    run_id,
+                    decision.get("approval_id"),
+                )
     except Exception as e:  # pragma: no cover - 审批服务不可用时不误恢复
         logger.error(
             "读取审批决策失败 run_id=%s err=%s（不恢复，保持等待）",

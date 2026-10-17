@@ -15,8 +15,10 @@ ledger + 审批 ID 派生的 ``operation_key`` 三者叠加。任何一环断链
 1. **重复投递（已终态）**：resume 成功后同一投递再来一次 → no-op，副作用仍 1 次；
 2. **崩溃于副作用之后、提交之前**：resume 执行了副作用但抛错 → run 进入
    RETRYING → 重投递时**不得重复执行**（ledger 去重）；
-3. **崩溃于认领决策之后、执行之前**：决策已被消费但尚未执行 → 重投递
-   **不会**静默重复消费，run 停在 WAITING_APPROVAL（liveness 边界，见报告）。
+3. **崩溃于认领决策之后、执行之前**：决策已被消费但尚未执行 → 重投递经
+   ``ApprovalService.peek_resume`` **重建**该终态决策并继续执行（Issue #14），
+   已批准动作**恰好执行一次**（ledger 去重），run 收敛到 SUCCEEDED，不再无期限滞留
+   （修复前会停在 ``WAITING_APPROVAL``，见下）。
 
 ``TEST_DISTRIBUTED_DB_URL`` 未设置时整体 skip（与同目录约定一致）。
 """
@@ -279,24 +281,28 @@ class TestCrashDuringResume:
             execute_run(run_id, service=service, runtime_provider=_async_provider(replay))
         )
         assert staging_call_count(order_id) == 1, "崩溃重投递不得重复执行副作用"
-        # 决策已被消费，运行无法再次消费它 -> 停在等待态。这是**已知 liveness
-        # 边界**：不重复（安全），但需要运维介入才能收敛。
+        # 决策已被消费，重放时图再次 interrupt -> 停在等待态。
         assert status2 == RunStatus.WAITING_APPROVAL.value
+        # Issue #14：下一次派发经 ``peek_resume`` 只读重建已消费的批准决策并继续执行，
+        # run 收敛到 SUCCEEDED（不再像修复前那样永久卡在 WAITING_APPROVAL）；
+        # 副作用仍恰好一次（ledger 的 ``run_id:approval:{id}`` 去重）。
         third = asyncio.run(
             execute_run(run_id, service=service, runtime_provider=_async_provider(replay))
         )
-        assert third == RunStatus.WAITING_APPROVAL.value
-        assert staging_call_count(order_id) == 1
+        assert third == RunStatus.SUCCEEDED.value, (
+            "崩溃窗口必须能被自动恢复（Issue #14），而不是永久滞留"
+        )
+        assert staging_call_count(order_id) == 1, "恢复不得重复执行已完成的副作用"
 
     def test_crash_before_execution_leaves_run_parked_without_side_effect(
         self, session_factory, approvals, ledger, registry_holder, thread_lock_off
     ):
-        """崩溃于认领决策之后、执行之前：副作用不得发生；run 停在 WAITING_APPROVAL。
+        """崩溃于认领决策之后、执行之前：重投递必须**恰好执行一次**该已批准动作。
 
-        这是**已知 liveness 边界**（不是重复副作用）：决策被 worker 原子认领后
-        该 worker 崩溃，重投递不会重新消费该决策，因此需要运维介入
-        （重新决策 / 或未来的 re-issue 机制）。本测试把该行为钉死，避免它被
-        误读为「审批恢复已经万无一失」。
+        修复前：决策被 worker 原子认领后该 worker 崩溃，重投递不会重新消费该决策，
+        run 永久停在 ``WAITING_APPROVAL``（已知 liveness 边界）。Issue #14 修复后，
+        ``_build_resume_command`` 经 ``peek_resume`` 重建载荷，已批准动作执行一次后
+        run 收敛到 SUCCEEDED —— 不滞留、不重复。
         """
         from runtime.executor import execute_run
         from runtime.statuses import RunStatus
@@ -325,8 +331,10 @@ class TestCrashDuringResume:
         status = asyncio.run(
             execute_run(run_id, service=service, runtime_provider=_async_provider(runtime))
         )
-        assert status == RunStatus.WAITING_APPROVAL.value
-        assert staging_call_count(order_id) == 0, "认领后崩溃不得产生副作用"
+        assert status == RunStatus.SUCCEEDED.value, (
+            "认领后崩溃必须能被恢复并收敛（Issue #14），不得永久滞留"
+        )
+        assert staging_call_count(order_id) == 1, "已批准动作必须恰好执行一次"
 
 
 class TestRejectAndExpireDoNotExecute:

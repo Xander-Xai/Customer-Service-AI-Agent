@@ -749,6 +749,25 @@ class BaseAgent(ABC):
         # 就 break（无工具调用 / LLM 异常），在分支内声明会 NameError。
         _deferred: list[dict] = []
 
+        # ``_logical_ordinals`` 给出「本节点内、同一工具」的第 n 次逻辑调用序号，
+        # 与 LLM 生成的 tool_call_id 无关，因此节点重放时同一逻辑调用仍拿到同一
+        # 序号 -> 写操作的幂等键跨重放稳定（见
+        # ``runtime.side_effects.build_replay_stable_operation_key``）。
+        #
+        # 计数器必须声明在**轮次循环之外**（与 `_deferred` 同理）：一个节点可跨
+        # 多个 LLM round。若每轮重新初始化，round r 的第 1 次调用与 round r+1 的第
+        # 1 次调用会拿到同一个 ordinal -> 同一个 operation_key。参数不同则撞
+        # ``request_fingerprint`` 触发 ``PermanentError``（合法的第二笔写被永久
+        # 拒绝）；参数相同则第二次 ``CLAIM_SUCCEEDED``，写操作被**静默吞掉**。
+        # 两者都违反重放稳定键 docstring 明确拒绝的「两次各退款 100 元被当成同一
+        # 笔」（Issue #12 Part B，回归见
+        # ``tests/unit/test_side_effect_ordinal_scope.py``）。
+        #
+        # 计数器仍是**节点局部**变量：节点重放时整个方法从头执行，序号从 0 重新
+        # 开始，与首次执行一致 —— 这才是「与 checkpoint 回放到本节点起点一致」的
+        # 正确含义。
+        _logical_ordinals: dict[str, int] = {}
+
         for round_num in range(max_tool_rounds):
             try:
                 response = await effective_llm.async_invoke(messages, tools=tools)
@@ -807,13 +826,11 @@ class BaseAgent(ABC):
 
                 # 执行每个工具调用，追加 ToolMessage
                 #
-                # ``_logical_ordinals`` 给出「本节点内、同一工具」的第 n 次调用序号。
-                # 它与 LLM 生成的 tool_call_id 无关，因此节点重放时同一逻辑调用仍然
-                # 拿到同一个序号 -> 写操作的幂等键跨重放稳定（见
-                # ``runtime.side_effects.build_replay_stable_operation_key``）。
-                # 计数器每次进入工具循环重新开始，所以与 checkpoint 回放到本节点的
-                # 起点一致。
-                _logical_ordinals: dict[str, int] = {}
+                # ``_logical_ordinals``（声明在轮次循环之外）给出「本节点内、同一
+                # 工具」的第 n 次调用序号，跨 LLM round 单调递增，因此两轮里同工具的
+                # 两次调用拿到不同 ordinal -> 不同 operation_key，不会被错误合并
+                # （Issue #12 Part B）。计数器按**工具名**分槽，所以插入另一种只读
+                # 工具不会改变某写工具的槽位。
                 for p in parsed_tcs:
                     _ordinal = _logical_ordinals.get(p["name"], 0)
                     _logical_ordinals[p["name"]] = _ordinal + 1

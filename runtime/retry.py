@@ -79,11 +79,17 @@ async def reconcile_stuck_runs(
     这条消息，迁移失败即不发。宽限期（``pending_grace_seconds``）避免对「消息正在
     投递途中」的 run 立刻补投。
 
-    刻意**不**回收 ``WAITING_APPROVAL``
-    ------------------------------------
-    等待人工审批的 run 不能自动重发：claim（审批已决策）之后 worker 崩溃的窗口里，
-    审批载荷可能已经被消费但副作用尚未提交，自动重发无法证明「不会重复执行副作用」。
-    保留人工 Runbook + 审批 TTL 到期按拒绝处理的既有安全边界。
+    刻意**不**无脑回收 ``WAITING_APPROVAL``
+    -----------------------------------------
+    仍在**等待**人工决策的 run 不能自动重发（没有决策可恢复）。但**决策已落定**
+    （APPROVED/REJECTED/EXPIRED）却因 worker 在 ``consume_resume`` 与
+    ``mark_resumed_running`` 之间崩溃、或 dispatch 丢失而滞留的 run，属于**可自动
+    恢复**的形态：决策是终态且被保留，可由 ``peek_resume`` 只读重建载荷；重复恢复
+    由 ``mark_resumed_running`` 的 CAS 与 side-effect ledger
+    （``run_id:approval:{approval_id}``）双保险兜底，不会重复执行高风险写
+    （Issue #14）。这类 run 由
+    :meth:`RunService.list_resumable_waiting_approval_runs` 精确挑出（有终态审批
+    且无未消费 PENDING），在此重新投递。
 
     幂等性：重新投递一个已在执行的 run 不会重复执行——``mark_running`` 的 lease
     谓词在同一条 UPDATE 内判定（见 ``RunService.mark_running``）。同时
@@ -104,6 +110,18 @@ async def reconcile_stuck_runs(
             dispatched.append(run_id)
         except Exception:
             # 单个投递失败不阻断其余 run；下一轮扫描会再试。
+            continue
+
+    # Issue #14：决策已落定但未恢复的 WAITING_APPROVAL run（崩溃窗口 / dispatch 丢失）。
+    for run_id in service.list_resumable_waiting_approval_runs(limit=limit):
+        if dispatcher is None:
+            from .dispatch import dispatch_run
+
+            dispatcher = dispatch_run
+        try:
+            await dispatcher(run_id)
+            dispatched.append(run_id)
+        except Exception:
             continue
 
     if reclaim_stale_pending:

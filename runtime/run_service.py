@@ -191,6 +191,14 @@ class RunService:
             limit=limit, now=now or _utcnow(), grace_seconds=grace_seconds
         )
 
+    def list_resumable_waiting_approval_runs(self, *, limit: int = 100) -> list[str]:
+        """列出「决策已落定但未恢复」的 WAITING_APPROVAL run（Issue #14）。
+
+        见 :meth:`AgentRunRepository.list_resumable_waiting_approval_runs`。由
+        reconciler 重新投递；状态迁移与幂等由 worker 侧 CAS + ledger 负责。
+        """
+        return self.repo.list_resumable_waiting_approval_runs(limit=limit)
+
     def promote_pending_to_queued(
         self, run_id: str, *, now: datetime | None = None
     ) -> dict[str, Any] | None:

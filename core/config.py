@@ -851,6 +851,33 @@ if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
     )
 
 
+def validate_app_database_dsn(*, dev_mode: bool, database_url: str) -> list[str]:
+    """生产应用库 DSN 校验（纯函数，返回问题列表，空 = 通过）。
+
+    为什么需要它
+    ------------
+    ``side_effect`` ledger 的接管路径依赖数据库**行级锁**排除并发重复执行。
+    只有 PostgreSQL（``SELECT ... FOR UPDATE``）提供该保证；SQLite / MySQL 的
+    ``FOR UPDATE`` 被忽略，两个认领者可同时接管同一笔写（Issue #13）。运行时已
+    fail-closed，但生产应更早失败——拒绝带病启动。
+
+    注意 ``LANGGRAPH_CHECKPOINT_DATABASE_URL`` 是**独立**设置，因此
+    「PG checkpoint + SQLite 应用库」会骗过只看 checkpoint 的校验；这里对
+    **应用库**单独把关。开发/测试不受约束（SQLite 是默认的回退库）。
+    """
+    if dev_mode:
+        return []
+    if not database_url:
+        return ["Production requires DATABASE_URL (PostgreSQL)"]
+    if not database_url.startswith(("postgresql://", "postgres://")):
+        return [
+            "Production DATABASE_URL must be PostgreSQL (got a non-PostgreSQL DSN): "
+            "the side-effect ledger's takeover path requires row-level locking; "
+            "SQLite/MySQL cannot provide it (see Issue #13)"
+        ]
+    return []
+
+
 def validate_distributed_runtime_settings(
     *,
     dev_mode: bool,
@@ -1412,8 +1439,21 @@ def validate_required_config():
                 "fail. Set CORS_ORIGINS or ALLOWED_ORIGINS"
             )
 
-    if not _DEV_MODE and not DATABASE_URL:
-        errors.append("Production requires DATABASE_URL (PostgreSQL)")
+    if not _DEV_MODE:
+        errors.extend(
+            validate_app_database_dsn(dev_mode=_DEV_MODE, database_url=DATABASE_URL)
+        )
+    elif not _DEV_MODE and not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        # 应用库必须是 PostgreSQL：非 PostgreSQL 方言（SQLite/MySQL）没有行级锁，
+        # side-effect ledger 的接管路径无法排除并发重复执行（Issue #13）。注意
+        # LANGGRAPH_CHECKPOINT_DATABASE_URL 是**独立**设置，所以
+        # 「PG checkpoint + SQLite 应用库」的组合会骗过只检查 checkpoint 的校验；
+        # 这里对**应用库**单独 fail-fast，避免带病启动。
+        errors.append(
+            "Production DATABASE_URL must be PostgreSQL (got a non-PostgreSQL DSN): "
+            "the side-effect ledger's takeover path requires row-level locking; "
+            "SQLite/MySQL cannot provide it (see Issue #13)"
+        )
 
     # LangGraph checkpoint：生产禁止进程内 MemorySaver（多 worker/多副本不共享、
     # 重启即丢失），且必须能解析出可用的 PostgreSQL DSN。

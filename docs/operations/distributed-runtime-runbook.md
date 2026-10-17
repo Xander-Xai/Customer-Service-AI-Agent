@@ -331,16 +331,21 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
 - `resumed_at` 非空但 run 仍在 `WAITING_APPROVAL` → 恢复执行本身失败，查
   `agent_runs.error_code` 与 DLQ。
 - **`resumed_at` 非空、`status='APPROVED'`、run 停在 `WAITING_APPROVAL`，且无
-  error / 无 DLQ** → worker 在**认领决策之后、run 收敛之前**崩溃。这是已知
-  **liveness 边界**：`resumed_at IS NULL` 的一次性认领意味着重投递**不会**重新
-  消费该决策，run 不会自愈（`consume_resume` 返回 `None`，executor 保持等待）。
-  **副作用不会重复**（`operation_key = run_id:approval:{approval_id}` 的 ledger
-  去重），但需人工介入：
-  1. 若已确认无需执行，按 §3.7 第 4 步经 `WAITING_APPROVAL → CANCELLED`
-     收口后重新发起；
-  2. 若仍需执行，重新创建一条审批（新 `approval_id` → 新 `operation_key`）。
-  自动 re-issue 机制**未实现**。
-  回归用例：`tests/integration/runtime/test_hitl_resume_fault_injection.py::TestCrashDuringResume`。
+  error / 无 DLQ** → worker 曾在**认领决策之后、run 收敛之前**崩溃（Issue #14）。
+  **现已自动收敛**（不再需要人工介入）：reconciler 经
+  `RunService.list_resumable_waiting_approval_runs`（有终态审批且无未消费
+  `PENDING`）重新投递；`_build_resume_command` 经 `ApprovalService.peek_resume`
+  **只读重建**已消费的决策并继续执行。重复恢复由 `mark_resumed_running` 的 CAS 与
+  ledger（`operation_key = run_id:approval:{approval_id}`）去重，**本仓不重复发起**该
+  已批准写操作。**边界**：这是本仓的发起次数保证，外部系统端到端 exactly-once
+  **NOT PROVIDED**（需下游接受同一把幂等键）。
+  若 30s 内未收敛，按 §3.8 查 reconciler 是否停滞。
+  - 修复前该状态是硬滞留（`consume_resume` 一次性认领会永远返回 `None`），需人工
+    重投 / 重建审批；现保留该手工路径仅作为 reconciler 不可用时的兜底：
+    §3.7 第 4 步经 `WAITING_APPROVAL → CANCELLED` 收口，或重建一条审批（新
+    `approval_id` → 新 `operation_key`）。
+  - 回归用例：`tests/integration/runtime/test_hitl_approval_crash_window.py`、
+    `test_hitl_resume_fault_injection.py::TestCrashDuringResume`。
 - `status='REJECTED'` / `'EXPIRED'` → 图已按拒绝恢复，**不会**产生副作用
   （`operation_key = run_id:approval:{approval_id}` 从未写入 ledger）。
 
