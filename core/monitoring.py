@@ -376,6 +376,10 @@ try:
         "agent_run_ownership_lost_commit_total",
         "Completion commits rejected by the owner/lease CAS (stale worker write-back)",
     )
+    agent_run_ownership_lost_execution_total = _counter(
+        "agent_run_ownership_lost_execution_total",
+        "Graph executions cancelled after the worker lost run ownership (fencing acted)",
+    )
     agent_run_stale_reclaimed_total = _counter(
         "agent_run_stale_reclaimed_total",
         "Stale RUNNING runs (expired lease) re-dispatched by the reconciler",
@@ -590,6 +594,7 @@ except ImportError:
     agent_worker_heartbeat = _NoopMetric()
     agent_worker_heartbeat_error_total = _NoopMetric()
     agent_run_ownership_lost_commit_total = _NoopMetric()
+    agent_run_ownership_lost_execution_total = _NoopMetric()
     agent_run_stale_reclaimed_total = _NoopMetric()
     agent_run_stale_dead_letter_total = _NoopMetric()
     agent_reconcile_scan_total = _NoopMetric()

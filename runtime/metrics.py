@@ -105,6 +105,16 @@ def record_ownership_lost_commit() -> None:
     _inc("agent_run_ownership_lost_commit_total")
 
 
+def record_ownership_lost_execution() -> None:
+    """失去 ownership 后**取消了正在执行的图**。
+
+    与 ``record_ownership_lost_commit`` 区分：那个是「提交被 owner CAS 拒绝」
+    （执行完了才发现没权提交），这个是「执行到一半发现没权，于是主动停下」。后者
+    才是 fencing 生效的证据；前者只说明 CAS 兜住了状态。
+    """
+    _inc("agent_run_ownership_lost_execution_total")
+
+
 def record_stale_run_reclaimed() -> None:
     """reconciler 重新投递了 lease 已过期的 RUNNING run。"""
     _inc("agent_run_stale_reclaimed_total")

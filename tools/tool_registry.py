@@ -152,6 +152,36 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
+        #: 执行权复核回调（``() -> bool``）。由 worker 装入（见
+        #: ``runtime.executor._install_execution_fence``）。``None`` 表示不启用
+        #: 复核（例如测试与实时快路径），此时只走原有的操作身份治理。
+        self._execution_fence: Callable[[], bool] | None = None
+
+    def set_execution_fence(self, fence: Callable[[], bool] | None) -> None:
+        """装入「我是否仍持有执行权」的只读判定。
+
+        用于**副作用工具执行前**的第二道防线：owner CAS 保护状态提交，协作式取消
+        保护图执行，但两者之间仍有窗口（心跳周期内 ownership 可能已经易主）。
+        这里在发起外部写之前再确认一次。
+
+        语义：
+        - 只对 ``side_effect=True`` 的工具有效，只读工具完全不受影响；
+        - 判定抛异常时按「没有执行权」处理（fail-closed）；
+        - 判定为否时**拒绝执行**，返回可解释的拒绝文案，而不是照写。
+        """
+        self._execution_fence = fence
+
+    def _execution_fence_allows(self, tool_name: str) -> bool:
+        """副作用工具的执行权复核。缺省允许（未启用复核时保持既有行为）。"""
+        if self._execution_fence is None:
+            return True
+        try:
+            return bool(self._execution_fence())
+        except Exception as e:  # noqa: BLE001 - 无法确认即视为没有执行权
+            logger.warning(
+                "执行权复核失败，按无执行权处理 tool=%s: %s", tool_name, type(e).__name__
+            )
+            return False
 
     def register(
         self,
@@ -239,6 +269,17 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if not tool:
             return f"错误：工具 '{name}' 不存在"
+
+        # 执行权 fencing（第二道防线）：失去 ownership 的 worker 不得再发起外部写。
+        # 只读工具不受影响；失败一律 fail-closed。
+        if tool.side_effect and not self._execution_fence_allows(name):
+            logger.warning(
+                "已失去执行权，拒绝执行写操作工具 tool=%s（协作式取消的窗口内兜底）", name
+            )
+            return (
+                f"错误：本 worker 已失去该 run 的执行权，写操作工具 '{name}' 已拒绝执行，"
+                "以避免与新执行者重复写入。请等待当前 run 由持有执行权的 worker 完成。"
+            )
 
         # Fail-closed governance boundary (Issue #123). This is the single choke
         # point every realtime transport (REST / SSE / WS / multimodal) and the

@@ -488,6 +488,17 @@ class RunService:
             )
         return updated is not None
 
+    def owns_execution(self, run_id: str, *, worker_id: str) -> bool:
+        """当前执行者是否仍持有执行权（**只读**，不续租、不改任何状态）。
+
+        工具在执行副作用前用它复核 ownership。谓词与状态提交同源
+        （``repository.owns_execution`` 与 ``transition_owned`` 一致）。
+
+        绝不能用 ``heartbeat`` 代替：那会顺带把租约续期，语义从「检查」变成
+        「续租 + 检查」，调用方就再也无法判断自己是否真的还持有执行权。
+        """
+        return self.repo.owns_execution(run_id, worker_id=worker_id)
+
     def heartbeat(self, run_id: str, *, worker_id: str, lease_seconds: float) -> bool:
         """续租（仅当前 owner 且 lease 仍存活时生效）。返回是否成功。
 

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from db.database import get_db_session
@@ -382,6 +382,37 @@ class AgentRunRepository:
         finally:
             session.close()
         return self.get(run_id)
+
+    def owns_execution(self, run_id: str, *, worker_id: str, now: datetime | None = None) -> bool:
+        """只读地判断「当前执行者是否仍持有执行权」。
+
+        谓词与 ``transition_owned`` **完全一致**：
+        ``id = run_id AND status = RUNNING AND worker_id = :me AND lease_expires_at > now``。
+
+        刻意**不做**任何写入。特别地不能用 ``renew_lease_owned`` 代替：它会把
+        ``lease_expires_at`` 改成 ``now + lease_seconds``，用 ``lease_seconds=0``
+        去做「只读检查」会**主动把自己的租约置为过期**，把一次查询变成一次自伤。
+
+        工具在执行前的 ownership 复核用它（见 ``runtime.executor``）。判定与状态
+        提交同源，因此不会出现两套「我还有没有执行权」的标准。
+        """
+        now = now or _utcnow()
+        session = self._session()
+        try:
+            count = session.execute(
+                select(func.count())
+                .select_from(AgentRun)
+                .where(
+                    AgentRun.id == run_id,
+                    AgentRun.status == RunStatus.RUNNING.value,
+                    AgentRun.worker_id == worker_id,
+                    AgentRun.lease_expires_at.isnot(None),
+                    AgentRun.lease_expires_at > now,
+                )
+            ).scalar()
+            return bool(count)
+        finally:
+            session.close()
 
     def renew_lease_owned(
         self,
