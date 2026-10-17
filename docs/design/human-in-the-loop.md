@@ -258,8 +258,9 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 | ledger `claim` 租约 | 同 key 并发认领只有一个拿到执行权 |
 
 > `runtime/side_effects.py` 的原子 `claim`（`INSERT ... ON CONFLICT DO NOTHING`
-> + `SELECT ... FOR UPDATE` + owner token）来自 PR #28。本 PR **复用**它，
-> 不重新实现。若基于修复前的版本，审批路径会重新引入"并发重复执行"缺陷。
+> + `SELECT ... FOR UPDATE` + owner token）是本仓库既有实现（`runtime/side_effects.py`
+> 的 `SideEffectStore.claim`）。审批路径**复用**它，不重新实现。若基于缺少该原子
+> 认领的版本，审批路径会重新引入"并发重复执行"缺陷。
 
 ## 7. 失败语义
 
@@ -321,12 +322,14 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 
 ### 已执行验证命令
 
+> 测试数量不写入本文档（会随代码演进腐化）：收集数与结果以命令当前输出为准。
+
 ```bash
-python3 -m pytest tests/unit -q                        # 1853 passed
+python3 -m pytest tests/unit -q
 TEST_DISTRIBUTED_DB_URL=... TEST_REDIS_URL=... \
-  python3 -m pytest tests/integration/runtime -q       # 73 passed（真实 PG + Redis）
-python3 -m ruff check .                                # 与 #28 baseline 持平（17，均为既有）
-python3 -m mypy runtime --ignore-missing-imports        # 与 #28 baseline 持平
+  python3 -m pytest tests/integration/runtime -q       # 真实 PG + Redis
+python3 -m ruff check .
+python3 -m mypy runtime --ignore-missing-imports
 python3 -m alembic heads                               # 006_add_human_approvals (head)，单头无分叉
 python3 -m alembic upgrade head / downgrade 005        # 真实 PG 上可升可降
 ```
