@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import json
 import os
@@ -49,9 +50,15 @@ REDIS_URL = os.getenv("TEST_REDIS_URL", "").strip()
 WORKER_CMD = [sys.executable, "-m", "tests.integration.celery_worker_runner"]
 PROVIDER = "tests.integration.side_effect_provider:provide"
 
-VISIBILITY_TIMEOUT = 5
+#: broker 未 ACK 可见性时间。必须 **大于** ``AGENT_RUN_TASK_TIME_LIMIT``（本 lane 取
+#: 120s），否则消息会在旧执行者仍在运行时重新可见 = 同一 run 并发执行。历史值 5s
+#: 配 25s 的工具阻塞正是这种错误配置，仅靠它制造「第二次投递机会」。
+VISIBILITY_TIMEOUT = 120
 LEASE_SECONDS = 3
 BLOCK_SECONDS = 25
+#: 崩溃后到 reconciler 投递之间的等待：等 lease（3s）真的过期，再由 reconciler 重投。
+#: 不用 visibility 提供第二次机会——见上面的说明。
+REDELIVERY_SETTLE_SECONDS = 5
 
 #: 与 ``core.code_provenance.UNAVAILABLE`` 同值。这里必须写字面量，是因为本函数
 #: 存在的目的正是"连采集器都 import 不了"的场景 —— 那时无法引用那个常量。
@@ -133,6 +140,57 @@ def kill_worker_group(proc: subprocess.Popen) -> None:
     log = getattr(proc, "_log", None)
     if log is not None:
         log.close()
+
+
+def _recover_via_reconciler(engine, run_id: str, queue: str) -> list[str]:
+    """等 lease 真的过期，然后用**生产同款** reconciler 重新投递该 run。"""
+    from celery import Celery
+    from sqlalchemy.orm import sessionmaker
+
+    from runtime.repository import AgentRunRepository
+    from runtime.retry import reconcile_stuck_runs
+    from runtime.run_service import RunService
+
+    svc = RunService(
+        repository=AgentRunRepository(
+            session_factory=sessionmaker(bind=engine, expire_on_commit=False)
+        )
+    )
+
+    from sqlalchemy import text as _text
+
+    def _lease():
+        with engine.connect() as conn:
+            return conn.execute(
+                _text("SELECT lease_expires_at FROM agent_runs WHERE id=:id"), {"id": run_id}
+            ).scalar()
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if _row(engine, run_id) is None:
+            raise ChaosFailure(f"run 消失：{run_id}")
+        lease = _lease()
+        if lease is None:
+            break
+        if lease.tzinfo is None:
+            from datetime import timezone as _tz
+
+            lease = lease.replace(tzinfo=_tz.utc)
+        if lease.timestamp() <= time.time():
+            break
+        time.sleep(0.5)
+
+    async def _dispatcher(target_run_id: str, countdown: float | None = None) -> str:
+        return str(
+            Celery(broker=REDIS_URL)
+            .send_task("runtime.execute_agent_run", args=[target_run_id], queue=queue)
+            .id
+        )
+
+    delivered = asyncio.run(reconcile_stuck_runs(svc, dispatcher=_dispatcher))
+    if run_id not in delivered:
+        raise ChaosFailure(f"reconciler 未重新投递该 run（delivered={delivered}）")
+    return delivered
 
 
 def wait_for(predicate, timeout: float, label: str):
@@ -244,9 +302,26 @@ def run() -> dict:
         worker_a = None
         steps.append({"step": 5, "action": "sigkill_worker_group", "ok": True})
 
-        time.sleep(VISIBILITY_TIMEOUT + 3)
+        # 恢复靠 **reconciler**，不是 broker 重投。
+        #
+        # 整个进程组被杀 -> 没有父进程去察觉 WorkerLostError -> 不会自动重投；而
+        # 普通失败本来就被 broker 丢弃（``make runtime-delivery`` 实测）。生产里真正
+        # 收敛过期 lease 的 RUNNING 的就是 reconciler，所以 chaos 必须走它。
+        #
+        # 先清掉 broker 侧残留（``unacked``/``unacked_index`` 是全局 bookkeeping 键），
+        # 让本脚本的重投**只**可能来自 reconciler，断言才有确定性。
+        client.delete(queue, "unacked", "unacked_index")
+        _recover_via_reconciler(engine, run_id, queue)
+        steps.append(
+            {
+                "step": 6,
+                "action": "reconcile_stale_running",
+                "detail": "lease 过期后由生产同款 reconciler 重新投递",
+                "ok": True,
+            }
+        )
+
         worker_b = start_worker(env, Path("/tmp/csai-chaos-worker-b.log"))
-        steps.append({"step": 6, "action": "restart_worker", "ok": True})
 
         final = wait_for(
             lambda: (r := _row(engine, run_id))

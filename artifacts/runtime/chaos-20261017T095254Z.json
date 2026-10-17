@@ -1,0 +1,61 @@
+{
+  "result": "FAIL",
+  "run_id": "chaos-8dff9258",
+  "thread_id": "T-chaos-8dff9258",
+  "error": "ChaosFailure: 等待超时（150s）：run 进入终态",
+  "steps": [
+    {
+      "step": 1,
+      "action": "create_run",
+      "run_id": "chaos-8dff9258",
+      "ok": true
+    },
+    {
+      "step": 2,
+      "action": "enqueue",
+      "queue": "agent_runs_test_8dff9258",
+      "ok": true
+    },
+    {
+      "step": 3,
+      "action": "side_effect_applied",
+      "idem:counter": 1,
+      "ok": true
+    },
+    {
+      "step": 4,
+      "action": "checkpoint_persisted",
+      "checkpoints": 2,
+      "worker_id": "Ydxx:679177:6f143c54",
+      "ok": true
+    },
+    {
+      "step": 5,
+      "action": "sigkill_worker_group",
+      "ok": true
+    },
+    {
+      "step": 6,
+      "action": "restart_worker",
+      "ok": true
+    }
+  ],
+  "code_provenance": {
+    "commit_sha": "c64c610ffe78d7e2bb472dff6af016578d4b65ac",
+    "dirty": false,
+    "tracked_diff_sha256": null,
+    "untracked_source_sha256": null,
+    "tool_versions": {
+      "python": "3.10.12",
+      "langgraph": "1.2.12",
+      "langchain-core": "1.6.6",
+      "fastapi": "0.137.1",
+      "qdrant-client": "1.18.0",
+      "celery": "5.6.3"
+    },
+    "generated_at": "2026-10-17T09:55:37.050305+00:00",
+    "dataset_sha256": null,
+    "publication_status": "REPRODUCIBLE",
+    "notes": []
+  }
+}
