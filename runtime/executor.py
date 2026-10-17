@@ -948,13 +948,15 @@ async def _supervise_execution(run_task: asyncio.Task[Any], guard: _FenceGuard) 
 
     watcher = asyncio.create_task(_watch(), name="run-fence-supervisor")
     try:
-        done, _pending = await asyncio.wait(
-            {run_task, watcher}, return_when=asyncio.FIRST_COMPLETED
-        )
-        if run_task in done:
-            return run_task.result()
-        # watcher 先完成 = ownership 丢失，图已被取消
-        raise ExecutionFenced(guard.reason)
+        await asyncio.wait({run_task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+        # 判定**必须看 fence 信号，不能看 `run_task in done`**：watcher 是先取消
+        # 图、再返回的，所以它返回时 `run_task` 通常也已经在 done 集合里。此时按
+        # 成员关系分支会走 `run_task.result()`，而那正是被取消的任务 —— 抛出的
+        # `CancelledError` 会一路逃出 `execute_run`（它不是 `ExecutionFenced`，
+        # 也不属于 `Exception`），把「失去执行权」变成一次未处理取消。
+        if guard.ownership_lost:
+            raise ExecutionFenced(guard.reason)
+        return run_task.result()
     finally:
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
