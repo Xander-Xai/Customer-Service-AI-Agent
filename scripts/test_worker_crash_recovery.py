@@ -88,10 +88,16 @@ def worker_env(queue: str, key_prefix: str) -> dict[str, str]:
             "DEV_MODE": "true",
             "AGENT_RUN_DISPATCH": "celery",
             "AGENT_RUN_QUEUE": queue,
-            "AGENT_RUN_VISIBILITY_TIMEOUT": str(VISIBILITY_TIMEOUT),
+            # 交叉不变量（``core.config.validate_timeout_invariants``，所有环境强制）：
+            # 本 lane 把定时器缩到秒级以便观察崩溃/接管，但**缩小不等于可以不一致**。
+            # 下面这组值彼此满足 visibility > task_time_limit > 工具阻塞时长，且
+            # lock_ttl > task_time_limit + margin；lease/heartbeat 保留小值是为了让
+            # 「owner 消失 -> 接管」在秒级发生。
+            "AGENT_RUN_VISIBILITY_TIMEOUT": "120",
             "AGENT_RUN_LEASE_SECONDS": str(LEASE_SECONDS),
             "AGENT_RUN_HEARTBEAT_SECONDS": "1",
-            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(LEASE_SECONDS),
+            "AGENT_RUN_TASK_TIME_LIMIT": "60",
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": "120",
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": PROVIDER,
             "SIDE_EFFECT_BLOCK_SECONDS": str(BLOCK_SECONDS),

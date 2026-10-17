@@ -1,0 +1,105 @@
+{
+  "schema": "runtime-crash-diagnostics/v1",
+  "tag": "e168bdc4",
+  "run_id": "ckpt-crash-e168bdc4",
+  "thread_id": "T-ckpt-crash-e168bdc4",
+  "queue": "agent_runs_test_e168bdc4",
+  "key_prefix": "ckpt:e168bdc4",
+  "host": "Ydxx.localdomain",
+  "pid": 612563,
+  "env": {
+    "AGENT_RUN_MAX_ATTEMPTS": "3",
+    "LANGGRAPH_CHECKPOINT_BACKEND": "memory"
+  },
+  "timeline": {
+    "started_at": "2026-10-17T09:09:47.857269+00:00",
+    "marks": [
+      {
+        "mark": "worker_a_started",
+        "at": "2026-10-17T09:09:47.858112+00:00",
+        "t_s": 0.0008
+      },
+      {
+        "mark": "worker_a_entered_second",
+        "at": "2026-10-17T09:10:48.154979+00:00",
+        "t_s": 59.2476
+      },
+      {
+        "mark": "failure:wait_worker_a_second_node",
+        "at": "2026-10-17T09:10:48.155215+00:00",
+        "t_s": 59.2478
+      }
+    ],
+    "marks_seconds_since_start": [
+      0.0008,
+      59.2476,
+      59.2478
+    ]
+  },
+  "visible_worker_processes": [],
+  "agent_run": {
+    "__collector_error__": "ProgrammingError: (psycopg2.errors.UndefinedColumn) column \"attempts\" does not exist\nLINE 1: SELECT run_id, attempts, error_type, error_code, created_at ...\n                       ^\n\n[SQL: SELECT run_id, attempts, error_type, error_code, created_at FROM agent_dead_letters WHERE run_id = %(id)s]\n[parameters: {'id': 'ckpt-crash-e168bdc4'}]\n(Background on this error at: https://sqlalche.me/e/20/f405)"
+  },
+  "checkpoints": {
+    "thread_id": "T-ckpt-crash-e168bdc4",
+    "committed_checkpoint_count": 0,
+    "durable_channels": [],
+    "checkpoints": [],
+    "pending_write_count": 0,
+    "pending_writes": []
+  },
+  "broker": {
+    "queue": "agent_runs_test_e168bdc4",
+    "queue_length": 1,
+    "broker_global_keys": {
+      "unacked": {
+        "type": "none",
+        "size": null
+      },
+      "unacked_index": {
+        "type": "none",
+        "size": null
+      }
+    },
+    "unacked_size": 0,
+    "unacked_task_ids": []
+  },
+  "run_events": {
+    "key": "agent:run:ckpt-crash-e168bdc4:events",
+    "exists": false,
+    "length": 0,
+    "entries": []
+  },
+  "redis_signals": {
+    "node_first": null,
+    "node_second": null,
+    "recovered": null,
+    "trace": null,
+    "key_prefix": "ckpt:e168bdc4"
+  },
+  "phase": "wait_worker_a_second_node",
+  "exception": {
+    "type": "AssertionError",
+    "message": "Worker A 未进入 second 节点\nassert False",
+    "repr": "AssertionError('Worker A 未进入 second 节点\\nassert False')"
+  },
+  "workers": {
+    "worker_a": {
+      "name": "worker_a",
+      "started": true,
+      "pid": 626105,
+      "alive_now": false,
+      "returncode": 1,
+      "exit_code": 1,
+      "killed_by_signal": null,
+      "kill_sent_at": null,
+      "pgid": {
+        "__collector_error__": "ProcessLookupError: [Errno 3] No such process"
+      }
+    },
+    "worker_b": {
+      "name": "worker_b",
+      "started": false
+    }
+  }
+}

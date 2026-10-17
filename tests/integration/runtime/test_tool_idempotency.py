@@ -53,7 +53,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WORKER_CMD = [sys.executable, "-m", "tests.integration.celery_worker_runner"]
 _PROVIDER = "tests.integration.side_effect_provider:provide"
 
-_VISIBILITY_TIMEOUT = 5
+_VISIBILITY_TIMEOUT = 120
+#: worker 被杀后消息**立即**重投（实测：task_reject_on_worker_lost），与 visibility
+#: 无关。但**领取**要求 lease 已过期：本 lane 的 lease 是 3s，而重投几乎立刻发生，
+#: 于是重投的那条消息会被正确地拒绝（「已由其他 worker 持有 lease」——这正是
+#: 「重复投递不得杀死正在执行的 run」这条契约在起作用）。
+#: 因此这里要等 lease 过期之后才让第二个 worker 上场：
+#: 等待窗口 = lease + 余量。真正的收敛断言仍由下面的 ``_wait_for`` 承担。
+_REDELIVERY_SETTLE_SECONDS = 10
 _BLOCK_SECONDS = 25
 
 
@@ -84,10 +91,18 @@ def _worker_env(queue: str, key_prefix: str) -> dict[str, str]:
             "DEV_MODE": "true",
             "AGENT_RUN_DISPATCH": "celery",
             "AGENT_RUN_QUEUE": queue,
-            "AGENT_RUN_VISIBILITY_TIMEOUT": str(_VISIBILITY_TIMEOUT),
+            # 交叉不变量（``core.config.validate_timeout_invariants``，所有环境强制）：
+            # 本 lane 把定时器缩到秒级以便观察崩溃/接管，但**缩小不等于可以不一致**。
+            # 下面这组值彼此满足 visibility > task_time_limit > 工具阻塞时长，且
+            # lock_ttl > task_time_limit + margin；lease/heartbeat 保留小值是为了让
+            # 「owner 消失 -> 接管」在秒级发生。
+            "AGENT_RUN_VISIBILITY_TIMEOUT": "120",
             "AGENT_RUN_LEASE_SECONDS": "3",
             "AGENT_RUN_HEARTBEAT_SECONDS": "1",
-            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": "3",
+            "AGENT_RUN_TASK_TIME_LIMIT": "60",
+            # lock TTL 必须覆盖 task time limit（60s）+ margin，否则任务仍在执行时
+            # 锁已过期，同 thread 的另一个 worker 可以进入同一条 state lineage。
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": "120",
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": _PROVIDER,
             "SIDE_EFFECT_BLOCK_SECONDS": str(_BLOCK_SECONDS),
@@ -111,6 +126,69 @@ def _start_worker(env: dict[str, str], log_path: str) -> subprocess.Popen:
     )
     proc._csai_log = log  # type: ignore[attr-defined]
     return proc
+
+
+def _recover_via_reconciler(db_url: str, run_id: str, queue: str) -> None:
+    """用**生产同款** reconciler 恢复一个 lease 已过期的 RUNNING。
+
+    先真实等待 lease 过期（过期判定本身是被测对象之一，不用伪造时间），再调用
+    ``runtime.retry.reconcile_stuck_runs``，dispatcher 指向本 lane 的队列。
+
+    为什么必须走 reconciler 而不是等 broker 再投一次
+    ------------------------------------------------
+    本用例把整个 worker 进程组杀掉，因此父进程不在，没人把 ``WorkerLostError``
+    翻译成重投——而实测（``make runtime-delivery``）普通失败一律 ``reject(requeue=False)``，
+    消息直接丢弃。生产里真正提供恢复的就是 reconciler，因此这里必须验证它。
+
+    反过来说：把 visibility 设成小于任务时长来「制造第二次投递」是**错误配置**
+    （``AGENT_RUN_VISIBILITY_TIMEOUT`` 必须大于 ``AGENT_RUN_TASK_TIME_LIMIT``，
+    否则消息在旧执行者仍在运行时重新可见 = 同一 run 并发执行），本仓库已在启动时
+    拒绝该组合。
+    """
+    import asyncio
+    import time as _time
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from runtime.repository import AgentRunRepository
+    from runtime.retry import reconcile_stuck_runs
+    from runtime.run_service import RunService
+
+    # 必须显式绑定本 lane 的真实 PostgreSQL：用默认 RunService 会落到默认 SQLite，
+    # 于是读到的 run 永远是 None。
+    engine = create_engine(db_url)
+    svc = RunService(
+        repository=AgentRunRepository(
+            session_factory=sessionmaker(bind=engine, expire_on_commit=False)
+        )
+    )
+
+    deadline = _time.monotonic() + 30
+    while _time.monotonic() < deadline:
+        row = svc.get_run(run_id)
+        if row is None:
+            raise AssertionError("run 消失：reconciler 无法恢复一个不存在的 run")
+        lease = row.get("lease_expires_at")
+        if lease is not None and lease.tzinfo is None:
+            from datetime import timezone as _tz
+
+            lease = lease.replace(tzinfo=_tz.utc)
+        if lease is None or lease.timestamp() <= _time.time():
+            break
+        _time.sleep(0.5)
+
+    async def _dispatcher(target_run_id: str, countdown: float | None = None) -> str:
+        from celery import Celery
+
+        return str(
+            Celery(broker=REDIS_URL)
+            .send_task("runtime.execute_agent_run", args=[target_run_id], queue=queue)
+            .id
+        )
+
+    delivered = asyncio.run(reconcile_stuck_runs(svc, dispatcher=_dispatcher))
+    assert run_id in delivered, f"reconciler 未重新投递该 run（delivered={delivered}）"
 
 
 def _stop_worker(proc: subprocess.Popen) -> None:
@@ -215,11 +293,58 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
         )
         assert ledger, "ledger 未记录 SUCCEEDED"
 
-        # 2) 工具成功、消息未 ACK 时 SIGKILL
+        # 2) 工具成功、消息未 ACK 时 SIGKILL 整个 worker 进程组
+        #
+        # 杀整个组（而不是只杀 prefork 子进程）是刻意的：父进程存活会不断 spawn 新
+        # 子进程去消费同一条重投消息，与后续 worker 竞争，让本用例依赖调度时序
+        # （实测出现过副作用被反复重放、断言偶发失败）。
+        #
+        # 父进程一起死掉意味着 **broker 不会自动重投**——这正是本仓库实测的投递
+        # 语义（``make runtime-delivery``：只有 WorkerLostError 会重投，而它需要
+        # 父进程活着）。因此本用例的恢复必须由 reconciler 提供，见下面第 3b 步。
         _stop_worker(worker_a)
 
-        # 3) 等未 ACK 消息重新可见，启动 Worker B
-        time.sleep(_VISIBILITY_TIMEOUT + 3)
+        # 3) 等未 ACK 消息重新投递，启动 Worker B
+        #
+        # 这里**不再**等 visibility 超时。本 lane 原本把 visibility 设成 5s 并阻塞
+        # 工具 25s，也就是「可见性时间短于最长执行时间」——那正是
+        # ``AGENT_RUN_VISIBILITY_TIMEOUT > AGENT_RUN_TASK_TIME_LIMIT`` 这条不变量禁止
+        # 的配置（消息在旧执行者仍在运行时重新可见 = 同一 run 并发执行），
+        # 现在已在启动时被拒绝。
+        #
+        # 实测（``make runtime-delivery``，Celery 5.6.3 + 真实 Redis broker）：
+        # worker 进程被杀触发 ``task_reject_on_worker_lost``，消息**立即**重投，
+        # 与 visibility 无关。所以这里等一个短的确定窗口即可；真正的等待由下面的
+        # ``_wait_for(_terminal, ...)`` 承担。
+        time.sleep(_REDELIVERY_SETTLE_SECONDS)
+
+        # 3b) **生产里的真实恢复路径是 reconciler，不是 broker 反复重投。**
+        #
+        # 实测（``make runtime-delivery``）：worker 被杀会触发一次**立即**重投，
+        # 但那次重投几乎总是落在 lease 过期之前，于是 worker 正确地拒绝领取
+        # （「已由其他 worker 持有 lease」——这正是「重复投递不得杀死正在执行的
+        # run」这条契约在起作用），而那条消息已经被消费掉了。
+        #
+        # 因此「只有一次立即重投」**不足以**恢复；恢复靠的是数据库里 lease 过期的
+        # RUNNING 被 reconciler 捞起并重新投递。本 lane 此前靠把 visibility 设成 5s
+        # 来制造第二次投递机会，那等于配置成
+        # ``AGENT_RUN_VISIBILITY_TIMEOUT < AGENT_RUN_TASK_TIME_LIMIT``——正是
+        # ``validate_timeout_invariants`` 禁止的组合（消息在旧执行者仍在运行时
+        # 重新可见 = 同一 run 并发执行）。
+        #
+        # 这里改为显式跑真正的 reconciler：它先确认「此刻 lease 确已过期」，再把
+        # run 重新投递到本 lane 的队列。这才是需要被验证的恢复机制。
+        # 3b) 清掉 broker 侧残留（未 ACK 消息 + 队列里的任何投递），让本用例的
+        # 恢复**只**可能来自下面的 reconciler。``unacked``/``unacked_index`` 是
+        # Redis transport 的**全局** bookkeeping 键（不是 per-queue），用例开头与
+        # 收尾都要动它们，这一点原有注释已经记录过。
+        client.delete(queue, "unacked", "unacked_index")
+
+        # 3c) 用**生产同款** reconciler 恢复。父进程已死，broker 不会自动重投
+        # （实测：WorkerLostError 的重投依赖父进程存活），因此这条路径就是生产里
+        # 真正起作用的恢复机制。
+        _recover_via_reconciler(DB_URL, run_id, queue)
+
         worker_b = _start_worker(env, "/tmp/csai-idem-worker-b.log")
         started.append(worker_b)
 

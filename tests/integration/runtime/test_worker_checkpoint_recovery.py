@@ -146,10 +146,16 @@ def _worker_env(queue: str, key_prefix: str) -> dict[str, str]:
             # 每次测试用**独立队列**：否则上一次异常退出遗留的 worker（可能仍在
             # 消费 agent_runs）会抢走本次消息，让"崩溃恢复"变成"别人跑完了"。
             "AGENT_RUN_QUEUE": queue,
-            "AGENT_RUN_VISIBILITY_TIMEOUT": str(_VISIBILITY_TIMEOUT),
+            # 交叉不变量（``core.config.validate_timeout_invariants``，所有环境强制）：
+            # 本 lane 把定时器缩到秒级以便观察崩溃/接管，但**缩小不等于可以不一致**。
+            # 下面这组值彼此满足 visibility > task_time_limit > 工具阻塞时长，且
+            # lock_ttl > task_time_limit + margin；lease/heartbeat 保留小值是为了让
+            # 「owner 消失 -> 接管」在秒级发生。
+            "AGENT_RUN_VISIBILITY_TIMEOUT": "120",
             "AGENT_RUN_LEASE_SECONDS": str(_LEASE_SECONDS),
             "AGENT_RUN_HEARTBEAT_SECONDS": "1",
-            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(_LEASE_SECONDS),
+            "AGENT_RUN_TASK_TIME_LIMIT": "60",
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": "120",
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": _PROVIDER,
             "CHECKPOINT_RESUME_KEY_PREFIX": key_prefix,
