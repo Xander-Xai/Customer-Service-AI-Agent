@@ -47,9 +47,17 @@ pytestmark = [
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WORKER_CMD = [sys.executable, "-m", "tests.integration.celery_worker_runner"]
-_VISIBILITY_TIMEOUT = 5
+# 这些值必须满足 `core/config.py::validate_timeout_invariants`（在**所有**环境强制、
+# 且早于 DEV_MODE 早退），否则 worker 子进程会在导入 config 时拒绝启动，run 永远停在
+# QUEUED。约束（本文件已满足）：
+#   heartbeat*2 <= lease；tool_timeout < task_time_limit；
+#   task_time_limit < visibility_timeout；lock_ttl > task_time_limit + 30。
+_VISIBILITY_TIMEOUT = 8
 _LEASE_SECONDS = 3
 _FAKE_SLEEP = 6
+_TASK_TIME_LIMIT = 7
+_TOOL_TIMEOUT = 6
+_LOCK_TTL = 45
 
 
 def _worker_env() -> dict[str, str]:
@@ -63,7 +71,9 @@ def _worker_env() -> dict[str, str]:
             "AGENT_RUN_VISIBILITY_TIMEOUT": str(_VISIBILITY_TIMEOUT),
             "AGENT_RUN_LEASE_SECONDS": str(_LEASE_SECONDS),
             "AGENT_RUN_HEARTBEAT_SECONDS": "1",
-            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(_LEASE_SECONDS),
+            "AGENT_RUN_TASK_TIME_LIMIT": str(_TASK_TIME_LIMIT),
+            "TOOL_EXECUTION_TIMEOUT_SECONDS": str(_TOOL_TIMEOUT),
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(_LOCK_TTL),
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": ("tests.integration.fake_runtime_provider:provide"),
             "FAKE_RUNTIME_SLEEP_SECONDS": str(_FAKE_SLEEP),
