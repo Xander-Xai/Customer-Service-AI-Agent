@@ -3055,3 +3055,210 @@ def test_guard_ak_real_repo_has_no_exactly_once_overclaim():
     errors: list[str] = []
     audit.check_exactly_once_claim_scope(docs, errors, root=REAL_ROOT)
     assert errors == []
+
+
+# ------------------------- L. side-effect operation_key + commit fencing guards
+#
+# `tool_call_id` is LLM-generated, so `run_id:tool_call_id` gives the same logical
+# write a NEW key after a node replay and the side effect runs twice. These tests
+# pin the guard in both directions: the old recommendation must fail, the current
+# one must pass, and a historical framing is allowed through on purpose.
+STALE_KEY_SAMPLES = [
+    "`tool_side_effects` ledger，`operation_key = run_id:tool_call_id`",
+    "工具级 ledger 的 `operation_key = run_id:tool_call_id`",
+    "idempotency_key = run_id:tool_call_id",
+    "operation_key: run_id + tool_call_id",
+]
+
+CURRENT_KEY_SAMPLES = [
+    "`operation_key` = 重放稳定键 `build_replay_stable_operation_key`",
+    "operation_key` = 重放稳定键 `build_replay_stable_operation_key`；HITL 为 "
+    "`run_id:approval:{approval_id}`",
+    "非 HITL 为重放稳定键 `build_replay_stable_operation_key`；审批执行时为 "
+    "`run_id:approval:{approval_id}`",
+    # HITL keys legitimately keep run_id:approval:{approval_id}.
+    "审批执行的 `operation_key = run_id:approval:{approval_id}`",
+]
+
+
+@pytest.mark.parametrize("sample", STALE_KEY_SAMPLES)
+def test_guard_detects_stale_operation_key_recommendation(tmp_repo: Path, sample: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{sample}\n")
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([doc], errors, root=tmp_repo)
+    # The module-binding half of the check needs the real module; only assert the
+    # doc-side error here.
+    assert any(
+        "stale operation_key recommendation" in e for e in errors
+    ), f"stale recommendation not detected: {sample}"
+
+
+@pytest.mark.parametrize("sample", CURRENT_KEY_SAMPLES)
+def test_guard_allows_current_operation_key_recommendation(tmp_repo: Path, sample: str):
+    doc = write(tmp_repo, "docs/reference/x.md", f"{sample}\n")
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([doc], errors, root=tmp_repo)
+    assert not any(
+        "stale operation_key recommendation" in e for e in errors
+    ), f"false positive on: {sample}"
+
+
+def test_guard_allows_stale_operation_key_when_framed_as_historical(tmp_repo: Path):
+    doc = write(
+        tmp_repo,
+        "docs/reference/x.md",
+        "历史缺陷（已修复）：旧实现推荐 `operation_key = run_id:tool_call_id`。\n",
+    )
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([doc], errors, root=tmp_repo)
+    assert not any("stale operation_key recommendation" in e for e in errors)
+
+
+def test_guard_detects_select_then_update_terminal_commit(tmp_repo: Path):
+    """The fenced commit must not regress into SELECT-then-mutate.
+
+    `ToolSideEffect` has no `version_id_col`, so that shape emits
+    `UPDATE ... WHERE id = :pk` and the ownership check lives in a different
+    statement — the TOCTOU window is real.
+    """
+    unsafe = (
+        "def mark_succeeded(self, tool_name, operation_key, result_reference, *, owner=None):\n"
+        "    session = self._session()\n"
+        "    stmt = select(ToolSideEffect).where(ToolSideEffect.tool_name == tool_name)\n"
+        "    row = session.execute(stmt).scalar_one_or_none()\n"
+        "    row.status = 'SUCCEEDED'\n"
+        "    session.commit()\n"
+    )
+    write(tmp_repo, audit.SIDE_EFFECTS_MODULE, unsafe)
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([], errors, root=tmp_repo)
+    assert any("SELECT-then-mutate" in e for e in errors), errors
+
+
+def test_guard_detects_lost_ownership_predicate(tmp_repo: Path):
+    write(
+        tmp_repo,
+        audit.SIDE_EFFECTS_MODULE,
+        "def build_replay_stable_operation_key(**kw):\n    return 'k'\n\n\n"
+        "def _commit(self):\n"
+        "    session.execute(update(ToolSideEffect).where(ToolSideEffect.status == 'PENDING'))\n",
+    )
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([], errors, root=tmp_repo)
+    assert any("ownership predicate" in e for e in errors), errors
+
+
+def test_guard_detects_removed_replay_stable_key(tmp_repo: Path):
+    write(
+        tmp_repo,
+        audit.SIDE_EFFECTS_MODULE,
+        "def _commit(self):\n"
+        "    session.execute(update(ToolSideEffect).where("
+        "ToolSideEffect.claim_owner == owner))\n",
+    )
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([], errors, root=tmp_repo)
+    assert any("no longer defines" in e for e in errors), errors
+
+
+def test_guard_accepts_current_side_effects_module():
+    """The real module must satisfy the guard (no false positives in real code)."""
+    errors: list[str] = []
+    audit.check_side_effect_operation_key_recommendation([], errors, root=REAL_ROOT)
+    assert errors == []
+
+
+# ------------------------------------------- M. reconciler alert wiring guard
+
+
+def _rules(tmp_repo: Path, body: str) -> None:
+    write(tmp_repo, "monitoring/alert_rules.yml", body)
+
+
+def test_guard_detects_stale_unwired_reconciler_alert_claim(tmp_repo: Path):
+    _rules(
+        tmp_repo,
+        "      - alert: AgentReconcileStalled\n"
+        "        expr: time() - agent_reconcile_last_success_timestamp_seconds > 360\n"
+        "      - alert: AgentReconcileScanFailing\n"
+        '        expr: increase(agent_reconcile_scan_total{outcome="error"}[10m]) > 0\n',
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/runtime-state-convergence.md",
+        "已知缺口（P1）：这两个指标已实现并暴露，但**尚未接入告警规则**。\n",
+    )
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift([doc], errors, root=tmp_repo)
+    assert any("reconciler alert wiring drift" in e for e in errors), errors
+
+
+def test_guard_detects_unwired_reconciler_alert_claim_in_english(tmp_repo: Path):
+    _rules(
+        tmp_repo,
+        "      - alert: AgentReconcileStalled\n"
+        "        expr: agent_reconcile_last_success_timestamp_seconds\n"
+        "      - alert: AgentReconcileScanFailing\n"
+        "        expr: agent_reconcile_scan_total\n",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/runtime-state-convergence.md",
+        "These metrics are exposed but not wired to any alert rule yet.\n",
+    )
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift([doc], errors, root=tmp_repo)
+    assert any("reconciler alert wiring drift" in e for e in errors), errors
+
+
+def test_guard_allows_historical_unwired_claim(tmp_repo: Path):
+    _rules(
+        tmp_repo,
+        "      - alert: AgentReconcileStalled\n"
+        "        expr: agent_reconcile_last_success_timestamp_seconds\n"
+        "      - alert: AgentReconcileScanFailing\n"
+        "        expr: agent_reconcile_scan_total\n",
+    )
+    doc = write(
+        tmp_repo,
+        "docs/reference/runtime-state-convergence.md",
+        "历史缺陷（已修复）：该节曾写这两个指标「尚未接入告警规则」。\n",
+    )
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_guard_detects_rules_no_longer_covering_reconciler_metrics(tmp_repo: Path):
+    """If the rules stop covering the metrics, the docs' 'wired' claim goes stale."""
+    _rules(tmp_repo, "      - alert: HighErrorRate\n        expr: rate(errors[5m])\n")
+    doc = write(
+        tmp_repo,
+        "docs/reference/runtime-state-convergence.md",
+        "告警已接入 `AgentReconcileStalled`。\n",
+    )
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift([doc], errors, root=tmp_repo)
+    assert any("no longer references" in e for e in errors), errors
+
+
+def test_reconciler_alert_guard_scoped_to_its_docs(tmp_repo: Path):
+    """The unwired-claim check is scoped: other docs must not be swept in."""
+    _rules(
+        tmp_repo,
+        "      - alert: AgentReconcileStalled\n"
+        "        expr: agent_reconcile_last_success_timestamp_seconds\n"
+        "      - alert: AgentReconcileScanFailing\n"
+        "        expr: agent_reconcile_scan_total\n",
+    )
+    doc = write(tmp_repo, "docs/design/unrelated.md", "尚未接入告警规则。\n")
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift([doc], errors, root=tmp_repo)
+    assert errors == []
+
+
+def test_reconciler_alert_guard_real_repo_has_no_drift():
+    docs = audit.discover_docs(REAL_ROOT)
+    errors: list[str] = []
+    audit.check_reconciler_alert_wiring_drift(docs, errors, root=REAL_ROOT)
+    assert errors == []

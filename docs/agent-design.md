@@ -87,7 +87,7 @@ flowchart TD
         DEFER["HIGH 风险 → 摘出到 pending_actions<br/><b>不执行</b>，回一句提示给模型"]
         EXEC["③ execute_raw 统一执行边界"]
         LEDGER{"④ 有 Run 上下文<br/>且工具 side_effect=True?"}
-        SAFE["ledger 原子 claim<br/>operation_key = run_id:tool_call_id"]
+        SAFE["ledger 原子 claim + 条件 UPDATE 提交<br/>重放稳定 operation_key"]
         CALLSIDE["执行 → mark_succeeded 存结果"]
         FAIL["执行抛错 → mark_failed + re-raise<br/><b>绝不当成成功记账</b>"]
         NOOP["无 Run 上下文 → 显式拒绝文案<br/>不静默降级为非幂等直调"]

@@ -4,15 +4,40 @@ at-least-once delivery + application-level idempotency：同一
 ``(tool_name, operation_key)`` 一旦 SUCCEEDED，重投递/崩溃恢复不得再次执行。
 唯一约束在数据库层（``uq_tool_side_effects_operation``），Redis 不参与真相。
 
-工具调用侧建议的 operation_key 约定::
+operation_key 该怎么取（**当前推荐**）
+------------------------------------
+**默认用 :func:`build_replay_stable_operation_key`**——它对**节点重放稳定**::
 
-    idempotency_key = run_id + ":" + tool_call_id
+    operation_key = build_replay_stable_operation_key(
+        run_id=run_id, node_id=node_id, agent=agent,
+        tool_name=tool_name, ordinal=ordinal,
+    )
 
-由 :func:`build_tool_idempotency_key` 构造，作为工具层接口边界。只读工具不经过
-此路径。
+原因：``run_id + ":" + tool_call_id`` 里的 ``tool_call_id`` 由 LLM 生成，
+节点在 checkpoint 提交前崩溃并重放时 LLM 被重新调用，可以产生**不同的** id，
+于是同一笔逻辑写操作拿到新的 ``operation_key``，唯一约束看不到任何重复，
+副作用执行两次（真实复现见
+``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
+
+``build_tool_idempotency_key``（``run_id + tool_call_id``）现在只用于
+**``tool_call_id`` 本身稳定**的场景，主要是 HITL 路径传
+``approval:{approval_id}``——审批 id 恒定，键稳定。**保持不变。**
+非 HITL 路径不要用它去重跨重放的写操作。
+
+只读工具不经过此路径。
+
+并发边界
+--------
+``claim()`` / ``renew_claim()`` / ``_commit_terminal_state()`` 三处都把判定与写入
+放在**同一条语句**（``SELECT ... FOR UPDATE`` 行锁 或 条件 UPDATE）里，判定结果
+不受并发影响；``ToolSideEffect`` 没有 ``version_id_col``，ORM 层的
+「改对象 + commit」只会发出按主键的 UPDATE，因此终态提交必须走条件 UPDATE
+（见 :meth:`SideEffectStore._commit_terminal_state` 与
+``tests/integration/runtime/test_side_effect_commit_fencing_pg.py``）。
 
 边界：本 ledger 只防止「同一 Agent 重复发起同一副作用」。若下游外部系统需要
-端到端幂等，必须由下游 API 接受 idempotency key，或配合人工对账。
+端到端幂等，必须由下游 API 接受 idempotency key，或配合人工对账。**不构成下游
+ERP 的端到端 exactly-once。**
 """
 
 from __future__ import annotations
@@ -417,6 +442,7 @@ class SideEffectStore:
         operation_key: str,
         result_reference: Any,
         owner: str | None,
+        request_fingerprint: str | None = None,
     ) -> None:
         """写成功结果；归属校验失败时抛 :class:`SideEffectOwnershipLost`。
 
@@ -432,11 +458,100 @@ class SideEffectStore:
         """
         from .errors import SideEffectOwnershipLost
 
-        if not self.mark_succeeded(tool_name, operation_key, result_reference, owner=owner):
+        if not self.mark_succeeded(
+            tool_name,
+            operation_key,
+            result_reference,
+            owner=owner,
+            request_fingerprint=request_fingerprint,
+        ):
             raise SideEffectOwnershipLost(
                 f"tool {tool_name} operation_key {operation_key} 的执行权已丢失，"
                 "外部调用结果未知；不会报告成功，需经 ledger 重试或人工核对"
             )
+
+    def _commit_terminal_state(
+        self,
+        *,
+        tool_name: str,
+        operation_key: str,
+        owner: str | None,
+        values: dict[str, Any],
+        request_fingerprint: str | None = None,
+    ) -> bool:
+        """用**单条条件 UPDATE** 原子提交终态，返回是否真的提交成功。
+
+        为什么不能是「SELECT 判断 + 改 ORM 对象 + commit」
+        -----------------------------------------------
+        ``ToolSideEffect`` 没有 ``version_id_col``，所以那条 commit 真实发出的 SQL 是
+        ``UPDATE tool_side_effects SET ... WHERE tool_side_effects.id = :pk``——**只按主键**。
+        归属判断发生在**另一条语句**里，两条语句之间是可被并发利用的真实窗口：
+
+            A: SELECT 读到 claim_owner=A（通过） -> 暂停
+            B: A 的租约过期，B 原子接管，claim_owner=B（B 的租约是新的）
+            A: 恢复，按主键提交 -> 覆盖 B 的 PENDING / SUCCEEDED
+
+        真机复现（真实 PostgreSQL + 并发屏障，不用 sleep 赌时序）见
+        ``tests/integration/runtime/test_side_effect_commit_fencing_pg.py``。
+
+        同一条 UPDATE 里带上判定谓词，判定与写入就在**一个事务原子步骤**内，
+        与同模块 :meth:`renew_claim` 的形态一致。
+
+        三个谓词各自排除一类错误（缺一不可）
+        -----------------------------------
+        - ``claim_owner == owner``：旧 owner 不能覆盖新 owner。这是最关键的一条——
+          接管者的租约是**未过期**的，「租约未过期」谓词挡不住旧 owner，只有它能。
+        - ``status == PENDING``：终态不可被迟到写入改写（已 SUCCEEDED 的操作不会被
+          迟到的失败回调改成 FAILED）。
+        - ``claim_expires_at > now``：过期但尚未被接管的 owner 不能靠一次迟到提交
+          **复活**执行权——否则租约语义形同虚设。
+
+        关于 ``request_fingerprint`` 谓词
+        ------------------------------
+        可选但由 :func:`execute_idempotent_operation` 始终传入：``claim()`` 在接管时会
+        **改写** ``request_fingerprint``，所以它始终代表「当前 owner 认领的参数集」。
+        带上它 = 「只在这一行仍描述我认领的那组参数时提交」，是对 ABA / token 碰撞的
+        纵深防御，并让「结果 ↔ 参数」在同一行内自洽。
+
+        为什么**不**加 version 列谓词
+        -----------------------------
+        - 我们要的判定就是「我下面的所有权有没有被换掉」，而 ``claim_owner`` 在每次
+          接管时原子变化，它**就是**那个 epoch。version 列只会重复同一真相。
+        - ``updated_at`` 不能当 version：``renew_claim`` 会更新它而不换 owner，正常续租
+          就会误判冲突。
+        - owner + status + lease 三条合起来对「迟到写入」比 owner + version **更强**：
+          它们额外挡住过期提交与终态改写，而 version 单独用挡不住这两类。
+        - 引入 version 列需要迁移，并制造第二份可能漂移的真相源。
+        """
+        from .errors import PermanentError
+
+        if not owner:
+            # fail-closed：没有 owner token 就等于放弃了生产级写入权限检查。
+            # 过去这里是「owner 可选」，None 会退化成无条件写入（按主键）——
+            # 等于任何调用方都能改写别人的副作用结果。
+            raise PermanentError(
+                f"tool {tool_name} operation_key {operation_key} 的结果提交缺少 claim owner；"
+                "不接受无归属校验的写入（fail-closed）。请使用 claim() 返回的 owner。"
+            )
+
+        now = _utcnow()
+        session = self._session()
+        try:
+            stmt = update(ToolSideEffect).where(
+                ToolSideEffect.tool_name == tool_name,
+                ToolSideEffect.operation_key == operation_key,
+                ToolSideEffect.claim_owner == owner,
+                ToolSideEffect.status == STATUS_PENDING,
+                ToolSideEffect.claim_expires_at.isnot(None),
+                ToolSideEffect.claim_expires_at > now,
+            )
+            if request_fingerprint is not None:
+                stmt = stmt.where(ToolSideEffect.request_fingerprint == request_fingerprint)
+            result = session.execute(stmt.values(**values))
+            session.commit()
+            return result.rowcount == 1
+        finally:
+            session.close()
 
     def mark_succeeded(
         self,
@@ -445,34 +560,31 @@ class SideEffectStore:
         result_reference: Any,
         *,
         owner: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> bool:
-        """标记成功。**只有当前认领者**可以写入；返回是否真的写入。
+        """标记成功。**只有当前未过期认领者**可以写入；返回是否真的写入。
 
-        归属校验解决"并发重试时后完成者覆盖先完成者结果"的问题：拿不到认领的调用方
-        （owner 不匹配或已被接管）不会改写状态与结果。
+        判定在 UPDATE 的 WHERE 里（见 :meth:`_commit_terminal_state`），所以
+        「读到的 owner」与「写入的行」之间不存在 TOCTOU 窗口：旧 owner 无法覆盖
+        新 owner 的 PENDING / SUCCEEDED，迟到的异常无法改写已终态的操作。
         """
-        session = self._session()
-        try:
-            stmt = select(ToolSideEffect).where(
-                ToolSideEffect.tool_name == tool_name,
-                ToolSideEffect.operation_key == operation_key,
-            )
-            if owner is not None:
-                stmt = stmt.where(ToolSideEffect.claim_owner == owner)
-            row = session.execute(stmt).scalar_one_or_none()
-            if row is None:
-                return False
-            row.status = STATUS_SUCCEEDED
-            row.result_reference = _serialize_reference(result_reference)
-            row.error_type = None
-            row.error_message = None
-            row.finished_at = _utcnow()
-            row.updated_at = _utcnow()
-            row.claim_expires_at = None
-            session.commit()
-            return True
-        finally:
-            session.close()
+        now = _utcnow()
+        return self._commit_terminal_state(
+            tool_name=tool_name,
+            operation_key=operation_key,
+            owner=owner,
+            request_fingerprint=request_fingerprint,
+            values={
+                "status": STATUS_SUCCEEDED,
+                "result_reference": _serialize_reference(result_reference),
+                "error_type": None,
+                "error_message": None,
+                "finished_at": now,
+                "updated_at": now,
+                # 终态没有活着的认领：清租约，避免留下可被误读为「仍被持有」的行。
+                "claim_expires_at": None,
+            },
+        )
 
     def mark_failed(
         self,
@@ -482,28 +594,27 @@ class SideEffectStore:
         error_type: str,
         error_message: str,
         owner: str | None = None,
+        request_fingerprint: str | None = None,
     ) -> bool:
-        """标记失败。**只有当前认领者**可以写入；返回是否真的写入。"""
-        session = self._session()
-        try:
-            stmt = select(ToolSideEffect).where(
-                ToolSideEffect.tool_name == tool_name,
-                ToolSideEffect.operation_key == operation_key,
-            )
-            if owner is not None:
-                stmt = stmt.where(ToolSideEffect.claim_owner == owner)
-            row = session.execute(stmt).scalar_one_or_none()
-            if row is None:
-                return False
-            row.status = STATUS_FAILED
-            row.error_type = error_type
-            row.error_message = error_message[:2000]
-            row.updated_at = _utcnow()
-            row.claim_expires_at = None
-            session.commit()
-            return True
-        finally:
-            session.close()
+        """标记失败。**只有当前未过期认领者**可以写入；返回是否真的写入。
+
+        判定同样在 WHERE 里，因此迟到的失败回调不能把已 SUCCEEDED 的操作改写成
+        FAILED（那会让一次真实成功的写操作在 ledger 上变成「失败」并被重新发起）。
+        """
+        now = _utcnow()
+        return self._commit_terminal_state(
+            tool_name=tool_name,
+            operation_key=operation_key,
+            owner=owner,
+            request_fingerprint=request_fingerprint,
+            values={
+                "status": STATUS_FAILED,
+                "error_type": error_type,
+                "error_message": error_message[:2000],
+                "updated_at": now,
+                "claim_expires_at": None,
+            },
+        )
 
 
 _default_store: SideEffectStore | None = None
@@ -647,8 +758,11 @@ async def execute_idempotent_operation(
        因此「租约过期 = 持有者已死」这个判定不会在工具**仍在执行**时成立。否则第
        二个执行者会在第一个还没写完时接管并重复发起同一笔写操作
        （真实复现见 ``tests/integration/runtime/test_side_effect_claim_lease_pg.py``）；
-    3. **归属校验的结果提交**（``commit_result_or_raise``）：写不进结果时抛
-       ``SideEffectOwnershipLost``，把「结果未知」上报，而不是静默返回成功。
+    3. **数据库原子的结果提交**（``_commit_terminal_state``）：终态写入是一条带
+       「所有权 AND 状态 AND 租约」谓词的单条 UPDATE，判定与写入不存在 TOCTOU
+       窗口。归属校验失败时 ``commit_result_or_raise`` 抛
+       ``SideEffectOwnershipLost``，把「结果未知」上报，而不是静默返回成功
+       （真实复现见 ``tests/integration/runtime/test_side_effect_commit_fencing_pg.py``）。
 
     ``claim_ttl_seconds`` 的下界（``min_claim_ttl_seconds``）
     ------------------------------------------------------
@@ -702,13 +816,26 @@ async def execute_idempotent_operation(
             result = await result
     except BaseException as e:
         await renewer.stop()
-        store.mark_failed(
-            tool_name,
-            operation_key,
-            error_type=type(e).__name__,
-            error_message=str(e),
-            owner=claim.owner,
-        )
+        # ledger 自身的故障（DB 不可用等）不得**替换**工具的真实异常：运维看到的
+        # 应该是业务失败原因，而不是一个基础设施错误。这里已经是失败路径，
+        # 不存在「上报成功」的风险，因此记录后照常抛出原始异常。
+        try:
+            store.mark_failed(
+                tool_name,
+                operation_key,
+                error_type=type(e).__name__,
+                error_message=str(e),
+                owner=claim.owner,
+                request_fingerprint=fingerprint,
+            )
+        except Exception as ledger_error:  # noqa: BLE001 - 不得掩盖原始异常
+            logger.error(
+                "side-effect 失败结果写入 ledger 失败（原始异常照常上抛）"
+                "tool=%s op=%s ledger_error=%s",
+                tool_name,
+                operation_key,
+                type(ledger_error).__name__,
+            )
         raise
     await renewer.stop()
     store.commit_result_or_raise(
@@ -716,5 +843,6 @@ async def execute_idempotent_operation(
         operation_key=operation_key,
         result_reference=result,
         owner=claim.owner,
+        request_fingerprint=fingerprint,
     )
     return result

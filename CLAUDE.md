@@ -178,8 +178,8 @@ make db-downgrade # 回滚迁移
 - **at-least-once + 幂等**：`task_acks_late` + `task_reject_on_worker_lost` +
   Redis `visibility_timeout` → **不是** exactly-once。幂等由三层承担：
   run 级（终态重复投递 no-op + `idempotency_key` 唯一约束）、thread 级（Redis
-  锁 + lease）、工具级（`tool_side_effects` ledger，
-  `operation_key = run_id:tool_call_id`）。
+  锁 + lease）、工具级（`tool_side_effects` ledger，`operation_key` = 重放稳定键
+  `build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`）。
 - **崩溃/恢复语义**：worker 崩溃 → 未 ACK 任务经 `visibility_timeout` 重投 →
   lease 过期后 `mark_running` 接管（attempt+1）→ **从 checkpoint `next` 续跑**
   （`runtime/bootstrap.py::invoke_graph_with_resume`）→ retry 退避 → 用尽

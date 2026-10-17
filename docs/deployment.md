@@ -158,7 +158,7 @@ task_ignore_result = True                    # 结果后端不是真相源
 |---|---|---|
 | run 级 | 终态重复投递 no-op + `idempotency_key` 唯一约束 | 同一请求重复提交产生两个 run |
 | thread 级 | Redis 锁 + lease | 同 thread 并发执行 |
-| 工具级 | `tool_side_effects` ledger，`operation_key = run_id:tool_call_id` | **做了一次被重做** |
+| 工具级 | `tool_side_effects` ledger，`operation_key` = 重放稳定键（`build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`） | **做了一次被重做** |
 
 ---
 
@@ -242,7 +242,9 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
 python3 scripts/replay_dead_run.py --run-id <RUN_ID>    # make runtime-replay-help
 ```
 
-**为什么重放必须复用原 `run_id`？** 幂等键是 `run_id:tool_call_id`。
+**为什么重放必须复用原 `run_id`？** 重放稳定幂等键
+（`build_replay_stable_operation_key`）以 `run_id` 为其中一个分量；HITL 路径的
+`operation_key = run_id:approval:{approval_id}` 也含 `run_id`。
 换一个 `run_id` 就换了一套幂等键，**已执行过的副作用会真的再执行一次**。
 所以 `requeue_dead_letter`（`runtime/run_service.py:512-553`）
 在代码层面就禁止生成新 run_id。

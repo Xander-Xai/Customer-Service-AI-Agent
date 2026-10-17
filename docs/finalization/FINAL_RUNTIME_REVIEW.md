@@ -1,5 +1,16 @@
 # Final Runtime Review — state machine, recovery semantics, idempotency boundaries
 
+> **HISTORICAL AUDIT SNAPSHOT** — PR #3 收尾审计的一次性评审快照，绑定当时的代码与
+> `artifacts/distributed-runtime/<ts>/report.json` 证据。仅在该审计执行时点有效；
+> 现状与证据边界以 [reference/current-state.md](../reference/current-state.md) 与
+> [reference/runtime-state-convergence.md](../reference/runtime-state-convergence.md) 为准。
+>
+> **其中已过时的设计不要当推荐方案**，典型例子（保留作为历史记录）：
+> §4 的 `operation_key = run_id:tool_call_id`——`tool_call_id` 由 LLM 生成、节点重放
+> 时会变，现行做法是重放稳定键 `build_replay_stable_operation_key`；以及
+> `mark_succeeded` 当时只被描述为 "owner-guarded"，其归属判定实际是「SELECT + 按主键
+> UPDATE」，现已改为带所有权 + 状态 + 租约谓词的单条条件 UPDATE。
+
 > Scope: `runtime/`, `core/hitl/`, `core/checkpointer.py`, `db/` — **audit only**.
 > No runtime was re-implemented. Every claim below is tied to a command or a
 > `file:line`.

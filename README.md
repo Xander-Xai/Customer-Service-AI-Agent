@@ -140,9 +140,11 @@ LLM 说"我觉得该退款"不构成授权。
    embedding 挂 → 语义缓存失效并显式标记 degraded，**不静默退化成词面命中**。
    无治理上下文的写操作 → 拒绝执行。
 2. **AgentRun 表是唯一真相源.** Celery result backend 不是（`task_ignore_result=True`）。
-3. **副作用必须可去重，且要写清楚去重到哪一层.** 用
-   `operation_key = run_id:tool_call_id` + 原子 claim 换，而不是假装消息队列是
-   exactly-once。**边界**：ledger 让**本仓**不重复发起同一次写；外部系统的
+3. **副作用必须可去重，且要写清楚去重到哪一层.** 用**重放稳定**
+   `operation_key`（`build_replay_stable_operation_key`，非 HITL；HITL 用
+   `run_id:approval:{approval_id}`）+ 原子 claim 换，而不是假装消息队列是
+   exactly-once。**不能用 `run_id:tool_call_id`**：`tool_call_id` 由 LLM 生成，节点
+   重放时会变，同一笔逻辑写操作换键后会被执行两次。**边界**：ledger 让**本仓**不重复发起同一次写；外部系统的
    exactly-once 需要下游接受同一把幂等键——本仓**不提供、不宣称**端到端保证。
 4. **没证据就不写数字.** 正式检索指标当前**不可测**（gold 不是相关度标注），
    所以本仓库不发布任何 Hit@K / MRR 百分比。用随机同类别文档当 gold 算出来的数字

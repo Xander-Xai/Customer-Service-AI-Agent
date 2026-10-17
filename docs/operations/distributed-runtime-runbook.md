@@ -206,9 +206,15 @@ curl -s -G "$PROM_URL/api/v1/query" --data-urlencode 'query=agent_run_dead_lette
    ```
 
    重放**复用原 `run_id`**（只产生新的队列投递），原始 DLQ 历史不被改写。不要通过
-   "新建一个 run"来重放——`operation_key = run_id:tool_call_id`（审批执行时为
-   `run_id:approval:{approval_id}`）在任意次重试中恒定，它让**本仓 ledger 不会
+   "新建一个 run"来重放——`operation_key` 以 `run_id` 为分量（非 HITL 为重放稳定键
+   `build_replay_stable_operation_key`；审批执行时为 `run_id:approval:{approval_id}`），
+   因此在任意次重试中恒定，它让**本仓 ledger 不会
    再次发起**已成功的退款/改单；换 `run_id` 会绕过这个幂等键，导致副作用重做。
+
+   > 历史缺陷（已修复，不再是当前设计）：旧文档写「`operation_key = run_id:tool_call_id`
+   > 在任意次重试中恒定」。这**不成立**——`tool_call_id` 由 LLM 生成，节点重放时
+   > 可能变化，导致同一笔逻辑写操作换键并被执行两次（真实复现见
+   > `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。
    注意这不是外部系统的 exactly-once 保证：下游是否真的没扣第二次，取决于下游
    是否接受同一把幂等键（本仓**不提供、不宣称**端到端 exactly-once）。
 

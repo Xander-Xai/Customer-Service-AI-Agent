@@ -196,7 +196,8 @@ error_type / error_code / entered_at）。
 **重放**：`python scripts/replay_dead_run.py <run_id>`（或
 `RunService.requeue_dead_letter`）。
 
-> 重放刻意**复用原 `run_id`**：工具幂等键是 `run_id:tool_call_id`，换新 run_id 会让
+> 重放刻意**复用原 `run_id`**：工具幂等键（重放稳定键 `build_replay_stable_operation_key`、
+> HITL 的 `run_id:approval:{approval_id}`）以 `run_id` 为分量，换新 run_id 会让
 > 重放绕过 ledger，把已经成功的退款/改单**再执行一次**。规范里 `job_id` 是"一次队列
 > 投递"，重放正是新的一次投递。原始 DLQ 历史不被改写。
 

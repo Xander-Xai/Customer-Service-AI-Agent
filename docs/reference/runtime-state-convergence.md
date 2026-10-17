@@ -12,6 +12,10 @@
 `tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py` 与
 `test_pending_enqueue_contract_pg.py` 里找到对应的真实 PostgreSQL 用例。
 
+这条原则**同样适用于 `tool_side_effects` 幂等 ledger**（见 2.7），它曾经是唯一的
+例外——`mark_succeeded` / `mark_failed` 过去是「SELECT 判归属 + 改 ORM 对象 +
+commit」，而 `ToolSideEffect` 没有 `version_id_col`，真实提交的 SQL 只按主键。
+
 ---
 
 ## 1. 统一状态模型
@@ -128,6 +132,38 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入时已变 `QUEUED`），
 而取消对每个非终态都合法，谓词直接写成「不是终态」即可，不需要预先知道当前状态。
 
+### 2.7 副作用 ledger（`tool_side_effects`）：PENDING → SUCCEEDED | FAILED
+
+同一笔写操作可以被两个执行者**同时**持有过认领（租约过期后被接管），因此这里的
+核心不变量是：**只有当前且未过期的认领者能提交终态，且终态不可被迟到写入改写。**
+
+| 情况 | 收敛结果 | 判定谓词（同一条 UPDATE 内，`_commit_terminal_state`） |
+|---|---|---|
+| 当前 owner、租约未过期 | **原子提交** SUCCEEDED / FAILED | `tool_name=? AND operation_key=? AND claim_owner=? AND status='PENDING' AND claim_expires_at > now [AND request_fingerprint=?]` |
+| 旧 owner（已被接管，接管者租约**未过期**） | **拒写**（`rowcount=0`），接管者的 PENDING 不受影响 | `claim_owner` 不匹配 |
+| 旧 owner 试图把接管者的 SUCCEEDED 改成 FAILED | **拒写** | `claim_owner` 不匹配（**且** `status` 谓词独立兜底） |
+| 已 SUCCEEDED / FAILED 的行收到迟到回调 | **拒写**，终态不可改写 | `status='PENDING'` 不成立 |
+| 租约已过期但**尚未被接管** | **拒写**，不能靠一次迟到提交复活执行权 | `claim_expires_at > now` 不成立 |
+| `owner` 缺失 | **fail-closed 抛 `PermanentError`**，不做无归属写入 | 调用契约违反，不是 SQL 谓词 |
+
+要点：
+
+- **租约未过期谓词挡不住旧 owner。** 接管者的租约是**未来时刻**，所以
+  `claim_expires_at > now` 对旧 owner 依然为真；真正拦住它的只有 `claim_owner`。
+  这正是「读到的 owner」与「写入的行」之间必须同一条 SQL 的原因。
+- **`claim_owner` 就是 epoch。** 每次接管都原子改写它，因此不需要额外的 version 列：
+  `updated_at` 不能当 version（`renew_claim` 会更新它而不换 owner，正常续租会误判
+  冲突）。`request_fingerprint` 作为可选的纵深防御随 `execute_idempotent_operation`
+  始终传入（`claim()` 接管时会改写它，它始终代表当前 owner 的参数集）。
+- **提交失败不得上报成功。** 外部写已经落地、ledger 却写不进结果时，
+  `commit_result_or_raise` 抛 `SideEffectOwnershipLost`（transient），
+  最终落 DLQ 人工核对，绝不返回「成功」。
+- **缺失 owner 不等于「管理员模式」。** 过去 `owner` 是可选参数、传 `None` 会跳过
+  归属谓词；现在 fail-closed。
+
+真实 PostgreSQL + 多连接 + 受控并发屏障的行为级用例（8 个场景全部覆盖）：
+`tests/integration/runtime/test_side_effect_commit_fencing_pg.py`。
+
 ---
 
 ## 3. DLQ 转移的原子性与剩余限制
@@ -152,9 +188,19 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
   闭环是「数据库 AgentRun 状态机 + 周期扫描器 + 人工重放脚本」。
 - **不覆盖 `WAITING_APPROVAL`。** 见 2.5。
 - **人工重放是唯一出口。** `DEAD_LETTER` 没有自动出口；`requeue_dead_letter` 复用原
-  `run_id`，因此非 HITL 的 `operation_key = run_id:tool_call_id` 在任意次重放中恒定
-  （HITL 的 `operation_key = run_id:approval:{approval_id}` 同理，见
-  [human-in-the-loop.md](../../docs/design/human-in-the-loop.md)）。
+  `run_id`。
+- **`operation_key` 的稳定性来自键的构造，不是来自 `run_id` 恒定。**
+  - **HITL**：`operation_key = run_id:approval:{approval_id}`（`core/hitl/gate.py`）。
+    审批 id 恒定，因此任意次重放中键恒定。**保持不变。**
+  - **非 HITL**：**重放稳定键** `build_replay_stable_operation_key`
+    （`run_id + node_id + agent + tool_name + ordinal` 的 SHA-256，版本前缀 `v1`）。
+    `run_id` 只是其中一个分量；它恒定**不足以**让键恒定。
+  - **历史缺陷（已修复，不再是当前设计）**：旧文档与旧实现推荐
+    `run_id:tool_call_id` 作为幂等键。其中 `tool_call_id` **由 LLM 生成**，
+    节点在 checkpoint 提交前崩溃并被重放时 LLM 会被重新调用、可能产生不同的 id，
+    于是同一笔逻辑写操作拿到新键、唯一约束看不到重复、**副作用执行两次**（真实复现
+    见 `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。
+    `build_tool_idempotency_key` 现在**只**用于 `tool_call_id` 本身稳定的场景。
 - **DLQ 落终态后不再被扫描。** 这是有意的（终态收敛才能终止无界重投），代价是
   恢复完全依赖人工——所以 DLQ 写入与状态迁移必须同事务，否则会静默丢失。
 - **外部系统端到端 exactly-once：`NOT PROVIDED`。** ledger 只保证本仓不重复发起，
@@ -235,8 +281,19 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 schedule 文件照样更新、健康检查照样是绿的，而恢复闭环已经断了。
 `agent_reconcile_last_success_timestamp_seconds` 才是「恢复闭环还在工作」的直接证据。
 
-已知缺口（P1）：这两个指标已实现并暴露，但**尚未接入告警规则**；当前只能通过查询
-指标发现闭环停滞。
+**告警已接入**（`monitoring/alert_rules.yml`，并由 `monitoring/alert_rules_test.yml` +
+`promtool test rules` 钉住行为）：
+
+| 告警 | 表达式要点 | 覆盖的失效形态 |
+|---|---|---|
+| `AgentReconcileStalled`（critical，`for: 5m`） | `time() - agent_reconcile_last_success_timestamp_seconds > 360`，或 `absent(...)` 且实例存活 | 「beat 根本没在调度」与「调度了但扫描一直失败」**同时**覆盖（用时间戳而非失败计数，失败计数在未调度时恒为 0） |
+| `AgentReconcileScanFailing`（warning，`for: 5m`） | `increase(agent_reconcile_scan_total{outcome="error"}[10m]) > 0` | beat 仍在调度但扫描本身持续失败（最常见：数据库不可达） |
+
+两者互补：**停滞看时间，失败看原因分类**；`increase(...) > 0` 保证只在窗口内有失败时
+报警，不会因历史一次失败永久 latching。阈值 360s ≈ 扫描间隔（30s）的 12 倍。
+
+> 历史缺陷（已修复）：本节曾写「这两个指标已实现并暴露，但**尚未接入告警规则**」。
+> 该描述在告警接入后即失效，现已按 `monitoring/alert_rules.yml` 的现行规则更新。
 
 ### 5.3 Queue backlog 与批量扫描饥饿
 
