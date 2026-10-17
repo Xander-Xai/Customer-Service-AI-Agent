@@ -1,0 +1,266 @@
+# AgentRun 状态收敛契约（canonical）
+
+本文件是**状态收敛规则**的唯一真相源：每一种「非终态 + 某个外部信号」的组合，
+系统必须收敛到哪个状态、由哪条数据库谓词决定、以及实际检测延迟是多少。
+
+代码位置：`runtime/statuses.py`（合法迁移表）、`runtime/repository.py`（原子谓词）、
+`runtime/run_service.py`（服务层编排）、`runtime/retry.py`（周期扫描器）。
+
+**核心原则：所有「能否改状态」的判定都在数据库层，同一条 `UPDATE` 的 `WHERE` 里。**
+任何「Python 先 `SELECT` 看到某个值、再据此决定写什么」的写法都是竞态来源，不是
+保护。本文件中的每条规则都可以在
+`tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py` 与
+`test_pending_enqueue_contract_pg.py` 里找到对应的真实 PostgreSQL 用例。
+
+---
+
+## 1. 统一状态模型
+
+下图是**唯一**的状态模型。下文各节只展开其中一条边或一个非终态的收敛规则，不再
+各自重画状态机。
+
+```text
+PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
+               ▲          │      ├──► FAILED           (终态，permanent error)
+               │          │      ├──► RETRYING ──┐
+               │          │      │               │
+               │          │      │        (回到 QUEUED 侧重新领取)
+               │          │      ├──► WAITING_APPROVAL ──► RUNNING (非终态，人工审批)
+               │          │      └──► DEAD_LETTER      (终态，retry 用尽)
+               │          └──► CANCELLED              (终态，协作式)
+               └── 人工重放（唯一自动路径之外的出口：DEAD_LETTER -> QUEUED）
+```
+
+终态集合：`SUCCEEDED | FAILED | DEAD_LETTER | CANCELLED`。合法迁移的机器可读真相源
+是 `runtime/statuses.py::ALLOWED_TRANSITIONS`（本图是它的人类可读投影）。
+
+`WAITING_APPROVAL` 是 human-in-the-loop 专用的**非终态**：它不在
+`EXECUTABLE_STATUSES` 里（通用轮询不捞起，否则忙循环），且它回到 `RUNNING` 时
+**不递增 `attempt`**（等人不是失败，不该消耗重试预算）。它的收敛策略见 2.5。
+
+## 2. 状态收敛矩阵
+
+`attempt` 是**已开始的执行次数**（在领取时 `attempt + 1`）。`attempt == max_attempts`
+是**最后一次正常执行的常态**，不是异常状态——这是本文件最重要的前提，下面多条规则
+都建立在它之上。
+
+### 2.1 RUNNING（有人正在执行）
+
+| lease | 预算 | 触发者 | 收敛结果 | 判定谓词（同一条 UPDATE 内） |
+|---|---|---|---|---|
+| **有效** | 已耗尽 `attempt >= max` | 重复投递 | **保持 RUNNING，不改任何字段** | `takeover_running` 因 `lease_expires_at > now` 全部子句为假而 `rowcount=0`；DLQ 因 `lease_expires_at <= now` 为假而 `rowcount=0` |
+| **有效** | 未耗尽 | 重复投递 | **保持 RUNNING，不改任何字段** | 同上 |
+| **过期** | 已耗尽 `attempt >= max` | 重复投递 / reconciler | **原子转入 DEAD_LETTER** | `dead_letter_stale_running`：`status=RUNNING AND lease_exp IS NOT NULL AND lease_exp <= now AND attempt >= max_attempts` |
+| **过期** | 未耗尽 `attempt < max` | reconciler | **原子接管**（`attempt + 1`、写新 owner 与 lease） | `takeover_running`：`status=RUNNING AND attempt < max_attempts AND (worker_id=新 OR worker_id IS NULL OR lease_exp IS NULL OR lease_exp <= now)` |
+
+要点：
+
+- **重复投递永远不能杀死正在执行的 run。** 前两行是本文件的硬约束：`attempt ==
+  max_attempts` 时任何重复投递都只得到 `None`（不执行、不改状态、无 DLQ 行），
+  原 owner 的 `mark_succeeded(expected_worker_id=...)` 仍能正常提交。
+- 扫描与写入之间可能隔任意长时间，其间原 owner 可能刚刚续上 lease、或被另一个
+  worker 接管。因为 lease 谓词在写入的同一条 SQL 里，这两种情况都会让写入落空，
+  变成 benign no-op（`rowcount == 0`）。**不存在 TOCTOU 窗口。**
+- 并发接管者中恰好一个 `rowcount == 1`：赢家写入即把 lease 变成未来时刻，
+  其它竞争者的谓词立刻全部为假。
+
+### 2.2 QUEUED / RETRYING（已入队、未开始执行）
+
+| 预算 | 触发者 | 收敛结果 | 判定谓词 |
+|---|---|---|---|
+| `attempt < max` | worker 领取 | **原子领取** `RUNNING`（`attempt + 1`） | `claim_executable`：`status IN (QUEUED,RETRYING) AND attempt < max_attempts`，`attempt + 1` 在 SQL 内 |
+| `attempt >= max` | worker 领取 / reconciler | **原子转入 DEAD_LETTER** | `dead_letter_exhausted_executable`：`status IN (QUEUED,RETRYING) AND attempt >= max_attempts` |
+
+要点：
+
+- **重复投递不消耗预算。** `attempt + 1` 只发生在赢得 CAS 的那条 `UPDATE` 里；
+  落败的领取返回 `None`，`attempt` 不变。这让 at-least-once 投递在预算上是无害的。
+- **落败的领取是良性 no-op，不是错误。** 如果竞争者刚把 run 领取成 `RUNNING`，
+  本次领取返回 `None`（绝不抛 `RUNNING -> RUNNING` 的 `InvalidRunTransition`——
+  那不是非法迁移，只是基于过期快照的比较）。
+- 预算耗尽必须**终态**收敛：`list_recoverable_runs` 不比较 `max_attempts`，一个停在
+  `QUEUED`/`RETRYING` 且预算耗尽的 run 会被它反复重新投递，形成无界重投循环。
+
+### 2.3 PENDING（已落库、投递结果未知）
+
+| 情况 | 收敛结果 | 判定谓词 |
+|---|---|---|
+| 落库未超过宽限期（默认 60s） | **不动**，不投递 | `list_stale_pending_runs`：`status=PENDING AND updated_at <= now - grace` |
+| 陈旧 PENDING | **条件迁移到 QUEUED（见第 1 节统一模型的第一条边），然后投递** | `promote_pending_to_queued`：`status = PENDING`（单条 UPDATE 的 rowcount 决定谁有权发消息） |
+| 陈旧 PENDING 已被取消 / 已 `mark_queued` / 已终态 | **不投递**（谓词不成立） | 同上 |
+| 并发 reconciler 同时扫到 | **只有一个迁移成功、只有一个投递** | 同上 |
+| 迁移成功但投递失败 | 停在 `QUEUED` + `next_retry_at IS NULL` → QUEUED 孤儿分支兜底 | 见 1.4 |
+
+要点：
+
+- **恢复不是无脑重投。** 直接对 `PENDING` 重投无法区分「publish 之前被打断」（必须
+  补投）与「publish 成功但 `mark_queued` 未提交」（补投多余），所以必须先做**条件
+  迁移**，让数据库裁决「谁有权发这条消息」，迁移失败即不发。
+- 宽限期不可省：没有它就会对「消息正在投递途中」的 run 立刻补投。
+- C2（publish 成功、`mark_queued` 未提交）的恢复会产生一次**多余投递**，这是
+  at-least-once 入队的固有性质；正确性由 1.2 的领取 CAS 保证（恰好一个执行者）。
+
+### 2.4 QUEUED + `next_retry_at IS NULL`（已入队确认、消息可能已丢）
+
+| 情况 | 收敛结果 | 判定谓词 |
+|---|---|---|
+| `created_at` 未超过宽限期（默认 60s） | 不动 | `list_recoverable_runs` 的孤儿分支年龄下限 |
+| 已超过宽限期 | **重新投递**（不强制改状态） | 同上 |
+| 投递失败 | 下一轮扫描再试（不推进 `attempt`） | — |
+
+这是 `POST /api/runs` 现行单阶段路径（先建 `QUEUED` 再 publish）的恢复机制，也是
+1.3 最后一行「投递失败后的最终收敛」所依赖的分支。两条路径合起来保证：**不存在
+永久搁浅的 `PENDING` / `QUEUED`。**
+
+### 2.5 WAITING_APPROVAL（人工审批）
+
+**保持既有保守策略，本轮不变更。** 不自动重发：审批已被 claim、但 worker 随后崩溃的
+窗口里，审批载荷可能已被消费而副作用尚未提交，自动重发无法证明「不会重复执行
+副作用」。保留人工 Runbook + 审批 TTL 到期按拒绝处理。合法迁移集合以
+`runtime/statuses.py::ALLOWED_TRANSITIONS` 为准（`→ RUNNING` 不递增 `attempt`）。
+
+### 2.6 CANCELLED / 终态
+
+终态不可再迁出（唯一例外是人工重放的 `DEAD_LETTER -> QUEUED`，见
+`RunService.requeue_dead_letter`；**没有任何自动路径**会做这件事）。
+
+取消用**单条** `UPDATE ... WHERE status NOT IN (终态)` 判定：先读状态再按该状态做
+CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入时已变 `QUEUED`），
+而取消对每个非终态都合法，谓词直接写成「不是终态」即可，不需要预先知道当前状态。
+
+---
+
+## 3. DLQ 转移的原子性与剩余限制
+
+### 2.1 原子性保证
+
+`agent_runs` 的状态迁移与 `agent_dead_letters` 的记录写入在**同一个事务**里完成
+（`AgentRunRepository._dead_letter_conditionally`）。
+
+这一点是必需的，不是优化。分两次提交会留下一个**不可恢复**的窗口：状态已是终态
+（不再被任何扫描器捞起）而 DLQ 行缺失，于是这个 run 既不会重投、也没有记录供人工
+`scripts/replay_dead_run.py` 重放——它变成静默消失。行为级证据见
+`test_dead_letter_transition_and_dlq_row_are_atomic`（注入 DLQ 写入故障，断言状态
+迁移被**回滚**）。
+
+`agent_dead_letters` 行**不可变**：重复补写返回既有行，保留首次进入 DLQ 时的
+`attempt_count` / `error_code` / `entered_at`（重放后再次进入 DLQ 不覆盖历史证据）。
+
+### 2.2 剩余限制（诚实边界）
+
+- **不是 broker-native DLX。** 没有 RabbitMQ/Redis 死信交换机，也没有自动重投队列；
+  闭环是「数据库 AgentRun 状态机 + 周期扫描器 + 人工重放脚本」。
+- **不覆盖 `WAITING_APPROVAL`。** 见 2.5。
+- **人工重放是唯一出口。** `DEAD_LETTER` 没有自动出口；`requeue_dead_letter` 复用原
+  `run_id`，因此非 HITL 的 `operation_key = run_id:tool_call_id` 在任意次重放中恒定
+  （HITL 的 `operation_key = run_id:approval:{approval_id}` 同理，见
+  [human-in-the-loop.md](../../docs/design/human-in-the-loop.md)）。
+- **DLQ 落终态后不再被扫描。** 这是有意的（终态收敛才能终止无界重投），代价是
+  恢复完全依赖人工——所以 DLQ 写入与状态迁移必须同事务，否则会静默丢失。
+- **外部系统端到端 exactly-once：`NOT PROVIDED`。** ledger 只保证本仓不重复发起，
+  下游需接受同一把幂等键。
+
+---
+
+## 4. 实际恢复延迟与配置关系
+
+**`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`（默认 30s）是扫描间隔，不是恢复时间。**
+真实延迟 = 触发条件（过期 / 宽限期）到被扫到之间的等待 + 执行时间。
+
+| 故障形态 | 触发条件 | 实际检测延迟（下界） | 依据的配置 |
+|---|---|---|---|
+| `QUEUED`/`RETRYING` 退避到点但消息丢失 | `next_retry_at <= now` | 0 ～ 一个扫描间隔 | `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`（30s） |
+| `QUEUED` 单阶段路径 publish 前/后崩溃 | `created_at <= now - 60s` | **60s 宽限期** + 0 ～ 30s 扫描间隔 → **60 ～ 90s** | `orphan_grace_seconds=60` + `RECONCILE_INTERVAL` |
+| `PENDING` 两阶段入队被打断 | `updated_at <= now - 60s` | **60 ～ 90s** | `pending_grace_seconds`（默认 60）+ `RECONCILE_INTERVAL` |
+| `RUNNING` worker 崩溃（lease 过期） | `lease_expires_at <= now` | **lease TTL**（`AGENT_RUN_LEASE_SECONDS`，默认 180s）+ 0 ～ 30s | `AGENT_RUN_LEASE_SECONDS` + `RECONCILE_INTERVAL` |
+| `RUNNING` 被误判（心跳抖动） | 同上 | 同上 | 同上 |
+
+关键点：
+
+- **lease 过期才是 `RUNNING` 的故障判定信号，不是心跳失败。** 心跳持续续租的 run
+  永远不会被回收；心跳只是让 lease 不过期。
+- **`orphan_grace_seconds=60` 与扫描间隔 30s 的关系**：60s 宽限期意味着刚入队的
+  `QUEUED`/`PENDING` 在前 60s 内不会被补投（避免对投递途中的消息重复投递）；之后
+  最坏再等一个扫描间隔。所以「60s 宽限期 + 30s 扫描」给出的实际检测延迟是
+  **60 ～ 90s**，把它写成「30 秒恢复」是错的。
+- **`RUNNING` 恢复的延迟由 lease 主导**（默认 180s），与扫描间隔无关。把
+  `AGENT_RUN_LEASE_SECONDS` 调小会缩短崩溃恢复延迟，但更容易因 GC / 事件循环饿死
+  造成**误判过期**——而误判的直接后果是新 worker 接管并从 checkpoint 续跑
+  （工具幂等 ledger 兜底副作用），不是数据损坏。
+
+### 4.1 超时交叉配置
+
+| 配置 | 默认 | 必须满足 | 启动校验 |
+|---|---|---|---|
+| `AGENT_RUN_LEASE_SECONDS` | 180s | 应显著大于心跳间隔 | 无硬校验（见下） |
+| `AGENT_RUN_HEARTBEAT_SECONDS` | 30s | `< LEASE_SECONDS`（否则续租永远追不上过期） | 无硬校验 |
+| `AGENT_RUN_TASK_TIME_LIMIT` | 180s | `< VISIBILITY_TIMEOUT` | `AGENT_RUN_VISIBILITY_TIMEOUT` 默认 3600s |
+| `AGENT_RUN_VISIBILITY_TIMEOUT` | 3600s | `> TASK_TIME_LIMIT`，否则任务还在跑消息已重投 | 无硬校验 |
+| `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` | — | `> TASK_TIME_LIMIT + safety margin` | **有**（`core/config.py::validate_distributed_runtime_settings`） |
+| `AGENT_RUN_RECONCILE_INTERVAL_SECONDS` | 30s | ≥ 1s（防忙循环） | 有 |
+
+当前**只有 thread-lock TTL 与 task time limit 的关系被启动校验强制**。lease /
+heartbeat / visibility 的交叉关系目前靠文档约束，无 fail-fast 校验——这是已知缺口
+（P1），记录在此以便后续补齐。
+
+---
+
+## 5. 恢复闭环的可运维性
+
+### 5.1 Beat 单点故障
+
+`celery beat` 是 compose 里的**独立 service**（`deploy/compose/docker-compose.yml`），
+刻意**不**内嵌进 worker——worker 可以被 `--scale` 成多副本，内嵌 beat 会让每个副本
+都调度一次。
+
+- `restart: unless-stopped`：beat 崩溃后由 Docker 拉起。
+- **单点是真实存在的**：beat 挂掉期间（崩溃到拉起之间、或拉起失败）**没有任何扫描**，
+  滞留 run 不会收敛。队列消息此时可能仍在，但按第 5 节的实测，消息本身随时可能丢。
+- 不做 beat 高可用是有意的复杂度取舍：一个 beat 重复调度是幂等的（所有判定都是
+  条件 UPDATE），而多 beat 需要分布式调度锁，收益不匹配当前规模。
+- **beat 必须被单独监控**：它挂了而 worker 全部健康，队列深度会缓慢上升。
+
+### 5.2 Beat 存活 ≠ Reconciler 成功执行
+
+这是两个**正交**的信号，必须分开看：
+
+| 信号 | 覆盖什么 | 覆盖不到什么 |
+|---|---|---|
+| beat 容器健康检查（`/tmp/celerybeat-schedule` mtime < `max(120, 4×interval)`） | beat 进程活着、schedule 文件在被更新 | 扫描任务本身是否成功执行 |
+| `agent_reconcile_scan_total{outcome}` | 每次扫描的执行结果（`success` / `error`） | 扫描跑了但一条 run 都没收敛 |
+| `agent_reconcile_last_success_timestamp_seconds` | 最近一次**成功**扫描的 Unix 时间戳 | — |
+| `agent_run_stale_reclaimed_total` / `agent_run_stale_dead_letter_total` | 实际发生了收敛动作 | 无可收敛对象时的沉默 |
+
+只监控 beat 存活是不够的：beat 活着但每次扫描都抛错（例如数据库不可达）时，
+schedule 文件照样更新、健康检查照样是绿的，而恢复闭环已经断了。
+`agent_reconcile_last_success_timestamp_seconds` 才是「恢复闭环还在工作」的直接证据。
+
+已知缺口（P1）：这两个指标已实现并暴露，但**尚未接入告警规则**；当前只能通过查询
+指标发现闭环停滞。
+
+### 5.3 Queue backlog 与批量扫描饥饿
+
+扫描器按 `created_at ASC` 取前 `limit` 条（默认 100）。因此：
+
+- **队头饥饿**：若最老的一批 run 持续投递失败（例如 broker 局部故障），它们会一直
+  占据扫描窗口，靠后的新 run 得不到处理。
+- 缓解：单条投递失败不会中断本轮其余 run（`continue`），下一轮仍从队头开始，所以
+  **只要投递恢复，全部 backlog 会被逐轮清空**——饥饿是暂时的，不是永久丢失。
+- 重复投递的数量随 backlog 上升，但**不消耗预算**（见 2.2），因此不影响正确性，
+  只影响无效工作量。
+- 未实现：按失败次数退避、或对 `next_retry_at` 重置以把失败项移出队头。
+
+---
+
+## 6. 相关文档
+
+- 状态机与整体设计：[distributed-agent-runtime.md](../../docs/design/distributed-agent-runtime.md)
+- 状态归属：[runtime-state-ownership.md](../../docs/design/runtime-state-ownership.md)
+- 运维手册：[../operations/distributed-runtime-runbook.md](../../docs/operations/distributed-runtime-runbook.md)
+- 人工审批与副作用幂等：[human-in-the-loop.md](../../docs/design/human-in-the-loop.md)
+- 投递语义实测：[../operations/e2e-verification-guide.md](../../docs/operations/e2e-verification-guide.md)
+
+**证据分级**：本文件描述的收敛规则全部有**真实 PostgreSQL** 行为级用例覆盖
+（`tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py`、
+`test_pending_enqueue_contract_pg.py`）。但真实生产集群 / 多副本长期运行 / 真实用户
+流量仍未验证，属 `NOT_VERIFIED`；本文件不构成生产验证结论。

@@ -1036,27 +1036,140 @@ class TestDeliverySemanticsContract:
         )
 
     @pytest.mark.unit
-    def test_attempt_budget_is_enforced_at_the_claim_point(self):
-        """预算必须在领取/接管**之前**判定，否则重投可以突破 max_attempts。
+    def test_pending_grace_and_queued_orphan_grace_are_one_value(self):
+        """QUEUED 孤儿分支与 PENDING 分支的宽限期必须是**同一个**常量。
 
-        ``repository.takeover_running`` 的 ``attempt = attempt + 1`` 是无条件的；
-        ``mark_recoverable`` 类路径若不先挡住，broker 崩溃重投能把 run 推到预算外
-        继续执行。
+        两者描述的是同一类不确定性（消息是否已发出不可知）。用两个各自硬编码的
+        magic number 会让两者的实际检测延迟悄悄漂移，而延迟承诺写在
+        ``docs/reference/runtime-state-convergence.md`` 第 4 节。
         """
         import inspect
 
+        from runtime import repository, retry
+
+        assert repository.ORPHAN_GRACE_SECONDS == 60
+        sig = inspect.signature(retry.reconcile_stuck_runs)
+        default = sig.parameters["pending_grace_seconds"].default
+        assert (
+            default == repository.ORPHAN_GRACE_SECONDS
+        ), "PENDING 宽限期默认值必须复用 ORPHAN_GRACE_SECONDS，不能各写一个数字"
+
+    @pytest.mark.unit
+    def test_reconcile_outcome_signal_is_distinct_from_beat_liveness(self):
+        """必须有「reconciler 成功执行」的可观测信号，不能只有 beat 存活。
+
+        beat 的健康检查只看 schedule 文件 mtime（进程活着就一直更新），所以
+        「beat 活着但扫描每次都失败」时健康检查仍是绿的，而恢复闭环已经断了。
+        """
+        import inspect
+
+        from core import monitoring
+        from runtime import metrics
+        from runtime.tasks import reconcile_stuck_runs_task
+
+        assert hasattr(monitoring, "agent_reconcile_scan_total")
+        assert hasattr(monitoring, "agent_reconcile_last_success_timestamp_seconds")
+        assert hasattr(monitoring, "agent_run_stale_reclaimed_total")
+        src = inspect.getsource(reconcile_stuck_runs_task)
+        assert "record_reconcile_scan(False)" in src, "扫描失败必须留下可查询信号"
+        assert "record_reconcile_success" in src, "成功扫描必须刷新时间戳"
+        assert inspect.getsource(metrics.record_reconcile_scan)
+
+    @pytest.mark.unit
+    def test_dead_letter_write_is_not_lease_unconditional(self):
+        """禁止出现「只判 RUNNING、不带 lease 谓词」的 DLQ 更新。
+
+        这是本轮修复的缺陷本体：``attempt == max_attempts`` 是最后一次正常执行的
+        常态，只判 status 的 DLQ 写入会误杀持有有效 lease、正在跑图的 run。
+        """
+        import inspect
+
+        from runtime import repository
+
+        dl_src = inspect.getsource(repository.AgentRunRepository.dead_letter_stale_running)
+        assert "AgentRun.lease_expires_at <= now" in dl_src
+        assert "AgentRun.attempt >= AgentRun.max_attempts" in dl_src
+        # 状态迁移与 DLQ 行必须同事务
+        helper = inspect.getsource(repository.AgentRunRepository._dead_letter_conditionally)
+        assert "_attach_dead_letter" in helper
+        assert helper.index("_attach_dead_letter") < helper.index("session.commit()")
+
+    @pytest.mark.unit
+    def test_attempt_budget_is_enforced_inside_the_claim_update(self):
+        """预算必须在**领取的那条 UPDATE** 里判定，不能放在 Python 里先判。
+
+        历史形态（本文件曾断言的源码顺序）是 ``mark_running`` 里先 SELECT 出
+        ``attempt``、在 Python 里比 ``max_attempts``、耗尽就无条件
+        ``RUNNING -> DEAD_LETTER``。``attempt == max_attempts`` 是**最后一次正常
+        执行**的常态，于是任何重复投递都会把持有有效 lease、正在跑图的 run 打成
+        DEAD_LETTER —— 已证实的缺陷。
+
+        现在的契约更强：预算谓词与 lease 谓词、状态谓词**同在一条 UPDATE 内**，
+        由数据库一次性判定。行为级证据见
+        ``tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py``。
+        """
+        import inspect
+
+        from runtime.repository import AgentRunRepository
         from runtime.run_service import RunService
 
+        # 服务层不得再做「先 SELECT 再判预算」：它只能消费数据库层的原子结果。
         src = inspect.getsource(RunService.mark_running)
-        gate_at = src.find('next_attempt > int(run["max_attempts"])')
-        takeover_at = src.find("self.repo.takeover_running(")
-        # 领取路径的写状态调用（_transition(...) 换行），用稳定的成员名定位
-        claim_at = src.find("from_statuses={cur}")
-        assert gate_at != -1, "mark_running 里没有 attempt 预算闸门"
-        assert takeover_at != -1
-        assert claim_at != -1
-        assert gate_at < takeover_at, "预算闸门必须在 takeover_running 之前"
-        assert gate_at < claim_at, "预算闸门必须在领取写状态之前"
+        assert (
+            "next_attempt" not in src
+        ), "mark_running 里不应再有 Python 侧预算判定（attempt+1 已下沉到 SQL）"
+        for call in ("self.repo.takeover_running(", "self.repo.claim_executable("):
+            assert call in src, f"mark_running 必须走原子领取原语 {call}"
+        assert "from_statuses={RunStatus.RUNNING}" in src and (
+            "require_expired_lease=True" in src
+        ), "RUNNING 的预算耗尽收敛必须要求 lease 已过期"
+
+        # 预算谓词在 repository 层，且必须与状态/lease 谓词同一条 UPDATE。
+        take = inspect.getsource(AgentRunRepository.takeover_running)
+        assert (
+            "AgentRun.attempt < AgentRun.max_attempts" in take
+        ), "takeover_running 必须在同一条 UPDATE 里带预算谓词"
+        for method in (
+            "dead_letter_stale_running",
+            "dead_letter_exhausted_executable",
+            "claim_executable",
+        ):
+            body = inspect.getsource(getattr(AgentRunRepository, method))
+            assert "max_attempts" in body, f"{method} 必须带预算谓词"
+
+        # 三条 RUNNING 收敛路径都不允许出现「无 lease 条件的 RUNNING -> DEAD_LETTER」。
+        dl_stale = inspect.getsource(AgentRunRepository.dead_letter_stale_running)
+        assert (
+            "AgentRun.lease_expires_at <= now" in dl_stale
+        ), "RUNNING -> DEAD_LETTER 必须带 lease 过期谓词，否则会误杀正在执行的 run"
+
+    @pytest.mark.unit
+    def test_pending_recovery_uses_conditional_transition_not_blanket_dispatch(self):
+        """PENDING 恢复必须是「条件迁移 + 宽限期」，不是无脑重投。"""
+        import inspect
+
+        from runtime.repository import AgentRunRepository
+        from runtime.run_service import RunService
+
+        promote = inspect.getsource(AgentRunRepository.promote_pending_to_queued)
+        assert (
+            "AgentRun.status == RunStatus.PENDING.value" in promote
+        ), "PENDING -> QUEUED 必须是 status 谓词下的条件迁移"
+        assert "grace_seconds" in inspect.getsource(
+            AgentRunRepository.list_stale_pending_runs
+        ), "PENDING 扫描必须带宽限期"
+        scan = inspect.getsource(RunService.list_stale_pending_runs)
+        assert "grace_seconds" in scan
+        # 宽限期默认值必须与 QUEUED 孤儿分支同一口径（同一常量，不各写一个数字）
+        from runtime.repository import ORPHAN_GRACE_SECONDS
+
+        assert "ORPHAN_GRACE_SECONDS" in inspect.getsource(
+            AgentRunRepository.list_stale_pending_runs
+        ), "PENDING 宽限期必须复用 ORPHAN_GRACE_SECONDS"
+        assert "ORPHAN_GRACE_SECONDS" in inspect.getsource(
+            AgentRunRepository.list_recoverable_runs
+        ), "QUEUED 孤儿分支也必须复用同一常量"
+        assert ORPHAN_GRACE_SECONDS == 60
 
 
 class TestAttemptBudgetTerminalConvergence:

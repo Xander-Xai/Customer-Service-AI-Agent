@@ -115,6 +115,28 @@ def record_stale_run_dead_lettered() -> None:
     _inc("agent_run_stale_dead_letter_total")
 
 
+def record_reconcile_scan(success: bool) -> None:
+    """记录一次 reconciler 扫描的**执行结果**（不是 beat 是否存活）。
+
+    与 beat 健康检查正交：beat 的健康检查只看 schedule 文件 mtime，进程活着
+    就一直是绿的；而这里记录扫描本身是否成功执行完。两者都为绿才意味着恢复闭环
+    真的在跑（``beat 活着 + 扫描失败`` = 闭环已断但健康检查看不出来）。
+    """
+    _inc("agent_reconcile_scan_total", outcome="success" if success else "error")
+
+
+def record_reconcile_success(timestamp_seconds: float) -> None:
+    """记录最近一次**成功**扫描的 Unix 时间戳（便于直接算恢复闭环是否停滞）。"""
+    try:
+        from core import monitoring
+
+        metric = getattr(monitoring, "agent_reconcile_last_success_timestamp_seconds", None)
+        if metric is not None:
+            metric.set(timestamp_seconds)
+    except Exception:
+        pass
+
+
 def record_run_failure() -> None:
     _inc("agent_run_failed_total")
 

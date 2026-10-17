@@ -32,15 +32,22 @@ def execute_agent_run(self, run_id: str) -> str:  # pragma: no cover - 需 broke
 
 @celery_app.task(name="runtime.reconcile_stuck_runs")
 def reconcile_stuck_runs_task() -> dict[str, object]:  # pragma: no cover - 需 broker
-    """Celery Beat 周期入口：捞回滞留的 RETRYING/QUEUED 与 lease 过期 RUNNING。
+    """Celery Beat 周期入口：捞回滞留的 RETRYING/QUEUED/PENDING 与 lease 过期 RUNNING。
 
-    幂等：重复投递一个已在执行的 run 不会重复执行——``mark_running`` 在他人持有
-    有效 lease 时返回 None。单个 run 的投递失败不影响其余（下一轮再试）。
+    幂等：重复投递一个已在执行的 run 不会重复执行——``mark_running`` 的 lease /
+    预算谓词在同一条 UPDATE 内判定，落败者不消耗 attempt。单个 run 的投递失败不
+    影响其余（下一轮再试）。
 
     刻意**不**回收 ``WAITING_APPROVAL``：等待人工审批的 run 不能自动重发，
     理由见 ``runtime/retry.py::reconcile_stuck_runs``。
-    """
 
+    记录扫描**执行结果**：beat 的健康检查只看 schedule 文件 mtime（进程活着就一直
+    更新），所以「beat 活着但扫描每次都失败」时健康检查仍是绿的，而恢复闭环已经
+    断了。这两个信号必须分开看。
+    """
+    import time
+
+    from . import metrics
     from .repository import AgentRunRepository
     from .retry import reconcile_stuck_runs
     from .run_service import RunService
@@ -51,5 +58,13 @@ def reconcile_stuck_runs_task() -> dict[str, object]:  # pragma: no cover - 需 
         service = RunService(repository=AgentRunRepository(session_factory=get_db_session))
         return await reconcile_stuck_runs(service)
 
-    dispatched = run_sync(_once())
+    try:
+        dispatched = run_sync(_once())
+    except Exception:
+        # 扫描失败必须可见：否则「beat 存活」会被误读成「恢复闭环在工作」。
+        # 不吞异常（让 Celery 记录任务失败），但先落下可查询的信号。
+        metrics.record_reconcile_scan(False)
+        raise
+    metrics.record_reconcile_scan(True)
+    metrics.record_reconcile_success(time.time())
     return {"dispatched": len(dispatched), "run_ids": dispatched}

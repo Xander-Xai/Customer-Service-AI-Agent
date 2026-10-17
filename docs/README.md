@@ -38,6 +38,7 @@
 - 系统架构 → [design/architecture-design.md](design/architecture-design.md)
 - 分布式 Agent Runtime 设计 → [design/agent-runtime.md](design/agent-runtime.md)
 - 状态归属（checkpoint / session / cache / tool store） → [design/runtime-state-ownership.md](design/runtime-state-ownership.md)
+- AgentRun 状态收敛契约（收敛矩阵 / DLQ 原子性 / 恢复延迟） → [reference/runtime-state-convergence.md](reference/runtime-state-convergence.md)
 - API 参考 → [reference/api-reference.md](reference/api-reference.md)
 - 安全设计 → [design/security.md](design/security.md)
 - Prompt 策略 → [design/prompt-engineering.md](design/prompt-engineering.md)
@@ -139,6 +140,7 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 | [distributed-agent-runtime.md](design/distributed-agent-runtime.md) | 分布式 Runtime 架构与可靠性边界（能力/非能力） | 开发者、审计者 |
 | [human-in-the-loop.md](design/human-in-the-loop.md) | 高风险工具副作用的人工审批治理（风险模型 / 职责分离 / TTL / 幂等双防线 / 证据边界） | 开发者、审计者 |
 | [runtime-state-ownership.md](design/runtime-state-ownership.md) | 四类状态归属表（checkpoint / session / cache / tool store） | 开发者、审计者 |
+| [reference/runtime-state-convergence.md](reference/runtime-state-convergence.md) | AgentRun 状态收敛契约（收敛矩阵 / DLQ 原子性 / 实际恢复延迟与配置关系） | 开发者、审计者 |
 | [async-agent-worker-architecture.md](design/async-agent-worker-architecture.md) | Worker pool 深化设计（已实现部分 vs 纯设计部分） | 开发者 |
 | [context-engineering.md](design/context-engineering.md) | Tool Result / Session Context Engineering | 开发者 |
 | [security.md](design/security.md) | 安全架构、威胁模型、认证方案 | 开发者、审计者 |

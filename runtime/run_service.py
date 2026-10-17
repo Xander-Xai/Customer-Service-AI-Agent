@@ -173,10 +173,49 @@ class RunService:
 
         用于重试投递失败后的兜底恢复（见 ``runtime/retry.py::reconcile_stuck_runs``）。
 
-        刻意**不含**过期 lease 的 RUNNING：那一类由
-        :meth:`list_stale_running_runs` 单独覆盖。
+        刻意**不含**过期 lease 的 RUNNING（由 :meth:`list_stale_running_runs`
+        覆盖），也**不含** PENDING（由 :meth:`list_stale_pending_runs` 覆盖：PENDING
+        需要先做条件迁移再投递，不是无脑重发）。
         """
         return self.repo.list_recoverable_runs(limit=limit, now=now or _utcnow())
+
+    def list_stale_pending_runs(
+        self, *, limit: int = 100, now: datetime | None = None, grace_seconds: int = 60
+    ) -> list[str]:
+        """列出落库超过宽限期、仍停在 ``PENDING`` 的 run（两阶段入队恢复）。
+
+        见 :meth:`promote_pending_to_queued` 的契约说明。刻意**不**扫描全部
+        PENDING：投递结果未知的 run 需要一个宽限期才允许补投。
+        """
+        return self.repo.list_stale_pending_runs(
+            limit=limit, now=now or _utcnow(), grace_seconds=grace_seconds
+        )
+
+    def promote_pending_to_queued(
+        self, run_id: str, *, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        """条件迁移 ``PENDING -> QUEUED``，成功后调用方才可投递。
+
+        为什么是「先迁移、再发消息」而不是「直接发消息」
+        -------------------------------------------
+        直接对 PENDING 重投无法区分两种情况：（a）进程在 publish **之前**被打断
+        —— 必须补投；（b）publish 成功但 ``mark_queued`` 未提交 —— 队列里已经有
+        一条消息，补投是多余投递。区分不了就只能无脑重投。
+
+        先原子地把 PENDING 迁移成 QUEUED，让**数据库**成为「谁有权发这条消息」
+        的裁决者：并发 reconciler 只有一个能迁移成功，也只有一个投递；已被取消 /
+        已处理的 PENDING 谓词不成立，绝不会发出消息。
+
+        投递失败后的最终收敛：此时 run 停在 QUEUED 且 ``next_retry_at IS NULL``，
+        由 :meth:`list_recoverable_runs` 的 QUEUED 孤儿分支（同样带宽限期）兜底。
+        因此这条路径**总能**收敛到执行或 DLQ，不存在永久搁浅的 PENDING。
+
+        返回迁移后的 run；谓词不成立返回 ``None``（benign no-op）。
+        """
+        now = now or _utcnow()
+        if not self.repo.promote_pending_to_queued(run_id, now=now):
+            return None
+        return self.repo.get(run_id)
 
     def list_stale_running_runs(
         self, *, limit: int = 100, now: datetime | None = None
@@ -191,43 +230,29 @@ class RunService:
     def dead_letter_stale_running(
         self, run_id: str, *, error_code: str, error_message: str, now: datetime | None = None
     ) -> dict[str, Any] | None:
-        """把 lease 仍处于过期状态的 RUNNING run 推入 DEAD_LETTER（预算已耗尽）。
+        """把「lease 仍过期 **且** 预算已耗尽」的 RUNNING run 原子推入 DEAD_LETTER。
 
         与 :meth:`mark_dead_letter` 的区别：这里**不**做 ``worker_id`` 匹配
-        （owner 本来就已失效，没有 owner 可匹配），但**要求 lease 仍然过期**——
-        一个刚刚续上 lease 的健康 run 不会被 reconciler 误杀。
+        （owner 本来就已失效，没有 owner 可匹配），但**要求 lease 仍然过期**
+        —— 一个刚刚续上 lease 的健康 run 不会被 reconciler 误杀；**同时要求预算
+        已经耗尽**，否则应当走接管而不是落 DLQ。
 
-        返回 ``None`` 表示谓词不成立（run 已被别的执行者接走/已终态/刚续租），
-        调用方应把它当作 benign no-op，而不是错误。
+        三条谓词（``status=RUNNING`` / ``lease_expires_at <= now`` /
+        ``attempt >= max_attempts``）与 DLQ 行写入都在**同一条 UPDATE + 同一
+        事务**内完成，因此不存在「状态已终态但 DLQ 行缺失」的不可恢复窗口。
+
+        返回 ``None`` 表示谓词不成立（run 已被接走 / 已续租 / 已终态 / 预算未
+        耗尽），调用方应把它当作 benign no-op，而不是错误。
         """
         now = now or _utcnow()
-        run = self.repo.get(run_id)
-        if run is None:
-            raise RunNotFound(run_id)
-        updated = self.repo.transition_stale_running(
+        self.require_run(run_id)  # 不存在则抛 RunNotFound；存在与否由下面的谓词决定
+        return self.repo.dead_letter_stale_running(
             run_id,
-            to_status=RunStatus.DEAD_LETTER,
             now=now,
             error_code=error_code,
             error_message=error_message[:2000],
             error_type="transient",
-            last_error=error_message[:2000],
-            lease_expires_at=None,
-            finished_at=now,
         )
-        if updated is None:
-            return None
-        self.repo.add_dead_letter(
-            run_id=run_id,
-            thread_id=run["thread_id"],
-            attempt_count=int(run["attempt"]),
-            max_attempts=int(run["max_attempts"]),
-            error_type="transient",
-            error_code=error_code,
-            error_message=error_message,
-            worker_id=run.get("worker_id"),
-        )
-        return updated
 
     def get_dead_letter(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get_dead_letter(run_id)
@@ -303,31 +328,38 @@ class RunService:
         lease_seconds: float | None = None,
         now: datetime | None = None,
     ) -> dict[str, Any] | None:
-        """QUEUED/RETRYING -> RUNNING（递增 attempt + 写 worker lease）。
+        """QUEUED/RETRYING/RUNNING -> RUNNING（递增 attempt + 写 worker lease）。
 
-        返回 None 表示「不应执行」：当前 RUNNING 且被其他 worker 的有效 lease
-        持有（重复投递）。RUNNING 但 lease 过期/归属自己 -> 接管并递增 attempt。
-        终态 -> InvalidRunTransition。
+        返回 None 表示「不应执行」。三条**互斥**的收敛契约，全部由数据库层的
+        条件 UPDATE 判定，不在本方法里先 SELECT 再判断：
 
-        RUNNING -> RUNNING 的接管是**单条 UPDATE 谓词**（见
-        ``repository.takeover_running``），不是「先 SELECT 看到过期、再按 status
-        更新」：后者允许两个竞争者读到同一份过期快照后都成功接管。
+        - **RUNNING + 有效 lease**（重复投递）：不改状态，返回 None。
+          判定在 ``repository.takeover_running`` 的 lease 谓词里。
+        - **RUNNING + 过期 lease + 预算耗尽**：原子收敛 DEAD_LETTER。
+          判定在 ``repository.dead_letter_stale_running`` 的
+          ``lease_expires_at <= now AND attempt >= max_attempts`` 里。
+        - **RUNNING + 过期 lease + 预算未耗尽**：原子接管（attempt+1）。
+
+        QUEUED/RETRYING 领取走 ``repository.claim_executable``：状态 + 预算 +
+        ``attempt + 1`` 同一条 UPDATE，落败者**不消耗预算**。预算耗尽由
+        ``repository.dead_letter_exhausted_executable`` 原子收敛。
+
+        为什么不能把预算判定放在本方法里
+        --------------------------------
+        ``attempt == max_attempts`` 是**最后一次正常执行**的常态。若在这里先判预算、
+        耗尽就无条件 RUNNING -> DEAD_LETTER，则任何一条重复投递（broker 重投、
+        reconciler 补投）都会把**持有有效 lease、正在跑图**的 run 打成 DEAD_LETTER：
+        已被证实的缺陷。lease 失效与预算耗尽必须都是数据库层谓词，且二者**与**
+        状态谓词同在一条 UPDATE 内判定。
         """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
         now = now or _utcnow()
-        next_attempt = int(run["attempt"]) + 1
 
         if cur == RunStatus.RUNNING:
             if worker_id is None or lease_seconds is None:
                 return run
-            # 预算闸门必须在**接管之前**：``takeover_running`` 的
-            # ``attempt = attempt + 1`` 是无条件的，不在这里挡住，broker 崩溃重投 /
-            # reconciler / 任何重复投递都能把 run 推到 ``max_attempts`` 之后继续执行
-            # —— 预算形同虚设。
-            if next_attempt > int(run["max_attempts"]):
-                self._dead_letter_budget_exhausted(run, cur=cur, now=now, takeover=True)
-                return None
+            # 1) 原子接管：lease 失效谓词 + 预算谓词同在一条 UPDATE 内
             taken = self.repo.takeover_running(
                 run_id,
                 worker_id=worker_id,
@@ -337,58 +369,113 @@ class RunService:
             )
             if taken is not None:
                 return taken
-            # 谓词不成立：要么别人持有有效 lease（重复投递），要么并发竞争输了。
+            # 2) 未取得所有权。只有「lease 仍然过期 **且** 预算已耗尽」才允许收敛
+            #    到 DLQ；持有有效 lease 的执行在这里被完整放过（benign no-op）。
+            self._dead_letter_budget_exhausted(
+                run_id,
+                from_statuses={RunStatus.RUNNING},
+                source="RUNNING 接管",
+                require_expired_lease=True,
+                now=now,
+            )
+            # 3) 别人持有有效 lease / 并发竞争输了 / 已终态 -> benign no-op
             return None
 
         ensure_transition(cur, RunStatus.RUNNING, run_id)
-        if next_attempt > int(run["max_attempts"]):
-            self._dead_letter_budget_exhausted(run, cur=cur, now=now, takeover=False)
+        claimed = self.repo.claim_executable(
+            run_id,
+            from_statuses={cur},
+            worker_id=worker_id,
+            task_id=task_id,
+            lease_seconds=lease_seconds,
+            set_started_at=run.get("started_at") is None,
+            now=now,
+        )
+        if claimed is not None:
+            return claimed
+        # 领取落败：区分「预算耗尽（可原子收敛）」与「并发竞争输了（不改状态）」
+        if self._dead_letter_budget_exhausted(
+            run_id,
+            from_statuses={cur},
+            source=f"{cur.value} 领取",
+            require_expired_lease=False,
+            now=now,
+        ):
             return None
-        fields: dict[str, Any] = {
-            "attempt": next_attempt,
-            "worker_id": worker_id,
-            "task_id": task_id,
-        }
-        if run.get("started_at") is None:
-            fields["started_at"] = now
-        if lease_seconds is not None:
-            fields["lease_expires_at"] = now + timedelta(seconds=lease_seconds)
-            fields["heartbeat_at"] = now
-        return self._transition(run_id, RunStatus.RUNNING, from_statuses={cur}, **fields)
+        current = self.repo.get(run_id)
+        if current is None:
+            raise RunNotFound(run_id)
+        if current["status"] == RunStatus.RUNNING.value:
+            # 并发重复投递：竞争者刚把 QUEUED/RETRYING 领取成 RUNNING。这与
+            # 「RUNNING 分支里他人持有有效 lease」是同一种良性结果——本次投递不
+            # 执行，也不该被报成状态机错误（``RUNNING -> RUNNING`` 根本不是非法
+            # 迁移，是这里的比较基于过期快照）。
+            return None
+        raise InvalidRunTransition(run_id, current["status"], RunStatus.RUNNING.value)
 
     def _dead_letter_budget_exhausted(
-        self, run: dict[str, Any], *, cur: RunStatus, now: datetime, takeover: bool
-    ) -> None:
-        """attempt 预算耗尽时把 run 收敛到 DEAD_LETTER（终态）。
+        self,
+        run_id: str,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        source: str,
+        require_expired_lease: bool,
+        now: datetime,
+    ) -> bool:
+        """attempt 预算耗尽时原子收敛到 DEAD_LETTER；谓词不成立返回 False。
+
+        判定完全在数据库层：
+
+        - ``require_expired_lease=True``（RUNNING 来源）：额外要求
+          ``lease_expires_at <= now``，因此**正在正常执行的 run 不会被这条路径
+          改写**——没有所有权失效证据就不动终态。
+        - ``require_expired_lease=False``（QUEUED/RETRYING 来源）：这两类状态没有
+          持有中的 lease，谓词为 ``status IN (...) AND attempt >= max_attempts``。
 
         必须**终态**收敛而不是「拒绝执行就完事」：一旦 reconciler 被调度，
-        一个停在 QUEUED/RETRYING 且预算已耗尽的 run 会被
-        ``list_recoverable_runs``（它不比较 ``max_attempts``）反复重新投递，
-        变成无界重投循环。落 DLQ 后它不再出现在扫描结果里，循环自然终止，
-        同时留下 ``agent_dead_letters`` 记录供人工
-        ``scripts/replay_dead_run.py`` 重放。
+        一个停在 QUEUED/RETRYING 且预算已耗尽的 run 会被 ``list_recoverable_runs``
+        （它不比较 ``max_attempts``）反复重新投递，变成无界重投循环。落 DLQ 后它
+        不再出现在扫描结果里，循环自然终止，同时留下 ``agent_dead_letters`` 记录
+        供人工 ``scripts/replay_dead_run.py`` 重放。
 
-        方向说明：这是 fail-closed——宁可把 run 交给人，也不让它在预算外被执行。
+        方向说明：这是 fail-closed——宁可把 run 交给人，也不让它在预算外被执行；
+        但只在**已证明 owner 失效**之后才 fail-closed，不误伤活着的执行。
         """
-        run_id = str(run["id"])
-        attempt = int(run["attempt"])
-        max_attempts = int(run["max_attempts"])
-        logger.warning(
-            "attempt 预算已耗尽，落 DLQ 拒绝执行: run_id=%s attempt=%d/%d takeover=%s",
-            run_id,
-            attempt,
-            max_attempts,
-            takeover,
-        )
-        source = "RUNNING 接管" if takeover else f"{cur.value} 领取"
-        self.mark_dead_letter(
-            run_id,
-            error_code="max_attempts_exhausted_at_claim",
-            error_message=(
-                f"{source}时 attempt 预算已耗尽（{attempt}/{max_attempts}），拒绝再次执行"
-            ),
-            error_type="transient",
-        )
+        # 这两个值**只用于构造错误信息**；判定权在数据库的谓词里，所以读到的快照
+        # 过期也不会影响收敛决策。
+        snapshot = self.require_run(run_id)
+        attempt = int(snapshot["attempt"])
+        max_attempts = int(snapshot["max_attempts"])
+        error_code = "max_attempts_exhausted_at_claim"
+        error_message = f"{source}时 attempt 预算已耗尽（{attempt}/{max_attempts}），拒绝再次执行"
+        if require_expired_lease:
+            updated = self.repo.dead_letter_stale_running(
+                run_id,
+                now=now,
+                error_code=error_code,
+                error_message=error_message,
+            )
+        else:
+            updated = self.repo.dead_letter_exhausted_executable(
+                run_id,
+                from_statuses=from_statuses,
+                now=now,
+                error_code=error_code,
+                error_message=error_message,
+            )
+        # 只有谓词真的成立才告警：``attempt`` / ``max_attempts`` 只是用于**构造
+        # 错误信息**的读值，判定权在数据库。在问数据库之前就打「预算已耗尽」的
+        # warning，会让每一次重复投递都产生一条假告警（重复投递在 at-least-once
+        # 下是常态），从而淹没真正的预算耗尽信号。
+        if updated is not None:
+            logger.warning(
+                "attempt 预算已耗尽，落 DLQ 拒绝执行: run_id=%s attempt=%d/%d source=%s",
+                run_id,
+                attempt,
+                max_attempts,
+                source,
+            )
+        return updated is not None
 
     def heartbeat(self, run_id: str, *, worker_id: str, lease_seconds: float) -> bool:
         """续租（仅当前 owner 且 lease 仍存活时生效）。返回是否成功。
@@ -792,23 +879,28 @@ class RunService:
           - QUEUED/RETRYING/PENDING -> 立即置 CANCELLED：worker 领取时会因状态不是
             EXECUTABLE_STATUSES 而跳过，等价于「投递后被丢弃」，不会执行图；
           - RUNNING -> 置 CANCELLED 属于**协作式取消**：只改状态，不中断已在运行的
-            asyncio task。worker 的 ``mark_succeeded`` 走
-            ``from_statuses={RUNNING}`` 条件更新，因此不会覆盖 CANCELLED；调用方
-            必须等待 ``finished_at``/轮询确认最终态，不能假设已中断执行。
+          asyncio task。worker 的 ``mark_succeeded`` 走
+          ``from_statuses={RUNNING}`` 条件更新，因此不会覆盖 CANCELLED；调用方
+          必须等待 ``finished_at``/轮询确认最终态，不能假设已中断执行。
+
+        并发：取消用**单条** ``UPDATE ... WHERE status NOT IN (终态)`` 判定。
+        先读状态再按该状态做 CAS 会与 promote/领取竞争出假失败（读到 PENDING、
+        写入时已变 QUEUED）；取消对每个非终态都合法，所以谓词直接写成「不是终态」，
+        不需要预先知道当前状态。
         """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
         if cur in TERMINAL_STATUSES:
             return run
-        now = _utcnow()
-        return self._transition(
-            run_id,
-            RunStatus.CANCELLED,
-            from_statuses={cur},
-            lease_expires_at=None,
-            next_retry_at=None,
-            finished_at=now,
-        )
+        if not self.repo.cancel_if_not_terminal(run_id, now=_utcnow()):
+            # 谓词不成立：run 在读与写之间进了终态（正常收敛），返回现状。
+            latest = self.repo.get(run_id)
+            if latest is None:
+                raise RunNotFound(run_id)
+            if latest["status"] in {s.value for s in TERMINAL_STATUSES}:
+                return latest
+            raise InvalidRunTransition(run_id, latest["status"], RunStatus.CANCELLED.value)
+        return self.repo.get(run_id) or run
 
 
 _default_service: RunService | None = None
