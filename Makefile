@@ -1,3 +1,4 @@
+.PHONY: alert-rules-sync alert-rules-test
 .PHONY: help dev dev-docker test test-mcp test-cov lint format prod prod-down prod-build clean env-check db-migrate db-upgrade backup canary scale scale-down monitoring-up monitoring-token metrics-exposure-check metrics-exposure-verify alert-rules-test agent-eval agent-eval-contract agent-eval-annotation-status agent-eval-cases agent-eval-real rag-gold-validate rag-gold-review rag-gold-known-item rag-gold-reviewed-eval rag-gold-reviewed-status rag-ablation runtime-report perf-evidence eval-rag rag-eval-649 rag-eval-649-preflight rag-eval-649-smoke rag-eval-import audit-docs public-boundary public-boundary-history openapi-check facts runtime-e2e runtime-chaos runtime-verify mcp-verify demo-offline
 
 # reviewed-gold 人工标注数据集（人工生产，默认路径；可用 GOLD_LABELS=... 覆盖）
@@ -305,7 +306,10 @@ monitoring-up: monitoring-token ## 启动完整监控栈（Prometheus + Grafana 
 metrics-exposure-check: ## 指标暴露链路契约（告警/Grafana 引用的每个指标名都可达）
 	@python3 -m pytest tests/unit/test_metrics_exposure_contract.py tests/unit/test_metrics_multiprocess.py tests/unit/test_compose_metrics_topology.py -v --tb=short -p no:cacheprovider
 
-alert-rules-test: monitoring-token ## 官方 promtool 规则单测（DLQ 告警是否真会 firing / 是否会 latching）
+alert-rules-sync: ## 从 alert_rules.yml 重新生成规则单测的 annotation 期望（幂等）
+	@python3 scripts/sync_alert_rule_test_annotations.py
+
+alert-rules-test: monitoring-token ## 官方 promtool 规则单测（DLQ / 恢复闭环告警是否真会 firing / 是否会 latching）
 	@echo "🧪 promtool check config + test rules（真实 Prometheus 镜像）..."
 	@docker run --rm \
 		-v "$(PWD)/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \

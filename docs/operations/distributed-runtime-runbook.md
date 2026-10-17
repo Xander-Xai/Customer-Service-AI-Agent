@@ -340,6 +340,50 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
 
 ---
 
+### 3.8 恢复闭环停滞（`AgentReconcileStalled`）
+
+**先分清两个信号**：beat 进程存活 ≠ reconciler 扫描成功。
+
+beat 的容器健康检查只看 schedule 文件的 mtime，进程活着它就一直更新。因此
+「beat 活着但每次扫描都失败」（数据库不可达、扫描抛错）时健康检查是**绿色**的，
+而恢复闭环已经断了——滞留的 `RUNNING`/`QUEUED`/`PENDING` run 不会被重新投递，也不
+会落 DLQ，会静默堆积。
+
+```bash
+# 1) 最近的扫描成功了吗？
+curl -s "$METRICS_URL" | grep -E 'agent_reconcile_(last_success|scan_total)'
+
+# 2) 扫描是否在失败？（beat 仍调度时）
+curl -s "$METRICS_URL" | grep 'agent_reconcile_scan_total{outcome="error"}'
+
+# 3) beat 存活与 schedule 文件是否推进
+docker compose -f deploy/compose/docker-compose.yml ps beat
+stat -c '%y %n' /tmp/celerybeat-schedule      # 容器内
+```
+
+判定与处置：
+
+| 观察 | 结论 | 处置 |
+|---|---|---|
+| `last_success` 陈旧 + `outcome="error"` 增长 | beat 在调度，扫描在失败 | 查数据库可达性（`pg_isready` / 连接池）；修好后下一轮扫描自动恢复 |
+| `last_success` 陈旧 + `outcome="error"` 不增长 | beat 没在调度 | `docker compose restart beat`；检查 `--schedule` 路径可写 |
+| `last_success` 从未出现 | beat 刚部署或从未成功扫描过一次 | 确认 beat 配置与数据库；这一段窗口此前无监控，现由 `absent()` 分支覆盖 |
+| `prometheus_multiprocess_enabled != 1` | **告警全部失明**（含本条） | 先修抓取侧，见 §4 表 |
+
+手工触发一次扫描验证闭环是否恢复：
+
+```bash
+python3 scripts/reconcile_stuck_runs.py --dry-run
+```
+
+恢复后确认滞留 run 被收敛：`agent_run_stale_reclaimed_total` /
+`agent_run_stale_dead_letter_total` 应出现增长。
+
+**未覆盖的失效面**：本条告警验证的是「表达式在 promtool 下真的会 firing」。真实
+Alertmanager 的**通知送达**是另一段链路（见 §5），本仓库不声称已端到端验证。
+
+---
+
 ## 4. 值班指标速查
 
 | 指标 | 告警建议 |
@@ -355,6 +399,8 @@ FROM human_approvals WHERE approval_id = '<approval_id>';
 | `prometheus_multiprocess_enabled` | **≠ 1 → 告警全部失明**：worker 写的 `agent_*` 指标在抓取侧恒为 0 |
 | `prometheus_exposition_metric_families` | 骤降 → 指标模块未 import / REGISTRY 被换掉 |
 | `tool_execution_timeout_total` | 突增 → 上游（ERP/外部 API）变慢，检查 `TOOL_EXECUTION_TIMEOUT_SECONDS` 是否偏紧 |
+| `agent_reconcile_last_success_timestamp_seconds` | `time()` 减去它 > 360s → 恢复闭环停滞（见 §3.8），**与 beat 存活正交** |
+| `agent_reconcile_scan_total{outcome="error"}` | 突增 → 扫描在失败但 beat 仍调度，最常见是数据库不可达 |
 
 **label 纪律**：任何 `agent_*` 指标都不得带 `run_id` / `thread_id` / `user_id` /
 `query`（高基数会打爆 Prometheus）。有测试断言这一点。
@@ -388,9 +434,9 @@ Alertmanager 的通知投递 —— 那是另一段链路，见 §5。
    能重投的只有 `WorkerLostError`，且**立即**重投、无退避。因此恢复完全依赖
    数据库 AgentRun + beat 周期 reconciler；`beat` 停摆 = 没有自动恢复。
    另：裸 `Reject(requeue=True)` 同样立即重投（实测 5 秒 80 次），不能当策略。
-1. 无 fencing token：pause 超过 lease TTL 的旧 worker 不会被强制中止。
+1. **无 fencing token**，只有协作式取消：失去 lease 的 worker 会被**取消图执行**（`_FenceGuard`）并在写外部副作用前复核 ownership（`ToolRegistry` 的 execution fence），但取消之前已发出的外部调用无法回收；卡在同步 C 调用里的执行也不可取消，由 `AGENT_RUN_TASK_TIME_LIMIT` 兜底。lease/heartbeat/visibility/lock/claim 的交叉关系已在启动时强制（`validate_timeout_invariants`），不是靠文档约定。
 2. 单 Redis 互斥，不是 Redlock；Redis 故障转移期间可能双持有。
-3. 认领后崩溃的副作用会被重放（见 §3.5）。
+3. 认领后崩溃的副作用会被重放（见 §3.5）。认领租约在执行期间会续租（`_ClaimRenewer`），且 claim TTL 必须覆盖工具执行上界 + 余量（启动时强制），因此「工具仍在执行、认领先过期」不再是可达状态；旧执行者写不进结果时会抛「结果未知」而不是静默返回成功。
 4. 取消是协作式的，不打断已在执行的图。
 5. 事件流仅 best-effort 可续读（非 exactly-once）：可重复、可有缺口、裁剪后不可恢复。
 6. 无 backpressure：永久锁死的 thread 会持续按

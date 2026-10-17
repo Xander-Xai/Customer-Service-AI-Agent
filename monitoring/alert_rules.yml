@@ -49,3 +49,45 @@ groups:
           summary: "检测到新的 AgentRun dead-letter"
           description: "过去 5 分钟新增 {{ $value | humanize }} 个 dead-letter（重试耗尽）。检查 GET /api/runs/dead 与 agent_dead_letters 表，判断是否可重放。"
           runbook_url: "https://github.com/Xander-Xai/Customer-Service-AI-Agent/blob/main/docs/operations/distributed-runtime-runbook.md#33-dead_letter-堆积"
+
+      # 恢复闭环停滞。**这与 beat 存活是两个正交信号**：beat 的容器健康检查只看
+      # schedule 文件的 mtime，进程活着它就一直更新 —— 于是「beat 活着但每次扫描
+      # 都失败」（数据库不可达、扫描抛错）时健康检查是绿的，而恢复闭环已经断了，
+      # 滞留 run 会静默堆积。
+      #
+      # 表达式用「最近一次**成功**扫描距今多久」，而不是扫描失败计数：
+      #   - 计数只在有扫描失败时才增长；「beat 根本没在调度」时它恒为 0，不会报警；
+      #   - 时间戳同时覆盖「调度停了」与「扫描一直失败」两种情况。
+      # `absent()` 分支覆盖「worker 从未上报过该指标」（如 beat 刚部署、还没有一次
+      # 成功扫描），否则刚上线时会有一段无监控窗口。
+      #
+      # 阈值与 `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`（默认 30s）绑定：给足 10 个
+      # 扫描周期 + 60s 抖动余量，避免正常抖动误报。
+      - alert: AgentReconcileStalled
+        expr: |
+          (
+            time() - agent_reconcile_last_success_timestamp_seconds
+          ) > 360
+          or
+          (
+            absent(agent_reconcile_last_success_timestamp_seconds)
+            and on() (up{job=~".*"} == 1)
+          )
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "恢复调和任务长时间未成功执行"
+          description: "最近一次成功的 reconcile 扫描距今超过 360s（约为扫描间隔的 12 倍），或该指标从未出现。beat 进程存活不等于恢复闭环在工作：beat 的健康检查只看 schedule 文件 mtime，扫描本身失败时它仍为绿色。滞留的 RUNNING/QUEUED/PENDING run 不会被收敛——它们不会被重新投递，也不会落 DLQ。排查：curl -s metrics 端点并 grep agent_reconcile；确认 beat service 存活且数据库可达；检查 agent_reconcile_scan_total 中 outcome=error 的计数。"
+          runbook_url: "https://github.com/Xander-Xai/Customer-Service-AI-Agent/blob/main/docs/operations/distributed-runtime-runbook.md#recover-loop-stalled"
+
+      # 扫描持续失败：与上面的「停滞」互补（停滞看时间，这个看原因分类）。
+      # `increase(...) > 0` 保证只在窗口内有失败时报警，不会因历史一次失败永久 latching。
+      - alert: AgentReconcileScanFailing
+        expr: increase(agent_reconcile_scan_total{outcome="error"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "恢复调和扫描持续失败"
+          description: "过去 10 分钟出现 {{ $value | humanize }} 次失败的 reconcile 扫描。beat 仍在调度，但扫描本身在失败——最常见原因是数据库不可达。恢复闭环此刻是断的：滞留 run 不会被重新投递。"
