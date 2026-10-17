@@ -51,6 +51,12 @@ def _worker_env(redis_url: str) -> dict[str, str]:
     # 硬/软时间上限要短，否则每个场景都要等分钟级。
     env["AGENT_RUN_TASK_TIME_LIMIT"] = "4"
     env["AGENT_RUN_TASK_SOFT_TIME_LIMIT"] = "3"
+    # 探针任务**不调用任何工具**，因此工具超时在这里显式关闭（0 = 关闭）。
+    # 这不是绕过校验：把 4s 的 task limit 与默认 30s 的工具超时放在一起，本来就违反
+    # `TOOL_EXECUTION_TIMEOUT_SECONDS < AGENT_RUN_TASK_TIME_LIMIT`——那条关系在生产分支
+    # 早已强制，现在被提升为所有环境强制（见 core.config.validate_timeout_invariants）。
+    # 正确做法是让本 lane 自己声明「不测工具超时」，而不是把不变量降级成警告。
+    env["TOOL_EXECUTION_TIMEOUT_SECONDS"] = "0"
     return env
 
 
