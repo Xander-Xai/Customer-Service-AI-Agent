@@ -213,12 +213,29 @@ def test_fence_guard_is_a_noop_when_ownership_is_retained():
 
 
 @requires_infra
-def test_side_effect_tools_recheck_ownership_before_executing():
+def test_side_effect_tools_recheck_ownership_before_executing(pg_engine, cleanup_created_runs):
     """工具执行前的 ownership 复核：失去执行权的 worker 不得发起新的外部写。
 
     这是第二道防线（第一道是协作式取消）。复核失败必须 **fail-closed**：拒绝执行，
     而不是「记一条日志然后照写」。
+
+    ledger 必须注入**本 lane 的真实 PostgreSQL**：走默认 ``get_side_effect_store()``
+    会落到默认 SQLite（``data/csai.db``），而那个库里通常没有 ``tool_side_effects``
+    表 —— CI 上正是因此失败（``no such table: tool_side_effects``）。
     """
+    from runtime import side_effects as se
+
+    store = se.SideEffectStore(session_factory=_session_factory(pg_engine))
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(se, "get_side_effect_store", lambda: store)
+    try:
+        _assert_tool_fence_refuses_write()
+    finally:
+        monkey.undo()
+
+
+def _assert_tool_fence_refuses_write() -> None:
+    """``ToolRegistry`` 的 execution fence 必须在失去 ownership 时拒绝写操作。"""
     from tools.tool_registry import LogicalCall, ToolCachePolicy, ToolRegistry
 
     executed: list[dict] = []
