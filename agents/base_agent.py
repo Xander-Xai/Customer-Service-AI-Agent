@@ -102,6 +102,23 @@ def _should_gate_tool(
         return True
 
 
+def _exec_kwargs(stream_callback: Any, tool_call_id: Any, logical_call: Any) -> dict[str, Any]:
+    """只读工具的调用签名必须与引入 ``logical_call`` 之前**逐字一致**。
+
+    只读工具不经过 ledger（``_idempotent_operation`` 对 ``side_effect=False`` 直接
+    返回），因此没有必要带上逻辑身份。多传一个恒为 ``None`` 的 kwarg 会改变所有
+    只读工具的调用签名，让既有契约测试（以及任何按签名断言的注入替身）失效——
+    这类"无行为变化却破坏接口"的改动比它带来的收益大得多。
+    """
+    kwargs: dict[str, Any] = {
+        "stream_callback": stream_callback,
+        "tool_call_id": tool_call_id,
+    }
+    if logical_call is not None:
+        kwargs["logical_call"] = logical_call
+    return kwargs
+
+
 def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, ordinal: int) -> Any:
     """构造一次写操作调用的**重放稳定**逻辑身份（``tools.LogicalCall``）。
 
@@ -800,12 +817,17 @@ class BaseAgent(ABC):
                 for p in parsed_tcs:
                     _ordinal = _logical_ordinals.get(p["name"], 0)
                     _logical_ordinals[p["name"]] = _ordinal + 1
+                    # 只有**写操作**工具需要重放稳定的逻辑身份（只有它们经过
+                    # ledger）；只读工具传 `logical_call=None`，既省掉一次构造，
+                    # 也让只读路径的调用签名保持稳定。
+                    #
+                    # 判定用 `is True` 而不是真值：`MagicMock.is_side_effect(...)`
+                    # 返回的是一个真值 Mock，若用真值判定，测试替身会被误认为
+                    # 「是写操作」，凭空给只读工具加上逻辑身份。
                     _logical_call = None
-                    if self.tool_registry is not None and getattr(
-                        self.tool_registry, "is_side_effect", None
-                    ):
+                    if self.tool_registry is not None:
                         with contextlib.suppress(Exception):
-                            if self.tool_registry.is_side_effect(p["name"]):
+                            if self.tool_registry.is_side_effect(p["name"]) is True:
                                 _logical_call = _build_logical_call(
                                     agent=self.name,
                                     state=state,
@@ -891,17 +913,13 @@ class BaseAgent(ABC):
                             result = await self.tool_registry.execute_raw(
                                 p["name"],
                                 p["args"],
-                                stream_callback=stream_callback,
-                                tool_call_id=tool_call_id,
-                                logical_call=_logical_call,
+                                **_exec_kwargs(stream_callback, tool_call_id, _logical_call),
                             )
                         elif not cache_hit:
                             result = await self.tool_registry.execute(
                                 p["name"],
                                 p["args"],
-                                stream_callback=stream_callback,
-                                tool_call_id=tool_call_id,
-                                logical_call=_logical_call,
+                                **_exec_kwargs(stream_callback, tool_call_id, _logical_call),
                             )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
