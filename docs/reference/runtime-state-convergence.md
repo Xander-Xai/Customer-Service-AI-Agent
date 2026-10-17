@@ -188,37 +188,37 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
   造成**误判过期**——而误判的直接后果是新 worker 接管并从 checkpoint 续跑
   （工具幂等 ledger 兜底副作用），不是数据损坏。
 
-### 4.1 超时交叉配置
+### 4.1 超时交叉配置（可执行不变量表）
 
-| 配置 | 默认 | 必须满足 | 启动校验 |
-|---|---|---|---|
-| `AGENT_RUN_LEASE_SECONDS` | 180s | 应显著大于心跳间隔 | 无硬校验（见下） |
-| `AGENT_RUN_HEARTBEAT_SECONDS` | 30s | `< LEASE_SECONDS`（否则续租永远追不上过期） | 无硬校验 |
-| `AGENT_RUN_TASK_TIME_LIMIT` | 180s | `< VISIBILITY_TIMEOUT` | `AGENT_RUN_VISIBILITY_TIMEOUT` 默认 3600s |
-| `AGENT_RUN_VISIBILITY_TIMEOUT` | 3600s | `> TASK_TIME_LIMIT`，否则任务还在跑消息已重投 | 无硬校验 |
-| `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` | — | `> TASK_TIME_LIMIT + safety margin` | **有**（`core/config.py::validate_distributed_runtime_settings`） |
-| `AGENT_RUN_RECONCILE_INTERVAL_SECONDS` | 30s | ≥ 1s（防忙循环） | 有 |
+下表是 `core/config.py::validate_timeout_invariants` 的**可执行镜像**
+（`tests/unit/test_timeout_invariants.py` 同时钉住两者）。该校验在**所有环境**
+强制、且**早于 `DEV_MODE` 早退**：这些关系错了会在运行时产生不确定的重复执行或锁
+丢失，与「是不是生产」无关。
 
-当前**只有 thread-lock TTL 与 task time limit 的关系被启动校验强制**。lease /
-heartbeat / visibility 的交叉关系目前靠文档约束，无 fail-fast 校验——这是已知缺口
-（P1），记录在此以便后续补齐。
+**致命约束**（不满足 -> 拒绝启动）
 
----
+| 约束 | 出厂默认 | 违反后果 |
+|---|---|---|
+| `AGENT_RUN_HEARTBEAT_SECONDS < AGENT_RUN_LEASE_SECONDS` | 30s < 180s | 续租永远追不上过期，lease 恒定失效，任何执行都被判为失去所有权 |
+| `AGENT_RUN_LEASE_SECONDS >= 2 * AGENT_RUN_HEARTBEAT_SECONDS` | 180s >= 60s | 只有一次续租机会，无法证明长执行不会因单次抖动丢租约 |
+| `TOOL_EXECUTION_TIMEOUT_SECONDS < AGENT_RUN_TASK_TIME_LIMIT` | 30s < 180s | 工具超时的局部降级来不及发生，退化为整体失败 |
+| `AGENT_RUN_TASK_TIME_LIMIT < AGENT_RUN_VISIBILITY_TIMEOUT` | 180s < 3600s | broker 未 ACK 可见性时间覆盖不住执行时长：任务还在跑、消息已重投 -> 同一 run 并发执行 |
+| `claim TTL >= TOOL_EXECUTION_TIMEOUT_SECONDS + margin(30s)` | 60s >= 60s | 执行期间认领过期 -> 第二个执行者拿到执行权并重复发起同一笔写 |
+| `AGENT_RUN_THREAD_LOCK_TTL_SECONDS > AGENT_RUN_TASK_TIME_LIMIT + margin(30s)` | 300s > 210s | 任务仍在执行时锁已过期，同 thread 的另一个 worker 可进入同一 state lineage |
 
-## 5. 恢复闭环的可运维性
+`LOCK_TTL` 一行在 `AGENT_RUN_THREAD_LOCK_ENABLED=false` 时不适用；任何一行为 `<= 0`
+视为**显式关闭**，该维度不参与校验（关掉旋钮不该报一堆无关错误）。
 
-### 5.1 Beat 单点故障
+**刻意不是致命约束**（只影响恢复延迟 / 运维偏好，只警告）
 
-`celery beat` 是 compose 里的**独立 service**（`deploy/compose/docker-compose.yml`），
-刻意**不**内嵌进 worker——worker 可以被 `--scale` 成多副本，内嵌 beat 会让每个副本
-都调度一次。
+| 项 | 理由 |
+|---|---|
+| `LEASE > TASK_TIME_LIMIT` | 有正常续租时这不是正确性问题。一刀切要求会让「lease 60s + task 180s + heartbeat 20s」这种正常配置被判为非法。可证明条件是 `LEASE >= 2 * HEARTBEAT`。只有**心跳停用**时它才升级为建议（`timeout_invariant_recommendations`） |
+| `RECONCILE_INTERVAL` 与 `LEASE` 的相对大小 | 只改变滞留 run 的检测延迟（见 4.2），不影响正确性 |
+| `RECONCILE_INTERVAL >= 1s` | 防忙循环，由调度侧下限保证，不属于重复执行风险 |
 
-- `restart: unless-stopped`：beat 崩溃后由 Docker 拉起。
-- **单点是真实存在的**：beat 挂掉期间（崩溃到拉起之间、或拉起失败）**没有任何扫描**，
-  滞留 run 不会收敛。队列消息此时可能仍在，但按第 5 节的实测，消息本身随时可能丢。
-- 不做 beat 高可用是有意的复杂度取舍：一个 beat 重复调度是幂等的（所有判定都是
-  条件 UPDATE），而多 beat 需要分布式调度锁，收益不匹配当前规模。
-- **beat 必须被单独监控**：它挂了而 worker 全部健康，队列深度会缓慢上升。
+上一版文档曾把「lease/heartbeat/visibility 没有硬校验」列为已知缺口（P1）；该缺口
+已由 `validate_timeout_invariants` 关闭。
 
 ### 5.2 Beat 存活 ≠ Reconciler 成功执行
 

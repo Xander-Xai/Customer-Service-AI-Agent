@@ -65,8 +65,12 @@ CLAIM_TTL_MIN_MARGIN_SECONDS = 30.0
 def min_claim_ttl_seconds(tool_timeout_seconds: float) -> float:
     """受保护副作用所需的最小 claim TTL = 工具执行上界 + 余量。
 
-    显式函数而不是到处写字面量：这条不变量同时被启动校验（A4）与运行期 fail-closed
-    使用，两处必须同源，否则会一边收紧一边放行。
+    显式函数而不是到处写字面量：这条不变量同时被启动校验
+    （``core.config.validate_timeout_invariants``，它**反向读取**本模块的常量）与运行期
+    fail-closed 使用，必须同源，否则会一边收紧一边放行。
+
+    依赖方向是单向的：本模块持有真相源，config 读取它。写成 config -> runtime 或
+    runtime -> config 都会形成真正的 import 环。
     """
     return float(tool_timeout_seconds) + CLAIM_TTL_MIN_MARGIN_SECONDS
 
