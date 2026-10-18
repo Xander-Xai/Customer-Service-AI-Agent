@@ -343,3 +343,87 @@ async def test_content_addressed_key_dedupes_reordered_same_tool_writes(store):
     assert external.executions == 2, f"外部只应执行 A、B 各一次: {external.calls}"
     assert external.calls.count(a) == 1, "A 换槽位后必须被内容寻址键去重"
     assert external.calls.count(b) == 1
+
+
+@requires_infra
+async def test_partial_resume_recovers_interrupted_identical_write(store, cleanup_side_effects):
+    """Issue #12 Part A **部分恢复**残差：真实 PG 上不得静默吞掉第二笔同参写。
+
+    attempt 1 提出 ``[refund(A), refund(A)]``（两笔独立业务意图）：解析器在**执行任何写
+    之前**把两个 occurrence 都预占落账（``reserve_operation``）；第 1 笔（occ0）执行成功
+    后 worker 崩溃，occ1 仍是未执行的预占。恢复时只提出一个无业务 ID 的 A，
+    无法判断是 A1 重放还是 A2 首次执行，必须 fail-closed；当完整提出 [A1,A2]
+    时保留原序号，A1 去重且 A2 执行，合计两笔合法写入。
+
+    两笔都 SUCCEEDED 后的**缩短重放**同样无法判定对应哪一笔，也必须 fail-closed，
+    不得复用任意一笔的历史结果。
+    """
+    from runtime.operation_identity import ContentOccurrenceResolver
+    from runtime.side_effects import build_replay_stable_operation_key
+
+    run_id = f"{prefix}-partial"
+    thread_id = f"{prefix}-t"
+    node_id, agent, tool = "tools#0", "refund_agent", "staging_refund"
+    args = {"order_id": "ORD-PR", "amount": 100}
+    external = _ExternalSystem()
+
+    def key(occ: int) -> str:
+        return build_replay_stable_operation_key(
+            run_id=run_id,
+            node_id=node_id,
+            agent=agent,
+            tool_name=tool,
+            arguments=args,
+            ordinal=occ,
+        )
+
+    cleanup_side_effects.extend([key(0), key(1)])
+
+    async def _run(k: str) -> None:
+        await execute_idempotent_operation(
+            tool_name=tool,
+            operation_key=k,
+            run_id=run_id,
+            thread_id=thread_id,
+            arguments=args,
+            operation=lambda: external.refund(args),
+            store=store,
+        )
+
+    # attempt 1 预解析：本轮两个同内容 occurrence 全部预占后，只执行 occ0。
+    resolver = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    assert resolver.assign([(tool, args), (tool, args)]) == [0, 1]
+    await _run(key(0))
+    assert external.executions == 1
+    assert store.get(tool, key(1))["status"] == "PENDING", "occ1 必须已作为未执行预占落账"
+
+    # Shortened replay with one identical proposal is indistinguishable:
+    # it may mean "replay A1" or "execute A2". It must fail closed.
+    from runtime.operation_identity import OperationIdentityUnavailable
+
+    resolver2 = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
+        resolver2.assign([(tool, args)])
+    assert external.executions == 1, "ambiguous shortened replay must not issue another refund"
+
+    # Full [A1, A2] replay preserves occurrence order: A1 dedupes, A2 executes.
+    resolver3 = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    assert resolver3.assign([(tool, args), (tool, args)]) == [0, 1]
+    await _run(key(0))
+    await _run(key(1))
+    assert external.executions == 2, "full replay must recover exactly the missing refund"
+
+    # Both occurrences are now SUCCEEDED. A shortened replay is still
+    # ambiguous (which result would the caller mean?) and must fail closed.
+    resolver4 = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
+        resolver4.assign([(tool, args)])
+    assert external.executions == 2, "ambiguous shortened replay must not issue a third refund"
