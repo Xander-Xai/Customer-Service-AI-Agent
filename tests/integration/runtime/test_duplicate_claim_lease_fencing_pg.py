@@ -700,3 +700,116 @@ def test_same_identity_duplicate_claim_does_not_double_count_attempt(
         assert after["attempt"] == 2
         assert after["attempt"] < after["max_attempts"]
     assert svc.get_dead_letter(run_id) is None
+
+
+# ---------------------------------------------------------------------------
+# 7. executor 实际调用路径的 mark_dead_letter 原子性（F2）
+# ---------------------------------------------------------------------------
+
+
+@requires_infra
+def test_executor_mark_dead_letter_is_atomic_on_dlq_insert_failure(
+    pg_engine, monkeypatch, cleanup_created_runs
+):
+    """``_handle_failure`` 真实调用的 ``mark_dead_letter`` 必须与 DLQ 行同事务。
+
+    既有原子性用例只覆盖 reconciler 的 ``dead_letter_stale_running`` 旁路；
+    executor 的常规失败提交走 ``RunService.mark_dead_letter``，过去是「先提交状态、
+    再单独插 DLQ 行」。DLQ 插入失败时会留下一个已终态却没有 DLQ 记录的 run——
+    reconciler 不捞、``replay_dead_run.py`` 也没有记录可重放。
+    """
+    from types import SimpleNamespace
+
+    from runtime.executor import _handle_failure
+
+    repo = AgentRunRepository(session_factory=_session_factory(pg_engine))
+    svc = RunService(repository=repo)
+    thread = f"f2-exec-{uuid.uuid4().hex[:8]}"
+    run_id = _seed_running(
+        repo,
+        attempt=1,
+        max_attempts=1,
+        lease_seconds=180.0,
+        worker_id="worker-A",
+        thread_id=thread,
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated DLQ row write failure")
+
+    monkeypatch.setattr(repo, "_attach_dead_letter", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated DLQ row write failure"):
+        asyncio.run(
+            _handle_failure(
+                svc,
+                run_id,
+                error_type="transient",
+                error_code="X",
+                error_message="boom",
+                dispatcher=None,
+                cfg=SimpleNamespace(AGENT_RUN_RETRY_BASE_SECONDS=0.01),
+                worker_id="worker-A",
+            )
+        )
+
+    after = svc.get_run(run_id)
+    assert after["status"] == RunStatus.RUNNING.value, "DLQ 写入失败必须回滚状态迁移"
+    assert svc.get_dead_letter(run_id) is None
+
+    # 故障消失后重试：状态与 DLQ 行同事务落地
+    monkeypatch.undo()
+    result = asyncio.run(
+        _handle_failure(
+            svc,
+            run_id,
+            error_type="transient",
+            error_code="X",
+            error_message="boom",
+            dispatcher=None,
+            cfg=SimpleNamespace(AGENT_RUN_RETRY_BASE_SECONDS=0.01),
+            worker_id="worker-A",
+        )
+    )
+    assert result == RunStatus.DEAD_LETTER.value
+    assert svc.get_run(run_id)["status"] == RunStatus.DEAD_LETTER.value
+    assert svc.get_dead_letter(run_id) is not None
+
+
+@requires_infra
+def test_executor_mark_dead_letter_rejects_stale_owner_without_dlq(pg_engine, cleanup_created_runs):
+    """stale owner 不得把新 owner 的 run 推进 DLQ，也不得留下 DLQ 行。"""
+    from types import SimpleNamespace
+
+    from runtime.executor import _handle_failure
+    from runtime.run_service import RunOwnershipLost
+
+    repo = AgentRunRepository(session_factory=_session_factory(pg_engine))
+    svc = RunService(repository=repo)
+    thread = f"f2-stale-{uuid.uuid4().hex[:8]}"
+    run_id = _seed_running(
+        repo,
+        attempt=1,
+        max_attempts=1,
+        lease_seconds=180.0,
+        worker_id="worker-B",
+        thread_id=thread,
+    )
+
+    result = asyncio.run(
+        _handle_failure(
+            svc,
+            run_id,
+            error_type="transient",
+            error_code="X",
+            error_message="boom",
+            dispatcher=None,
+            cfg=SimpleNamespace(AGENT_RUN_RETRY_BASE_SECONDS=0.01),
+            worker_id="worker-A",
+        )
+    )
+    # executor 捕获 RunOwnershipLost 后按「放弃提交」处理：不写终态、不进 DLQ。
+    assert result == RunStatus.RUNNING.value
+    assert svc.get_run(run_id)["status"] == RunStatus.RUNNING.value
+    assert svc.get_dead_letter(run_id) is None
+    assert RunOwnershipLost is not None

@@ -511,6 +511,75 @@ class ApprovalService:
         finally:
             session.close()
 
+    def expire_overdue(self, *, limit: int = 100, now: datetime | None = None) -> list[str]:
+        """主动把已过 TTL 的 ``PENDING`` 审批批量置为 ``EXPIRED``（后台扫描用）。
+
+        为什么不能只靠读路径
+        --------------------
+        ``list_pending`` / ``consume_resume`` 会在被调用时顺带过期，但**没有人轮询
+        审批**时它们永远不会被调用：run 停在 ``WAITING_APPROVAL``、审批仍是
+        ``PENDING``，reconciler 的 ``list_resumable_waiting_approval_runs`` 又要求
+        「已有终态审批」，于是这个 run 没有任何自动收敛路径。过期必须由周期扫描
+        主动完成，而不是某个 GET 的副作用。
+
+        并发与竞态
+        ----------
+        每条都是 ``UPDATE ... WHERE approval_id=? AND status='PENDING' AND
+        expires_at <= now`` 的 CAS：与人工 ``decide()`` 竞争时恰好一方成功。
+        - ``decide`` 先提交 -> 这里 ``rowcount == 0``，已批准/拒绝的终态不被覆写；
+        - 这里先提交 -> ``decide`` 读到终态，返回 ``newly_decided=False``，同样安全。
+        多个扫描器（多 worker / 重复任务）同时执行也只会有一条路径真正 transition。
+
+        返回本轮**实际**被置为过期的 run_id 列表（已终止/未到期/竞争者抢先的不计入）。
+        """
+        now = now or _utcnow()
+        bounded_limit = max(1, min(int(limit), 500))
+        session = self._session()
+        expired_run_ids: list[str] = []
+        try:
+            rows = session.execute(
+                select(HumanApproval.approval_id, HumanApproval.run_id)
+                .where(
+                    HumanApproval.status == STATUS_PENDING,
+                    HumanApproval.expires_at.isnot(None),
+                    HumanApproval.expires_at <= now,
+                )
+                .order_by(HumanApproval.expires_at.asc())
+                .limit(bounded_limit)
+            ).all()
+            for approval_id, run_id in rows:
+                result = session.execute(
+                    update(HumanApproval)
+                    .where(
+                        HumanApproval.approval_id == approval_id,
+                        HumanApproval.status == STATUS_PENDING,
+                        HumanApproval.expires_at.isnot(None),
+                        HumanApproval.expires_at <= now,
+                    )
+                    .values(
+                        status=STATUS_EXPIRED,
+                        reviewed_at=now,
+                        decision={"decision": "expired", "reason": "approval TTL elapsed"},
+                        updated_at=now,
+                    )
+                )
+                if result.rowcount:
+                    expired_run_ids.append(str(run_id))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+        for run_id in expired_run_ids:
+            _record_expired()
+            logger.warning(
+                "[HITL] 后台扫描把超时审批置为 EXPIRED run_id=%s（等待无人决策，按拒绝收敛）",
+                run_id,
+            )
+        return expired_run_ids
+
     # -- resume 消费（幂等） -------------------------------------------------
 
     def consume_resume(self, run_id: str, *, now: datetime | None = None) -> dict[str, Any] | None:

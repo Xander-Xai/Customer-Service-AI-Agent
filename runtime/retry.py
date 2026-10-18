@@ -9,7 +9,11 @@ import random
 from datetime import datetime, timezone
 from typing import Any
 
+from core.logger import get_logger
+
 from .repository import ORPHAN_GRACE_SECONDS
+
+logger = get_logger("runtime.retry")
 
 
 def compute_backoff(
@@ -111,6 +115,19 @@ async def reconcile_stuck_runs(
         except Exception:
             # 单个投递失败不阻断其余 run；下一轮扫描会再试。
             continue
+
+    # Issue #14 / F6：等待人工决策的审批也必须能主动过期，不能只靠
+    # ``GET /api/approvals`` 的读路径副作用。没有这一步时，一个
+    # ``WAITING_APPROVAL`` + ``PENDING`` 的 run 在 TTL 之后仍是「未决策」，
+    # ``list_resumable_waiting_approval_runs`` 看不到它，run 永久滞留。
+    try:
+        from core.hitl.approval_service import get_approval_service
+
+        expired_runs = get_approval_service().expire_overdue(now=now, limit=limit)
+        if expired_runs:
+            logger.warning("reconciler 主动过期 %s 个超时审批（等待无人决策）", len(expired_runs))
+    except Exception as e:  # noqa: BLE001 - 单次扫描失败不得吃掉其它恢复路径
+        logger.warning("reconciler 主动过期审批失败: %s", type(e).__name__)
 
     # Issue #14：决策已落定但未恢复的 WAITING_APPROVAL run（崩溃窗口 / dispatch 丢失）。
     for run_id in service.list_resumable_waiting_approval_runs(limit=limit):

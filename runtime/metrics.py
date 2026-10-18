@@ -168,6 +168,16 @@ def record_tool_idempotency_hit() -> None:
     _inc("agent_tool_idempotency_hit_total")
 
 
+def record_side_effect_terminal_write_rejected() -> None:
+    """ledger 的 SUCCEEDED/FAILED 结果提交被 CAS 拒绝。
+
+    典型原因：执行期间 claim 被接管、租约已过期、或该操作已进入终态。外部调用的
+    结果因此是**未知**的，不能静默当成成功或失败；调用方必须上抛并保留原始异常，
+    同时用这个指标让运维看得见「有一条 FAILED 记录没有写进去」。
+    """
+    _inc("agent_side_effect_terminal_write_rejected_total")
+
+
 def record_worker_task(status: str) -> None:
     _inc("agent_worker_task_total", status=status)
 

@@ -679,54 +679,61 @@ class RunService:
         """
         run = self.require_run(run_id)
         cur = parse_status(run["status"])
-        owner_gated = cur == RunStatus.RUNNING and expected_worker_id is not None
-        if cur in (RunStatus.RUNNING, RunStatus.RETRYING, RunStatus.QUEUED):
-            fields = {
-                "error_code": error_code,
-                "error_message": error_message[:2000],
-                "error_type": error_type,
-                "last_error": error_message[:2000],
-                "lease_expires_at": None,
-                "finished_at": _utcnow(),
-            }
-            if owner_gated:
-                updated = self._transition_owned(
-                    run_id,
-                    RunStatus.DEAD_LETTER,
-                    from_statuses={RunStatus.RUNNING},
-                    expected_worker_id=expected_worker_id,
-                    **fields,
-                )
-            else:
-                updated = self.repo.transition(
-                    run_id,
-                    from_statuses={cur},
-                    to_status=RunStatus.DEAD_LETTER,
-                    **fields,
-                )
-                if updated is None:
-                    latest = self.repo.get(run_id)
-                    if latest is None:
-                        raise RunNotFound(run_id)
-                    if latest["status"] == RunStatus.DEAD_LETTER.value:
-                        updated = latest
-                    else:
-                        raise InvalidRunTransition(run_id, latest["status"], "DEAD_LETTER")
-        elif cur == RunStatus.DEAD_LETTER:
-            updated = run
-        else:
+        if cur == RunStatus.DEAD_LETTER:
+            # 已是终态：DLQ 行应已存在；补写是幂等的，用于修复历史/异常中断留下的
+            # 缺行。这里不再做状态迁移，因此不涉及下面的原子事务承诺。
+            self.repo.add_dead_letter(
+                run_id=run_id,
+                thread_id=run["thread_id"],
+                attempt_count=int(run["attempt"]),
+                max_attempts=int(run["max_attempts"]),
+                error_type=error_type,
+                error_code=error_code,
+                error_message=error_message,
+                worker_id=worker_id or run.get("worker_id"),
+            )
+            return run
+        if cur not in (RunStatus.RUNNING, RunStatus.RETRYING, RunStatus.QUEUED):
             raise InvalidRunTransition(run_id, cur.value, RunStatus.DEAD_LETTER.value)
 
-        self.repo.add_dead_letter(
-            run_id=run_id,
-            thread_id=run["thread_id"],
-            attempt_count=int(run["attempt"]),
-            max_attempts=int(run["max_attempts"]),
-            error_type=error_type,
+        owner_gated = cur == RunStatus.RUNNING and expected_worker_id is not None
+        # 关键：状态迁移与 agent_dead_letters 行必须在**同一事务**里完成。
+        # 分两次提交会留下「状态已终态、DLQ 行缺失」的不可恢复窗口：run 不再被任何
+        # 扫描器捞起，也没有记录供 replay_dead_run.py 人工重放。
+        updated = self.repo.dead_letter_with_record(
+            run_id,
+            from_statuses={cur},
             error_code=error_code,
-            error_message=error_message,
-            worker_id=worker_id or run.get("worker_id"),
+            error_message=error_message[:2000],
+            error_type=error_type,
+            expected_worker_id=expected_worker_id if owner_gated else None,
+            require_live_lease=owner_gated,
         )
+        if updated is None:
+            latest = self.repo.get(run_id)
+            if latest is None:
+                raise RunNotFound(run_id)
+            if latest["status"] == RunStatus.DEAD_LETTER.value:
+                # 并发写者已经完成迁移（它的事务里也已写 DLQ）；补写仍是幂等的。
+                self.repo.add_dead_letter(
+                    run_id=run_id,
+                    thread_id=latest["thread_id"],
+                    attempt_count=int(latest["attempt"]),
+                    max_attempts=int(latest["max_attempts"]),
+                    error_type=error_type,
+                    error_code=error_code,
+                    error_message=error_message,
+                    worker_id=worker_id or latest.get("worker_id"),
+                )
+                return latest
+            if owner_gated and latest["status"] == RunStatus.RUNNING.value:
+                raise RunOwnershipLost(
+                    run_id,
+                    expected_worker_id=expected_worker_id,
+                    current_status=latest["status"],
+                    current_worker_id=latest.get("worker_id"),
+                )
+            raise InvalidRunTransition(run_id, latest["status"], RunStatus.DEAD_LETTER.value)
         return updated
 
     def requeue_dead_letter(self, run_id: str, *, reset_attempts: bool = True) -> dict[str, Any]:

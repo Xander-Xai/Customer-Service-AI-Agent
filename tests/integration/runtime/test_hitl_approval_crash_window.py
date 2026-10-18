@@ -216,3 +216,115 @@ def test_reconciler_ignores_genuinely_pending_approval(
         )
     )
     assert run_id not in dispatched, "仍在等待人审批的 run 不得被自动重投"
+
+
+# ---------------------------------------------------------------------------
+# F6：无人轮询时，PENDING 审批超过 TTL 必须被后台扫描主动过期并收敛 run
+# ---------------------------------------------------------------------------
+
+
+def _waiting_run_with_pending_approval(run_service, approvals, *, ttl_seconds: float = 10.0):
+    from runtime.statuses import RunStatus
+
+    thread_id = f"thread-f6-{uuid.uuid4().hex[:8]}"
+    run = run_service.create_run(
+        query="退款", session_id=thread_id, status=RunStatus.WAITING_APPROVAL
+    )
+    rec = approvals.create_or_get(
+        run_id=run["id"],
+        thread_id=thread_id,
+        action="staging_refund",
+        risk_level="high",
+        proposal={"order_id": "O-f6", "amount": 100},
+        user_id="customer-1",
+        ttl_seconds=ttl_seconds,
+    )
+    return run["id"], rec["approval_id"]
+
+
+def _future(seconds: float = 11.0):
+    from datetime import datetime, timedelta, timezone
+
+    return datetime.now(timezone.utc) + timedelta(seconds=seconds)
+
+
+def test_reconciler_expires_overdue_pending_approval_without_any_read_path(
+    run_service, approvals, session_factory, cleanup_created_runs
+):
+    """修复前：没有人调用审批读接口时，PENDING 审批永不过期，WAITING_APPROVAL run 卡死。
+
+    这里**不调用** ``GET /api/approvals`` / ``list_pending``，只跑 reconciler，断言
+    审批被 CAS 置为 EXPIRED 且 run 被重新投递。
+    """
+    from runtime.retry import reconcile_stuck_runs
+
+    run_id, approval_id = _waiting_run_with_pending_approval(run_service, approvals)
+    future = _future()
+
+    dispatched: list[str] = []
+
+    async def _fake_dispatch(rid: str) -> None:
+        dispatched.append(rid)
+
+    asyncio.run(
+        reconcile_stuck_runs(
+            run_service,
+            dispatcher=_fake_dispatch,
+            now=future,
+            reclaim_stale_running=False,
+            reclaim_stale_pending=False,
+        )
+    )
+
+    assert approvals.require(approval_id)["status"] == "EXPIRED", "超时审批必须被主动过期"
+    assert run_id in dispatched, "过期后 run 必须成为「决策已落定」并被重新投递"
+
+
+def test_expire_overdue_is_idempotent_and_never_overwrites_a_decision(
+    approvals, session_factory, run_service, cleanup_created_runs
+):
+    from core.hitl.approval_service import DECISION_APPROVE
+
+    svc = ApprovalService(session_factory=session_factory)
+    run_id, approval_id = _waiting_run_with_pending_approval(run_service, approvals)
+    future = _future()
+
+    assert svc.expire_overdue(now=future) == [run_id]
+    assert svc.expire_overdue(now=future) == [], "重复扫描不得重复过期"
+
+    # 竞态：人工先决策 -> 过期扫描不得覆写终态。
+    _run_id2, approval_id2 = _waiting_run_with_pending_approval(run_service, approvals)
+    approvals.decide(approval_id2, reviewer_id="sup-1", decision=DECISION_APPROVE)
+    assert svc.expire_overdue(now=future) == []
+    assert approvals.require(approval_id2)["status"] == "APPROVED", "不得把已批准改成 EXPIRED"
+
+
+def test_expired_approval_is_recovered_on_a_later_scan_after_a_crash(
+    run_service, approvals, session_factory, cleanup_created_runs
+):
+    """过期与投递之间崩溃：下一轮扫描必须把 run 捞起来（不能只依赖当轮投递）。"""
+    from runtime.retry import reconcile_stuck_runs
+
+    svc = ApprovalService(session_factory=session_factory)
+    run_id, approval_id = _waiting_run_with_pending_approval(run_service, approvals)
+    future = _future()
+
+    # 模拟「过期已提交、进程在 dispatch 前崩溃」：只做过期，不投递。
+    assert svc.expire_overdue(now=future) == [run_id]
+
+    dispatched: list[str] = []
+
+    async def _fake_dispatch(rid: str) -> None:
+        dispatched.append(rid)
+
+    asyncio.run(
+        reconcile_stuck_runs(
+            run_service,
+            dispatcher=_fake_dispatch,
+            now=future,
+            reclaim_stale_running=False,
+            reclaim_stale_pending=False,
+        )
+    )
+    assert run_id in dispatched
+    assert approvals.require(approval_id)["status"] == "EXPIRED"

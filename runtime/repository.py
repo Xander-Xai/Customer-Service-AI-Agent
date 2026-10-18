@@ -705,6 +705,50 @@ class AgentRunRepository:
             session.close()
         return self.get(run_id)
 
+    def dead_letter_with_record(
+        self,
+        run_id: str,
+        *,
+        from_statuses: set[RunStatus] | frozenset[RunStatus],
+        error_code: str,
+        error_message: str,
+        error_type: str,
+        now: datetime | None = None,
+        expected_worker_id: str | None = None,
+        require_live_lease: bool = True,
+    ) -> dict[str, Any] | None:
+        """``mark_dead_letter`` 的原子原语：状态迁移 + DLQ 行同一事务。
+
+        与 :meth:`dead_letter_stale_running` / :meth:`dead_letter_exhausted_executable`
+        的区别只是谓词来源：本方法服务 executor 的常规失败提交路径（RUNNING 来源
+        带 owner + 存活 lease；RETRYING/QUEUED 来源不带 owner）。三者共用
+        :meth:`_dead_letter_conditionally`，因此都不会出现「状态已终态、DLQ 行缺失」
+        的不可恢复窗口。
+
+        ``expected_worker_id`` 非空时追加 owner + 存活 lease 谓词；这与
+        :meth:`transition_owned` 的 worker-owned 语义一致。
+        """
+        now = now or _utcnow()
+        allowed = [s.value for s in from_statuses]
+        predicates: list[Any] = [
+            AgentRun.id == run_id,
+            AgentRun.status.in_(allowed),
+        ]
+        if expected_worker_id is not None:
+            predicates.append(AgentRun.worker_id == expected_worker_id)
+            if require_live_lease:
+                predicates.append(
+                    AgentRun.lease_expires_at.isnot(None) & (AgentRun.lease_expires_at > now)
+                )
+        return self._dead_letter_conditionally(
+            run_id=run_id,
+            predicates=predicates,
+            error_code=error_code,
+            error_message=error_message,
+            error_type=error_type,
+            now=now,
+        )
+
     def dead_letter_exhausted_executable(
         self,
         run_id: str,

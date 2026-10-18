@@ -121,12 +121,17 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 **Issue #14 已修复：决策已落定但未恢复的 run 会被自动收敛。**
 
 - **仍在等待人工决策**（`PENDING` 未过期）的 run **不自动重发**——没有决策可恢复。
+- **TTL 到期但无人轮询也会主动过期**（F6）：`reconcile_stuck_runs` 每轮先调用
+  `ApprovalService.expire_overdue`，用 CAS（`WHERE status='PENDING' AND expires_at <= now`）
+  把超时审批置为 `EXPIRED`（按拒绝处理），**不依赖** `GET /api/approvals` 这类读路径的
+  副作用。过期后该 run 立即成为「决策已落定」，由下一段收敛路径投递。
 - **决策已落定**（`APPROVED` / `REJECTED` / `EXPIRED`）却因 worker 在
   `consume_resume` 与 `mark_resumed_running` 之间崩溃、或 `dispatch` 丢失而滞留的
   run，由 `reconcile_stuck_runs` 通过
   `RunService.list_resumable_waiting_approval_runs` 重新投递（有终态审批且**无**未消费
   `PENDING`）。`_build_resume_command` 先 `consume_resume`，返回 `None` 时回退到
-  `ApprovalService.peek_resume` **只读重建**载荷（审批是终态且被保留）。
+  `ApprovalService.peek_resume` **只读重建**载荷（审批是终态且被保留；`EXPIRED` 也
+  在可重建集合内）。
 - **不重复执行高危写**：run 状态迁移由 `mark_resumed_running`
   的 `WHERE status='WAITING_APPROVAL'` CAS 保证只有一个赢家；副作用由 ledger 的
   `operation_key = run_id:approval:{approval_id}` 去重。双重保险下重复恢复 = no-op。
@@ -185,7 +190,11 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 ### 2.1 原子性保证
 
 `agent_runs` 的状态迁移与 `agent_dead_letters` 的记录写入在**同一个事务**里完成
-（`AgentRunRepository._dead_letter_conditionally`）。
+（`AgentRunRepository._dead_letter_conditionally`）。executor 的常规失败提交
+`RunService.mark_dead_letter`（RUNNING 来源带 owner + 存活 lease；RETRYING/QUEUED
+来源不带 owner）与 reconciler 的 `dead_letter_stale_running` /
+`dead_letter_exhausted_executable` 共用同一条原语，因此**所有**自动 DEAD_LETTER
+路径都满足这条原子性，而不是只有 reconciler 那两条旁路。
 
 这一点是必需的，不是优化。分两次提交会留下一个**不可恢复**的窗口：状态已是终态
 （不再被任何扫描器捞起）而 DLQ 行缺失，于是这个 run 既不会重投、也没有记录供人工
@@ -247,6 +256,7 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 | `RUNNING` worker 崩溃（lease 过期） | `lease_expires_at <= now` | **lease TTL**（`AGENT_RUN_LEASE_SECONDS`，默认 180s）+ 0 ～ 30s | `AGENT_RUN_LEASE_SECONDS` + `RECONCILE_INTERVAL` |
 | `RUNNING` 被误判（心跳抖动） | 同上 | 同上 | 同上 |
 | `WAITING_APPROVAL` 决策已落定但未恢复（崩溃窗口 / dispatch 丢失） | 存在终态审批且无未消费 `PENDING` | 0 ～ 一个扫描间隔（30s）*（下次扫描即捞起）* | `AGENT_RUN_RECONCILE_INTERVAL_SECONDS` + `list_resumable_waiting_approval_runs` |
+| `WAITING_APPROVAL` + `PENDING` 审批超过 TTL 且**无人轮询** | `expires_at <= now` | 审批 TTL 到期 + 0 ～ 一个扫描间隔（30s） | `reconcile_stuck_runs` -> `ApprovalService.expire_overdue`（主动 CAS 过期，不靠读接口副作用） |
 
 关键点：
 
@@ -277,6 +287,12 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 | `TOOL_EXECUTION_TIMEOUT_SECONDS < AGENT_RUN_TASK_TIME_LIMIT` | 30s < 180s | 工具超时的局部降级来不及发生，退化为整体失败 |
 | `AGENT_RUN_TASK_TIME_LIMIT < AGENT_RUN_VISIBILITY_TIMEOUT` | 180s < 3600s | broker 未 ACK 可见性时间覆盖不住执行时长：任务还在跑、消息已重投 -> 同一 run 并发执行 |
 | `claim TTL >= TOOL_EXECUTION_TIMEOUT_SECONDS + margin(30s)` | 60s >= 60s | 执行期间认领过期 -> 第二个执行者拿到执行权并重复发起同一笔写 |
+
+启动校验只是第一道门；`ToolRegistry._idempotent_operation` 在构造副作用执行闭包时
+会把 `min_claim_ttl_seconds(TOOL_EXECUTION_TIMEOUT_SECONDS)` **传入实际调用路径**，
+因此上线后把工具超时调大、却没同步 claim TTL 时，写操作会 fail-closed 而不是照写
+（运行期下界，而不是只写在文档里的承诺）。`TOOL_EXECUTION_TIMEOUT_SECONDS <= 0`
+表示显式关闭 per-call 超时，此时不存在可证明的执行上界，运行期不额外收紧。
 | `AGENT_RUN_THREAD_LOCK_TTL_SECONDS > AGENT_RUN_TASK_TIME_LIMIT + margin(30s)` | 300s > 210s | 任务仍在执行时锁已过期，同 thread 的另一个 worker 可进入同一 state lineage |
 
 `LOCK_TTL` 一行在 `AGENT_RUN_THREAD_LOCK_ENABLED=false` 时不适用；任何一行为 `<= 0`

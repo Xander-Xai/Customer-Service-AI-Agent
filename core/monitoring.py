@@ -417,6 +417,10 @@ try:
     agent_tool_idempotency_hit_total = _counter(
         "agent_tool_idempotency_hit_total", "Side-effect tool idempotency hits"
     )
+    agent_side_effect_terminal_write_rejected_total = _counter(
+        "agent_side_effect_terminal_write_rejected_total",
+        "Side-effect ledger terminal writes rejected by ownership/status/lease CAS",
+    )
     # human-in-the-loop 审批治理。
     #
     # label 基数纪律同上：只用 risk_level / decision / outcome 这类低基数维度。
@@ -603,6 +607,7 @@ except ImportError:
     agent_checkpoint_recovery_total = _NoopMetric()
     agent_run_idempotency_hit_total = _NoopMetric()
     agent_tool_idempotency_hit_total = _NoopMetric()
+    agent_side_effect_terminal_write_rejected_total = _NoopMetric()
     agent_approval_requested_total = _NoopMetric()
     agent_approval_decided_total = _NoopMetric()
     agent_approval_pending = _NoopMetric()

@@ -399,10 +399,9 @@ async def execute_run(
                     guard=fence_guard,
                 )
             )
-            # 工具级第二道防线：副作用工具在执行前复核 ownership（见
-            # ``ToolRegistry.set_execution_fence``）。协作式取消有窗口，心跳周期内
-            # ownership 可能已经易主；这一层把「窗口内仍能发起写」也堵住。
-            _install_execution_fence(svc, run_id, owner, fence_guard)
+            # 工具级第二道防线在拿到 runtime 之后再安装：真正的 ToolRegistry 属于
+            # ServiceContainer（``runtime.container.tool_registry``），RunService 上
+            # 并没有这个属性。过去的提前安装因此恒为空操作。
             tokens = set_run_context(run_id, thread_id, task_id)
             # Lightweight tracing: ONE span per execution attempt, opened after the
             # run context exists so run/thread/task correlation attributes are
@@ -435,12 +434,22 @@ async def execute_run(
                 },
             )
             trace_ctx = _span_cm.__enter__()
+            fence_registry: Any = None
             try:
                 if runtime_provider is None:
                     from .bootstrap import get_default_runtime
 
                     runtime_provider = get_default_runtime
                 runtime = await runtime_provider()
+                # 第二道防线必须装在 agent 真正使用的 registry 上：先解析 runtime
+                # 的 container，而不是依赖 RunService 上并不存在的属性。
+                fence_registry = _install_execution_fence(
+                    svc,
+                    run_id,
+                    owner,
+                    fence_guard,
+                    registry=_resolve_tool_registry(runtime, svc),
+                )
                 run_kwargs: dict[str, Any] = {
                     "thread_id": thread_id,
                     "query": run["query"],
@@ -555,6 +564,7 @@ async def execute_run(
                 logger.info("AgentRun 执行成功 run_id=%s", run_id)
                 return RunStatus.SUCCEEDED.value
             finally:
+                _clear_execution_fence(fence_registry, run_id)
                 reset_run_context(tokens)
                 heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -923,20 +933,57 @@ class _FenceGuard:
             await task
 
 
+def _resolve_tool_registry(runtime: Any, svc: RunService) -> Any:
+    """找到 **agent 实际使用** 的 ToolRegistry。
+
+    生产构造是 ``AgentRuntime -> ServiceContainer.tool_registry``；agent 在
+    ``core/container.py`` 里从同一个容器拿到它。``RunService`` 本身不持有 registry
+    （它只管理状态），因此过去 ``getattr(svc, "tool_registry", None)`` 恒为 None，
+    fence 从未在真实 worker 路径安装过。
+    """
+    container = getattr(runtime, "container", None)
+    registry = getattr(container, "tool_registry", None)
+    if registry is not None:
+        return registry
+    return getattr(svc, "tool_registry", None)
+
+
 def _install_execution_fence(
-    svc: RunService, run_id: str, worker_id: str, guard: _FenceGuard
-) -> None:
-    """把「是否仍有执行权」装进 ToolRegistry（工具级第二道防线）。
+    svc: RunService,
+    run_id: str,
+    worker_id: str,
+    guard: _FenceGuard,
+    *,
+    registry: Any = None,
+) -> Any:
+    """把「是否仍有执行权」装进**实际** ToolRegistry（工具级第二道防线）。
 
     判定复用与状态提交**完全相同**的谓词（``heartbeat`` = owner 匹配 + lease 未过期），
     所以工具看到的「我还有没有执行权」与提交时看到的是同一个事实，不会出现两套标准。
 
     判定失败（数据库异常）一律视为**没有执行权**（fail-closed）：宁可拒绝一次写操作，
     也不在无法确认所有权时发起外部写。
+
+    返回被安装的 registry（供 finally 清理）；找不到 registry 时返回 None，并记录
+    可观测告警而不是静默假装已启用。
     """
-    registry = getattr(svc, "tool_registry", None)
-    if registry is None or not hasattr(registry, "set_execution_fence"):
-        return
+    registry = registry if registry is not None else getattr(svc, "tool_registry", None)
+    if registry is None:
+        logger.warning(
+            "未找到 ToolRegistry，工具级 execution fence 未安装 run_id=%s worker=%s",
+            run_id,
+            worker_id,
+        )
+        return None
+    if not hasattr(registry, "set_execution_fence") and not hasattr(
+        registry, "set_run_execution_fence"
+    ):
+        logger.warning(
+            "ToolRegistry 不支持 execution fence，第二道防线未安装 run_id=%s type=%s",
+            run_id,
+            type(registry).__name__,
+        )
+        return None
 
     def _owns_execution() -> bool:
         if guard.ownership_lost:
@@ -946,7 +993,24 @@ def _install_execution_fence(
         except Exception:  # noqa: BLE001 - 无法确认即视为没有执行权
             return False
 
-    registry.set_execution_fence(_owns_execution)
+    if hasattr(registry, "set_run_execution_fence"):
+        registry.set_run_execution_fence(run_id, _owns_execution)
+    else:  # 兼容只实现全局槽位的旧 protocol/test double
+        registry.set_execution_fence(_owns_execution)
+    return registry
+
+
+def _clear_execution_fence(registry: Any, run_id: str) -> None:
+    """清理本 run 的 fence（避免闭包/谓词泄漏到后续执行）。"""
+    if registry is None:
+        return
+    try:
+        if hasattr(registry, "clear_run_execution_fence"):
+            registry.clear_run_execution_fence(run_id)
+        elif hasattr(registry, "set_execution_fence"):
+            registry.set_execution_fence(None)
+    except Exception:  # noqa: BLE001 - 清理失败不得影响 run 的既有结果
+        logger.debug("清理 execution fence 失败 run_id=%s", run_id)
 
 
 async def _supervise_execution(run_task: asyncio.Task[Any], guard: _FenceGuard) -> Any:

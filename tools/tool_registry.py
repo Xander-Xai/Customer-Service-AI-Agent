@@ -101,8 +101,13 @@ class LogicalCall:
     - ``ordinal``：**本节点内、同一工具**的第 n 次调用（从 0 开始）。区分一个节点里
       的多次同类写操作。
 
-    调用方应保证同一节点内同一工具的调用顺序可重放；不可重放时退化的后果是
-    ``request_fingerprint`` 冲突 -> ``PermanentError``（fail-closed），不会重复执行。
+    调用方应保证同一节点内同一工具的调用顺序可重放。**顺序不可重放时不是安全的
+    fail-closed**：同一写工具在重放中换到另一个 ``ordinal``，会得到一个新的
+    ``operation_key``，``request_fingerprint`` 只在同一个键内比较，因此看不到这次
+    重复，写操作**可能被再次执行**。只有「同一槽位、不同参数」才会撞
+    ``request_fingerprint`` 并抛 ``PermanentError``。跨任意调用序列的严格去重需要
+    调用方提供稳定逻辑操作身份（例如 HITL 的 ``approval:{approval_id}``）；
+    ``ordinal`` 不构成完整幂等。Issue #12 Part A 保持 OPEN。
     """
 
     node_id: str
@@ -156,6 +161,11 @@ class ToolRegistry:
         #: ``runtime.executor._install_execution_fence``）。``None`` 表示不启用
         #: 复核（例如测试与实时快路径），此时只走原有的操作身份治理。
         self._execution_fence: Callable[[], bool] | None = None
+        #: 按 ``run_id`` 隔离的执行权复核。生产 worker 会把 fence 装到实际被
+        #: agent 使用的 ToolRegistry 上；同一进程若并发执行多个 run，单槽位回调
+        #: 会被后一个 run 覆盖，导致前一个 run 用错误的 ownership 判定。按 run
+        #: 作用域存放后，每个 run 的工具调用都只看到自己的谓词。
+        self._run_execution_fences: dict[str, Callable[[], bool]] = {}
 
     def set_execution_fence(self, fence: Callable[[], bool] | None) -> None:
         """装入「我是否仍持有执行权」的只读判定。
@@ -171,12 +181,37 @@ class ToolRegistry:
         """
         self._execution_fence = fence
 
+    def set_run_execution_fence(self, run_id: str, fence: Callable[[], bool]) -> None:
+        """为**单个 run** 装入执行权复核（生产 worker 路径）。
+
+        与 :meth:`set_execution_fence` 的全局槽位分开：ToolRegistry 在进程内是共享
+        的，多个 run 并发执行时全局槽位会被最后一个 run 覆盖。按 ``run_id`` 作用域
+        存放后，工具调用根据自己的 Run 上下文选择谓词，不会拿别的 run 的 ownership
+        结果做判断。
+        """
+        self._run_execution_fences[str(run_id)] = fence
+
+    def clear_run_execution_fence(self, run_id: str) -> None:
+        """移除该 run 的复核谓词（执行结束/异常退出都必须调用，避免泄漏闭包）。"""
+        self._run_execution_fences.pop(str(run_id), None)
+
     def _execution_fence_allows(self, tool_name: str) -> bool:
         """副作用工具的执行权复核。缺省允许（未启用复核时保持既有行为）。"""
-        if self._execution_fence is None:
+        fence = self._execution_fence
+        try:
+            from runtime.context import get_current_run_id
+
+            current_run_id = get_current_run_id()
+        except Exception:  # noqa: BLE001 - 上下文不可用时只回退到全局槽位
+            current_run_id = None
+        if current_run_id:
+            scoped = self._run_execution_fences.get(str(current_run_id))
+            if scoped is not None:
+                fence = scoped
+        if fence is None:
             return True
         try:
-            return bool(self._execution_fence())
+            return bool(fence())
         except Exception as e:  # noqa: BLE001 - 无法确认即视为没有执行权
             logger.warning(
                 "执行权复核失败，按无执行权处理 tool=%s: %s", tool_name, type(e).__name__
@@ -433,6 +468,7 @@ class ToolRegistry:
                 build_replay_stable_operation_key,
                 build_tool_idempotency_key,
                 execute_idempotent_operation,
+                min_claim_ttl_seconds,
             )
         except Exception:
             logger.error(
@@ -468,6 +504,14 @@ class ToolRegistry:
             )
         thread_id = get_current_thread_id()
 
+        # 运行期下界必须由**实际执行路径**传给 ledger。只在启动期校验配置、或在
+        # 测试里直接调用 execute_idempotent_operation 时传 min_claim_ttl_seconds，
+        # 都不能保护这条真实路径：那会让 per-call floor 变成一句空承诺。
+        # TOOL_EXECUTION_TIMEOUT_SECONDS <= 0 表示显式关闭 per-call 超时，此时没有
+        # 可证明的执行上界；保持既有的「不额外收紧」语义，由启动校验记录该配置。
+        tool_timeout = _tool_timeout_seconds()
+        claim_floor = min_claim_ttl_seconds(tool_timeout) if tool_timeout > 0 else None
+
         async def _run():
             logger.info(
                 "副作用工具走幂等 ledger tool=%s run_id=%s op=%s",
@@ -481,6 +525,7 @@ class ToolRegistry:
                 run_id=run_id,
                 thread_id=thread_id,
                 arguments=arguments,
+                min_claim_ttl_seconds=claim_floor,
                 # 副作用工具超时时**必须冒泡**：ledger 只有在收到异常时才会把这次
                 # 执行标记为 failed。若在这里把超时转成字符串返回，ledger 会把
                 # 一个「结果未知」的写操作记成 SUCCEEDED 并缓存，重投递时直接返回

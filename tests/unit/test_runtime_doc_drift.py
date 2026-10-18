@@ -195,3 +195,34 @@ class TestRunbook:
         assert "_FenceGuard" in text, "已知限制必须写清 fencing 的真实边界"
         assert "_ClaimRenewer" in text
         assert "validate_timeout_invariants" in text
+
+
+class TestOrdinalDriftDocstrings:
+    """F3：不得再宣称 ordinal 漂移一定 fail-closed / 不会重复执行。
+
+    ``ordinal`` 是位置不是逻辑操作身份。同一写工具在重放中换槽位会得到新的
+    ``operation_key``，``request_fingerprint`` 只在同一个键内比较，因此**可能重复
+    执行**。Issue #12 Part A 仍未解决，源码文档不得把它写成已解决。
+    """
+
+    @pytest.fixture(scope="class")
+    def base_agent_text(self) -> str:
+        return (ROOT / "agents" / "base_agent.py").read_text(encoding="utf-8")
+
+    @pytest.fixture(scope="class")
+    def tool_registry_text(self) -> str:
+        return (ROOT / "tools" / "tool_registry.py").read_text(encoding="utf-8")
+
+    def test_base_agent_does_not_claim_ordinal_drift_cannot_duplicate(self, base_agent_text):
+        assert (
+            "PermanentError``（fail-closed），不会重复执行" not in base_agent_text
+        ), "base_agent.py 不得再宣称 ordinal 漂移一定 fail-closed 不会重复执行"
+        assert "可能被再次执行" in base_agent_text or "可能被重复执行" in base_agent_text
+        assert "#12" in base_agent_text or "Part A" in base_agent_text
+
+    def test_tool_registry_does_not_claim_ordinal_drift_is_fail_closed(self, tool_registry_text):
+        assert (
+            "PermanentError``（fail-closed），不会重复执行" not in tool_registry_text
+        ), "tool_registry.py 不得再宣称 ordinal 漂移一定 fail-closed 不会重复执行"
+        assert "可能被再次执行" in tool_registry_text or "可能被重复执行" in tool_registry_text
+        assert "#12" in tool_registry_text or "Part A" in tool_registry_text

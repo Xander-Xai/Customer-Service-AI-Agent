@@ -889,7 +889,7 @@ async def execute_idempotent_operation(
         # 应该是业务失败原因，而不是一个基础设施错误。这里已经是失败路径，
         # 不存在「上报成功」的风险，因此记录后照常抛出原始异常。
         try:
-            store.mark_failed(
+            recorded = store.mark_failed(
                 tool_name,
                 operation_key,
                 error_type=classify_exception(e),
@@ -897,7 +897,25 @@ async def execute_idempotent_operation(
                 owner=claim.owner,
                 request_fingerprint=fingerprint,
             )
+            if not recorded:
+                # CAS 拒绝不是「无需记录」：它意味着 owner 已丢失 / 租约已过期 /
+                # 状态已被改写，外部调用结果未知。不能静默丢掉 FAILED 结果，否则
+                # 运维只会看到一次普通工具异常，看不到 ledger 仍停在 PENDING。
+                from . import metrics as run_metrics
+
+                run_metrics.record_side_effect_terminal_write_rejected()
+                logger.error(
+                    "side-effect FAILED 记录被 CAS 拒绝（结果未知，未静默丢弃）"
+                    " tool=%s op=%s owner=%s error_type=%s",
+                    tool_name,
+                    operation_key,
+                    claim.owner,
+                    classify_exception(e),
+                )
         except Exception as ledger_error:  # noqa: BLE001 - 不得掩盖原始异常
+            from . import metrics as run_metrics
+
+            run_metrics.record_side_effect_terminal_write_rejected()
             logger.error(
                 "side-effect 失败结果写入 ledger 失败（原始异常照常上抛）"
                 "tool=%s op=%s ledger_error=%s",

@@ -465,8 +465,10 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     ownership lease 与 Redis lock TTL，`agent_thread_lease_renewed_total` /
     `agent_worker_heartbeat` 观测）。
   - **worker-owned 状态迁移的 owner CAS**：worker 提交 AgentRun 状态
-    （`mark_succeeded` / `mark_failed` / `mark_retrying` / `mark_waiting_approval` /
-    RUNNING 来源的 `mark_dead_letter`）走 `repository.transition_owned()`，
+    （`mark_succeeded` / `mark_failed` / `mark_retrying` / `mark_waiting_approval`）
+    走 `repository.transition_owned()`；RUNNING 来源的 `mark_dead_letter` 走
+    `repository.dead_letter_with_record()`（**同样的** owner + 存活 lease 谓词，
+    并在**同一事务**里写 `agent_dead_letters` 行）。
     `run_id + status + worker_id + lease 未过期` 在**同一条 UPDATE** 里判定；
     `heartbeat()` 是原子 owner CAS（`renew_lease_owned`），RUNNING 接管是原子
     谓词（`takeover_running`），两个竞争者只有一个能接管。因此 **ownership 丢失后

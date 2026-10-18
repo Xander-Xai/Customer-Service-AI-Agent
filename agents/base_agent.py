@@ -140,8 +140,17 @@ def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, or
       逻辑操作，不会被错误合并；
     - 不同 run（用户主动再次发起）由 ``run_id`` 区分。
 
-    序号漂移（LLM 重放时换了调用序列）退化为 ``request_fingerprint`` 冲突 ->
-    ``PermanentError``（fail-closed），不会重复执行。
+    边界（**不要**宣称 ordinal 漂移一定 fail-closed）
+    ------------------------------------------------
+    序号漂移分两类，后果相反：
+
+    - **同一槽位、不同参数**：撞 ``request_fingerprint`` -> ``PermanentError``
+      （fail-closed）。
+    - **同一写工具换到不同槽位**（重放时调用序列插入/交换了另一次同类写）：拿到的是
+      **新的 operation_key**，``request_fingerprint`` 只在同一个键内比较，看不到这次
+      重复，写操作**可能被再次执行**。ordinal 是位置不是身份，因此它不构成完整幂等
+      （Issue #12 Part A 保持 OPEN，见 ``docs/limitations.md``）。严格去重需要调用方
+      提供稳定逻辑操作身份（HITL 的 ``approval:{approval_id}`` 即属此类）。
 
     构造失败一律返回 ``None``：调用方随后会因为缺少操作身份而 fail-closed 拒绝
     执行写操作（见 ``ToolRegistry._idempotent_operation``），这是期望行为。

@@ -405,3 +405,96 @@ def test_fenced_worker_commits_no_terminal_state(svc, monkeypatch):
     assert after["attempt"] == attempt_before, "失去执行权不得消耗重试预算"
     assert after["worker_id"] == "B"
     assert ex.ExecutionFenced is not None
+
+
+# ---------------------------------------------------------------------------
+# F1：生产入口必须把 fence 装到 agent 真正使用的 ToolRegistry 上
+# ---------------------------------------------------------------------------
+
+
+@requires_infra
+def test_production_entry_installs_fence_on_runtime_registry(
+    pg_engine,
+    monkeypatch,
+    thread_lock_off,
+    cleanup_created_runs,
+    side_effect_store,
+):
+    """不依赖 ``registry.set_execution_fence`` 的测试专用注入：直接走 ``execute_run``。
+
+    生产构造是 ``AgentRuntime -> ServiceContainer.tool_registry``；``RunService`` 上
+    没有 ``tool_registry`` 属性。修复前 ``_install_execution_fence`` 因此恒为空操作，
+    第二道防线从未在 worker 路径生效。本用例让 runtime 自带一个真实 ToolRegistry，
+    在 lease 过期后调用写工具，断言 handler 未被调用。
+    """
+    import asyncio
+    from types import SimpleNamespace
+
+    import core.config as config
+    from runtime import executor as ex
+    from runtime import side_effects as se
+    from tools.tool_registry import LogicalCall, ToolCachePolicy, ToolRegistry
+
+    monkeypatch.setattr(config, "AGENT_RUN_THREAD_LOCK_ENABLED", False)
+    monkeypatch.setattr(config, "AGENT_RUN_LEASE_SECONDS", 0.2)
+    monkeypatch.setattr(config, "AGENT_RUN_HEARTBEAT_SECONDS", 60.0)
+
+    store = se.SideEffectStore(session_factory=_session_factory(pg_engine))
+    monkeypatch.setattr(se, "get_side_effect_store", lambda: store)
+
+    calls: list[dict] = []
+
+    async def _handler(arguments: dict) -> str:
+        calls.append(dict(arguments))
+        return "written"
+
+    registry = ToolRegistry()
+    registry.register(
+        name="fenced_write",
+        description="w",
+        parameters={"type": "object", "properties": {}},
+        handler=_handler,
+        side_effect=True,
+        cache_policy=ToolCachePolicy(enabled=False),
+    )
+
+    class _Runtime:
+        def __init__(self) -> None:
+            self.container = SimpleNamespace(tool_registry=registry)
+
+        async def run(self, *, thread_id, query, user_id=None, resume_command=None):
+            # 等 lease 真实过期，再发起一次写工具调用。
+            await asyncio.sleep(0.45)
+            out = await registry.execute_raw(
+                "fenced_write",
+                {"order_id": "ORD-F1"},
+                tool_call_id="call-f1",
+                logical_call=LogicalCall(node_id="n#0", agent="a", ordinal=0),
+            )
+            return {"response": out}
+
+    async def _provider():
+        return _Runtime()
+
+    svc = RunService(repository=AgentRunRepository(session_factory=_session_factory(pg_engine)))
+    run = svc.create_run(
+        query="q",
+        session_id=f"s-f1-{uuid.uuid4().hex[:8]}",
+        thread_id=f"t-f1-{uuid.uuid4().hex[:8]}",
+    )
+
+    status = asyncio.run(
+        ex.execute_run(
+            run["id"],
+            service=svc,
+            runtime_provider=_provider,
+            dispatcher=None,
+            lock_manager=None,
+            worker_id="worker-A",
+        )
+    )
+
+    assert calls == [], "失去 ownership 后写工具 handler 不得被调用（fence 必须真的装上）"
+    assert status == RunStatus.RUNNING.value, "失去 ownership 不得写终态"
+    # fence 谓词必须在执行结束后清理，避免影响后续 run
+    assert registry._run_execution_fences == {}

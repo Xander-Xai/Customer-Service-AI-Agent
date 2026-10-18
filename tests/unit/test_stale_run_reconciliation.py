@@ -472,3 +472,61 @@ class TestPostDiscardStateIsRecoverable:
 
         await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(1.0))
         assert run["id"] not in dispatcher.calls
+
+
+# ---------------------------------------------------------------------------
+# 额外风险：积压 > limit 的 stale-run 扫描不得发生持久饥饿
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stale_run_backlog_over_limit_drains_when_dispatch_recovers(env):
+    """105 条过期 RUNNING + limit=100：健康投递下两轮必须全部排空，无持久饥饿。
+
+    扫描按 ``lease_expires_at ASC`` 取前 limit 条。队头投递失败时它们会留在窗口内，
+    但只要投递恢复，队头会被接管并离开窗口，下一轮继续处理后续——因此饥饿是
+    「故障持续期间」的现象，不是永久丢失。本用例用会真的接管的 dispatcher 固定这一点。
+    """
+    from runtime.retry import reconcile_stuck_runs
+
+    total = 105
+    for i in range(total):
+        run = env.create_run(query="q", session_id=f"T-backlog-{i}", max_attempts=3)
+        env.mark_running(run["id"], worker_id="w-dead", lease_seconds=-1.0)
+
+    class _TakeoverDispatcher:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def __call__(self, run_id, **kwargs):
+            self.calls.append(run_id)
+            # 模拟 worker 接管：租约改为未来 -> 该行离开 stale 扫描窗口。
+            env.mark_running(run_id, worker_id="w-live", lease_seconds=600.0, now=_later())
+
+    dispatcher = _TakeoverDispatcher()
+    first = await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(), limit=100)
+    second = await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(), limit=100)
+
+    assert len(first) == 100
+    assert len(second) == total - 100, "剩余积压必须在下一轮被处理，不得被队头永久挡住"
+    assert len(set(dispatcher.calls)) == total
+
+
+@pytest.mark.asyncio
+async def test_stale_run_dead_letter_backlog_over_limit_drains(env):
+    """预算耗尽的过期 RUNNING（105 条）也必须分轮清空，不因 limit 卡在队头。"""
+    from runtime.retry import reconcile_stuck_runs
+
+    total = 105
+    for i in range(total):
+        run = env.create_run(query="q", session_id=f"T-dlq-backlog-{i}", max_attempts=1)
+        env.mark_running(run["id"], worker_id="w-dead", lease_seconds=-1.0)
+
+    first = await reconcile_stuck_runs(
+        env, dispatcher=_RecordingDispatcher(), now=_later(), limit=100
+    )
+    second = await reconcile_stuck_runs(
+        env, dispatcher=_RecordingDispatcher(), now=_later(), limit=100
+    )
+    assert len(first) == 100
+    assert len(second) == total - 100
