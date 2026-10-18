@@ -56,7 +56,7 @@ async def invoke_graph_with_resume(
 
     ``resume_command``（human-in-the-loop）
     --------------------------------------
-    人工审批恢复**不能**用 ``ainvoke(None)``：实测 langgraph 1.2.12 上对处于
+    人工审批恢复**不能**用 ``ainvoke(None)``：实测 langgraph 1.2.2 上对处于
     interrupt 的图调用 ``ainvoke(None, cfg)`` 只会原样再次返回 ``__interrupt__``，
     节点不推进（interrupt 需要一个 resume 值才能解除）。因此审批恢复必须显式传
     ``Command(resume=<decision>)``，此时崩溃恢复分支被跳过。

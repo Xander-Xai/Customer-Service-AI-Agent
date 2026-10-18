@@ -21,7 +21,8 @@ Side Effect」建立一条企业可用的治理边界：
    同一 ``run_id:approval:{approval_id}`` 在**本仓 ledger 层**只会被发起一次外部写。
    边界：外部系统端到端 exactly-once **NOT PROVIDED**（需下游接受同一把幂等键）。
 
-已验证的 LangGraph 语义（langgraph 1.2.12 / Python 3.10，本仓库实测）
+已验证的 LangGraph 语义（langgraph 1.2.2 / Python 3.10，本仓库实测；1.2.2 为
+``requirements-lock.txt`` 锁定且本地 venv 实际安装的版本）
 --------------------------------------------------------------------
 - **必须**显式设置 ``var_child_runnable_config``：该环境下 ``interrupt()``
   内部调用 ``get_config()`` 会抛
@@ -46,7 +47,7 @@ from core.logger import get_logger
 
 logger = get_logger("core.hitl.gate")
 
-#: LangGraph 在 interrupt 发生时于返回值里注入的 key（实测 langgraph 1.2.12）。
+#: LangGraph 在 interrupt 发生时于返回值里注入的 key（实测 langgraph 1.2.2）。
 INTERRUPT_KEY = "__interrupt__"
 
 
@@ -195,7 +196,7 @@ async def run_approval_gate(state: dict[str, Any], config: Any, container: Any) 
     thread_id = state.get("session_id") or ""
     service = get_approval_service()
 
-    # langgraph 1.2.12 + Python 3.10：interrupt() 依赖的 get_config() 在深层
+    # langgraph 1.2.2 + Python 3.10：interrupt() 依赖的 get_config() 在深层
     # async 节点里拿不到 runnable config，必须显式注入（见模块 docstring 的实测）。
     from langchain_core.runnables.config import (
         RunnableConfig,

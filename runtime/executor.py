@@ -59,7 +59,7 @@ def _awaiting_approval(result: Any) -> bool:
     """执行结果是否表示图正挂在人工审批的 interrupt 上。
 
     LangGraph 在 interrupt 时不抛异常，而是在返回值注入 ``__interrupt__``。实测
-    （langgraph 1.2.12）：该 key 非空 == 节点待重放 == 需要人工决策。
+    （langgraph 1.2.2）：该 key 非空 == 节点待重放 == 需要人工决策。
     """
     if not isinstance(result, dict):
         return False

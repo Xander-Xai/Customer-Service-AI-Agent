@@ -2,7 +2,7 @@
 
 为什么必须是真 LangGraph + 真 checkpointer
 ------------------------------------------
-``core/hitl/gate.py`` 的模块 docstring 对 langgraph 1.2.12 / Python 3.10 断言了
+``core/hitl/gate.py`` 的模块 docstring 对 langgraph 1.2.2 / Python 3.10 断言了
 **具体语义**。这些断言是整个审批恢复机制的地基，若随版本变化而失效，图会静默地
 「不推进」——run 永远停在 WAITING_APPROVAL，且没有任何报错：
 
