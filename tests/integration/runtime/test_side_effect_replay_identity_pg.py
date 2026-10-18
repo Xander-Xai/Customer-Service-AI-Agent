@@ -351,9 +351,9 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
 
     attempt 1 提出 ``[refund(A), refund(A)]``（两笔独立业务意图）：解析器在**执行任何写
     之前**把两个 occurrence 都预占落账（``reserve_operation``）；第 1 笔（occ0）执行成功
-    后 worker 崩溃，occ1 仍是未执行的预占。恢复时只重新提出第 2 笔——若身份只看「本次尝试
-    内出现序号」，它会重新编号到 occ0 并命中第 1 笔的成功结果被静默吞掉。持久化解析器必须
-    把它解析回 occ1（恢复执行），两笔各执行一次。
+    后 worker 崩溃，occ1 仍是未执行的预占。恢复时只提出一个无业务 ID 的 A，
+    无法判断是 A1 重放还是 A2 首次执行，必须 fail-closed；当完整提出 [A1,A2]
+    时保留原序号，A1 去重且 A2 执行，合计两笔合法写入。
     """
     from runtime.operation_identity import ContentOccurrenceResolver
     from runtime.side_effects import build_replay_stable_operation_key
@@ -396,12 +396,22 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
     assert external.executions == 1
     assert store.get(tool, key(1))["status"] == "PENDING", "occ1 必须已作为未执行预占落账"
 
-    # 恢复：只重新提出第 2 笔（本次尝试内它会是「同内容出现序号 0」）。
+    # Shortened replay with one identical proposal is indistinguishable:
+    # it may mean "replay A1" or "execute A2". It must fail closed.
+    from runtime.operation_identity import OperationIdentityUnavailable
+
     resolver2 = ContentOccurrenceResolver(
         run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
     )
-    assert resolver2.assign([(tool, args)]) == [
-        1
-    ], "恢复必须解析回被中断的 occ1，而不是重新编号到 occ0 去撞第一笔的成功结果"
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous partial replay"):
+        resolver2.assign([(tool, args)])
+    assert external.executions == 1, "ambiguous shortened replay must not issue another refund"
+
+    # Full [A1, A2] replay preserves occurrence order: A1 dedupes, A2 executes.
+    resolver3 = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    assert resolver3.assign([(tool, args), (tool, args)]) == [0, 1]
+    await _run(key(0))
     await _run(key(1))
-    assert external.executions == 2, "第二笔合法写操作恢复后必须恰好执行一次"
+    assert external.executions == 2, "full replay must recover exactly the missing refund"
