@@ -48,8 +48,8 @@ TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
     # import cryptography.fernet。cryptography 由已声明的 pdfplumber 传递提供
     # （pdfplumber -> pdfminer.six -> cryptography）。此前这里误记为 python-jose：
     # python-jose 既不提供 cryptography（只放在可选 extra `cryptography` 里），
-    # 也从未被本仓库任何代码 import —— 该直接依赖已移除，见
-    # DEPENDENCY_SECURITY_TRIAGE_REPORT。
+    # 也从未被本仓库任何代码 import —— 该直接依赖已移除（PYSEC-2026-4298；
+    # 完整证据与验证见 PR #19）。
     "cryptography": "pdfplumber",
     "numpy": ("qdrant-client", "openai", "opencv-python-headless"),
     "requests": ("qdrant-client", "langchain-community", "edge-tts"),

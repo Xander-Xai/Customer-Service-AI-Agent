@@ -68,7 +68,7 @@ prometheus-client>=0.20.0
 # 注：python-jose 曾作为直接依赖声明（历史安全升级，修 PYSEC-2024-232/233），
 # 但仓库无任何代码 import jose/python_jose（JWT 全部走 PyJWT），干净解析确认
 # 也没有任何传递依赖需要它。它只带来不可达的 PYSEC-2026-4298 攻击面，
-# 故移除（见 DEPENDENCY_SECURITY_TRIAGE_REPORT）。
+# 故移除（PYSEC-2026-4298 / CVE-2026-85394；完整证据与验证见 PR #19）。
 # Jinja2 CVE: HTML sanitization bypass (CVE-2024-22195)
 # MarkupSafe CVE: ReDoS
 # starlette CVE: path traversal + multiple (PYSEC-2026-161, CVE-2024-47874, CVE-2025-54121)
