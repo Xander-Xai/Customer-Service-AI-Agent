@@ -74,10 +74,10 @@ class TestLimitationsCurrentState:
         for done in (
             "覆盖 `PENDING` 滞留 run",
             "attempt 预算在 worker 接管路径上的闸门",
-            # Issue #12 只有 Part B（跨 LLM 轮次 ordinal 重置）算完成；Part A（同类写
-            # 重放顺序变化）仍 OPEN，由 test_partially_completed_roadmap_items_stay_open
-            # 单独守卫——不得因为 Part B 完成就把整条划掉。
+            # Issue #12 两部分都已完成：Part B（跨 LLM 轮次 ordinal 重置）与
+            # Part A（同类写重放顺序变化 -> 内容寻址身份）。完成证据见对应回归。
             "非 HITL 副作用工具的 `operation_key` 稳定性（Part B",
+            "非 HITL 副作用工具的 `operation_key` 稳定性（Part A",
             "side-effect claim TTL 早于副作用结束",
             "超时参数交叉校验",
             "强制中止失去所有权的 worker",
@@ -85,7 +85,7 @@ class TestLimitationsCurrentState:
             lines = [ln for ln in text.splitlines() if ln.startswith("|") and done in ln]
             assert lines, f"roadmap 缺少条目: {done}"
             row = lines[0]
-            assert "~~" in row and "**已完成**" in row, (
+            assert "~~" in row and "**已完成" in row, (
                 f"roadmap 条目「{done}」已完成，必须划掉并标注 **已完成**，"
                 f"否则读者会以为它仍未开始"
             )
@@ -94,24 +94,24 @@ class TestLimitationsCurrentState:
                 marker in row for marker in ("§", "tests/", "core/", "回归")
             ), f"roadmap 条目「{done}」标为完成，必须附完成证据（§ 锚点 / 回归用例 / 代码路径）"
 
-    def test_partially_completed_roadmap_items_stay_open(self, text):
-        """部分完成的条目不得被划掉或标成已完成，且必须保留 Issue 引用与真实风险。
+    def test_part_a_resolution_keeps_the_duplicate_risk_statement(self, text):
+        """Part A 完成后仍须保留「外部副作用重复执行」风险与 Issue 引用。
 
-        Issue #12 Part A（同类写操作重放顺序变化导致身份漂移 → 对外部系统可能重复执行）
-        尚未解决，必须作为独立条目保持可见；不得为了绿灯把它并入已完成的 Part B 或
-        写成「已完成」。
+        修复消除了顺序漂移导致的重复执行，但**不得**把边界写成端到端 exactly-once：
+        参数非确定性、下游不接收幂等键仍是独立约束。
         """
         rows = [
             ln
             for ln in text.splitlines()
             if ln.startswith("|") and "operation_key" in ln and "Part A" in ln
         ]
-        assert rows, "Issue #12 Part A 必须作为独立 roadmap 条目保留，不得因 Part B 完成而整体划掉"
+        assert rows, "Issue #12 Part A 必须保留独立 roadmap 条目"
         row = rows[0]
-        assert "~~" not in row, "Part A 仍未解决，不得划掉"
-        assert "已完成" not in row, "Part A 仍未解决，不得标注已完成"
-        assert "#12" in row, "必须保留 Issue #12 引用，便于追踪未完成项"
-        assert "重复执行" in row, "必须保留外部副作用重复执行风险的真实表述"
+        assert "#12" in row, "必须保留 Issue #12 引用，便于追踪"
+        assert "内容寻址" in row, "必须写明修复手段是内容寻址身份"
+        assert (
+            "not exactly-once" in row.lower() or "端到端 exactly-once" in row
+        ), "必须保留端到端 exactly-once 未提供的边界"
 
     def test_beat_row_does_not_claim_no_automatic_restart(self, text):
         """compose 里 beat 有 ``restart: unless-stopped``，旧文案说「不自动重启」是错的。"""
@@ -197,12 +197,13 @@ class TestRunbook:
         assert "validate_timeout_invariants" in text
 
 
-class TestOrdinalDriftDocstrings:
-    """F3：不得再宣称 ordinal 漂移一定 fail-closed / 不会重复执行。
+class TestStableOperationIdentityDocstrings:
+    """Issue #12 Part A 修复后：源码文档必须说明**内容寻址**身份，且不得过度宣称。
 
-    ``ordinal`` 是位置不是逻辑操作身份。同一写工具在重放中换槽位会得到新的
-    ``operation_key``，``request_fingerprint`` 只在同一个键内比较，因此**可能重复
-    执行**。Issue #12 Part A 仍未解决，源码文档不得把它写成已解决。
+    ``ordinal`` 不再是身份：``build_replay_stable_operation_key`` 用调用内容
+    （+ 同内容出现序号）或调用方显式 ``logical_operation_id`` 派生，因此同一笔写重排
+    到别的槽位仍命中同一个键。源码文档必须写清这一点；同时**不得**把边界写成端到端
+    exactly-once（仍为 NOT PROVIDED）。
     """
 
     @pytest.fixture(scope="class")
@@ -213,16 +214,19 @@ class TestOrdinalDriftDocstrings:
     def tool_registry_text(self) -> str:
         return (ROOT / "tools" / "tool_registry.py").read_text(encoding="utf-8")
 
-    def test_base_agent_does_not_claim_ordinal_drift_cannot_duplicate(self, base_agent_text):
+    def test_base_agent_does_not_claim_ordinal_is_identity(self, base_agent_text):
         assert (
             "PermanentError``（fail-closed），不会重复执行" not in base_agent_text
-        ), "base_agent.py 不得再宣称 ordinal 漂移一定 fail-closed 不会重复执行"
-        assert "可能被再次执行" in base_agent_text or "可能被重复执行" in base_agent_text
+        ), "base_agent.py 不得宣称 ordinal 漂移一定 fail-closed 不会重复执行"
+        assert (
+            "内容" in base_agent_text and "request_fingerprint" in base_agent_text
+        ), "base_agent.py 必须说明身份是**内容寻址**（按内容指纹分槽），不是位置"
         assert "#12" in base_agent_text or "Part A" in base_agent_text
 
-    def test_tool_registry_does_not_claim_ordinal_drift_is_fail_closed(self, tool_registry_text):
+    def test_tool_registry_documents_content_addressed_identity(self, tool_registry_text):
         assert (
             "PermanentError``（fail-closed），不会重复执行" not in tool_registry_text
-        ), "tool_registry.py 不得再宣称 ordinal 漂移一定 fail-closed 不会重复执行"
-        assert "可能被再次执行" in tool_registry_text or "可能被重复执行" in tool_registry_text
+        ), "tool_registry.py 不得宣称 ordinal 漂移一定 fail-closed 不会重复执行"
+        assert "内容" in tool_registry_text, "tool_registry.py 必须说明内容寻址身份"
+        assert "logical_operation_id" in tool_registry_text
         assert "#12" in tool_registry_text or "Part A" in tool_registry_text

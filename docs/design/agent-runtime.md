@@ -31,7 +31,7 @@ Service Mesh / Redis Cluster / PostgreSQL HA / 微服务拆仓。理由见
 | `thread_id` | 一条**会话/状态时间线** | LangGraph `configurable.thread_id`（当前 == `session_id`） | 整个会话，多轮复用 |
 | `run_id` | 一次**图执行** | `agent_runs.id`（UUID4） | 单次执行 |
 | `job_id` | 一次**队列投递** | Celery task id / `agent_runs.task_id` | 可多次（retry、重投、replay 各自一次） |
-| `idempotency_key` | 防止**副作用重复** | `tool_side_effects.operation_key`：非 HITL 为 `build_replay_stable_operation_key(run, node, agent, tool, ordinal)`（不含 LLM 输出）；HITL 为 `run_id:approval:{approval_id}` | 一次逻辑业务操作 |
+| `idempotency_key` | 防止**副作用重复** | `tool_side_effects.operation_key`：非 HITL 为**内容寻址**键 `build_replay_stable_operation_key(run, node, agent, tool, arguments, occurrence)`（或调用方显式 `logical_operation_id`，**首选**；均不含 LLM 输出）；HITL 为 `run_id:approval:{approval_id}` | 一次逻辑业务操作 |
 
 铁律：
 
@@ -220,15 +220,22 @@ error_type / error_code / entered_at）。
 
 去重的**前提条件**必须讲清楚，否则容易被读成 exactly-once：
 
-1. 操作身份必须在**重投与节点重放后都稳定**。
+1. 操作身份必须在**重投与节点重放后都稳定**，且身份是**逻辑业务操作的内容**而不是
+   它在调用序列里的**位置**。
    - 非 HITL：**不能**用 LLM 生成的 `tool_call_id`。节点在 checkpoint 提交前崩溃后
      重放时 LLM 被重新调用、可能给出新 id，于是同一笔写拿到新键、ledger 去重失效、
      副作用执行两次（真实复现见
-     `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。现用
-     `build_replay_stable_operation_key(run_id, node_id, agent, tool_name, ordinal)`：
-     五个维度都不含 LLM 输出。刻意**不**按 `tool_name + arguments` 做全局去重——
-     那会把两次合法的 100 元退款合并成一次。序号（ordinal）漂移时退化为指纹冲突 →
-     `PermanentError`，即 fail-closed 而不是重复执行。
+     `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。
+   - 现用**内容寻址**键
+     `build_replay_stable_operation_key(run_id, node_id, agent, tool_name, arguments, occurrence)`：
+     身份 = 作用域 + `sha256(canonical_json(arguments))` + 「同**内容**出现序号」，
+     不含任何 LLM 输出，也不含位置。因此同一笔写重放时**重排到别的槽位**仍命中同一个
+     键（这是 Issue #12 Part A 的修复点：位置身份下重排会换键 → 重复执行）。
+   - 调用方若持有稳定业务操作 id（编排层），**首选**显式传 `logical_operation_id`；
+     此时身份完全来自调用方，参数内容不参与派生。
+   - 刻意**不**按 `tool_name + arguments` 做全局去重——那会把两次合法的 100 元退款
+     合并成一次。业务身份包含作用域，并用「同内容出现序号」区分**有意重复**：两次各
+     退款 100 元是两笔操作，都会执行。
    - HITL：`approval:{approval_id}`，审批 id 恒定，语义未变。
 2. 认领租约必须覆盖**受保护副作用的执行上界**。租约在执行期间由 `_ClaimRenewer`
    续租；TTL 下界（工具超时 + 余量）在启动时强制（`validate_timeout_invariants`），
@@ -245,7 +252,9 @@ at-least-once 投递 ⇒ 不能依赖 exactly-once ⇒ 副作用自身必须幂�
 
 ```
 operation_key 约定:
-  非 HITL  run_id + ":" + sha256(version|run_id|node_id|agent|tool_name|ordinal)
+  非 HITL  v2: sha256(v2|run_id|node_id|agent|tool_name|content:sha256(json(args))|occ:n)
+           或 v2: sha256(v2|run_id|node_id|agent|tool_name|id:<logical_operation_id>)
+           （v1 位置寻址 keyspace 仅保留给「只有位置」的 legacy 调用方）
   HITL     run_id + ":approval:" + approval_id
 指纹           = sha256(canonical_json(arguments))
 ```

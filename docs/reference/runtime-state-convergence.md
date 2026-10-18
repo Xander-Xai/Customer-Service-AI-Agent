@@ -216,21 +216,24 @@ CAS 会与「promote / 领取」竞争出假失败（读到 `PENDING`、写入�
 - **`operation_key` 的稳定性来自键的构造，不是来自 `run_id` 恒定。**
   - **HITL**：`operation_key = run_id:approval:{approval_id}`（`core/hitl/gate.py`）。
     审批 id 恒定，因此任意次重放中键恒定。**保持不变。**
-  - **非 HITL**：**重放稳定键** `build_replay_stable_operation_key`
-    （`run_id + node_id + agent + tool_name + ordinal` 的 SHA-256，版本前缀 `v1`）。
-    `run_id` 只是其中一个分量；它恒定**不足以**让键恒定。
+  - **非 HITL**：**内容寻址键** `build_replay_stable_operation_key`
+    （身份 = `run_id + node_id + agent + tool_name + sha256(canonical_json(arguments)) +
+    同内容出现序号` 的 SHA-256，版本前缀 `v2`；调用方持有稳定业务 id 时优先传
+    `logical_operation_id`）。`run_id` 只是其中一个分量；它恒定**不足以**让键恒定。
   - **历史缺陷（已修复，不再是当前设计）**：旧文档与旧实现推荐
     `run_id:tool_call_id` 作为幂等键。其中 `tool_call_id` **由 LLM 生成**，
     节点在 checkpoint 提交前崩溃并被重放时 LLM 会被重新调用、可能产生不同的 id，
     于是同一笔逻辑写操作拿到新键、唯一约束看不到重复、**副作用执行两次**（真实复现
     见 `tests/integration/runtime/test_side_effect_replay_identity_pg.py`）。
     `build_tool_idempotency_key` 现在**只**用于 `tool_call_id` 本身稳定的场景。
-- **非 HITL 重放稳定键的残余风险（Issue #12）。** `build_replay_stable_operation_key`
-  的 `ordinal` 是「本节点内该工具的调用序号」，不是逻辑操作身份：同一写工具的调用
-  序列在重放时**重排**（插入/交换另一次同类写）会让同一笔写换槽位、拿到新键，从而可能
-  **重复执行**；同一槽位的漂移则由 `request_fingerprint` fail-closed。要跨任意重排严格
-  去重，必须由调用方提供稳定身份（HITL 的 `approval:{approval_id}` 即属此类）。
-  见 `runtime/side_effects.py` docstring 与 `docs/limitations.md`。
+- **非 HITL 内容寻址键的残余边界（Issue #12 Part A 已修复）。** 修复前 `ordinal` 是
+  「本节点内该工具的调用序号」（位置），同一写工具的重放重排会让同一笔写换槽位、拿到
+  新键从而**重复执行**。现在身份来自**内容**（+ 同内容出现序号），同一笔写重排后仍命中
+  同一个键；参数相同的有意重复靠出现序号区分，不会被静默合并。**残余**：参数内容必须在
+  跨重放时**确定**（LLM 幻觉出 nonce/时间戳会把同一笔当成另一笔）；本仓仍**不构成端到端
+  exactly-once**（下游须接受幂等键或人工对账）。回归：
+  `tests/unit/test_side_effect_stable_logical_identity.py`。见 `runtime/side_effects.py`
+  docstring 与 `docs/limitations.md`。
 - **非 PostgreSQL 方言（Issue #13）。** 无行级锁的方言（SQLite/MySQL）上，ledger 的
   **接管**路径（租约过期 / FAILED 重试）一律 fail-closed 返回 `in_progress`，不交出
   执行权；首次插入的互斥由唯一约束提供，与方言无关。生产另由

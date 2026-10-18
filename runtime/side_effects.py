@@ -6,18 +6,50 @@ at-least-once delivery + application-level idempotency：同一
 
 operation_key 该怎么取（**当前推荐**）
 ------------------------------------
-**默认用 :func:`build_replay_stable_operation_key`**——它对**节点重放稳定**::
+**默认用 :func:`build_replay_stable_operation_key`**——它对**节点重放稳定**，
+且操作身份对应**逻辑业务操作的内容**，而不是它在调用序列里的**位置**::
 
     operation_key = build_replay_stable_operation_key(
         run_id=run_id, node_id=node_id, agent=agent,
-        tool_name=tool_name, ordinal=ordinal,
+        tool_name=tool_name,
+        arguments=arguments,          # 内容寻址：身份来自调用自身的内容
+        ordinal=occurrence,           # 同一节点内**相同内容**的第 n 次（区分有意重复）
+        # 或（优先，当编排层持有稳定业务 id 时）：
+        # logical_operation_id=logical_operation_id,
     )
 
-原因：``run_id + ":" + tool_call_id`` 里的 ``tool_call_id`` 由 LLM 生成，
-节点在 checkpoint 提交前崩溃并重放时 LLM 被重新调用，可以产生**不同的** id，
-于是同一笔逻辑写操作拿到新的 ``operation_key``，唯一约束看不到任何重复，
-副作用执行两次（真实复现见
-``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
+为什么不再用位置（ordinal）当身份
+--------------------------------
+``run_id + ":" + tool_call_id`` 里的 ``tool_call_id`` 由 LLM 生成：节点在
+checkpoint 提交前崩溃并重放时 LLM 被重新调用，可以产生**不同的** id，于是同一笔
+逻辑写操作拿到新的 ``operation_key``，副作用执行两次。
+
+即便把 ``tool_call_id`` 换成「本节点内该工具的第 n 次调用」这个**位置序号**也不行：
+重放时 LLM 若把同类写的调用序列**重排**（插入/交换另一次同类写），同一笔写会换到
+另一个槽位、拿到**新键**，``request_fingerprint`` 只在同一个键内比较，看不到这次
+重复，于是**可能重复执行**（Issue #12 Part A；真实复现见
+``tests/integration/runtime/test_side_effect_replay_identity_pg.py`` 与本模块回归
+``tests/unit/test_side_effect_stable_logical_identity.py``）。位置是「调用序列里的
+第几位」，不是「这笔业务操作是什么」。
+
+现在怎么取：内容寻址 + 有意重复的区分
+------------------------------------
+``operation_key`` 由三部分内容寻址地派生（不含任何 LLM 输出）：
+
+1. **作用域**：``run_id``（不同 run = 用户主动再次发起）、``node_id``、``agent``、
+   ``tool_name``；
+2. **内容**：``sha256(canonical_json(arguments))``——同一笔写无论排到第几位都拿到
+   同一个键，因此**重排/换槽位不再产生新身份**；
+3. **同内容出现序号**（``ordinal``）：「同一节点内、**相同内容**的第 n 次」。
+   它只用来区分**参数完全相同的有意重复**（用户两次各退款 100 元），不是全序列里
+   的位置；按``(tool_name, 内容指纹)``分槽计数，故插入/交换**其它**调用不会改变它。
+
+这样：内容相同 + 同一出现序号 -> 同一个键（重放去重）；内容不同 -> 不同键（不同
+业务操作）；内容相同但出现序号不同 -> 不同键（两次有意重复都执行，不被静默合并）。
+
+调用方若持有**稳定的业务操作 id**（例如编排层创建并持久化的
+``logical_operation_id``），**优先**直接传它：``logical_operation_id=...``。此时身份
+完全来自调用方，参数内容不参与派生，最贴近「一次业务操作」的语义。
 
 ``build_tool_idempotency_key``（``run_id + tool_call_id``）现在只用于
 **``tool_call_id`` 本身稳定**的场景，主要是 HITL 路径传
@@ -25,6 +57,17 @@ operation_key 该怎么取（**当前推荐**）
 非 HITL 路径不要用它去重跨重放的写操作。
 
 只读工具不经过此路径。
+
+残余边界（内容寻址**不等于**端到端 exactly-once）
+----------------------------------------------
+- 两个**参数相同、但业务上确实独立**的写操作会被区分（不同出现序号 / 不同显式 id），
+  不会被合并；但两个参数相同、编排层**没有**提供稳定 id、且出现序号也相同的调用，
+  在语义上就是「同一笔」——这是有意设计，不是缺陷。
+- 若同一笔写操作在重放时**参数内容本身发生变化**（例如 LLM 幻觉出新的
+  nonce/时间戳），内容寻址会把它当成**另一笔**操作。参数必须是确定性内容，跨重放
+  才能稳定。
+- 下游外部系统若也需要端到端去重，仍必须接受本仓传出的 idempotency key（或人工
+  对账）。**本模块不提供、也不宣称端到端 exactly-once。**
 
 并发边界
 --------
@@ -145,9 +188,19 @@ def build_tool_idempotency_key(run_id: str, tool_call_id: str) -> str:
     return f"{run_id}:{tool_call_id}"
 
 
-#: 重放稳定键的版本前缀。键空间与 ``run_id:tool_call_id`` 隔离，因此
-#: HITL（``approval:``）与历史键不受影响。
+#: **位置寻址**键（legacy）的版本前缀：调用方只提供「本节点内该工具的第 n 次」
+#: 位置序号、既没有内容也没有显式 id 时使用。键空间与内容寻址键、``run_id:tool_call_id``
+#: 都隔离。
+#:
+#: 刻意保留：它满足「不含 LLM 输出」的**最低**要求（跨重放但**调用序列不变**时稳定），
+#: 但**不**覆盖写序列重排（Issue #12 Part A），因此生产路径不使用它——Agent 工具循环
+#: 始终提供内容或显式 id。只读它的调用方须自担重排漂移风险。
 REPLAY_STABLE_KEY_VERSION = "v1"
+
+#: **内容寻址**键的版本前缀（当前推荐）：身份来自调用内容 + 有意重复序号，或调用方
+#: 显式提供的 ``logical_operation_id``。与位置寻址键（``v1``）键空间隔离，避免新旧
+#: 派生混用产生歧义。
+CONTENT_ADDRESSED_KEY_VERSION = "v2"
 
 
 def build_replay_stable_operation_key(
@@ -156,9 +209,20 @@ def build_replay_stable_operation_key(
     node_id: str,
     agent: str,
     tool_name: str,
-    ordinal: int,
+    ordinal: int = 0,
+    logical_operation_id: str | None = None,
+    arguments: dict[str, Any] | None = None,
 ) -> str:
     """构造**跨节点重放稳定**的逻辑操作身份（不使用 LLM 的 tool_call_id）。
+
+    身份 = 作用域 + **内容**，而不是「调用序列里的位置」。三种取法，按优先级：
+
+    1. ``logical_operation_id``（**首选**）：调用方（编排层）持有稳定业务操作 id 时
+       直接传它。身份完全来自调用方，参数内容不参与派生。
+    2. ``arguments``（默认）：内容寻址——``操作身份 = 作用域 + 内容指纹 + 出现序号``。
+       Agent 工具循环走这一支。
+    3. 都没有：退化为**位置寻址**（``v1``，``ordinal`` 当位置用）。仅在调用方明确
+       知道序列可重放时使用；**不**覆盖写序列重排（见下）。
 
     为什么不能只用 ``tool_call_id``
     -------------------------------
@@ -168,54 +232,51 @@ def build_replay_stable_operation_key(
     两次（真实复现见
     ``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
 
-    为什么不用 ``tool_name + arguments`` 全局去重
-    -------------------------------------------
-    那会把两次**合法**的业务操作合并：用户两次各退款 100 元会被当成同一笔，
-    第二次被静默吞掉。业务身份必须包含作用域。
+    为什么位置（ordinal）不是身份
+    ----------------------------
+    ordinal 若取「本节点内该工具的第 n 次调用」，重放时 LLM 若把**同一写工具**的
+    调用序列重排（插入/交换另一次同类写），同一笔写就会换到另一个槽位、拿到**新的
+    operation_key**；``request_fingerprint`` 只在同一个键内比较，看不到这次重复，
+    该写**可能重复执行**（Issue #12 Part A）。内容寻址修复的正是这一点：内容相同
+    的写无论排到第几位都得到同一个键。
 
-    五个组成部分各自排除一类错误合并
-    --------------------------------
+    为什么不能只按 ``tool_name + arguments`` 全局去重
+    ------------------------------------------------
+    那会把两次**合法**的业务操作合并：用户两次各退款 100 元会被当成同一笔，
+    第二次被静默吞掉。业务身份必须包含作用域**且**能区分有意重复。
+
+    各组成部分排除的错误类别
+    ------------------------
     - ``run_id``：不同 run = 用户主动再次发起的新操作，必须独立执行；
     - ``node_id``：同一 run 内不同图节点发起的同参数调用是不同操作；
     - ``agent``：同一节点内不同 agent 角色（协作模式下的分工）是不同操作；
     - ``tool_name``：不同工具不是同一操作；
-    - ``ordinal``：同一节点内**同一工具**的第 n 次逻辑调用。LLM 可以在一个节点里
-      发出多次同类写操作，ordinal 把它们区分开。
+    - ``内容指纹``：同一节点内不同参数是不同操作（内容不同 -> 键不同）；
+    - ``出现序号``：同一节点内**内容完全相同**的第 n 次调用是不同操作（有意重复），
+      按 ``(tool_name, 内容指纹)`` 分槽，故插入/交换**其它**调用不会改变它。
 
-    为什么 ordinal 漂移**不是**完整幂等
-    ----------------------------------
-    ordinal 是「本节点内该工具」的调用序号，不是逻辑操作的身份。重放时 LLM 若
-    产生不同的调用序列，可能把同一笔写移到**另一个槽位**：
-
-    - 插入**另一种只读工具**（例如重放时先查一次 ``query_order``）不影响该写工具的
-      槽位：计数器按工具名分槽（``agents/base_agent.py``），``query_order`` 有自己
-      的计数；
-    - 但**同一写工具**的调用序列发生重排（插入/交换另一次同类写）时，同一笔写会换到
-      不同 ordinal，于是拿到**不同的 operation_key**。此时 ``request_fingerprint``
-      的同键异参检查看不到它（两次落在两个不同的键上），该写可能被**重复执行**。
-
-    因此 ordinal 的不稳定性只保证「同一槽位内的漂移 fail-closed（同键异参抛
-    ``PermanentError``）」，**不保证**「不会重复执行」。需要跨任意写序列重放的
-    严格去重时，必须由调用方提供稳定的逻辑操作身份（HITL 路径用
-    ``approval:{approval_id}`` 即属此类），不得依赖 ordinal。真实复现与残余风险见
-    ``docs/limitations.md`` 与 Issue #12。
-
-    不含 arguments：参数属于指纹（``request_fingerprint``）的职责，混进键里会让
-    「同键异参」无法被检测。
+    残余边界
+    --------
+    - 参数内容必须在跨重放时**确定**；LLM 幻觉出 nonce/时间戳会让同一笔写被当成
+      另一笔。
+    - 本键只做本仓 ledger 的 application-level 去重；**不构成端到端 exactly-once**，
+      下游若需去重仍须接受 idempotency key 或人工对账。
     """
-    scope = "|".join(
-        [
-            REPLAY_STABLE_KEY_VERSION,
-            run_id,
-            node_id,
-            agent,
-            tool_name,
-            str(int(ordinal)),
-        ]
-    )
+    scope = [run_id, node_id, agent, tool_name]
+    if logical_operation_id:
+        version = CONTENT_ADDRESSED_KEY_VERSION
+        scope.append(f"id:{logical_operation_id}")
+    elif arguments is not None:
+        version = CONTENT_ADDRESSED_KEY_VERSION
+        scope.append(f"content:{request_fingerprint(arguments)}")
+        scope.append(f"occ:{int(ordinal)}")
+    else:
+        version = REPLAY_STABLE_KEY_VERSION
+        scope.append(f"ord:{int(ordinal)}")
     # 键需要确定性且适合做索引；显式限定分隔符歧义（node/agent 名里可能含 "|"）
     # 由上游节点名约定保证，digest 让长度不随名称增长。
-    return f"{REPLAY_STABLE_KEY_VERSION}:{hashlib.sha256(scope.encode('utf-8')).hexdigest()}"
+    digest = hashlib.sha256("|".join([version, *scope]).encode("utf-8")).hexdigest()
+    return f"{version}:{digest}"
 
 
 def request_fingerprint(arguments: dict[str, Any] | None) -> str:

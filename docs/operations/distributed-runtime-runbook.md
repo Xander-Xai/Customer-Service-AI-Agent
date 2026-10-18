@@ -206,8 +206,8 @@ curl -s -G "$PROM_URL/api/v1/query" --data-urlencode 'query=agent_run_dead_lette
    ```
 
    重放**复用原 `run_id`**（只产生新的队列投递），原始 DLQ 历史不被改写。不要通过
-   "新建一个 run"来重放——`operation_key` 以 `run_id` 为分量（非 HITL 为重放稳定键
-   `build_replay_stable_operation_key`；审批执行时为 `run_id:approval:{approval_id}`），
+   "新建一个 run"来重放——`operation_key` 以 `run_id` 为分量（非 HITL 为内容寻址
+   重放稳定键 `build_replay_stable_operation_key`；审批执行时为 `run_id:approval:{approval_id}`），
    因此在任意次重试中恒定，它让**本仓 ledger 不会
    再次发起**已成功的退款/改单；换 `run_id` 会绕过这个幂等键，导致副作用重做。
 
