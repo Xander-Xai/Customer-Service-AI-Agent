@@ -44,11 +44,16 @@ TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
     # （已直接声明在 requirements-dev.txt，仅测试/CI 工具链使用）。
     "yaml": "pyyaml",
     "jwt": "PyJWT",
-    "cryptography": "python-jose",
+    # core/session/session_manager.py 在启用 SESSION_ENCRYPTION_KEY 时延迟
+    # import cryptography.fernet。cryptography 由已声明的 pdfplumber 传递提供
+    # （pdfplumber -> pdfminer.six -> cryptography）。此前这里误记为 python-jose：
+    # python-jose 既不提供 cryptography（只放在可选 extra `cryptography` 里），
+    # 也从未被本仓库任何代码 import —— 该直接依赖已移除，见
+    # DEPENDENCY_SECURITY_TRIAGE_REPORT。
+    "cryptography": "pdfplumber",
     "numpy": ("qdrant-client", "openai", "opencv-python-headless"),
     "requests": ("qdrant-client", "langchain-community", "edge-tts"),
     "multipart": "python-multipart",
-    "jose": "python-jose",
     # tools/mcp_adapter.py 用 anyio.fail_after 给 MCP 握手加超时。anyio 是
     # starlette（FastAPI 依赖）与官方 mcp SDK 共同传递提供的硬依赖，二者都已在
     # requirements*.txt 中声明，故不必单独声明 anyio。

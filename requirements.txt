@@ -65,12 +65,14 @@ celery>=5.3.0
 prometheus-client>=0.20.0
 
 # ===== 安全依赖升级（防止传递依赖漏洞）=====
-# python-jose CVE: key verification bypass (PYSEC-2024-232/233)
+# 注：python-jose 曾作为直接依赖声明（历史安全升级，修 PYSEC-2024-232/233），
+# 但仓库无任何代码 import jose/python_jose（JWT 全部走 PyJWT），干净解析确认
+# 也没有任何传递依赖需要它。它只带来不可达的 PYSEC-2026-4298 攻击面，
+# 故移除（见 DEPENDENCY_SECURITY_TRIAGE_REPORT）。
 # Jinja2 CVE: HTML sanitization bypass (CVE-2024-22195)
 # MarkupSafe CVE: ReDoS
 # starlette CVE: path traversal + multiple (PYSEC-2026-161, CVE-2024-47874, CVE-2025-54121)
 # pillow CVE: multiple (CVE-2026-25990/40192/42310/42311)
-python-jose>=3.4.0
 Jinja2>=3.1.6
 MarkupSafe>=2.1.5
 starlette>=0.47.2
