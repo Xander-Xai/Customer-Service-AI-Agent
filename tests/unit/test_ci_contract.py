@@ -735,6 +735,43 @@ class TestRuffGate:
         )
 
 
+class TestScannerTargetPathsExist:
+    """Explicit ``*.py`` targets passed to mypy/bandit must exist on disk.
+
+    Regression for issue #20: the gradual mypy step passed root-level
+    ``session_manager.py`` / ``token_counter.py`` / ``drift_detector.py`` that
+    actually live under ``core/session/``. mypy aborts on the first missing
+    file, and the step's ``continue-on-error: true`` hid the resulting no-op.
+    The bandit step carried the same stale path (silently skipped). Both
+    modules are already covered by the ``core/`` directory argument, so the
+    bare names must not come back.
+    """
+
+    PY_PATH_RE = re.compile(r"(?<![\w./-])((?:[\w.-]+/)*[\w.-]+\.py)(?![\w./-])")
+
+    @staticmethod
+    def _scanner_scripts():
+        for name, run, _block in _steps():
+            if run and ("python -m mypy" in run or re.search(r"(?m)^\s*bandit\b", run)):
+                yield name, run
+
+    def test_explicit_python_targets_exist(self):
+        missing: list[str] = []
+        for name, run in self._scanner_scripts():
+            # Ignore trailing comments: a path named only in prose need not exist.
+            script = "\n".join(line.split("#", 1)[0] for line in run.splitlines())
+            for match in self.PY_PATH_RE.finditer(script):
+                target = match.group(1)
+                if not (REPO_ROOT / target).exists():
+                    missing.append(f"{name}: {target}")
+        assert not missing, (
+            "CI mypy/bandit steps pass explicit .py paths that do not exist at "
+            f"the repository root: {missing}. Point at the real path or drop the "
+            "argument when a directory already covers it; otherwise mypy aborts "
+            "before checking anything and continue-on-error hides the no-op."
+        )
+
+
 class TestMcpContractWiring:
     """The MCP e2e contract suite must be a real gate in the blocking `test`
     job, not a silent skip.
