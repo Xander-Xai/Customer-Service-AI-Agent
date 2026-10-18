@@ -719,12 +719,16 @@ class BaseAgent(ABC):
         只读工具与实时快路径完全不受影响：没有 Run 上下文就没有 side-effect ledger，
         解析器为 ``None``，工具循环退回纯内存行为（见 ``_process_with_tools``）。
         """
+        from runtime.operation_identity import OperationIdentityUnavailable
+
         try:
             from runtime.context import get_current_run_id, get_current_thread_id
 
             run_id = get_current_run_id()
-        except Exception:
-            return None
+        except Exception as exc:
+            raise OperationIdentityUnavailable(
+                "无法确认 Run 上下文，拒绝回退到无持久身份的写操作路径"
+            ) from exc
         if not run_id:
             return None
         try:
@@ -738,9 +742,11 @@ class BaseAgent(ABC):
                 thread_id=get_current_thread_id(),
                 store=get_side_effect_store(),
             )
-        except Exception:
-            self.logger.warning("写操作持久身份解析器不可用", exc_info=True)
-            return None
+        except Exception as exc:
+            self.logger.error("写操作持久身份解析器不可用，拒绝降级", exc_info=True)
+            raise OperationIdentityUnavailable(
+                "异步 Run 持久操作身份解析器不可用，拒绝裸执行副作用"
+            ) from exc
 
     # NOTE: _process_with_llm and _process_with_tools share identical pre-processing
     # (A/B variant resolution + _prepare_llm_messages + _get_effective_llm) and
