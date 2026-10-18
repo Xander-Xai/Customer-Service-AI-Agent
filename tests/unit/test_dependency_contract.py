@@ -44,13 +44,6 @@ TRANSITIVE_PROVIDERS: dict[str, str | tuple[str, ...]] = {
     # （已直接声明在 requirements-dev.txt，仅测试/CI 工具链使用）。
     "yaml": "pyyaml",
     "jwt": "PyJWT",
-    # core/session/session_manager.py 在启用 SESSION_ENCRYPTION_KEY 时延迟
-    # import cryptography.fernet。cryptography 由已声明的 pdfplumber 传递提供
-    # （pdfplumber -> pdfminer.six -> cryptography）。此前这里误记为 python-jose：
-    # python-jose 既不提供 cryptography（只放在可选 extra `cryptography` 里），
-    # 也从未被本仓库任何代码 import —— 该直接依赖已移除（PYSEC-2026-4298；
-    # 完整证据与验证见 PR #19）。
-    "cryptography": "pdfplumber",
     "numpy": ("qdrant-client", "openai", "opencv-python-headless"),
     "requests": ("qdrant-client", "langchain-community", "edge-tts"),
     "multipart": "python-multipart",
@@ -202,6 +195,23 @@ def test_prometheus_client_is_declared():
         "requirements.txt 必须显式声明 prometheus-client；"
         "它在 core/monitoring.py / cache/response_cache.py 是 try/except 的运行时 import，"
         "缺失时应用能启动但 /api/metrics 为空、所有 agent_* 指标消失"
+    )
+
+
+@pytest.mark.unit
+def test_cryptography_is_declared():
+    """回归锁定：cryptography 是会话加密的运行时依赖，必须**直接**声明。
+
+    ``core/session/session_manager.py`` 在配置 ``SESSION_ENCRYPTION_KEY`` 时延迟
+    import ``cryptography.fernet``；缺失时 ``_encrypt_data`` 的
+    ``except ImportError`` 会**静默降级为明文存储**且不报错。此前它只由
+    ``pdfplumber -> pdfminer.six`` 传递提供 —— 该链条一旦断裂就会无声关闭加密。
+    直接声明消除这条静默降级路径，因此不允许退回"某个传递依赖恰好提供"。
+    """
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    assert "cryptography" in declared, (
+        "requirements.txt 必须直接声明 cryptography：core/session/session_manager.py "
+        "在 SESSION_ENCRYPTION_KEY 启用时用它做 AES-256-Fernet 加密，缺失时静默降级为明文"
     )
 
 

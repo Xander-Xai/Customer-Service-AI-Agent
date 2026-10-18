@@ -21,6 +21,12 @@ langchain-community>=0.3.27
 # ===== 会话管理（滑动窗口 + 历史摘要）=====
 tiktoken>=0.7.0
 jieba>=0.42.1
+# 会话数据 AES-256-Fernet 加密（core/session/session_manager.py，启用
+# SESSION_ENCRYPTION_KEY 时）。此前仅靠 pdfplumber -> pdfminer.six 传递提供；
+# 一旦该链条断裂，_encrypt_data/_decrypt_data 的 `except ImportError` 会**静默
+# 降级为明文存储**且无任何错误。故显式声明为直接依赖（floor 对齐 pdfminer.six
+# 自身的 >=36.0.0，不额外宣称新的安全 floor）。
+cryptography>=36.0.0
 
 # ===== Redis 持久化后端（Session + Cache）=====
 redis>=5.0.0
