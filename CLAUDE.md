@@ -258,7 +258,7 @@ make db-downgrade # 回滚迁移
 - **API**：`GET /api/approvals`、`GET /api/approvals/{id}`、
   `POST /api/approvals/{id}/decision`（approve / edit / reject）、
   `GET /api/approvals/by-run/{run_id}`。
-- **验证过的 LangGraph 语义**（langgraph 1.2.12 / Python 3.10，真实 PG
+- **验证过的 LangGraph 语义**（langgraph 1.2.2 / Python 3.10，真实 PG
   checkpoint 上实测，测试
   `tests/integration/runtime/test_hitl_langgraph_interrupt.py`）：
   `interrupt()` 不抛异常而注入 `__interrupt__`；`ainvoke(None)` **解除不了**

@@ -305,7 +305,7 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 3. `Command(resume=...)` **必须**有 checkpointer——审批恢复依赖 durable
    checkpoint 跨 worker/跨进程续跑，`MemorySaver` 证明不了这一点。
 
-真 LangGraph 上钉住的语义（langgraph 1.2.12 / Python 3.10 实测）：
+真 LangGraph 上钉住的语义（langgraph 1.2.2 / Python 3.10 实测）：
 
 - `interrupt()` 不抛异常，返回值注入 `__interrupt__`；
 - `ainvoke(None, cfg)` **解除不了** interrupt（原样再次返回 `__interrupt__`）

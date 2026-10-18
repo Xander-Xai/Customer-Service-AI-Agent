@@ -271,7 +271,7 @@ escalation 的真实实现只有两处，都不是"转交"：
 | `has_pending_interrupt` 无生产调用方，与 `runtime/executor.py:58` 重复实现 | `core/hitl/gate.py:157` |
 | `default_operation_key` 在当前工具路径不可达 | `runtime/side_effects.py:92` |
 | `register_hitl_staging_tools` 只在测试里注册（**有意的**，但 docstring 未声明） | `tools/hitl_staging_tools.py:122` |
-| langgraph 版本"实测"声明与 lockfile 不符：文档/代码注释称 **1.2.12**（本地 venv 确实是），但 `requirements-lock.txt:144` 锁的是 **1.2.2** | `core/hitl/gate.py:23,48,184` 等 |
+| ~~langgraph 版本"实测"声明与 lockfile 不符~~（文档/代码注释曾称 **1.2.12**） | **已修复（2026-10-19 审计）**：代码/文档/测试注释统一为 lockfile 与本地 venv 一致的 **1.2.2**（`requirements-lock.txt:144`）；HITL LangGraph 语义测试在 1.2.2 上复测通过（`tests/integration/runtime/test_hitl_langgraph_interrupt.py`），`make runtime-chaos` artifact 亦记录 `langgraph: 1.2.2` |
 | `mcp` 版本要求冲突：`requirements-optional.txt:13` 要 `mcp>=2.0.0`，`requirements-lock.txt:149` 锁 `mcp==1.27.2` | 已在 `tools/mcp_adapter.py:44-45` 标注 2.x 未验证 |
 | `pyproject.toml` **没有 `[project].dependencies`**，依赖真相源是 `requirements*.txt` | `pyproject.toml` |
 | 当前文档里 `Issue #99 / #119 / #130 / #105 / #53`、`PR #19 / #20 / #21 / #28 / #128` 等编号指向**公开 tracker 之前**的私有台账，在公开 repo（0 issue、PR #1–#11）里**不解析**；它们是历史追踪引用，不是坏链接（`audit_doc_consistency.py` 的链接检查为绿）。按「快照不可回填」约定保留原文，待一次性治理再统一重编号 | 多个 `docs/reference/**`、`docs/evaluation/**`、`docs/design/human-in-the-loop.md` |
