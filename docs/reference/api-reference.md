@@ -176,7 +176,7 @@ PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (
 
 - **at-least-once，不是 exactly-once。** worker 崩溃后任务会被重新投递。
   幂等由三层保证：终态重复投递 no-op、`agent:thread-lock:{thread_id}` 跨进程互斥、
-  `tool_side_effects` ledger（`operation_key` = 重放稳定键
+  `tool_side_effects` ledger（`operation_key` = 内容寻址重放稳定键
   `build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`）。
 - **取消是协作式的。** `POST /api/runs/{run_id}/cancel` 立即置终态，但**已经进入
   `RUNNING` 的执行不会被强行中断**，调用方仍需轮询 `GET /api/runs/{run_id}` 确认。

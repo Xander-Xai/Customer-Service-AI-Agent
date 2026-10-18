@@ -234,10 +234,12 @@ app = workflow.compile(**compile_kwargs)
 
 **为什么必须区分**：崩溃恢复时 Celery 会用**新 task_id** 重投同一条 run。
 如果把 task_id 当业务标识，工具幂等键就会变，**重试会真的重复扣款**。
-所以幂等键用**重放稳定键** `build_replay_stable_operation_key`
-（`runtime/side_effects.py`，含 `run_id + node_id + agent + tool_name + ordinal`）——
+所以幂等键用**内容寻址键** `build_replay_stable_operation_key`
+（`runtime/side_effects.py`，身份 = `run_id + node_id + agent + tool_name +
+内容指纹 + 同内容出现序号`；调用方持有稳定业务 id 时优先传 `logical_operation_id`）——
 注意不能只用 `run_id:tool_call_id`：`tool_call_id` 由 LLM 生成，节点重放时会变，
-同一笔逻辑写操作换键后会被执行两次。
+同一笔逻辑写操作换键后会被执行两次。身份按**内容**而非**位置**派生，因此重放时调用
+序列重排也不会让同一笔写换键（Issue #12 Part A）。
 DLQ 重放**复用原 run_id**（`runtime/run_service.py:512-553`）——
 两个设计都指向同一个目的：**重试永远不会变成第二次副作用**。
 

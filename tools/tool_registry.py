@@ -96,23 +96,28 @@ class LogicalCall:
     字段语义
     --------
     - ``node_id``：发起调用的图节点。协作模式下同名节点可能跑多次，但那是不同的
-      逻辑调用，需要不同的 ``ordinal``。
+      逻辑调用，需要不同的身份。
     - ``agent``：发起调用的 agent 角色。
-    - ``ordinal``：**本节点内、同一工具**的第 n 次调用（从 0 开始）。区分一个节点里
-      的多次同类写操作。
+    - ``ordinal``：**同一节点内、相同调用内容**的第 n 次（从 0 开始）。它是「有意
+      重复」的区分键，**不是**全序列里的位置：``runtime.side_effects`` 按内容寻址
+      构造 ``operation_key``，同一笔写即使重排到别的槽位也得到同一个键；只有内容
+      相同的两次调用才靠 ``ordinal`` 区分。因此插入/交换**其它**调用不会改变本笔
+      写的身份。
+    - ``logical_operation_id``：调用方（编排层）持有的**稳定业务操作 id**。提供时
+      **优先**用它派生 ``operation_key``（参数内容不参与），最贴近「一次业务操作」；
+      省略时由 ``ToolRegistry`` 用调用内容 + ``ordinal`` 内容寻址派生。
 
-    调用方应保证同一节点内同一工具的调用顺序可重放。**顺序不可重放时不是安全的
-    fail-closed**：同一写工具在重放中换到另一个 ``ordinal``，会得到一个新的
-    ``operation_key``，``request_fingerprint`` 只在同一个键内比较，因此看不到这次
-    重复，写操作**可能被再次执行**。只有「同一槽位、不同参数」才会撞
-    ``request_fingerprint`` 并抛 ``PermanentError``。跨任意调用序列的严格去重需要
-    调用方提供稳定逻辑操作身份（例如 HITL 的 ``approval:{approval_id}``）；
-    ``ordinal`` 不构成完整幂等。Issue #12 Part A 保持 OPEN。
+    调用方应保证同一节点内**相同内容**的调用次数在重放时一致。**只按位置**的
+    身份（既无内容也无稳定 id）在写序列重排时会换槽位、得到新键，``request_fingerprint``
+    只在同一个键内比较，因此看不到重复，写操作**可能被再次执行**。内容寻址
+    （本类默认路径）消除了这个漂移；Issue #12 Part A 的回归见
+    ``tests/unit/test_side_effect_stable_logical_identity.py``。
     """
 
     node_id: str
     agent: str
     ordinal: int
+    logical_operation_id: str | None = None
 
 
 @dataclass
@@ -477,8 +482,13 @@ class ToolRegistry:
             return None, self._missing_precondition_refusal(tool.name, "幂等 ledger 不可用")
 
         if logical_call is not None:
-            # 重放稳定路径：优先。没有它，同一笔写操作会因为 LLM 在节点重放时换了
-            # tool_call_id 而被执行两次（见 runtime/side_effects.py 的说明）。
+            # 内容寻址路径：优先。身份 = 作用域 + 调用内容（+ 出现序号），或调用方
+            # 显式提供的稳定业务 id。没有它，同一笔写操作会因为 LLM 在节点重放时换了
+            # tool_call_id / 重排了调用序列而被执行两次（见 runtime/side_effects.py）。
+            #
+            # 传 ``arguments`` 是关键：内容参与身份派生，同一笔写即使重排到别的槽位
+            # 也得到同一个 operation_key（Issue #12 Part A）。``arguments`` 在这里
+            # 就是即将传给 handler 的真实参数，无需调用方额外传递。
             try:
                 operation_key = build_replay_stable_operation_key(
                     run_id=run_id,
@@ -486,6 +496,8 @@ class ToolRegistry:
                     agent=logical_call.agent,
                     tool_name=tool.name,
                     ordinal=logical_call.ordinal,
+                    logical_operation_id=logical_call.logical_operation_id,
+                    arguments=arguments,
                 )
             except Exception:
                 return None, self._missing_precondition_refusal(

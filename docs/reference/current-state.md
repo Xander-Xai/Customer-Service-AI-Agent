@@ -449,11 +449,13 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     `python scripts/replay_dead_run.py <run_id>`。重放**复用原 run_id**（只产生新的
     队列投递）——换新 run_id 会绕过工具幂等键，把已成功的退款/改单再执行一次。
     原始 DLQ 历史不被改写，`agent_run_dead_letter_replay_total` 计数。
-  - 工具侧幂等 ledger（`tool_side_effects`，`operation_key` = 重放稳定键
+  - 工具侧幂等 ledger（`tool_side_effects`，`operation_key` = 内容寻址重放稳定键
     `build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`）
     + `execute_idempotent_operation` 包裹执行；`ToolRegistry.register(side_effect=True)`
     的**写工具**在 Run 执行上下文内自动走 ledger（`tools/tool_registry.py`），
-    `agent/base_agent.py` 已把 LLM 的 `tool_call_id` 透传到 registry；
+    `agents/base_agent.py` 为写工具构造**内容寻址**逻辑身份（`LogicalCall`：节点 +
+    同内容出现序号），registry 再把真实 `arguments` 交给键构造，身份不含 LLM 的
+    `tool_call_id`；
     PENDING 认领租约未过期时抛 `TransientError`（退避重投）而不是重复执行副作用。
     外部系统端到端幂等仍需下游 API 接受 idempotency key。
   - **断点续跑语义（已修）**：LangGraph `ainvoke(state, cfg)` 会**从 START 重新

@@ -96,10 +96,12 @@ broker-native DLX、Kubernetes/HPA、multi-region。
 
 以下是对本 ADR 失败语义的**收窄与纠正**，不改变总体决策：
 
-- **#12（副作用操作身份）**：`build_replay_stable_operation_key` 的 `ordinal` 是
-  「节点内该工具调用序号」，不是身份。修正：计数器跨 LLM 轮次单调递增（此前每轮重置，
-  两轮同名同参写会误合并/误拒绝，Part B 已修复）；**如实降级**文档——写调用序列重排
-  仍可能换槽位重复执行（Part A 未修复），不据此宣称完整幂等。
+- **#12（副作用操作身份）**：`build_replay_stable_operation_key` 的 `ordinal` 曾是
+  「节点内该工具调用序号」（位置），不是身份。**Part B**：计数器跨 LLM 轮次单调递增
+  （此前每轮重置，两轮同名同参写会误合并/误拒绝）。**Part A（本轮修复）**：身份改为
+  **内容寻址**——`run_id + node_id + agent + tool_name + 内容指纹 + 同内容出现序号`，
+  或调用方显式 `logical_operation_id`（首选）。同一笔写重排换槽位不再换键；参数相同的
+  有意重复靠出现序号区分。残余：参数须跨重放确定；端到端 exactly-once 仍 NOT PROVIDED。
 - **#13（非 PostgreSQL claim）**：无行级锁的方言上，ledger 的**接管**路径 fail-closed
   返回 `in_progress`（首次插入仍由唯一约束互斥）；生产由 `validate_app_database_dsn`
   拒绝非 PostgreSQL 应用库，堵住「PG checkpoint + SQLite 应用库」。

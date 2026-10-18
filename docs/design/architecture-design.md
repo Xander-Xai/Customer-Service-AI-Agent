@@ -290,7 +290,7 @@ WAITING_APPROVAL → RUNNING`，任意未终态可 `→ CANCELLED`。其中
 投递为 at-least-once（`acks_late` + `reject_on_worker_lost` +
 `visibility_timeout`），因此**有副作用的写工具必须自身幂等**：
 `ToolRegistry.register(side_effect=True)` 的工具在 Run 上下文内自动走
-`tool_side_effects` ledger（`operation_key` = 重放稳定键
+`tool_side_effects` ledger（`operation_key` = 内容寻址重放稳定键
 `build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`）。
 
 ### 3.7 分布式执行边界（per-thread 锁 + Redis Session + 多 Worker gate）

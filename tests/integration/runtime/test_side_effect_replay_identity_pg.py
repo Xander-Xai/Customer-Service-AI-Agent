@@ -295,3 +295,51 @@ async def test_hitl_approval_key_semantics_are_unchanged(store):
             store=store,
         )
     assert external.executions == 1, "同一审批的重复执行必须被去重"
+
+
+@requires_infra
+async def test_content_addressed_key_dedupes_reordered_same_tool_writes(store):
+    """Issue #12 Part A：内容寻址键在真实 PG 上对同工具写序列重排去重。
+
+    attempt 1 发 ``[refund(A)]``；attempt 2 重排为 ``[refund(B), refund(A)]``（A 换到
+    槽位 1）。位置身份下 A 会拿到新键被再次执行；内容寻址下 A 稳定命中同一个键。
+    """
+    from runtime.side_effects import build_replay_stable_operation_key
+
+    run_id = f"{prefix}-runA-reorder"
+    thread_id = f"{prefix}-threadA-reorder"
+
+    def key(arguments: dict, occurrence: int) -> str:
+        return build_replay_stable_operation_key(
+            run_id=run_id,
+            node_id="tools#0",
+            agent="refund_agent",
+            tool_name="staging_refund",
+            arguments=arguments,
+            ordinal=occurrence,
+        )
+
+    a = {"order_id": "ORD-A1", "amount": 100}
+    b = {"order_id": "ORD-B1", "amount": 200}
+    external = _ExternalSystem()
+
+    async def _run(op_key: str, args: dict) -> None:
+        await execute_idempotent_operation(
+            tool_name="staging_refund",
+            operation_key=op_key,
+            run_id=run_id,
+            thread_id=thread_id,
+            arguments=args,
+            operation=lambda: external.refund(args),
+            store=store,
+        )
+
+    # attempt 1: [A]
+    await _run(key(a, 0), a)
+    # attempt 2（重放、重排）: [B, A] —— A 现在是同一内容的第 0 次出现
+    await _run(key(b, 0), b)
+    await _run(key(a, 0), a)
+
+    assert external.executions == 2, f"外部只应执行 A、B 各一次: {external.calls}"
+    assert external.calls.count(a) == 1, "A 换槽位后必须被内容寻址键去重"
+    assert external.calls.count(b) == 1

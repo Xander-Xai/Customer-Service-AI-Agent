@@ -129,6 +129,19 @@ def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, or
     不同的 id，于是同一笔写操作拿到新的键，ledger 失效、副作用执行两次
     （真实复现见 ``tests/integration/runtime/test_side_effect_replay_identity_pg.py``）。
 
+    ``ordinal`` 的语义：**同一节点内、相同调用内容**的第 n 次，不是位置
+    --------------------------------------------------------------
+    传入的 ``ordinal`` 由调用方按 ``(tool_name, 参数内容指纹)`` 分槽计算（见
+    ``_process_with_tools`` 的 ``_logical_ordinals``），因此：
+
+    - 同一笔写即使重放时**重排**到别的槽位，内容指纹不变、其**内容出现序号**也不变，
+      拿到同一个 ``operation_key``（Issue #12 Part A 由此修复）；
+    - 参数相同的有意重复（用户两次各退款 100 元）得到不同的出现序号，是不同的操作。
+
+    这个 ``ordinal`` **不是**全序列里的位置：插入/交换**其它**调用不会改变它，因此
+    与「位置序号」有本质区别。``ToolRegistry`` 另会把真实 ``arguments`` 一并交给
+    ``build_replay_stable_operation_key`` 做内容寻址。
+
     ``node_id`` 的取法
     -----------------
     图没有把「当前节点名」传给 agent，因此用 **agent 名 + 本 run 内该 agent 的
@@ -139,18 +152,6 @@ def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, or
     - 同一 run 内同名 agent 被第二次调用（咨询/层级模式）时序号不同 -> 是不同的
       逻辑操作，不会被错误合并；
     - 不同 run（用户主动再次发起）由 ``run_id`` 区分。
-
-    边界（**不要**宣称 ordinal 漂移一定 fail-closed）
-    ------------------------------------------------
-    序号漂移分两类，后果相反：
-
-    - **同一槽位、不同参数**：撞 ``request_fingerprint`` -> ``PermanentError``
-      （fail-closed）。
-    - **同一写工具换到不同槽位**（重放时调用序列插入/交换了另一次同类写）：拿到的是
-      **新的 operation_key**，``request_fingerprint`` 只在同一个键内比较，看不到这次
-      重复，写操作**可能被再次执行**。ordinal 是位置不是身份，因此它不构成完整幂等
-      （Issue #12 Part A 保持 OPEN，见 ``docs/limitations.md``）。严格去重需要调用方
-      提供稳定逻辑操作身份（HITL 的 ``approval:{approval_id}`` 即属此类）。
 
     构造失败一律返回 ``None``：调用方随后会因为缺少操作身份而 fail-closed 拒绝
     执行写操作（见 ``ToolRegistry._idempotent_operation``），这是期望行为。
@@ -758,24 +759,34 @@ class BaseAgent(ABC):
         # 就 break（无工具调用 / LLM 异常），在分支内声明会 NameError。
         _deferred: list[dict] = []
 
-        # ``_logical_ordinals`` 给出「本节点内、同一工具」的第 n 次逻辑调用序号，
-        # 与 LLM 生成的 tool_call_id 无关，因此节点重放时同一逻辑调用仍拿到同一
-        # 序号 -> 写操作的幂等键跨重放稳定（见
-        # ``runtime.side_effects.build_replay_stable_operation_key``）。
+        # ``_logical_ordinals`` 给出「本节点内、**相同调用内容**」的第 n 次出现序号
+        # （按 ``(工具名, 参数内容指纹)`` 分槽）。它是「有意重复」的区分键，不是全
+        # 序列里的位置，因此：
         #
-        # 计数器必须声明在**轮次循环之外**（与 `_deferred` 同理）：一个节点可跨
-        # 多个 LLM round。若每轮重新初始化，round r 的第 1 次调用与 round r+1 的第
-        # 1 次调用会拿到同一个 ordinal -> 同一个 operation_key。参数不同则撞
-        # ``request_fingerprint`` 触发 ``PermanentError``（合法的第二笔写被永久
-        # 拒绝）；参数相同则第二次 ``CLAIM_SUCCEEDED``，写操作被**静默吞掉**。
-        # 两者都违反重放稳定键 docstring 明确拒绝的「两次各退款 100 元被当成同一
-        # 笔」（Issue #12 Part B，回归见
+        # - 同一笔写即使重放时**重排**到别的槽位，内容指纹不变、内容出现序号不变，
+        #   拿到同一个 ``operation_key``（Issue #12 Part A 修复点）；
+        # - 参数相同的有意重复（两次各退款 100 元）得到不同出现序号 = 不同操作，不会
+        #   被静默合并或被指纹冲突永久拒绝。
+        #
+        # 计数器必须声明在**轮次循环之外**（与 `_deferred` 同理）：一个节点可跨多个
+        # LLM round。若每轮重新初始化，round r 的第 1 次调用与 round r+1 的第 1 次
+        # 调用会拿到同一个出现序号 -> 同一个 operation_key，两次合法写被误合并
+        # （Issue #12 Part B，回归见
         # ``tests/unit/test_side_effect_ordinal_scope.py``）。
         #
         # 计数器仍是**节点局部**变量：节点重放时整个方法从头执行，序号从 0 重新
         # 开始，与首次执行一致 —— 这才是「与 checkpoint 回放到本节点起点一致」的
         # 正确含义。
-        _logical_ordinals: dict[str, int] = {}
+        _logical_ordinals: dict[tuple[str, str], int] = {}
+
+        def _content_occurrence(tool_name: str, args: dict[str, Any]) -> int:
+            """返回并推进「本节点内该工具该内容」的出现序号（内容寻址，非位置）。"""
+            from runtime.side_effects import request_fingerprint
+
+            key = (tool_name, request_fingerprint(args))
+            value = _logical_ordinals.get(key, 0)
+            _logical_ordinals[key] = value + 1
+            return value
 
         for round_num in range(max_tool_rounds):
             try:
@@ -835,14 +846,13 @@ class BaseAgent(ABC):
 
                 # 执行每个工具调用，追加 ToolMessage
                 #
-                # ``_logical_ordinals``（声明在轮次循环之外）给出「本节点内、同一
-                # 工具」的第 n 次调用序号，跨 LLM round 单调递增，因此两轮里同工具的
-                # 两次调用拿到不同 ordinal -> 不同 operation_key，不会被错误合并
-                # （Issue #12 Part B）。计数器按**工具名**分槽，所以插入另一种只读
-                # 工具不会改变某写工具的槽位。
+                # ``_logical_ordinals``（声明在轮次循环之外）按
+                # ``(工具名, 参数内容指纹)`` 分槽给出「本节点内该工具该内容」的第 n
+                # 次出现序号，跨 LLM round 单调递增。它区分**有意重复**（两轮各退款
+                # 100 元拿到不同序号 = 不同 operation_key，Issue #12 Part B），而同一
+                # 笔写重排到别的槽位不会改变它的内容出现序号（Issue #12 Part A）。
                 for p in parsed_tcs:
-                    _ordinal = _logical_ordinals.get(p["name"], 0)
-                    _logical_ordinals[p["name"]] = _ordinal + 1
+                    _ordinal = _content_occurrence(p["name"], p["args"])
                     # 只有**写操作**工具需要重放稳定的逻辑身份（只有它们经过
                     # ledger）；只读工具传 `logical_call=None`，既省掉一次构造，
                     # 也让只读路径的调用签名保持稳定。
