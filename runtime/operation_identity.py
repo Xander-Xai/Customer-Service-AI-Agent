@@ -137,6 +137,37 @@ class ContentOccurrenceResolver:
         """
         from runtime.side_effects import request_fingerprint
 
+        # In mixed history a shortened same-content replay is fundamentally
+        # ambiguous: A1 succeeded, A2 was reserved, and a lone A could mean
+        # either "replay A1" or "execute A2". Prioritizing PENDING would
+        # accidentally execute A2 in the former case. Refuse without a
+        # durable logical_operation_id instead of guessing business intent.
+        from collections import Counter
+
+        proposal_counts = Counter(
+            (tool_name, request_fingerprint(arguments))
+            for tool_name, arguments in proposals
+        )
+        for content_key, count in proposal_counts.items():
+            tool_name, _ = content_key
+            state = self._states.get(content_key)
+            if state is None:
+                sample_args = next(
+                    args
+                    for name, args in proposals
+                    if (name, request_fingerprint(args)) == content_key
+                )
+                state = self._load(tool_name, sample_args)
+                self._states[content_key] = state
+            if state.executed and state.unexecuted:
+                known_count = len(state.executed) + len(state.unexecuted)
+                if count < known_count:
+                    raise OperationIdentityUnavailable(
+                        f"tool {tool_name}: ambiguous partial replay of "
+                        f"{count} identical proposals against {known_count} "
+                        "prior occurrences; require a durable logical_operation_id"
+                    )
+
         assignments: list[int] = []
         to_reserve: list[tuple[str, str, str]] = []  # (tool_name, key, fingerprint)
         for tool_name, arguments in proposals:
@@ -146,11 +177,16 @@ class ContentOccurrenceResolver:
                 state = self._load(tool_name, arguments)
                 self._states[content_key] = state
 
-            if state.unexecuted:
-                assignments.append(state.unexecuted.pop(0))
-                continue
-            if state.executed:
-                assignments.append(state.executed.pop(0))
+            # Preserve the original persisted occurrence order whenever
+            # a full set of previously proposed writes is replayed. Status
+            # is not an identity and must not reorder those slots.
+            if state.executed or state.unexecuted:
+                if state.executed and (
+                    not state.unexecuted or state.executed[0] < state.unexecuted[0]
+                ):
+                    assignments.append(state.executed.pop(0))
+                else:
+                    assignments.append(state.unexecuted.pop(0))
                 continue
 
             occ = state.next_new
