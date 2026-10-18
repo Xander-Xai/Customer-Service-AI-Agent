@@ -43,6 +43,7 @@ committed write. The caller can always disambiguate with an explicit, durable
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -142,8 +143,6 @@ class ContentOccurrenceResolver:
         # either "replay A1" or "execute A2". Prioritizing PENDING would
         # accidentally execute A2 in the former case. Refuse without a
         # durable logical_operation_id instead of guessing business intent.
-        from collections import Counter
-
         proposal_counts = Counter(
             (tool_name, request_fingerprint(arguments))
             for tool_name, arguments in proposals
