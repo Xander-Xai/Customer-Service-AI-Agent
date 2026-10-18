@@ -84,7 +84,9 @@ def test_side_effect_claim_deduplicates_after_success(store):
         fingerprint=fp,
     )
     assert first.state == CLAIM_EXECUTE
-    store.mark_succeeded("refund", op_key, {"refund_id": "R1"})
+    # 必须携带 claim 返回的 owner：结果提交是带归属谓词的条件 UPDATE，
+    # 没有 owner 等于放弃生产级写入权限检查（fail-closed）。
+    assert store.mark_succeeded("refund", op_key, {"refund_id": "R1"}, owner=first.owner) is True
 
     # 崩溃恢复/重投递：不得再次执行，返回已存结果
     second = store.claim(
@@ -101,14 +103,16 @@ def test_side_effect_claim_deduplicates_after_success(store):
 @pytest.mark.unit
 def test_side_effect_fingerprint_mismatch_conflicts(store):
     op_key = build_tool_idempotency_key("run-2", "call-1")
-    store.claim(
+    fp = request_fingerprint({"amount": 10})
+    first = store.claim(
         tool_name="refund",
         operation_key=op_key,
         run_id="run-2",
         thread_id="T1",
-        fingerprint=request_fingerprint({"amount": 10}),
+        fingerprint=fp,
     )
-    store.mark_succeeded("refund", op_key, {"refund_id": "R2"})
+    assert first.state == CLAIM_EXECUTE
+    assert store.mark_succeeded("refund", op_key, {"refund_id": "R2"}, owner=first.owner) is True
 
     conflict = store.claim(
         tool_name="refund",
@@ -118,3 +122,32 @@ def test_side_effect_fingerprint_mismatch_conflicts(store):
         fingerprint=request_fingerprint({"amount": 999}),
     )
     assert conflict.state == CLAIM_CONFLICT
+
+
+@pytest.mark.unit
+def test_result_commit_requires_an_owner(store):
+    """owner 缺失必须 fail-closed，而不是悄悄退化成无条件写入。
+
+    历史缺陷：``owner`` 是可选参数，传 ``None`` 时归属谓词被整体跳过，于是
+    任何调用方都能改写别人的副作用结果（真实 PG 并发复现见
+    ``tests/integration/runtime/test_side_effect_commit_fencing_pg.py``）。
+    """
+    from runtime.errors import PermanentError
+
+    op_key = build_tool_idempotency_key("run-3", "call-1")
+    claim = store.claim(
+        tool_name="refund",
+        operation_key=op_key,
+        run_id="run-3",
+        thread_id="T1",
+        fingerprint=request_fingerprint({"amount": 10}),
+    )
+    assert claim.state == CLAIM_EXECUTE
+
+    with pytest.raises(PermanentError):
+        store.mark_succeeded("refund", op_key, {"refund_id": "R3"}, owner=None)
+    with pytest.raises(PermanentError):
+        store.mark_failed("refund", op_key, error_type="E", error_message="m", owner=None)
+
+    # 未被写坏：认领仍是 PENDING，当前 owner 仍能正常提交。
+    assert store.mark_succeeded("refund", op_key, {"refund_id": "R3"}, owner=claim.owner) is True

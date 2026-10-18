@@ -49,9 +49,15 @@ REDIS_URL = os.getenv("TEST_REDIS_URL", "").strip()
 WORKER_CMD = [sys.executable, "-m", "tests.integration.celery_worker_runner"]
 PROVIDER = "tests.integration.side_effect_provider:provide"
 
-VISIBILITY_TIMEOUT = 5
+#: broker 未 ACK 可见性时间。必须 **大于** ``AGENT_RUN_TASK_TIME_LIMIT``（本 lane 取
+#: 120s），否则消息会在旧执行者仍在运行时重新可见 = 同一 run 并发执行。历史值 5s
+#: 配 25s 的工具阻塞正是这种错误配置，仅靠它制造「第二次投递机会」。
+VISIBILITY_TIMEOUT = 120
 LEASE_SECONDS = 3
 BLOCK_SECONDS = 25
+#: 崩溃后到 reconciler 投递之间的等待：等 lease（3s）真的过期，再由 reconciler 重投。
+#: 不用 visibility 提供第二次机会——见上面的说明。
+REDELIVERY_SETTLE_SECONDS = 5
 
 #: 与 ``core.code_provenance.UNAVAILABLE`` 同值。这里必须写字面量，是因为本函数
 #: 存在的目的正是"连采集器都 import 不了"的场景 —— 那时无法引用那个常量。
@@ -88,10 +94,16 @@ def worker_env(queue: str, key_prefix: str) -> dict[str, str]:
             "DEV_MODE": "true",
             "AGENT_RUN_DISPATCH": "celery",
             "AGENT_RUN_QUEUE": queue,
-            "AGENT_RUN_VISIBILITY_TIMEOUT": str(VISIBILITY_TIMEOUT),
+            # 交叉不变量（``core.config.validate_timeout_invariants``，所有环境强制）：
+            # 本 lane 把定时器缩到秒级以便观察崩溃/接管，但**缩小不等于可以不一致**。
+            # 下面这组值彼此满足 visibility > task_time_limit > 工具阻塞时长，且
+            # lock_ttl > task_time_limit + margin；lease/heartbeat 保留小值是为了让
+            # 「owner 消失 -> 接管」在秒级发生。
+            "AGENT_RUN_VISIBILITY_TIMEOUT": "120",
             "AGENT_RUN_LEASE_SECONDS": str(LEASE_SECONDS),
             "AGENT_RUN_HEARTBEAT_SECONDS": "1",
-            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": str(LEASE_SECONDS),
+            "AGENT_RUN_TASK_TIME_LIMIT": "60",
+            "AGENT_RUN_THREAD_LOCK_TTL_SECONDS": "120",
             "AGENT_RUN_THREAD_LOCK_BACKEND": "redis",
             "AGENT_RUN_RUNTIME_PROVIDER": PROVIDER,
             "SIDE_EFFECT_BLOCK_SECONDS": str(BLOCK_SECONDS),
@@ -127,6 +139,50 @@ def kill_worker_group(proc: subprocess.Popen) -> None:
     log = getattr(proc, "_log", None)
     if log is not None:
         log.close()
+
+
+def _recover_via_reconciler(engine, run_id: str, queue: str) -> None:
+    """等 lease 真的过期，然后**只**把这一条 run 重新投递到本 lane 的队列。
+
+    为什么不用 ``runtime.retry.reconcile_stuck_runs``
+    -----------------------------------------------
+    那个函数是**全表**扫描：它会把共享库里**所有**过期 lease 的 RUNNING / 陈旧的
+    QUEUED / PENDING 全部重新投递。把它的 dispatcher 指向本 lane 的队列，就等于把
+    无关的 run 倒进这条队列——它们会被本 lane 的 worker 执行，而 provider 从**环境
+    变量**读取 ``SIDE_EFFECT_KEY_PREFIX``，于是它们的副作用全部记到本 lane 的计数器上。
+
+    症状非常具体：在跑完 runtime-e2e 套件之后执行 chaos，计数器会从 1 涨到 9~11
+    （套件留下的 run 数量），而恢复本身是正确的（attempt=2）。这不是重复执行缺陷，
+    是本 lane 把别人的 run 也执行了。
+
+    正确做法：只做 reconciler 对**这一行**会做的事——确认 lease 已过期，然后投递。
+    「能不能接管」仍然由 worker 侧的 ``mark_running`` 原子判定（``takeover_running``
+    带 lease + 预算谓词），所以这里不需要、也不应该代替那个判定。
+    """
+    from datetime import timezone as _tz
+
+    from celery import Celery
+    from sqlalchemy import text as _text
+
+    def _lease():
+        with engine.connect() as conn:
+            value = conn.execute(
+                _text("SELECT lease_expires_at FROM agent_runs WHERE id=:id"), {"id": run_id}
+            ).scalar()
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=_tz.utc)
+        return value
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if _row(engine, run_id) is None:
+            raise ChaosFailure(f"run 消失：{run_id}")
+        lease = _lease()
+        if lease is None or lease.timestamp() <= time.time():
+            break
+        time.sleep(0.5)
+
+    Celery(broker=REDIS_URL).send_task("runtime.execute_agent_run", args=[run_id], queue=queue)
 
 
 def wait_for(predicate, timeout: float, label: str):
@@ -238,9 +294,26 @@ def run() -> dict:
         worker_a = None
         steps.append({"step": 5, "action": "sigkill_worker_group", "ok": True})
 
-        time.sleep(VISIBILITY_TIMEOUT + 3)
+        # 恢复靠 **reconciler**，不是 broker 重投。
+        #
+        # 整个进程组被杀 -> 没有父进程去察觉 WorkerLostError -> 不会自动重投；而
+        # 普通失败本来就被 broker 丢弃（``make runtime-delivery`` 实测）。生产里真正
+        # 收敛过期 lease 的 RUNNING 的就是 reconciler，所以 chaos 必须走它。
+        #
+        # 先清掉 broker 侧残留（``unacked``/``unacked_index`` 是全局 bookkeeping 键），
+        # 让本脚本的重投**只**可能来自 reconciler，断言才有确定性。
+        client.delete(queue, "unacked", "unacked_index")
+        _recover_via_reconciler(engine, run_id, queue)
+        steps.append(
+            {
+                "step": 6,
+                "action": "reconcile_stale_running",
+                "detail": "lease 过期后由生产同款 reconciler 重新投递",
+                "ok": True,
+            }
+        )
+
         worker_b = start_worker(env, Path("/tmp/csai-chaos-worker-b.log"))
-        steps.append({"step": 6, "action": "restart_worker", "ok": True})
 
         final = wait_for(
             lambda: (r := _row(engine, run_id))

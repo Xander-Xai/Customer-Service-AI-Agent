@@ -113,7 +113,7 @@ sequenceDiagram
     W->>DB: consume_resume() 原子认领决策
     W->>G: Command(resume=decision) 恢复
     G->>L: 认领 operation_key = run_id:approval:{approval_id}
-    G->>G: 执行副作用（恰好一次）
+    G->>G: 执行副作用 -- ledger 去重，端到端 depends on downstream
     G->>W: 返回 approval_results
     W->>DB: mark_succeeded()
 ```
@@ -258,8 +258,9 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 | ledger `claim` 租约 | 同 key 并发认领只有一个拿到执行权 |
 
 > `runtime/side_effects.py` 的原子 `claim`（`INSERT ... ON CONFLICT DO NOTHING`
-> + `SELECT ... FOR UPDATE` + owner token）来自 PR #28。本 PR **复用**它，
-> 不重新实现。若基于修复前的版本，审批路径会重新引入"并发重复执行"缺陷。
+> + `SELECT ... FOR UPDATE` + owner token）是本仓库既有实现（`runtime/side_effects.py`
+> 的 `SideEffectStore.claim`）。审批路径**复用**它，不重新实现。若基于缺少该原子
+> 认领的版本，审批路径会重新引入"并发重复执行"缺陷。
 
 ## 7. 失败语义
 
@@ -310,7 +311,9 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 - `ainvoke(None, cfg)` **解除不了** interrupt（原样再次返回 `__interrupt__`）
   → 崩溃恢复与审批恢复必须是两条路径；
 - `Command(resume=...)` 需要 checkpointer；
-- 恢复后副作用**恰好一次**（重复投递同一决策也不重复扣款）；
+- 恢复后**本仓不会重复发起**同一副作用（重复投递同一决策也不重复扣款）；
+  边界见 §2.3 与 [agent-runtime.md](agent-runtime.md)：外部系统若已写入而本进程
+  在 `mark_succeeded` 前崩溃，接管仍会再次发起，端到端 exactly-once **NOT PROVIDED**；
 - 已完成的 run 返回值**不得**再带 `__interrupt__`——否则 executor 会把
   已跑完的 run 重新挂成 `WAITING_APPROVAL`。这依赖图状态声明为 TypedDict
   （生产用 `AgentState`）；若改成裸 `dict`，`__interrupt__` 会变成 state
@@ -319,12 +322,14 @@ operation_key = f"{run_id}:approval:{approval_id}"   # 经 build_tool_idempotenc
 
 ### 已执行验证命令
 
+> 测试数量不写入本文档（会随代码演进腐化）：收集数与结果以命令当前输出为准。
+
 ```bash
-python3 -m pytest tests/unit -q                        # 1853 passed
+python3 -m pytest tests/unit -q
 TEST_DISTRIBUTED_DB_URL=... TEST_REDIS_URL=... \
-  python3 -m pytest tests/integration/runtime -q       # 73 passed（真实 PG + Redis）
-python3 -m ruff check .                                # 与 #28 baseline 持平（17，均为既有）
-python3 -m mypy runtime --ignore-missing-imports        # 与 #28 baseline 持平
+  python3 -m pytest tests/integration/runtime -q       # 真实 PG + Redis
+python3 -m ruff check .
+python3 -m mypy runtime --ignore-missing-imports
 python3 -m alembic heads                               # 006_add_human_approvals (head)，单头无分叉
 python3 -m alembic upgrade head / downgrade 005        # 真实 PG 上可升可降
 ```

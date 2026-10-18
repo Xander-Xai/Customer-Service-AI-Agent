@@ -209,7 +209,11 @@ def test_dead_letter_stale_running_refuses_when_lease_was_renewed(env):
     这是 ``transition_stale_running`` 把「仍然过期」放进同一条 UPDATE 的原因：
     只按 ``status=RUNNING`` 判断会误杀一个正在正常执行的 run。
     """
-    run = env.create_run(query="q", session_id="T-raced", max_attempts=1)
+    # 预算设为 2：本用例要验证的是 ``transition_stale_running`` 的 lease 谓词，
+    # 因此必须能合法地第二次领取（attempt 1 -> 2）。``mark_running`` 现在有 attempt
+    # 预算闸门，``max_attempts=1`` 会在续租前就被拒绝并落 DLQ（那是
+    # TestAttemptBudgetTerminalConvergence 覆盖的另一个语义）。
+    run = env.create_run(query="q", session_id="T-raced", max_attempts=2)
     env.mark_running(run["id"], worker_id="w1", lease_seconds=1.0)
     # 扫描时刻：确实过期
     assert [r["id"] for r in env.list_stale_running_runs(now=_later())] == [run["id"]]
@@ -384,3 +388,145 @@ def test_stranded_run_records_dead_letter_row_for_replay(env):
     assert requeued["id"] == run["id"], "重放必须复用原 run_id"
     assert requeued["status"] == RunStatus.QUEUED.value
     assert requeued["attempt"] == 0
+
+
+# ---------------------------------------------------------------------------
+# 2026-10-17 审计：broker 丢弃后的确切状态形状
+#
+# 实测（Celery 5.6.3 + 真实 Redis broker + 真实 worker，
+# tests/integration/runtime/test_celery_delivery_semantics.py）：普通 Exception、
+# RetryPublicationError、软/硬时间上限全部落到 ``Request.on_failure`` 的
+# ``reject(requeue=False)`` —— **消息被丢弃、不重新投递**。只有 WorkerLostError
+# 才重投。
+#
+# 因此 executor 让异常逃逸后，run 真正停留的状态是：
+#     RETRYING（或 QUEUED）+ next_retry_at 已过期 + 队列里没有它的消息
+# 这个状态没有任何 broker 侧的自动恢复手段；唯一的自动恢复是周期 reconciler。
+#
+# 本组用例把「那个确切形状」钉成断言，并把上面两个事实连起来。
+# ---------------------------------------------------------------------------
+
+
+class TestPostDiscardStateIsRecoverable:
+    @pytest.mark.asyncio
+    async def test_retrying_run_with_expired_backoff_is_redispatched(self, env):
+        """broker 丢弃后留下的形状必须被扫描器捞回并补发唤醒消息。"""
+        run = env.create_run(query="q", session_id="T-discard", max_attempts=3)
+
+        past = _utcnow() - timedelta(seconds=30)
+        env.repo.transition(
+            run["id"],
+            from_statuses={RunStatus.QUEUED},
+            to_status=RunStatus.RETRYING,
+            next_retry_at=past,
+        )
+        assert env.get_run(run["id"])["status"] == RunStatus.RETRYING
+
+        dispatcher = _RecordingDispatcher()
+        from runtime.retry import reconcile_stuck_runs
+
+        await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(1.0))
+
+        assert run["id"] in dispatcher.calls, "滞留的 RETRYING run 必须被重新投递"
+        # 投递只补唤醒信号，不改状态——状态收敛由被投递后的执行负责。
+        assert env.get_run(run["id"])["status"] == RunStatus.RETRYING
+
+    @pytest.mark.asyncio
+    async def test_redispatched_run_is_claimed_and_converges(self, env):
+        """补发的唤醒消息必须真的能被领取并跑到终态（闭环，不是日志）。"""
+        run = env.create_run(query="q", session_id="T-discard-e2e", max_attempts=3)
+
+        past = _utcnow() - timedelta(seconds=30)
+        env.repo.transition(
+            run["id"],
+            from_statuses={RunStatus.QUEUED},
+            to_status=RunStatus.RETRYING,
+            next_retry_at=past,
+        )
+        dispatcher = _RecordingDispatcher()
+        from runtime.retry import reconcile_stuck_runs
+
+        await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(1.0))
+        assert run["id"] in dispatcher.calls
+
+        # 模拟新消息被 worker 取走
+        claimed = env.mark_running(run["id"], worker_id="w-after-recover", lease_seconds=_LEASE)
+        assert claimed is not None, "补发的消息必须能领取这条 run"
+        env.mark_succeeded(run["id"], {"response": "ok"}, expected_worker_id="w-after-recover")
+        assert env.get_run(run["id"])["status"] == RunStatus.SUCCEEDED.value
+
+    @pytest.mark.asyncio
+    async def test_reconciler_never_invents_a_message_for_a_live_backoff(self, env):
+        """反向边界：next_retry_at 还没到的 RETRYING 不能被提前捞回（否则破坏退避）。"""
+        run = env.create_run(query="q", session_id="T-backoff", max_attempts=3)
+        future = _utcnow() + timedelta(seconds=600)
+        env.repo.transition(
+            run["id"],
+            from_statuses={RunStatus.QUEUED},
+            to_status=RunStatus.RETRYING,
+            next_retry_at=future,
+        )
+
+        dispatcher = _RecordingDispatcher()
+        from runtime.retry import reconcile_stuck_runs
+
+        await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(1.0))
+        assert run["id"] not in dispatcher.calls
+
+
+# ---------------------------------------------------------------------------
+# 额外风险：积压 > limit 的 stale-run 扫描不得发生持久饥饿
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stale_run_backlog_over_limit_drains_when_dispatch_recovers(env):
+    """105 条过期 RUNNING + limit=100：健康投递下两轮必须全部排空，无持久饥饿。
+
+    扫描按 ``lease_expires_at ASC`` 取前 limit 条。队头投递失败时它们会留在窗口内，
+    但只要投递恢复，队头会被接管并离开窗口，下一轮继续处理后续——因此饥饿是
+    「故障持续期间」的现象，不是永久丢失。本用例用会真的接管的 dispatcher 固定这一点。
+    """
+    from runtime.retry import reconcile_stuck_runs
+
+    total = 105
+    for i in range(total):
+        run = env.create_run(query="q", session_id=f"T-backlog-{i}", max_attempts=3)
+        env.mark_running(run["id"], worker_id="w-dead", lease_seconds=-1.0)
+
+    class _TakeoverDispatcher:
+        def __init__(self):
+            self.calls: list[str] = []
+
+        async def __call__(self, run_id, **kwargs):
+            self.calls.append(run_id)
+            # 模拟 worker 接管：租约改为未来 -> 该行离开 stale 扫描窗口。
+            env.mark_running(run_id, worker_id="w-live", lease_seconds=600.0, now=_later())
+
+    dispatcher = _TakeoverDispatcher()
+    first = await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(), limit=100)
+    second = await reconcile_stuck_runs(env, dispatcher=dispatcher, now=_later(), limit=100)
+
+    assert len(first) == 100
+    assert len(second) == total - 100, "剩余积压必须在下一轮被处理，不得被队头永久挡住"
+    assert len(set(dispatcher.calls)) == total
+
+
+@pytest.mark.asyncio
+async def test_stale_run_dead_letter_backlog_over_limit_drains(env):
+    """预算耗尽的过期 RUNNING（105 条）也必须分轮清空，不因 limit 卡在队头。"""
+    from runtime.retry import reconcile_stuck_runs
+
+    total = 105
+    for i in range(total):
+        run = env.create_run(query="q", session_id=f"T-dlq-backlog-{i}", max_attempts=1)
+        env.mark_running(run["id"], worker_id="w-dead", lease_seconds=-1.0)
+
+    first = await reconcile_stuck_runs(
+        env, dispatcher=_RecordingDispatcher(), now=_later(), limit=100
+    )
+    second = await reconcile_stuck_runs(
+        env, dispatcher=_RecordingDispatcher(), now=_later(), limit=100
+    )
+    assert len(first) == 100
+    assert len(second) == total - 100

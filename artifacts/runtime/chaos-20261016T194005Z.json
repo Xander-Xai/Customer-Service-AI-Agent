@@ -1,0 +1,83 @@
+{
+  "result": "PASS",
+  "run_id": "chaos-9053cc0a",
+  "thread_id": "T-chaos-9053cc0a",
+  "queue": "agent_runs_test_9053cc0a",
+  "steps": [
+    {
+      "step": 1,
+      "action": "create_run",
+      "run_id": "chaos-9053cc0a",
+      "ok": true
+    },
+    {
+      "step": 2,
+      "action": "enqueue",
+      "queue": "agent_runs_test_9053cc0a",
+      "ok": true
+    },
+    {
+      "step": 3,
+      "action": "side_effect_applied",
+      "idem:counter": 1,
+      "ok": true
+    },
+    {
+      "step": 4,
+      "action": "checkpoint_persisted",
+      "checkpoints": 2,
+      "worker_id": "Ydxx:408011:39e1f8b8",
+      "ok": true
+    },
+    {
+      "step": 5,
+      "action": "sigkill_worker_group",
+      "ok": true
+    },
+    {
+      "step": 6,
+      "action": "restart_worker",
+      "ok": true
+    },
+    {
+      "step": 7,
+      "action": "recovered",
+      "status": "SUCCEEDED",
+      "attempt": 2,
+      "worker_id": "Ydxx:408237:6b0bf5f9",
+      "worker_switched": true,
+      "ok": true
+    },
+    {
+      "step": 8,
+      "action": "side_effect_deduplicated",
+      "idem:counter": 1,
+      "tool_invocations": 2,
+      "ledger_hits": 1,
+      "ledger": {
+        "tool_name": "increment_counter",
+        "operation_key": "chaos-9053cc0a:T-chaos-9053cc0a:refund",
+        "status": "SUCCEEDED"
+      },
+      "ok": true
+    }
+  ],
+  "code_provenance": {
+    "commit_sha": "7520461a432d1ab00b2880154e65e6ce40a5c7d8",
+    "dirty": false,
+    "tracked_diff_sha256": null,
+    "untracked_source_sha256": null,
+    "tool_versions": {
+      "python": "3.10.12",
+      "langgraph": "1.2.12",
+      "langchain-core": "1.6.6",
+      "fastapi": "0.137.1",
+      "qdrant-client": "1.18.0",
+      "celery": "5.6.3"
+    },
+    "generated_at": "2026-10-16T19:40:20.900036+00:00",
+    "dataset_sha256": null,
+    "publication_status": "REPRODUCIBLE",
+    "notes": []
+  }
+}

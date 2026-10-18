@@ -803,6 +803,20 @@ AGENT_RUN_RETRY_BASE_DELAY = _float_env("AGENT_RUN_RETRY_BASE_DELAY", 2.0)
 AGENT_RUN_RETRY_MAX_DELAY = _float_env("AGENT_RUN_RETRY_MAX_DELAY", 60.0)
 AGENT_RUN_RETRY_JITTER = _float_env("AGENT_RUN_RETRY_JITTER", 0.3)
 
+# 卡死 run 兜底扫描的调度周期。
+#
+# **为什么必须有它（实测依据）**：Celery 只在 `WorkerLostError`（worker 进程被杀）
+# 时才把消息重新投递。普通 Exception、`RetryPublicationError`、软/硬超时时间上限
+# 全部落到 `Request.on_failure` 的 `self.reject(requeue=False)` 分支——**消息被丢弃，
+# 不重投**（真实 Redis + Celery 5.6.3 实测，见
+# tests/integration/runtime/test_celery_delivery_semantics.py）。因此「让异常逃逸以
+# 触发 redelivery」这个前提是错的：逃逸只是把消息丢掉，run 会停在
+# QUEUED/RETRYING 且**没有任何消息会再来**。
+#
+# 所以恢复闭环的承重结构是「数据库里的 AgentRun + 定时扫描」，队列消息只是唤醒信号，
+# 而唤醒信号随时可能丢。扫描未调度 = 没有恢复闭环。
+AGENT_RUN_RECONCILE_INTERVAL_SECONDS = _float_env("AGENT_RUN_RECONCILE_INTERVAL_SECONDS", 30.0)
+
 # ---------------------------------------------------------------------------
 # Human-in-the-loop（高风险工具副作用的人工审批治理）
 # ---------------------------------------------------------------------------
@@ -835,6 +849,33 @@ if AGENT_RUN_THREAD_LOCK_BACKEND not in ("redis", "memory"):
         f"AGENT_RUN_THREAD_LOCK_BACKEND 非法: {AGENT_RUN_THREAD_LOCK_BACKEND!r}"
         "（仅支持 redis | memory）"
     )
+
+
+def validate_app_database_dsn(*, dev_mode: bool, database_url: str) -> list[str]:
+    """生产应用库 DSN 校验（纯函数，返回问题列表，空 = 通过）。
+
+    为什么需要它
+    ------------
+    ``side_effect`` ledger 的接管路径依赖数据库**行级锁**排除并发重复执行。
+    只有 PostgreSQL（``SELECT ... FOR UPDATE``）提供该保证；SQLite / MySQL 的
+    ``FOR UPDATE`` 被忽略，两个认领者可同时接管同一笔写（Issue #13）。运行时已
+    fail-closed，但生产应更早失败——拒绝带病启动。
+
+    注意 ``LANGGRAPH_CHECKPOINT_DATABASE_URL`` 是**独立**设置，因此
+    「PG checkpoint + SQLite 应用库」会骗过只看 checkpoint 的校验；这里对
+    **应用库**单独把关。开发/测试不受约束（SQLite 是默认的回退库）。
+    """
+    if dev_mode:
+        return []
+    if not database_url:
+        return ["Production requires DATABASE_URL (PostgreSQL)"]
+    if not database_url.startswith(("postgresql://", "postgres://")):
+        return [
+            "Production DATABASE_URL must be PostgreSQL (got a non-PostgreSQL DSN): "
+            "the side-effect ledger's takeover path requires row-level locking; "
+            "SQLite/MySQL cannot provide it (see Issue #13)"
+        ]
+    return []
 
 
 def validate_distributed_runtime_settings(
@@ -1029,6 +1070,177 @@ def _validate_mcp_risk_level(item: dict) -> list[str]:
     return []
 
 
+def _default_side_effect_claim_ttl() -> float:
+    """从 ledger 模块取实际生效的 claim TTL；导入失败退回其默认值。
+
+    刻意**不在 config 里复制常量**：两边各写一个数字会悄悄漂移，而这条不变量正是
+    为了防止漂移。取不到时用 ledger 自己的默认值（两边一致）。
+    """
+    try:
+        from runtime.side_effects import DEFAULT_CLAIM_TTL_SECONDS
+
+        return float(DEFAULT_CLAIM_TTL_SECONDS)
+    except Exception:
+        return 60.0
+
+
+def _claim_ttl_margin_seconds() -> float:
+    """claim TTL 的余量；唯一真相源在 ledger 模块（见 ``min_claim_ttl_seconds``）。
+
+    依赖方向刻意是单向的（config -> runtime.side_effects），与
+    ``_default_side_effect_claim_ttl`` 一致。两边各写一个数字就是这条不变量要防的
+    漂移，而反向依赖会形成真正的 import 环。
+    """
+    try:
+        from runtime.side_effects import CLAIM_TTL_MIN_MARGIN_SECONDS
+
+        return float(CLAIM_TTL_MIN_MARGIN_SECONDS)
+    except Exception:
+        return 30.0
+
+
+def validate_timeout_invariants(
+    *,
+    lease_seconds: float = AGENT_RUN_LEASE_SECONDS,
+    heartbeat_seconds: float = AGENT_RUN_HEARTBEAT_SECONDS,
+    task_time_limit_seconds: float = float(AGENT_RUN_TASK_TIME_LIMIT),
+    visibility_timeout_seconds: float = float(AGENT_RUN_VISIBILITY_TIMEOUT),
+    tool_timeout_seconds: float = TOOL_EXECUTION_TIMEOUT_SECONDS,
+    thread_lock_ttl_seconds: float = AGENT_RUN_THREAD_LOCK_TTL_SECONDS,
+    claim_ttl_seconds: float | None = None,
+    lock_enabled: bool = AGENT_RUN_THREAD_LOCK_ENABLED,
+    task_time_limit_enabled: bool = True,
+) -> list[str]:
+    """超时/租约交叉不变量（纯函数，返回**致命**问题列表，空 = 通过）。
+
+    与其它校验的区别
+    ----------------
+    ``validate_distributed_runtime_settings`` 只在生产生效；本函数在**所有**环境
+    生效，理由与 HITL 校验一致：这些关系错了会在运行时产生**不确定的重复执行**
+    （重复投递、重复写、锁丢失），与「是不是生产」无关。开发机上的集成测试拿到
+    虚假的安全性同样有害。
+
+    必须强制的正确性约束（不满足 -> 拒绝启动）
+    ------------------------------------------
+    1. ``heartbeat * 2 < lease``：续租的可证明条件。周期续租的架构**不要求**
+       lease 大于整个任务时长——那会让长任务永远拿不到执行权。要求的是「两次续租
+       机会都在过期之前」：即使某一轮续租因 DB 抖动/调度延迟被推迟到接近一个周期，
+       下一轮仍能在租约过期前落地。用倍数表达而不是 ``lease > task_time_limit``，
+       因为后者会把正常的长任务配置判为非法。
+    2. ``tool_timeout < task_time_limit``：工具超时必须先于 run 级上限触发，否则
+       局部降级永远来不及发生。
+    3. ``task_time_limit < visibility_timeout``：broker 的未 ACK 可见性时间必须大于
+       最长可能执行时间，否则任务还在跑、消息已被重新投递 -> 并发执行同一 run。
+    4. ``claim_ttl >= tool_timeout + margin``：side-effect 认领租约必须覆盖受保护
+       副作用的执行上界，否则执行期间认领过期、第二个执行者重复发起同一笔写。
+       （与 ``runtime.side_effects.min_claim_ttl_seconds`` 同源。）
+    5. ``thread_lock_ttl > task_time_limit + margin``：锁 TTL 必须覆盖任务执行，
+       否则任务还在跑、同 thread 的另一个 worker 就能进入同一条 state lineage。
+       ``lock_enabled=False`` 时不适用。
+
+    刻意**不**作为致命约束的（只影响恢复延迟或运维偏好）
+    --------------------------------------------------
+    - ``lease > task_time_limit``：有正常续租时这不是正确性问题；只在无法续租的
+      部署（例如心跳被禁用）下才成为问题，因此记为建议而不是拒绝启动。
+    - ``reconcile_interval`` 与 ``lease`` 的相对大小：只改变滞留 run 的检测延迟。
+    """
+    problems: list[str] = []
+
+    def _off(value: float) -> bool:
+        """<= 0 视为「显式关闭」，该维度不参与校验。"""
+        return value <= 0
+
+    if not _off(lease_seconds) and not _off(heartbeat_seconds):
+        if heartbeat_seconds >= lease_seconds:
+            problems.append(
+                f"AGENT_RUN_HEARTBEAT_SECONDS({heartbeat_seconds}) 必须小于 "
+                f"AGENT_RUN_LEASE_SECONDS({lease_seconds}) —— 否则续租永远追不上过期，"
+                "lease 会恒定失效，任何执行都会被判为失去所有权"
+            )
+        elif lease_seconds < heartbeat_seconds * 2:
+            problems.append(
+                f"AGENT_RUN_LEASE_SECONDS({lease_seconds}) 至少要是 "
+                f"AGENT_RUN_HEARTBEAT_SECONDS({heartbeat_seconds}) 的两倍 —— 周期续租需要"
+                "「两次机会都在过期之前」才能证明长执行不会因单次抖动丢租约"
+            )
+
+    if (
+        task_time_limit_enabled
+        and not _off(tool_timeout_seconds)
+        and not _off(task_time_limit_seconds)
+        and tool_timeout_seconds >= task_time_limit_seconds
+    ):
+        problems.append(
+            f"TOOL_EXECUTION_TIMEOUT_SECONDS({tool_timeout_seconds}) 必须小于 "
+            f"AGENT_RUN_TASK_TIME_LIMIT({task_time_limit_seconds})"
+        )
+
+    if (
+        task_time_limit_enabled
+        and not _off(task_time_limit_seconds)
+        and not _off(visibility_timeout_seconds)
+        and visibility_timeout_seconds <= task_time_limit_seconds
+    ):
+        problems.append(
+            f"AGENT_RUN_VISIBILITY_TIMEOUT({visibility_timeout_seconds}) 必须大于 "
+            f"AGENT_RUN_TASK_TIME_LIMIT({task_time_limit_seconds}) —— broker 的未 ACK "
+            "可见性时间必须覆盖最长可能执行时间，否则任务仍在执行时消息已被重新投递，"
+            "同一 run 被并发执行"
+        )
+
+    effective_claim_ttl = (
+        float(claim_ttl_seconds)
+        if claim_ttl_seconds is not None
+        else _default_side_effect_claim_ttl()
+    )
+    if not _off(effective_claim_ttl) and not _off(tool_timeout_seconds):
+        margin = _claim_ttl_margin_seconds()
+        floor = tool_timeout_seconds + margin
+        if effective_claim_ttl < floor:
+            problems.append(
+                f"side-effect claim TTL({effective_claim_ttl}) 必须不小于 "
+                f"TOOL_EXECUTION_TIMEOUT_SECONDS({tool_timeout_seconds}) + margin"
+                f"({margin}) = {floor} —— 执行期间认领过期会让第二个"
+                "执行者拿到执行权并重复发起同一笔写操作"
+            )
+
+    if (
+        lock_enabled
+        and task_time_limit_enabled
+        and not _off(thread_lock_ttl_seconds)
+        and not _off(task_time_limit_seconds)
+        and thread_lock_ttl_seconds <= task_time_limit_seconds + 30.0
+    ):
+        problems.append(
+            f"AGENT_RUN_THREAD_LOCK_TTL_SECONDS({thread_lock_ttl_seconds}) 必须大于 "
+            f"AGENT_RUN_TASK_TIME_LIMIT({task_time_limit_seconds}) + safety margin(30.0)"
+            " —— 否则任务仍在执行时锁已过期，同 thread 的另一个 worker 可以进入"
+            "同一条 state lineage"
+        )
+
+    return problems
+
+
+def timeout_invariant_recommendations(
+    *,
+    lease_seconds: float = AGENT_RUN_LEASE_SECONDS,
+    task_time_limit_seconds: float = float(AGENT_RUN_TASK_TIME_LIMIT),
+    heartbeat_enabled: bool = True,
+) -> list[str]:
+    """**非致命**建议（只影响恢复延迟或运维偏好，不拒绝启动）。
+
+    与 :func:`validate_timeout_invariants` 分开，是为了不把「偏好」伪装成「正确性」。
+    """
+    out: list[str] = []
+    if not heartbeat_enabled and 0 < lease_seconds <= task_time_limit_seconds:
+        out.append(
+            f"建议：心跳未启用时 AGENT_RUN_LEASE_SECONDS({lease_seconds}) 应大于 "
+            f"AGENT_RUN_TASK_TIME_LIMIT({task_time_limit_seconds})，否则长任务会在执行途中"
+            "被判为失去所有权并被 fencing 取消"
+        )
+    return out
+
+
 def validate_tool_settings(
     *,
     tool_timeout_seconds: float = TOOL_EXECUTION_TIMEOUT_SECONDS,
@@ -1094,8 +1306,11 @@ def validate_hitl_settings(
         errors.append(
             "HITL_ENABLED=true 但没有任何规则会产生 HIGH 风险判定"
             "（HITL_HIGH_RISK_TOOLS 为空 且 HITL_HIGH_AMOUNT_THRESHOLD<=0）"
-            "—— 所有工具都将被判为 LOW，审批闸门形同虚设且不会报错。"
-            "请至少配置 HITL_HIGH_RISK_TOOLS（逗号分隔的工具名）或设置金额阈值；"
+            "—— 实际后果：执行期兜底会把**每个**声明了 side_effect=True 且未声明"
+            "risk_level 的工具判为 HIGH（fail-closed，只读工具不受影响），"
+            "也就是说治理面是「所有写操作」而非你预期的白名单，且在工具真正被调用前"
+            "完全不可见。请显式配置 HITL_HIGH_RISK_TOOLS（逗号分隔的工具名）"
+            "或设置金额阈值，把治理面写进配置而不是靠兜底；"
             "若确实不需要该治理，请显式设置 HITL_ENABLED=false。"
         )
     if ttl_seconds <= 0:
@@ -1114,6 +1329,33 @@ def validate_hitl_settings(
 # ===== P0-3: 生产环境关键配置启动校验 =====
 def validate_required_config():
     """生产环境启动时校验关键配置项非空非占位符"""
+    # ---- 超时/租约交叉不变量（**先于** DEV_MODE 早退）----
+    # 与 HITL 同理：这些关系错了会在运行时产生**不确定的重复执行**（重复投递、
+    # 重复写、锁丢失），与「是不是生产」无关。开发机上放过它意味着集成测试拿到
+    # 虚假的安全性 —— 而这类问题恰恰只在并发下偶发，事后极难归因。
+    # 不满足时拒绝启动：宁可启动失败，也不要一个会静默重复写进程的配置。
+    timeout_errors = validate_timeout_invariants(
+        lease_seconds=AGENT_RUN_LEASE_SECONDS,
+        heartbeat_seconds=AGENT_RUN_HEARTBEAT_SECONDS,
+        task_time_limit_seconds=float(AGENT_RUN_TASK_TIME_LIMIT),
+        visibility_timeout_seconds=float(AGENT_RUN_VISIBILITY_TIMEOUT),
+        tool_timeout_seconds=TOOL_EXECUTION_TIMEOUT_SECONDS,
+        thread_lock_ttl_seconds=AGENT_RUN_THREAD_LOCK_TTL_SECONDS,
+        lock_enabled=AGENT_RUN_THREAD_LOCK_ENABLED,
+    )
+    if timeout_errors:
+        for err in timeout_errors:
+            print(f"🚨 超时不变量校验失败: {err}", file=sys.stderr)
+        raise ConfigurationError(
+            f"超时/租约配置不满足正确性约束（{len(timeout_errors)} 项）："
+            "这些关系会在运行时产生不确定的重复执行或锁丢失，拒绝启动"
+        )
+    for rec in timeout_invariant_recommendations(
+        lease_seconds=AGENT_RUN_LEASE_SECONDS,
+        task_time_limit_seconds=float(AGENT_RUN_TASK_TIME_LIMIT),
+    ):
+        print(f"⚠️  {rec}", file=sys.stderr)
+
     # ---- HITL 治理有效性（**先于** DEV_MODE 早退）----
     # 它与「是不是生产」无关：``HITL_ENABLED=true`` 却配不出任何 HIGH 判定，
     # 在开发机上同样会让集成测试与本地验收拿到虚假的安全感。因此这里刻意放在
@@ -1197,8 +1439,19 @@ def validate_required_config():
                 "fail. Set CORS_ORIGINS or ALLOWED_ORIGINS"
             )
 
-    if not _DEV_MODE and not DATABASE_URL:
-        errors.append("Production requires DATABASE_URL (PostgreSQL)")
+    if not _DEV_MODE:
+        errors.extend(validate_app_database_dsn(dev_mode=_DEV_MODE, database_url=DATABASE_URL))
+    elif not _DEV_MODE and not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        # 应用库必须是 PostgreSQL：非 PostgreSQL 方言（SQLite/MySQL）没有行级锁，
+        # side-effect ledger 的接管路径无法排除并发重复执行（Issue #13）。注意
+        # LANGGRAPH_CHECKPOINT_DATABASE_URL 是**独立**设置，所以
+        # 「PG checkpoint + SQLite 应用库」的组合会骗过只检查 checkpoint 的校验；
+        # 这里对**应用库**单独 fail-fast，避免带病启动。
+        errors.append(
+            "Production DATABASE_URL must be PostgreSQL (got a non-PostgreSQL DSN): "
+            "the side-effect ledger's takeover path requires row-level locking; "
+            "SQLite/MySQL cannot provide it (see Issue #13)"
+        )
 
     # LangGraph checkpoint：生产禁止进程内 MemorySaver（多 worker/多副本不共享、
     # 重启即丢失），且必须能解析出可用的 PostgreSQL DSN。

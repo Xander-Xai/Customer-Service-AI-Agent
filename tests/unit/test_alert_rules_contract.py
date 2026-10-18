@@ -122,3 +122,150 @@ def test_dead_letter_metric_is_registered_in_monitoring():
     from core import monitoring
 
     assert hasattr(monitoring, DEAD_LETTER_METRIC), f"core.monitoring 未注册 {DEAD_LETTER_METRIC}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 恢复闭环告警：beat 存活 ≠ reconciler 成功
+# ═══════════════════════════════════════════════════════════════════════════
+
+STALLED_ALERT = "AgentReconcileStalled"
+SCAN_FAILING_ALERT = "AgentReconcileScanFailing"
+STALLED_METRIC = "agent_reconcile_last_success_timestamp_seconds"
+SCAN_METRIC = "agent_reconcile_scan_total"
+RECONCILE_GROUP = "csai_alerts"
+
+
+class TestReconcileStallAlert:
+    """恢复闭环停滞必须可告警，且与 beat 存活正交。"""
+
+    def test_both_reconcile_alerts_exist_with_required_fields(self):
+        rules = {r["alert"]: r for r in _load_rules()}
+        for name, severity in (
+            (STALLED_ALERT, "critical"),
+            (SCAN_FAILING_ALERT, "warning"),
+        ):
+            assert name in rules, f"缺少告警规则 {name}"
+            rule = rules[name]
+            assert rule["labels"]["severity"] == severity
+            assert rule["annotations"]["summary"]
+            assert rule["annotations"]["description"], f"{name} 缺少 description"
+            # `for` 必须存在：否则一次抖动就报警
+            assert rule.get("for"), f"{name} 缺少 for（会对抖动过敏）"
+
+    def test_stalled_alert_uses_the_success_timestamp_not_a_failure_counter(self):
+        """用「最近一次成功扫描距今多久」，而不是失败计数。
+
+        失败计数只在**有扫描失败**时才增长；「beat 根本没在调度」时它恒为 0，
+        永远不会报警。用时间戳才能同时覆盖「调度停了」与「扫描一直失败」。
+        """
+        rules = {r["alert"]: r for r in _load_rules()}
+        expr = rules[STALLED_ALERT]["expr"]
+        assert STALLED_METRIC in expr
+        assert (
+            SCAN_METRIC not in expr
+        ), "停滞告警不得依赖扫描失败计数：那在「beat 完全没调度」时恒为 0"
+
+    def test_stalled_alert_covers_the_absent_case(self):
+        """指标从未出现时也必须报警。
+
+        否则刚部署 / 尚未成功扫描过一次的那段窗口是无监控的，而恢复闭环可能从一开始
+        就是断的。
+        """
+        rules = {r["alert"]: r for r in _load_rules()}
+        expr = rules[STALLED_ALERT]["expr"]
+        assert "absent(" in expr, "缺少 absent() 分支 -> 首次部署窗口无监控"
+
+    def test_scan_failing_alert_uses_increase_so_it_does_not_latch(self):
+        rules = {r["alert"]: r for r in _load_rules()}
+        expr = rules[SCAN_FAILING_ALERT]["expr"]
+        assert (
+            "increase(" in expr
+        ), "扫描失败告警必须用 increase()：写成 > 0 会在历史一次失败后永久报警"
+
+    def test_stalled_threshold_is_a_multiple_of_the_reconcile_interval(self):
+        """阈值必须明显大于扫描间隔，否则正常抖动会误报。"""
+        import core.config as cfg
+
+        rules = {r["alert"]: r for r in _load_rules()}
+        expr = rules[STALLED_ALERT]["expr"]
+        threshold = None
+        for tok in expr.replace("\n", " ").split():
+            if tok.isdigit() and int(tok) > 60:
+                threshold = int(tok)
+                break
+        assert threshold is not None, "阈值必须写成字面量才能被审计"
+        assert threshold >= 6 * cfg.AGENT_RUN_RECONCILE_INTERVAL_SECONDS, (
+            f"阈值 {threshold}s 相对扫描间隔 {cfg.AGENT_RUN_RECONCILE_INTERVAL_SECONDS}s "
+            "过小，正常抖动会误报"
+        )
+
+    def test_no_high_cardinality_labels_on_reconcile_alerts(self):
+        for rule in _load_rules():
+            if rule["alert"] not in (STALLED_ALERT, SCAN_FAILING_ALERT):
+                continue
+            labels = set(rule.get("labels", {}))
+            assert not (
+                labels & HIGH_CARDINALITY_LABELS
+            ), f"{rule['alert']} 引入高基数 label: {labels & HIGH_CARDINALITY_LABELS}"
+
+
+class TestReconcileRuleTestScenarios:
+    """规则单测必须覆盖四个必需场景（正常 / 停更 / 指标缺失 / 失败）。"""
+
+    def _cases(self) -> tuple[str, list[dict]]:
+        data = yaml.safe_load((ROOT / "monitoring" / "alert_rules_test.yml").read_text("utf-8"))
+        assert isinstance(data, dict), "alert_rules_test.yml 顶层必须是 mapping"
+        assert data.get("rule_files"), "alert_rules_test.yml 缺少 rule_files"
+        return data.get("evaluation_interval", "1m"), data.get("tests", [])
+
+    def test_five_scenarios_are_covered(self):
+        _, cases = self._cases()
+        stalled = [c for c in cases if _alertname(c) == STALLED_ALERT]
+        failing = [c for c in cases if _alertname(c) == SCAN_FAILING_ALERT]
+        assert len(stalled) >= 3, "Stalled 至少覆盖：健康不报 / 停更报警 / 指标缺失报警"
+        assert len(failing) >= 2, "ScanFailing 至少覆盖：失败报警 / 历史失败不 latching"
+
+    def test_generated_annotations_are_in_sync_with_the_rules(self):
+        """测试期望的 annotation 必须与规则文件一致（promtool 逐字匹配）。
+
+        手改任何一侧都会让 promtool 失败；用
+        ``make alert-rules-sync`` 从规则文件重新生成。
+        """
+        rules = {r["alert"]: r for r in _load_rules()}
+        _, cases = self._cases()
+        for case in cases:
+            name = _alertname(case)
+            if name not in rules:
+                continue
+            for check in case.get("alert_rule_test", []):
+                if check.get("alertname") != name:
+                    continue
+                for alert in check.get("exp_alerts") or []:
+                    exp = alert.get("exp_annotations") or {}
+                    actual = rules[name]["annotations"]
+                    for key in ("summary", "runbook_url"):
+                        if key in actual:
+                            assert exp.get(key) == actual[key], (
+                                f"{name}.{key} 与 alert_rules.yml 不一致；"
+                                "运行 make alert-rules-sync 重新生成"
+                            )
+                    if "description" in exp:
+                        want = actual["description"]
+                        got = exp["description"]
+                        if "{{ $value" in want:
+                            # 含模板的值由 promtool 渲染，无法逐字比较；只要求前后缀同源
+                            head, _, tail = want.partition("{{")
+                            assert got.startswith(head) and got.endswith(
+                                tail.partition("}}")[2]
+                            ), f"{name}.description 与模板前缀/后缀不一致"
+                        else:
+                            assert got == want, (
+                                f"{name}.description 与 alert_rules.yml 不一致；"
+                                "运行 make alert-rules-sync 重新生成"
+                            )
+
+
+def _alertname(case: dict) -> str | None:
+    for check in case.get("alert_rule_test", []) or []:
+        return check.get("alertname")
+    return None

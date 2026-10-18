@@ -48,6 +48,29 @@ class ThreadLockBackendError(TransientError):
     error_type = TRANSIENT
 
 
+class SideEffectOwnershipLost(TransientError):
+    """副作用执行权在飞行中丢失：结果**未知**，不得报告成功。
+
+    何时发生
+    --------
+    ``runtime.side_effects`` 在外部调用返回后写结果时做归属校验（``claim_owner``）。
+    校验失败说明认领已被另一个执行者接管——通常是因为本次执行超出了 claim 租约，
+    而续租也失败了（旧 worker 被 SIGSTOP / 心跳中断 / GC 长停顿）。
+
+    为什么是 transient 而不是 permanent
+    ----------------------------------
+    外部调用**可能已经落地**，只是结果无法确认。可重试是因为下一次尝试会经过
+    ledger：如果对方已经提交成功，本次会直接拿到已存结果而不重复执行；如果对方
+    也失败了，则由新 owner 接管。真正无法确认的情况最终落 DLQ 并由人工核对，
+    不会被静默当成成功。
+
+    旧实现**忽略**了 ``mark_succeeded`` 的 False 返回值，于是外部已写入、ledger
+    仍停在 PENDING，而上层看到的是一次「成功的工具返回」——把结果未知伪装成成功。
+    """
+
+    error_type = TRANSIENT
+
+
 _PERMANENT_BUILTINS = (
     ValueError,
     TypeError,
@@ -103,7 +126,8 @@ def classify_exception(exc: BaseException) -> str:
     # isinstance：``tools`` 与 ``runtime`` 是两个独立的包边界，``runtime`` 不应
     # 反向 import ``tools`` 造成单向依赖。它归入 TIMEOUT（可重试）而不是 PERMANENT：
     # 超时意味着外部系统的执行结果**未知**，重试必须经幂等 ledger 去重
-    # （``operation_key = run_id:tool_call_id``），而不是直接放行第二次写入。
+    # （重放稳定 ``operation_key``，见 ``runtime.side_effects``），而不是直接放行
+    # 第二次写入。
     if getattr(exc, "is_tool_timeout", False):
         return TIMEOUT
     if isinstance(exc, asyncio.CancelledError):

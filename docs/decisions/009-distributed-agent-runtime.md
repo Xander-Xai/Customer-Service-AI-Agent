@@ -92,6 +92,26 @@ broker-native DLX、Kubernetes/HPA、multi-region。
 见 [docs/design/async-agent-worker-architecture.md](../design/async-agent-worker-architecture.md)。
 完整设计见 [docs/design/agent-runtime.md](../design/agent-runtime.md)。
 
+## 修订（2026-10-18，PR #11 / Issue #12、#13、#14）
+
+以下是对本 ADR 失败语义的**收窄与纠正**，不改变总体决策：
+
+- **#12（副作用操作身份）**：`build_replay_stable_operation_key` 的 `ordinal` 是
+  「节点内该工具调用序号」，不是身份。修正：计数器跨 LLM 轮次单调递增（此前每轮重置，
+  两轮同名同参写会误合并/误拒绝，Part B 已修复）；**如实降级**文档——写调用序列重排
+  仍可能换槽位重复执行（Part A 未修复），不据此宣称完整幂等。
+- **#13（非 PostgreSQL claim）**：无行级锁的方言上，ledger 的**接管**路径 fail-closed
+  返回 `in_progress`（首次插入仍由唯一约束互斥）；生产由 `validate_app_database_dsn`
+  拒绝非 PostgreSQL 应用库，堵住「PG checkpoint + SQLite 应用库」。
+- **#14（审批恢复崩溃窗口）**：`consume_resume` 与 `mark_resumed_running` 之间崩溃不再
+  永久滞留——`peek_resume` 只读重建已消费的终态决策，reconciler 经
+  `list_resumable_waiting_approval_runs` 重新投递；重复恢复由 `mark_resumed_running`
+  的 CAS + ledger 去重。**不**对仍等待人工决策的 run 自动重发。
+
+失败语义相应更新：**WAITING_APPROVAL 中「决策已落定」的 run 现可自动收敛**；
+**非 PostgreSQL 方言的接管不再交出执行权**。完整证据见
+[docs/audit/2026-10-18-issue-12-13-14-remediation.md](../audit/2026-10-18-issue-12-13-14-remediation.md)。
+
 ## 来源文档
 
 - [docs/design/agent-runtime.md](../design/agent-runtime.md)

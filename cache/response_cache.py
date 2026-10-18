@@ -25,7 +25,9 @@ P0-02 (Cache Cross-User Leakage):
 - L1 过期：TTL 按意图类型配置（Redis EXPIRE 自动处理）
 - L2 过期：expires_at 时间戳过滤（Qdrant Range 条件）
 - L3 淘汰：FIFO 每次淘汰 5%（最大 500 条）
-- 降级路径：Redis 失败 -> Qdrant -> Jaccard -> LLM 调用
+- 读取顺序（`get()` 实际执行，非层级编号顺序）：L1 精确 -> L3 Jaccard -> L2 语义
+  —— L3 命中会**先于** L2 返回，因此低阈值的词法回退可能压过语义层。
+- 降级顺序：Redis 不可用 -> Jaccard 内存匹配 -> Qdrant 语义 -> LLM 调用
 """
 
 from __future__ import annotations
@@ -111,6 +113,10 @@ try:
             "Semantic cache (L2) tiers skipped due to embedding failure",
         )
     cache_misses = _counter("cache_misses_total", "Cache misses")
+    cache_errors = _counter(
+        "cache_errors_total",
+        "Cache lookups where every configured backend errored (neither hit nor a true miss)",
+    )
 
     # v6.0 新指标
     cache_fallback_hits = _counter(
@@ -162,6 +168,7 @@ except ImportError:
             pass
 
     cache_l1_hits = cache_l2_hits = cache_misses = _NoopMetric()
+    cache_errors = _NoopMetric()
     cache_fallback_hits = _NoopMetric()
     cache_qdrant_fallback_total = _NoopMetric()
     semantic_cache_embedding_failures = _NoopMetric()
@@ -197,8 +204,9 @@ class ResponseCache:
     - L2 (Qdrant): 向量语义搜索，支持 user_role / product_id 等 metadata 过滤
     - L3 (Jaccard): 内存回退层，基于 jieba 分词 + 倒排索引，纯 Python 实现
 
-    降级路径：
-        Redis 不可用 -> Qdrant 不可用 -> Jaccard 内存匹配 -> LLM 生成
+    降级路径（读取顺序）：
+        Redis 不可用 -> Jaccard 内存匹配 -> Qdrant 语义 -> LLM 生成
+        （`get()` 依次探测 L1 -> L3 -> L2；L3 命中先于 L2 返回）
 
     v6.0 重构：
     - L1 从 OrderedDict 改为 Redis
@@ -274,11 +282,14 @@ class ResponseCache:
         self._l3_inverted_index: dict[str, set] = defaultdict(set)
 
         # 统计计数
+        # errors = 所有已配置层都因后端异常而无法判定（既非命中，也非真正的 miss）。
+        # 把它单独记账，避免"缓存读取失败"污染 miss 分母并拉低命中率。
         self._stats: dict[str, int] = {
             "l1_hits": 0,
             "l2_hits": 0,
             "fallback_hits": 0,
             "misses": 0,
+            "errors": 0,
         }
 
         # Prometheus 指标刷新节流
@@ -327,6 +338,13 @@ class ResponseCache:
         read_keys = read_scope_keys(md.get("user_id"), md.get("tenant_id"))
         version = self._version
 
+        # 会计口径（scenario 9）：每个请求最终只贡献 hit 或 miss/error 之一。
+        # - 命中计数只在**成功取出响应之后**自增（此前在 entry 解析前自增，
+        #   损坏条目会同时命中 + 未命中，被记两次）；
+        # - 后端异常不等于"缓存里没有"：若所有已配置层都异常，记 errors 而非 miss。
+        consulted_ok = False  # 至少有一层后端成功作答（含"确认未命中"）
+        errored = False  # 至少有一层后端异常
+
         # ----- L1: Redis 精确匹配（按可探测作用域键逐一探测）-----
         if self._redis is not None:
             for scope_key in read_keys:
@@ -335,20 +353,29 @@ class ResponseCache:
                     md5_key = self._l1_key(normalized, scope_key, version)
                     data = self._redis.get(md5_key)
                     cache_redis_latency.observe(time.time() - t0)
-                    if data is not None:
-                        entry = json.loads(data)
-                        self._stats["l1_hits"] += 1
-                        cache_l1_hits.inc()
-                        cache_operation_duration.observe(time.time() - start)
-                        self._schedule_metrics_flush()
-                        return entry["response"]
                 except Exception as e:
+                    errored = True
                     logger.warning(f"L1 Redis get 失败，降级到 L2/L3: {e}")
+                    continue
+                consulted_ok = True
+                if data is not None:
+                    try:
+                        entry = json.loads(data)
+                        response = entry["response"]
+                    except Exception:
+                        logger.warning("L1 缓存条目损坏，忽略并降级到 L2/L3")
+                        continue
+                    self._stats["l1_hits"] += 1
+                    cache_l1_hits.inc()
+                    cache_operation_duration.observe(time.time() - start)
+                    self._schedule_metrics_flush()
+                    return response
 
         # ----- L3: Jaccard 内存匹配（按可探测作用域键过滤）-----
         if self._fallback_enabled:
             try:
                 l3_result = self._jaccard_search(normalized, read_keys, version)
+                consulted_ok = True
                 if l3_result is not None:
                     self._stats["fallback_hits"] += 1
                     cache_fallback_hits.inc()
@@ -356,6 +383,7 @@ class ResponseCache:
                     self._schedule_metrics_flush()
                     return l3_result
             except Exception:
+                errored = True
                 logger.debug("L3 Jaccard 搜索失败")
 
         # ----- L2: Qdrant 向量搜索（按作用域 OR 过滤）-----
@@ -364,6 +392,7 @@ class ResponseCache:
                 t0 = time.time()
                 result = self._qdrant_get(normalized, read_keys, version, md)
                 cache_qdrant_latency.observe(time.time() - t0)
+                consulted_ok = True
                 if result is not None:
                     self._stats["l2_hits"] += 1
                     cache_l2_hits.inc()
@@ -371,13 +400,18 @@ class ResponseCache:
                     self._schedule_metrics_flush()
                     return result
             except Exception as e:
+                errored = True
                 logger.warning(f"L2 Qdrant get 失败: {e}")
                 cache_qdrant_fallback_total.inc()
 
-        # ----- 全部未命中 -----
-        self._stats["misses"] += 1
-        cache_misses.inc()
+        # ----- 全部未命中（或全部后端异常）-----
         cache_operation_duration.observe(time.time() - start)
+        if errored and not consulted_ok:
+            self._stats["errors"] += 1
+            cache_errors.inc()
+        else:
+            self._stats["misses"] += 1
+            cache_misses.inc()
         self._schedule_metrics_flush()
         return None
 
@@ -521,8 +555,12 @@ class ResponseCache:
         """
         返回缓存统计信息
 
+        Notes:
+            ``errors`` 是「所有已配置后端都异常、无法判定」的请求数；它们既非命中
+            也非真正的未命中，因此**不进** hit_rate 分母（分母 = 命中 + 未命中）。
+
         Returns:
-            dict: 包含 l1_hits, l2_hits, fallback_hits, misses,
+            dict: 包含 l1_hits, l2_hits, fallback_hits, misses, errors,
                   l1_size, l2_size, l3_size, total, hit_rate
         """
         total = (
@@ -547,6 +585,7 @@ class ResponseCache:
             "l2_hits": self._stats["l2_hits"],
             "fallback_hits": self._stats["fallback_hits"],
             "misses": self._stats["misses"],
+            "errors": self._stats["errors"],
             # v6.3: 无 Redis 时，fallback_hits 计入 l1_hits（向后兼容）
             "l1_size": l1_size if self._redis is not None else len(self._l3_cache),
             "l2_size": 0,  # Qdrant 暂不暴露 count
@@ -1130,8 +1169,9 @@ class ResponseCache:
                 l1_size = getattr(self, "_l1_size_cached", 0)
         cache_l1_size.set(l1_size)
 
-        # L2 大小近似 = L3 大小（Qdrant 不实时暴露 count）
-        cache_l2_size.set(len(self._l3_cache))
+        # L2 大小：Qdrant 不实时暴露 count，因此**不能**用 L3 大小冒充 L2 大小
+        # （此前这里 set(len(self._l3_cache))，把 L3 槽位数谎报成 L2 Qdrant 条目数）。
+        cache_l2_size.set(0)
 
         self._metrics_pending = 0
         self._metrics_last_flush = time.monotonic()

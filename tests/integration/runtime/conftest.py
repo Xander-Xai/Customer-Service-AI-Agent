@@ -110,6 +110,49 @@ def _close_shared_event_publisher():
 
 
 @pytest.fixture
+def cleanup_created_runs(pg_engine):
+    """把本用例新建的 ``agent_runs`` 行全部收敛到终态（opt-in）。
+
+    为什么这类 fixture 在共享测试库里是必需的
+    ------------------------------------------
+    两个扫描器都是**全表**扫描、按时间排序取前 ``limit`` 条
+    （``list_stale_running_runs`` 默认 100、``list_recoverable_runs`` 默认 100）。
+    一个用例如果把 ``RUNNING`` 行留在库里（验证「重复领取不误杀」这类契约必须
+    停在 RUNNING），它的 lease 在 ``AGENT_RUN_LEASE_SECONDS`` 后过期，就变成一条
+    **永久**的 stale 行；``QUEUED``/``PENDING`` 行同理。攒够 ``limit`` 条之后，
+    后续用例自己的行会被挤出扫描窗口，导致**与该用例无关**的其它用例失败——
+    表现为「昨天还绿的测试今天红了」，且看起来像是产品代码的回归。
+
+    做法：进入用例前记下全部 run id，退出时把新增的那些取消。取消是终态，会退出
+    所有扫描窗口。已有 ``cleanup_runs`` fixture 的文件可以继续用它；本 fixture
+    用于不自带清理的文件。
+    """
+    from sqlalchemy import select, text
+
+    from db.models import AgentRun
+
+    def _ids() -> set[str]:
+        with pg_engine.connect() as conn:
+            return {row[0] for row in conn.execute(select(AgentRun.id))}
+
+    before = _ids()
+    yield
+    created = _ids() - before
+    if not created:
+        return
+    terminal = "('SUCCEEDED','FAILED','DEAD_LETTER','CANCELLED')"
+    with pg_engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE agent_runs SET status='CANCELLED', lease_expires_at=NULL, "
+                f"finished_at=now(), updated_at=now() WHERE id = ANY(:ids) "
+                f"AND status NOT IN {terminal}"
+            ),
+            {"ids": list(created)},
+        )
+
+
+@pytest.fixture
 def thread_lock_off(monkeypatch):
     """关闭 per-thread 锁。
 

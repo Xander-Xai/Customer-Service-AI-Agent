@@ -123,7 +123,9 @@ escalation 的真实实现只有两处，都不是"转交"：
 | `/api/chat` 快路径 | **明确不在治理边界内** | 快路径无 run 上下文（`core/hitl/gate.py::is_ungoverned_side_effect`）。补偿措施是**拒绝**无治理的副作用调用，而不是放行 |
 | 并发审批 | **Implemented** | 真实 PostgreSQL 下 N 个并发决策**恰好一个赢家**（`UPDATE ... WHERE status=PENDING` 的数据库级 CAS），见 `tests/integration/runtime/test_hitl_approval_concurrency.py` |
 | 审批恢复的重复副作用防护 | **Implemented / 已测** | `consume_resume`（`resumed_at IS NULL` 原子认领）+ side-effect ledger（`run_id:approval:{approval_id}`）双保险。重复投递、崩溃后重投递均不重复执行。测试：`tests/integration/runtime/test_hitl_resume_fault_injection.py`（6 场景） |
-| **审批恢复的 liveness 边界** | **Partial（已知，已测）** | 若 worker 在**认领决策之后、run 收敛之前**崩溃，`resumed_at` 已被消费，重投递**不会**重新消费 → run 停在 `WAITING_APPROVAL`（安全但需运维介入）。**无自动 re-issue 机制**。复现：`TestCrashDuringResume`；见 `make runtime-report` 的 `remaining_risks` |
+| `decide()` 的 TTL 过期分支也是 CAS | **Implemented（本轮修复）** | 此前只有正常决策路径是 `WHERE status='PENDING'` 的数据库级 CAS；过期分支用 ORM 属性赋值 + `commit()`，发出的是**无状态谓词**的 `UPDATE ... WHERE approval_id=:pk`（`HumanApproval` 无 `version_id_col`、无 DB CHECK）。并发下会把已 `APPROVED` **覆写**成 `EXPIRED` —— 状态机禁止的终态→终态边；且 `consume_resume` 只认 `APPROVED/REJECTED`，已批准的决策永远送不到工具，run 永久停在 `WAITING_APPROVAL`（安全但需人工介入）。两条路径现在都是 CAS，CAS 失败时返回既有终态。回归：`tests/unit/test_runtime_review_findings.py::TestApprovalExpiryIsCas` |
+| 未预期异常不得被 ACK | **Implemented（本轮修复）** | `execute_run` 的外层 `except Exception` 曾把「逃逸以触发 broker 重投」的 `raise` 写在 `with contextlib.suppress(Exception)` **内部**，异常被自己吞掉，控制流落到 `return FAILED` —— 等于 **ACK 了一个没有任何待投递消息**的 `QUEUED/RETRYING` run。告警指标照常上报（`record_retry_publication_failure`），恢复机制却是死的，与同文件 `RetryPublicationError` 分支的意图直接矛盾。回归：`tests/unit/test_runtime_review_findings.py::TestStrandedRunMustNotBeAcked` |
+| 审批恢复的崩溃窗口（consume_resume 后、run 迁移前崩溃） | **Implemented（Issue #14 修复）** | 此前 worker 在 `consume_resume`（破坏性写 `resumed_at`）与 `mark_resumed_running` 之间崩溃会让 run **永久停在** `WAITING_APPROVAL`，无自动恢复。现在 `_build_resume_command` 在 `consume_resume` 返回 `None` 时回退到 `ApprovalService.peek_resume` **只读重建**已消费的终态决策；reconciler 经 `list_resumable_waiting_approval_runs`（有终态审批且无未消费 `PENDING`）重新投递。重复恢复由 `mark_resumed_running` 的 CAS + ledger（`run_id:approval:{approval_id}`）去重，**不重复执行高危写**。回归：`tests/integration/runtime/test_hitl_approval_crash_window.py` + `TestCrashDuringResume`（已更新为收敛断言） |
 | 待审批通知 | **Designed** | 只有轮询队列，**没有 push / 邮件 / IM 主动通知** |
 | 真实 ERP 退款/改单 | **NOT_VERIFIED** | `tools/hitl_staging_tools.py` 是确定性 staging 工具，验证的是**治理机制**，不是金蝶 ERP 的正确性。无企业 staging 环境 |
 | MCP 写操作工具 | **结构上不可能存在** | 只注册 `risk_level=low` 的 MCP 服务器（`tools/mcp_adapter.py`），且 `side_effect=False` 硬编码 |
@@ -146,11 +148,15 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **真实用户流量下的行为** | **NOT_VERIFIED** | — |
 | **大规模 queue backlog** | **NOT_VERIFIED** | 无压测与容量模型 |
 | **K8s autoscaling / multi-region** | **NOT_VERIFIED** | 无 K8s manifest |
-| 卡死 run 兜底扫描 | **Partial** | `scripts/reconcile_stuck_runs.py` 是**手动 / cron 脚本**，没接 Celery Beat，也无 CI 契约保证会跑。扫描现覆盖 `RETRYING`/`QUEUED` **及 lease 已过期的 `RUNNING`**（P0 修复）；扫描是全局的 `ORDER BY lease_expires_at LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口 |
+| **broker 不为普通失败重新投递** | **实测确认（VERIFIED_LOCAL）** | `make runtime-delivery`（真实 Redis broker + 真实 Celery 5.6.3 worker 子进程）确认：普通 Exception、`RetryPublicationError`、软/硬时间上限全部走 `Request.on_failure` 的 `reject(requeue=False)`——**消息被丢弃**。只有 `WorkerLostError` 重投，且**立即**重投无退避；`Reject(requeue=True)` 同样立即重投（实测 5 秒 80 次）。本仓库此前把「让异常逃逸以触发 broker 重新投递」当恢复手段，那个前提是错的，已全部更正 |
+| 卡死 run 兜底扫描 | **Implemented** | 恢复闭环的承重结构：数据库 AgentRun + 周期 reconciler，由**独立 `celery beat` service** 驱动（`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`，默认 30s）。实测 beat 进程按周期投递 `runtime.reconcile_stuck_runs`；beat 的 healthcheck 判据是 schedule 文件仍在被写。未被调度 = 没有恢复闭环。**beat 存活 ≠ 扫描成功**：扫描失败时 schedule 文件照样更新、健康检查照样是绿的——由 `AgentReconcileStalled` 覆盖（runbook §3.8）。**剩余限制**：扫描是全局 `ORDER BY ... LIMIT 100`，积压时按最旧优先、新 run 可能被挤出单次窗口（最终收敛，非单轮命中） |
+| **失去所有权后的执行（fencing）** | **Partial（本轮收紧，仍非 fencing token）** | 心跳在 `renewed is False` 时触发 `_FenceGuard`，`_supervise_execution` **取消**正在执行的图任务并抛 `ExecutionFenced`；被取消的 worker **不写任何终态、不消耗 attempt**（owner CAS 本来也会拒绝）。另有第二道防线：`ToolRegistry.set_execution_fence` 让副作用工具在发起外部写之前复核 ownership（只读判定，失败即 fail-closed），只读工具不受影响。该 fence 由 worker 从 **agent 实际使用的** `runtime.container.tool_registry` 装入（按 run 作用域存放，执行结束清理），`RunService` 上并没有 registry 属性——修复前 `_install_execution_fence` 因此从未在生产路径生效。**剩余限制**：取消前已发出的外部调用无法回收；声明 `side_effect=False` 却实际写外部的工具不受治理；卡在同步 C 调用的执行不可取消（由 `AGENT_RUN_TASK_TIME_LIMIT` 兜底）；节点内已开始的 checkpoint 写不额外加锁。回归：`tests/integration/runtime/test_stale_worker_fencing_pg.py` |
+| attempt 预算在 worker 接管路径上的绕过 | **Implemented（第二轮修复的原始版本有缺陷）** | 第一版把预算判定放在 `RunService.mark_running` 的 Python 层、**先判预算后判 lease**，耗尽时走一条只判 `status='RUNNING'` 的无条件 DLQ 写入——于是 `attempt == max_attempts`（**最后一次正常执行的常态**）时任何重复投递都会把持有有效 lease、正在跑图的 run 打成 DEAD_LETTER。现在预算、lease、状态三条谓词**同在一条 UPDATE 内**：`takeover_running` 带 `attempt < max_attempts` + lease 谓词；`dead_letter_stale_running` 带 `lease <= now AND attempt >= max_attempts`；`claim_executable` 在同一条 UPDATE 里做状态 + 预算 + `attempt + 1`（**落败的重复投递不消耗预算**）。逐条收敛规则见 [reference/runtime-state-convergence.md](reference/runtime-state-convergence.md) §2。回归：`tests/integration/runtime/test_duplicate_claim_lease_fencing_pg.py` |
+| `PENDING` run 不被 reconciler 覆盖 | **Implemented** | `PENDING` 此前**没有任何扫描覆盖**，两阶段入队在 `mark_queued` 之前被杀就永久滞留。现在由 `list_stale_pending_runs`（带宽限期，默认 60s）+ **条件迁移** `promote_pending_to_queued`（`UPDATE ... WHERE status='PENDING'`）恢复：数据库充当「谁有权发这条消息」的裁决者，并发 reconciler 只有一个投递；已被取消 / 已处理的 PENDING 谓词不成立，不会发消息；迁移成功但投递失败则停在 `QUEUED` + `next_retry_at IS NULL`，由 QUEUED 孤儿分支兜底。**不是**无脑重投——那无法区分「publish 前被杀」（必须补投）与「已发布但未确认」（多余投递）。回归：`tests/integration/runtime/test_pending_enqueue_contract_pg.py` |
 | **正确性语义是 at-least-once，不是 exactly-once** | 设计如此 | `acks_late` + `reject_on_worker_lost` + `visibility_timeout`。正确性靠三层幂等（run / thread / 工具） |
 | Run 事件流 | **不是真相源** | Redis Stream → SSE，best-effort 可续读，**非 exactly-once**。断线会丢事件（可续读，但非完整） |
 | DLQ 重放 | **需人工** | 复用原 `run_id`（避免绕过工具幂等键），无自动重放策略 |
-| checkpoint 恢复用例曾卡在 `RUNNING`/attempt=2 | **已按根因修复** | 此前被记成「对 150s liveness 预算敏感」并靠调大 timeout 缓解——**那是错误诊断**，只掩盖症状。真正原因：worker lease 在图执行途中过期 → 完成提交被 owner CAS **正确**拒绝 → 任务被 ACK → `list_recoverable_runs` 只扫 `RETRYING`/`QUEUED` → run 永久停在 `RUNNING`（无终态、无 DLQ、无告警）。已修复：续租不再因一次瞬时异常永久中断；reconciler 复用既有原子 `takeover_running` 谓词回收过期 lease 的 `RUNNING`，attempt 耗尽落 DLQ；`WAITING_APPROVAL` 仍不自动重发。回归：`tests/unit/test_stale_run_reconciliation.py` + `tests/integration/runtime/test_stale_run_reconciliation_pg.py`（真实 PostgreSQL）。`RUNTIME_RECOVERY_WAIT_SECONDS` 的可配置化保留，但**不再**被当作该问题的修复 |
+| checkpoint 恢复用例曾卡在 `RUNNING`/attempt=2 | **已按根因修复** | 此前被记成「对 150s liveness 预算敏感」并靠调大 timeout 缓解——**那是错误诊断**，只掩盖症状。真正原因：worker lease 在图执行途中过期 → 完成提交被 owner CAS **正确**拒绝 → 任务被 ACK → `list_recoverable_runs` 只扫 `RETRYING`/`QUEUED` → run 永久停在 `RUNNING`（无终态、无 DLQ、无告警）。已修复：续租不再因一次瞬时异常永久中断；reconciler 复用既有原子 `takeover_running` 谓词回收过期 lease 的 `RUNNING`，attempt 耗尽落 DLQ；**决策已落定的** `WAITING_APPROVAL` run 现由 `list_resumable_waiting_approval_runs` 收敛（Issue #14），仍在等待人工决策的 `WAITING_APPROVAL` 不自动重发。回归：`tests/unit/test_stale_run_reconciliation.py` + `tests/integration/runtime/test_stale_run_reconciliation_pg.py`（真实 PostgreSQL）。`RUNTIME_RECOVERY_WAIT_SECONDS` 的可配置化保留，但**不再**被当作该问题的修复 |
 | 结构化故障注入报告 | **Implemented** | `make runtime-report`（`scripts/report_distributed_runtime.py`）聚合 e2e/chaos/verify，输出 git SHA + 环境 + 7 个故障场景 + 副作用计数 + 剩余风险。artifact：`artifacts/distributed-runtime-summary/<ts>.json` |
 
 ---
@@ -268,6 +274,7 @@ escalation 的真实实现只有两处，都不是"转交"：
 | langgraph 版本"实测"声明与 lockfile 不符：文档/代码注释称 **1.2.12**（本地 venv 确实是），但 `requirements-lock.txt:144` 锁的是 **1.2.2** | `core/hitl/gate.py:23,48,184` 等 |
 | `mcp` 版本要求冲突：`requirements-optional.txt:13` 要 `mcp>=2.0.0`，`requirements-lock.txt:149` 锁 `mcp==1.27.2` | 已在 `tools/mcp_adapter.py:44-45` 标注 2.x 未验证 |
 | `pyproject.toml` **没有 `[project].dependencies`**，依赖真相源是 `requirements*.txt` | `pyproject.toml` |
+| 当前文档里 `Issue #99 / #119 / #130 / #105 / #53`、`PR #19 / #20 / #21 / #28 / #128` 等编号指向**公开 tracker 之前**的私有台账，在公开 repo（0 issue、PR #1–#11）里**不解析**；它们是历史追踪引用，不是坏链接（`audit_doc_consistency.py` 的链接检查为绿）。按「快照不可回填」约定保留原文，待一次性治理再统一重编号 | 多个 `docs/reference/**`、`docs/evaluation/**`、`docs/design/human-in-the-loop.md` |
 
 ---
 
@@ -297,6 +304,18 @@ escalation 的真实实现只有两处，都不是"转交"：
 | ~~HITL fail-closed 启动校验~~ | — | **已完成**（§2）：启动校验 + side_effect 兜底 + 并发审批真实 PG 验证 |
 | ~~原生工具超时~~ | — | **已完成**（§4）；副作用超时的「冒泡而非降级」语义已锁定 |
 | 工具并行 / 熔断 / 重试 | 需先定义"读可重试、写不可重试"的边界；并行还需先确认副作用工具的调用序语义 | 未开始 |
+| ~~强制中止失去所有权的 worker~~ | — | **已完成**（§3「失去所有权后的执行」）：选的是 **heartbeat 取消图协程 + 工具执行前复核 ownership**，不是单调 fencing token。理由：单调 token 需要下游配合才能拒绝陈旧 owner，而本仓库的外部系统不保证幂等接口；协作式取消 + 只读 ownership 复核能在不依赖下游的前提下把窗口收窄。**不宣称**具备单调 fencing token |
+| ~~attempt 预算在 worker 接管路径上的闸门~~ | — | **已完成**（§3「attempt 预算…绕过」）：预算谓词已下沉到同一条 UPDATE |
+
+| ~~side-effect claim TTL 早于副作用结束~~ | — | **已完成**（§3）：claim 在执行期间由 `_ClaimRenewer` 续租；TTL 下界（工具超时 + 30s 余量）在**启动时**强制（`validate_timeout_invariants`），运行期也 fail-closed；`ToolRegistry._idempotent_operation` 现在把 `min_claim_ttl_seconds(TOOL_EXECUTION_TIMEOUT_SECONDS)` **显式传入真实执行路径**（修复前该参数在生产路径恒为 `None`，那句运行期承诺是死的）；`mark_succeeded` 被拒时抛 `SideEffectOwnershipLost`（「结果未知」）而不是静默返回成功；`mark_failed` 被 CAS 拒绝时计入 `agent_side_effect_terminal_write_rejected_total` 并记录结构化 error 日志，不再静默丢弃 FAILED 结果。回归：`tests/unit/test_side_effect_claim_floor_wiring.py`、`tests/integration/runtime/test_side_effect_failure_observability_pg.py`。**未做**：把 TTL 做成独立可调项——它必须由工具超时推导，独立配置只会制造新的非法组合 |
+| ~~非 HITL 副作用工具的 `operation_key` 稳定性（Part B：跨 LLM 轮次 ordinal 重置）~~ | — | **已完成**（§3「重放稳定操作身份」+ Issue #12 Part B）：`build_replay_stable_operation_key(run, node, agent, tool, ordinal)` 不含任何 LLM 输出；**Part B** 已修复——`_logical_ordinals` 过去在 LLM 轮次循环内初始化，两轮同名同参写会拿到同一 `ordinal` → 第二次被静默吞掉或被指纹冲突永久拒绝，现计数器移到轮次循环之外、跨轮单调递增。回归：`tests/unit/test_side_effect_ordinal_scope.py::test_same_tool_across_two_rounds_executes_twice` |
+| 非 HITL 副作用工具的 `operation_key` 稳定性（Part A：同类写操作重放顺序变化） | 需调用方提供稳定逻辑操作身份（内容寻址或显式 id）；`ordinal` 无法胜任 | **未完成**（Issue #12 Part A，保持 OPEN）：`ordinal` 是**位置**不是身份——同一写工具的调用序列在节点重放时**重排**（插入/交换另一次同类写）会让同一笔写换槽位、拿到新键，从而**可能对外部系统重复执行**该写操作（不是 fail-closed）。要跨任意重排严格去重必须由调用方提供稳定逻辑操作身份，`ordinal` **不是**完整幂等。回归与证据：`tests/unit/test_side_effect_ordinal_scope.py`、`docs/audit/2026-10-18-issue-12-13-14-remediation.md`。HITL 的 `approval:{approval_id}` 语义未变 |
+| ~~side-effect ledger 在非 PostgreSQL 方言的接管~~ | — | **已修复（Issue #13）**：SQLite/MySQL 忽略 `FOR UPDATE`，两个认领者可同时接管过期/FAILED 行、同时拿到 `CLAIM_EXECUTE` → 重复执行。现在非 PostgreSQL 方言的**接管**路径 fail-closed 返回 `in_progress`（首次插入的互斥仍由唯一约束提供）；生产另由 `core/config.py::validate_app_database_dsn` 拒绝非 PostgreSQL 应用库（堵住「PG checkpoint + SQLite 应用库」）。回归：`tests/unit/test_side_effect_sqlite_claim_safety.py` |
+| ~~`reconcile_stuck_runs` 接入调度~~ | — | **已完成**（§3）：独立 `celery beat` service + `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`。它是当前**唯一**能收敛「消息被 broker 丢弃」的自动机制，`beat` 停摆即无自动恢复 |
+| ~~覆盖 `PENDING` 滞留 run~~ | — | **已完成**（§3「`PENDING` run 不被 reconciler 覆盖」）：宽限期 + 条件迁移 + QUEUED 孤儿分支兜底 |
+| ~~无人轮询时审批 TTL 主动过期~~ | — | **已完成**（F6）：`reconcile_stuck_runs` 每轮调用 `ApprovalService.expire_overdue`，用 CAS 把超时的 `PENDING` 审批置 `EXPIRED`（按拒绝处理）并让 run 成为「决策已落定」被重新投递；不依赖 `GET /api/approvals` 的读路径副作用。回归：`tests/integration/runtime/test_hitl_approval_crash_window.py`（无读路径、幂等、竞态、崩溃后下一轮恢复） |
+| beat 单点 | 需决定 beat HA 方式 | 未开始：beat 是单实例（刻意如此，避免多副本重复调度；多 beat 需要分布式调度锁，收益不匹配当前规模）。compose 里 `restart: unless-stopped` 会在崩溃后拉起，但拉起失败或人工 `docker stop` 期间**没有扫描**。**本轮已补**：不再只依赖 beat 存活——`AgentReconcileStalled` 告警按「最近一次**成功**扫描距今多久」判定并覆盖指标从未出现的窗口，runbook §3.8 给出处置步骤。告警可发现 ≠ 自动修复，beat HA 仍未做 |
+| ~~超时参数交叉校验~~ | — | **已完成**：`core.config.validate_timeout_invariants` 在**所有环境**、**早于 `DEV_MODE` 早退**强制 6 条关系（heartbeat<lease、lease>=2*heartbeat、tool<task、task<visibility、claim>=tool+margin、lock>task+margin）。刻意**不**强制 `lease > task time limit`：有续租时那不是正确性约束。表见 [reference/runtime-state-convergence.md](reference/runtime-state-convergence.md) §4.1 |
 | Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
 | ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |
@@ -320,6 +339,9 @@ make metrics-exposure-check     # 契约测试：告警/Grafana 引用的每个�
 make monitoring-token           # 生成 Prometheus 抓取凭据（fail-closed）
 make alert-rules-test           # 官方 promtool：规则语法 + 真会 firing + 不 latching
 make metrics-exposure-verify    # 真实 Prometheus 端到端（DLQ 告警实际 FIRING）
+
+# Celery 投递语义（真实 Redis broker + 真实 worker 子进程）
+make runtime-delivery          # ACK / reject / requeue / 是否真的重新投递
 ```
 
 关键证据 artifact（可逐个打开复查）：

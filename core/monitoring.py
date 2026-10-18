@@ -376,6 +376,10 @@ try:
         "agent_run_ownership_lost_commit_total",
         "Completion commits rejected by the owner/lease CAS (stale worker write-back)",
     )
+    agent_run_ownership_lost_execution_total = _counter(
+        "agent_run_ownership_lost_execution_total",
+        "Graph executions cancelled after the worker lost run ownership (fencing acted)",
+    )
     agent_run_stale_reclaimed_total = _counter(
         "agent_run_stale_reclaimed_total",
         "Stale RUNNING runs (expired lease) re-dispatched by the reconciler",
@@ -383,6 +387,21 @@ try:
     agent_run_stale_dead_letter_total = _counter(
         "agent_run_stale_dead_letter_total",
         "Stale RUNNING runs dead-lettered by the reconciler after attempt budget exhaustion",
+    )
+    agent_reconcile_scan_total = _counter(
+        "agent_reconcile_scan_total",
+        "Reconciler scan executions by outcome (success|error)",
+        ["outcome"],
+    )
+    # Beat 存活与 reconciler 成功执行是**两个不同的信号**：
+    # beat 的健康检查只看 schedule 文件 mtime（进程活着就一直更新），所以
+    # 「beat 活着但 reconcile 每次都失败」（DB 不可达、扫描抛错）时健康检查仍为
+    # 绿色，而恢复闭环已经断了。这个时间戳让「最近一次成功扫描」可被直接查询，
+    # 是与 beat 存活正交的恢复闭环信号。
+    agent_reconcile_last_success_timestamp_seconds = _gauge(
+        "agent_reconcile_last_success_timestamp_seconds",
+        "Unix timestamp of the last SUCCESSFUL reconcile_stuck_runs scan",
+        multiprocess_mode="livesum",
     )
     checkpoint_errors_total = _counter(
         "checkpoint_errors_total", "LangGraph checkpoint backend errors"
@@ -397,6 +416,10 @@ try:
     )
     agent_tool_idempotency_hit_total = _counter(
         "agent_tool_idempotency_hit_total", "Side-effect tool idempotency hits"
+    )
+    agent_side_effect_terminal_write_rejected_total = _counter(
+        "agent_side_effect_terminal_write_rejected_total",
+        "Side-effect ledger terminal writes rejected by ownership/status/lease CAS",
     )
     # human-in-the-loop 审批治理。
     #
@@ -575,12 +598,16 @@ except ImportError:
     agent_worker_heartbeat = _NoopMetric()
     agent_worker_heartbeat_error_total = _NoopMetric()
     agent_run_ownership_lost_commit_total = _NoopMetric()
+    agent_run_ownership_lost_execution_total = _NoopMetric()
     agent_run_stale_reclaimed_total = _NoopMetric()
     agent_run_stale_dead_letter_total = _NoopMetric()
+    agent_reconcile_scan_total = _NoopMetric()
+    agent_reconcile_last_success_timestamp_seconds = _NoopMetric()
     checkpoint_errors_total = _NoopMetric()
     agent_checkpoint_recovery_total = _NoopMetric()
     agent_run_idempotency_hit_total = _NoopMetric()
     agent_tool_idempotency_hit_total = _NoopMetric()
+    agent_side_effect_terminal_write_rejected_total = _NoopMetric()
     agent_approval_requested_total = _NoopMetric()
     agent_approval_decided_total = _NoopMetric()
     agent_approval_pending = _NoopMetric()

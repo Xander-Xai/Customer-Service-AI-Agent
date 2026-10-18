@@ -78,6 +78,10 @@ worker 与 API 进程**共用同一套 key namespace**，见
 `runtime/statuses.py` 定义合法迁移，`runtime/run_service.py` 在数据库层用
 原子条件更新强制。
 
+**每种非终态 + 外部信号的组合收敛到哪个状态、由哪条谓词判定、实际检测延迟是多少**，
+见 [runtime-state-convergence.md](../reference/runtime-state-convergence.md)（canonical
+收敛契约）。本节只给状态机全貌。
+
 ```text
 PENDING ──► QUEUED ──► RUNNING ──┬──► SUCCEEDED        (终态)
                                  ├──► FAILED           (终态，permanent error，不重试)
