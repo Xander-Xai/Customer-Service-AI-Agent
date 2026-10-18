@@ -11,7 +11,7 @@
 
 ## 0. 审计范围与方法
 
-针对简历/文档中的 **AgentRuntime、PostgreSQL Checkpoint、Celery、Redis Lease、
+针对工程能力文档中的 **AgentRuntime、PostgreSQL Checkpoint、Celery、Redis Lease、
 幂等工具执行、HITL、故障恢复** 能力，做「宣称 → 代码符号 → 测试」三者一致性核对，
 并在**真实 PostgreSQL + Redis** 上重跑故障矩阵。约束与结论同样重要：**不为了产出
 PR 而改代码**；先确认是否仍有真实缺陷。
@@ -42,7 +42,7 @@ PR 而改代码**；先确认是否仍有真实缺陷。
 
 ## 2. 能力 → 代码符号 → 测试 映射
 
-| 简历/文档宣称 | 代码符号 | 回归测试（真实 PG+Redis 标 ✅） |
+| 工程能力断言 | 代码符号 | 回归测试（真实 PG+Redis 标 ✅） |
 |---|---|---|
 | 跨重试稳定操作身份（内容寻址） | `runtime/side_effects.py::build_replay_stable_operation_key`（`v2:` 键 = 作用域 + `sha256(canonical_json(args))` + 同内容 occurrence；或调用方 `logical_operation_id`） | `tests/unit/test_side_effect_stable_logical_identity.py`；✅ `tests/integration/runtime/test_side_effect_replay_identity_pg.py` |
 | 同内容多次**合法**写不被吞 | `agents/base_agent.py::_process_with_tools` 的 `_logical_ordinals`（跨 LLM 轮次单调，声明在轮次循环**外**）；`LogicalCall.ordinal` | `tests/unit/test_side_effect_ordinal_scope.py` |
@@ -208,7 +208,7 @@ $ python -c "import json; print(json.load(open('<fresh chaos artifact>'))['envir
 
 ---
 
-## 7. 面试可使用的准确措辞
+## 7. 工程能力与验证边界表述
 
 **可以这么说：**
 
