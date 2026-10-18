@@ -586,7 +586,11 @@ jobs:
       - name: Type checking — gradual (existing modules)
         continue-on-error: true
         run: |
-          python -m mypy agents/ cache/ collaboration/ core/ rag/ router/ tools/ api/ auth/ db/ erp/ knowledge/ session_manager.py token_counter.py drift_detector.py --ignore-missing-imports
+          # core/session/{session_manager,token_counter,drift_detector}.py are
+          # already covered by `core/`. Do NOT re-add bare root-level filenames:
+          # they do not exist, mypy aborts on the first missing file, and
+          # continue-on-error would hide the resulting no-op (issue #20).
+          python -m mypy agents/ cache/ collaboration/ core/ rag/ router/ tools/ api/ auth/ db/ erp/ knowledge/ --ignore-missing-imports
 
       # pip-audit is informational: a finding surfaces as a ⚠️ step result
       # (visible in the run UI) but does not block the job. `continue-on-error`
@@ -599,7 +603,9 @@ jobs:
 
       - name: Static security analysis (bandit)
         run: |
-          bandit -r agents/ api/ auth/ cache/ collaboration/ core/ db/ erp/ knowledge/ rag/ router/ session_manager.py tools/ -ll --skip B101
+          # core/session/session_manager.py is covered by `core/`; the bare
+          # root-level path never existed and was silently skipped (#20).
+          bandit -r agents/ api/ auth/ cache/ collaboration/ core/ db/ erp/ knowledge/ rag/ router/ tools/ -ll --skip B101
 
       - name: Public-repository boundary guard
         run: |
