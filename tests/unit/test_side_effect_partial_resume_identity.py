@@ -511,3 +511,82 @@ async def test_case_f4_repeated_redelivery_after_success_is_stable(ledger):
             _ScriptedLLM([[_tc(f"f-{i}", "staging_refund", A)], None]), calls
         )._process_with_tools(_state(), "你是客服。")
     assert calls.count(A) == 1
+
+
+# ---------------------------------------------------------------------------
+# Safety regression: an A1 replay and an A2 resume are indistinguishable
+# without a durable logical business id.
+# ---------------------------------------------------------------------------
+
+
+async def test_ambiguous_single_proposal_after_two_reservations_fails_closed(ledger):
+    """Never execute pending A2 just because a lone A could be its retry.
+
+    Attempt 1 plans A1 and A2, completes A1, then crashes. A recovery
+    proposing only A could be a replay of A1 *or* the first execution of A2.
+    The stored content and occurrence rows cannot distinguish these intents.
+    The only safe automatic result is an explicit identity refusal.
+    """
+    from runtime.operation_identity import OperationIdentityUnavailable
+
+    calls: list[dict] = []
+    with pytest.raises(_Crash):
+        await _make_agent(
+            _ScriptedLLM([[_tc("i1", "staging_refund", A), _tc("i2", "staging_refund", A)], None]),
+            calls,
+            crash_on_write=2,
+        )._process_with_tools(_state(), "你是客服。")
+    assert calls == [A]
+
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous partial replay"):
+        await _make_agent(
+            _ScriptedLLM([[_tc("ambiguous", "staging_refund", A)], None]), calls
+        )._process_with_tools(_state(), "你是客服。")
+
+    assert calls == [A], "ambiguous replay must not execute a second refund"
+    statuses = [
+        row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"
+    ]
+    assert sorted(statuses) == ["PENDING", "SUCCEEDED"]
+
+
+async def test_full_replay_after_partial_execution_preserves_order(ledger):
+    """Full [A1,A2] recovery reuses occ0 before executing reserved occ1."""
+    calls: list[dict] = []
+    with pytest.raises(_Crash):
+        await _make_agent(
+            _ScriptedLLM([[_tc("j1", "staging_refund", A), _tc("j2", "staging_refund", A)], None]),
+            calls,
+            crash_on_write=2,
+        )._process_with_tools(_state(), "你是客服。")
+    assert calls == [A]
+
+    await _make_agent(
+        _ScriptedLLM([[_tc("k1", "staging_refund", A), _tc("k2", "staging_refund", A)], None]),
+        calls,
+    )._process_with_tools(_state(), "你是客服。")
+
+    assert calls.count(A) == 2, "full replay must execute the missing write only once"
+    statuses = [
+        row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"
+    ]
+    assert statuses.count("SUCCEEDED") == 2
+
+
+async def test_run_resolver_unavailable_never_falls_back_to_memory_counter(
+    ledger, monkeypatch
+):
+    """A failed durable-identity store must fail closed even if an LLM proposes A."""
+    from runtime import side_effects
+    from runtime.operation_identity import OperationIdentityUnavailable
+
+    def broken_store():
+        raise OSError("durable identity store unavailable")
+
+    monkeypatch.setattr(side_effects, "get_side_effect_store", broken_store)
+    calls: list[dict] = []
+    with pytest.raises(OperationIdentityUnavailable, match="解析器不可用"):
+        await _make_agent(
+            _ScriptedLLM([[_tc("bad", "staging_refund", A)], None]), calls
+        )._process_with_tools(_state(), "你是客服。")
+    assert calls == []
