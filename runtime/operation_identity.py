@@ -17,15 +17,23 @@ must be anchored to something durable. This resolver:
 
 1. snapshots, per ``(scope, tool, content)``, the ledger rows that already exist
    **at the start of this attempt** (prior attempts' proposals);
-2. resolves each call of this attempt against them, in order:
+2. refuses a **shortened** proposal set when the content already has more than
+   one durable occurrence. A subset cannot be mapped back to specific prior
+   occurrences: a lone ``A`` may replay the first, replay the second, or be a
+   new business operation. Even when all prior occurrences succeeded, reusing
+   an arbitrary one would return the wrong stored result. Without a durable
+   ``logical_operation_id`` the only safe outcome is fail-closed
+   (:class:`OperationIdentityUnavailable`);
+3. otherwise resolves each call of this attempt against the prior occurrences
+   **in their persisted order**:
 
-   * a prior **unexecuted** occurrence (PENDING/FAILED, e.g. an interrupted
-     proposal) -> reuse it (execute the interrupted operation);
-   * else an unassigned prior **SUCCEEDED** occurrence -> reuse it (true replay,
-     dedupe);
+   * full proposal set -> reuse the prior occurrence at the same position;
+   * an **unexecuted** occurrence (PENDING/FAILED, e.g. an interrupted proposal)
+     -> execute the interrupted operation;
+   * a **SUCCEEDED** occurrence -> true replay, dedupe;
    * else allocate a **new** occurrence beyond every prior one;
 
-3. durably **reserves** every newly-allocated occurrence *before* the caller
+4. durably **reserves** every newly-allocated occurrence *before* the caller
    executes any of them, so a crash later in the round leaves the whole
    proposal set recorded (see ``SideEffectStore.reserve_operation``).
 
@@ -138,14 +146,15 @@ class ContentOccurrenceResolver:
         """
         from runtime.side_effects import request_fingerprint
 
-        # In mixed history a shortened same-content replay is fundamentally
-        # ambiguous: A1 succeeded, A2 was reserved, and a lone A could mean
-        # either "replay A1" or "execute A2". Prioritizing PENDING would
-        # accidentally execute A2 in the former case. Refuse without a
-        # durable logical_operation_id instead of guessing business intent.
+        # A shortened same-content proposal set is fundamentally ambiguous.
+        # Mixed history (A1 succeeded, A2 reserved) means a lone A could be
+        # "replay A1" or "execute A2"; prioritizing PENDING would accidentally
+        # execute A2 in the former case. Multiple completed occurrences are
+        # equally ambiguous: a lone A could replay any of them, and reusing an
+        # arbitrary stored result would be wrong. Refuse without a durable
+        # logical_operation_id instead of guessing business intent.
         proposal_counts = Counter(
-            (tool_name, request_fingerprint(arguments))
-            for tool_name, arguments in proposals
+            (tool_name, request_fingerprint(arguments)) for tool_name, arguments in proposals
         )
         for content_key, count in proposal_counts.items():
             tool_name, _ = content_key
@@ -158,14 +167,13 @@ class ContentOccurrenceResolver:
                 )
                 state = self._load(tool_name, sample_args)
                 self._states[content_key] = state
-            if state.executed and state.unexecuted:
-                known_count = len(state.executed) + len(state.unexecuted)
-                if count < known_count:
-                    raise OperationIdentityUnavailable(
-                        f"tool {tool_name}: ambiguous partial replay of "
-                        f"{count} identical proposals against {known_count} "
-                        "prior occurrences; require a durable logical_operation_id"
-                    )
+            known_count = len(state.executed) + len(state.unexecuted)
+            if count < known_count:
+                raise OperationIdentityUnavailable(
+                    f"tool {tool_name}: ambiguous shortened replay of "
+                    f"{count} identical proposal(s) against {known_count} "
+                    "prior occurrence(s); require a durable logical_operation_id"
+                )
 
         assignments: list[int] = []
         to_reserve: list[tuple[str, str, str]] = []  # (tool_name, key, fingerprint)

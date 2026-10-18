@@ -121,7 +121,10 @@ $ pytest tests/unit/test_side_effect_ordinal_scope.py \
 - **部分恢复（同参不同业务操作）残差另有专项修复（2026-10-18）。** 内容寻址身份在当时
   仍依赖「节点局部 occurrence 计数器」；worker 在「两笔同参写只执行了第一笔」后崩溃并
   整节点重放、且恢复只提出第二笔时，第二笔会被重新编号到 occurrence 0 撞上第一笔的成功
-  键被静默吞掉。该残差已由持久化 occurrence 预占 + 恢复解析修复，证据见
+  键被静默吞掉。修复引入持久化 occurrence 预占 + 恢复解析：**完整重放**按持久化顺序
+  去重/补执行；**缩短的同参重放**无法判定业务意图时 **fail-closed**，不会自动执行 A₂，
+  也不会复用任意历史成功结果。需要无歧义恢复单条 A₂ 时，调用方必须提供显式、持久的
+  `logical_operation_id`。证据见
   [2026-10-18-issue-12-part-a-partial-resume-identity.md](2026-10-18-issue-12-part-a-partial-resume-identity.md)。
 - **参数须跨重放确定。** 若 LLM 在重放时对同一笔写产生新的 nonce/时间戳，内容寻址会
   把它当成另一笔操作。这是内容寻址的固有边界，不是本仓缺陷。

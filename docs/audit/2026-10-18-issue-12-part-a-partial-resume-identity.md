@@ -82,11 +82,13 @@ E       assert 1 == 2                 # handler 只执行了一次：A₂ 被静
 1. `SideEffectStore.reserve_operation(...)`：在执行任何写之前，把本轮全部同内容
    occurrence 的身份以 **PENDING、无 owner** 的行持久化（唯一约束 + `ON CONFLICT DO
    NOTHING`）。崩溃也不会丢「本尝试提出过哪些写」。
-2. `ContentOccurrenceResolver`（新模块）在每次尝试开始时**快照**已有 occurrence，按执行
-   顺序把每个写提案解析为：
-   - **未执行的预占**（PENDING/FAILED，例如被中断的第 2 笔）→ 复用并**执行**；
-   - 否则**已成功**且未被消费的 occurrence → 复用（真重放去重）；
-   - 否则分配**全新** occurrence（并预占落账）。
+2. `ContentOccurrenceResolver`（新模块）在每次尝试开始时**快照**已有 occurrence：
+   - 若本轮同内容提案数**少于**已持久化的 occurrence 数（缩短重放），且没有显式持久
+     `logical_operation_id`，则**无法判定**该提案对应哪一笔 -> `OperationIdentityUnavailable`
+     **fail-closed**，不执行任何新副作用；
+   - 否则**按持久化 occurrence 顺序**解析：未执行的预占（PENDING/FAILED，例如被中断的
+     第 2 笔）→ 恢复执行；已成功的 occurrence → 真重放去重；超出历史的新提案 → 分配
+     全新 occurrence（并预占落账）。
 3. `SideEffectStore.claim(...)`：把**无 owner 的 PENDING**视为可接管的预占（条件 UPDATE
    `claim_owner IS NULL` 原子夺取）；**有 owner 的 PENDING** 仍受租约保护，语义不变。
 
@@ -95,10 +97,11 @@ E       assert 1 == 2                 # handler 只执行了一次：A₂ 被静
 | 场景 | 行为 |
 |---|---|
 | 真重放 A₁（attempt1 只提出 `[A]`） | attempt2 解析到已成功的 occ0 -> 去重（安全） |
-| A₁ 成功、恢复只提出 A₂（attempt1 提出 `[A, A]`） | attempt2 读到未执行的 occ1 -> **执行 A₂**（不再静默吞掉） |
-| 完整重放 `[A₁, A₂]` | 两笔都解析回各自 occurrence -> 去重，零额外执行 |
-| 重排恢复 `[B, A₂]` | 各自内容寻址 -> 不碰撞、不丢失 |
-| 显式 `logical_operation_id` | 优先级最高，跨 occurrence 重置恒定（HITL 约定不变） |
+| A₁ 成功、恢复只提出 A₂（attempt1 提出 `[A, A]`） | **身份歧义**（可能是 A₁ 重放或 A₂ 首次执行）-> `OperationIdentityUnavailable` **fail-closed**；occ1 预占保持 PENDING，不执行第二笔 |
+| 完整重放 `[A₁, A₂]`（混合历史） | 按持久化 occurrence 顺序：已成功项去重、未执行项执行一次，零额外执行 |
+| 重排且**缩短**恢复 `[B, A₂]`（历史有两笔 A） | 内容寻址仍避免槽位碰撞，但缩短的 A 无法判定对应 A₁/A₂ -> **fail-closed**，不复用任意历史结果 |
+| 多笔同参已全部成功、恢复只提出一个 A | 无法判定对应哪一笔 -> **fail-closed**，不复用任意成功结果 |
+| 显式 `logical_operation_id` | 优先级最高，跨 occurrence 重置恒定；单条 A₂ 的无歧义恢复推荐用它（HITL 约定不变） |
 | 预占槽位出现**不同参数** | 指纹冲突 -> fail-closed（不执行） |
 | 同一作用域同内容 occurrence 超上限 | `OperationIdentityUnavailable` -> fail-closed（不静默新建） |
 
@@ -127,33 +130,43 @@ E   assert 1 == 2
 1 failed, 8 passed
 ```
 
-修复后：
+修复后（最终安全契约）：
 
 ```text
 $ python -m pytest \
     tests/unit/test_side_effect_stable_logical_identity.py \
     tests/unit/test_side_effect_partial_resume_identity.py -q
-...  (22 passed)      # 原 13 项 + 新增 9 项
+26 passed             # 稳定身份 13 项 + 部分恢复 13 项
 ```
 
-关键量（Case B）：
+关键量（Case B，恢复只提出单个无业务 ID 的 A）：
 
 - A₁ 实际执行次数：1
-- A₂ 实际执行次数：修复前 0（静默吞掉）→ 修复后 1
-- ledger：修复前仅 occ0=SUCCEEDED，occ1 从未落账；修复后 occ1 在 A₁ 执行前已作为预占
-  落账，恢复时被 claim 并置 SUCCEEDED
-- 恢复路径：修复前 `execute_idempotent_operation` 命中 K0 -> `CLAIM_SUCCEEDED` 直接返回；
-  修复后解析到未执行 occ1 -> `CLAIM_EXECUTE`
+- A₂ 实际执行次数：修复前 0（被静默吞掉）→ 最终 0，但**原因不同**：恢复在解析阶段
+  以 `OperationIdentityUnavailable` **fail-closed**，不会静默返回 A₁ 的成功结果
+- ledger：occ0=SUCCEEDED；occ1 在 A₁ 执行前已作为**无 owner 的 PENDING 预占**落账，
+  恢复被拒绝后仍保持 PENDING（未被错误 claim）
+- 恢复路径：修复前命中 K0 -> `CLAIM_SUCCEEDED` 直接返回；最终在
+  `ContentOccurrenceResolver.assign` 的缩短重放检查处抛出身份歧义，**不进入** claim
+- 同一状态下**完整重放** `[A₁, A₂]`：按 occ0/occ1 顺序解析，A₁ 去重、A₂ 执行一次
+  （`test_full_replay_after_partial_execution_preserves_order`）
+- 两笔均已成功后的**缩短重放**：同样 fail-closed，不复用任意一笔结果
+  （`test_shortened_replay_after_two_completed_identical_ops_fails_closed`）
 
 ### 4.2 全量单测 / 静态检查
 
 ```text
 $ python -m pytest tests/unit -q
-3477 passed, 5 skipped
+3481 passed, 5 skipped
 
 $ ruff check .
 All checks passed!
+$ ruff format --check .
+411 files already formatted
 ```
+
+（Ruff 使用仓库 pin 的 `ruff==0.4.0`；PATH 上更新的 ruff 0.16.x 会产生规则漂移假失败，
+不得作为判据。）
 
 ### 4.3 真实 PostgreSQL + Redis（本机真实依赖）
 
@@ -183,8 +196,11 @@ $ python scripts/verify_distributed_runtime.py
 - **仍不可区分「无任何持久化痕迹的同参提案」**：若 attempt1 只提出过一次 A、attempt2
   再次提出 A，二者在系统内**完全等价**；此时按「重放」去重（与既有 ledger 存在理由一致）。
   需要区分时必须由调用方提供显式、持久的 `logical_operation_id`（HITL / 外部业务键）。
-  **本修复把「可被持久化记录的第二次同参提案」从不丢失，但不宣称能把任意非确定 LLM
-  输出自动映射回原始业务意图。**
+- **缩短的同参重放不做业务意图猜测**：当持久化历史中存在**多笔**同内容 occurrence，
+  而本次只提出其中一部分（包括「A₁ 成功 + A₂ 预占」以及「多笔均已成功」两种形态），
+  系统无法判定该提案对应哪一笔，必须以 `OperationIdentityUnavailable` **fail-closed**。
+  **持久化预占让可识别的恢复场景（完整重放 / 显式 ID）不丢失；但不能把任意非确定
+  LLM 输出自动映射回原始业务意图。**
 - **参数须跨重放确定**：LLM 幻觉出新的 nonce/时间戳会被内容寻址当成另一笔。
 - **HITL 语义未变**：`run_id:approval:{approval_id}` 保持不变；`/api/chat` 快路径无 run
   上下文，不在本治理边界内。

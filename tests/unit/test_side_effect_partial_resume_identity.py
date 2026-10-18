@@ -32,11 +32,18 @@ what a SIGKILL between two tool executions looks like.
 Cases
 -----
 A  true replay of A1 -> deduped (must keep working)
-B  A1 succeeded, resume proposes only A2 -> A2 must not be silently swallowed
+B  A1 succeeded, resume proposes only A2 -> ambiguous without a durable id ->
+   fail closed (never silently swallow, never blindly execute A2)
 C  full replay [A1, A2] -> both stable, no extra execution
-D  reordered recovery [A1, B, A2] -> recovery [B, A2] -> no collision / no loss
+D  reordered shortened recovery [A1, B, A2] -> [B, A2] -> ambiguous A ->
+   fail closed (no collision, no arbitrary result reuse, no new write)
 E  explicit stable ``logical_operation_id`` survives occurrence reset
 F  crash / redelivery / result-replay / fingerprint-conflict boundaries
+
+Rule: a shortened same-content proposal set against multiple durable
+occurrences is never resolved by guessing. Only a full proposal set preserves
+the persisted occurrence order; otherwise the caller must supply an explicit,
+durable ``logical_operation_id``.
 """
 
 from __future__ import annotations
@@ -228,10 +235,14 @@ async def test_case_a_true_replay_of_a1_is_deduped(ledger):
 async def test_case_b_resume_only_a2_is_not_silently_swallowed(ledger):
     """A1 succeeds; the worker dies before A2. Recovery proposes only A2.
 
-    A2 is a real, independent business operation. It must either be executed
-    (identity confirmed from durable state) or fail closed -- never be
-    silently replaced by A1's stored success.
+    The lone A is ambiguous: it may be a true replay of A1 or the first
+    execution of A2. Content and reservation slots cannot distinguish those
+    business intents, so the safe automatic outcome is fail-closed. The
+    caller must not see a silent success, and the resolver must not blindly
+    execute A2 either.
     """
+    from runtime.operation_identity import OperationIdentityUnavailable
+
     calls: list[dict] = []
 
     # Attempt 1: two identical proposals; write #1 (A1) commits, then crash
@@ -246,23 +257,16 @@ async def test_case_b_resume_only_a2_is_not_silently_swallowed(ledger):
 
     # Recovery: LLM proposes only A2 (same arguments). The in-node counter
     # restarts from 0, so a naive implementation maps A2 -> K0 (A1's key).
-    failure: Exception | None = None
-    try:
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
         await _make_agent(
             _ScriptedLLM([[_tc("y1", "staging_refund", A)], None]), calls
         )._process_with_tools(_state(), "你是客服。")
-    except Exception as exc:  # pragma: no cover - only on the fail-closed branch
-        failure = exc
 
-    if failure is not None:
-        # Fail-closed is acceptable: the caller must not see a silent success.
-        assert "written:1" not in str(failure)
-        return
-
-    assert calls.count(A) == 2, (
-        "A2 is an independent business operation and must be executed; getting 1 means "
-        "the partial-resume occurrence-reset collided with A1's key and silently dropped A2 "
-        "(Issue #12 Part A partial-resume residual)"
+    assert calls == [A], "ambiguous shortened replay must not execute another refund"
+    statuses = [row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"]
+    assert sorted(statuses) == ["PENDING", "SUCCEEDED"], (
+        "A1 stays SUCCEEDED and the interrupted A2 reservation stays PENDING; "
+        "neither may be turned into a second success by guessing"
     )
 
 
@@ -295,6 +299,16 @@ async def test_case_c_full_replay_of_two_identical_ops(ledger):
 
 
 async def test_case_d_reordered_recovery_does_not_collide(ledger):
+    """A shortened reordered replay must fail closed, not reuse an arbitrary result.
+
+    Attempt 1 completes ``[A1, B, A2]``. Recovery proposes ``[B, A2]``: B is a
+    full one-for-one replay, but A is shortened from two occurrences to one.
+    Nothing identifies which A result the caller means (A1 or A2), so the
+    resolver must refuse rather than return an arbitrary stored result. No new
+    write may execute.
+    """
+    from runtime.operation_identity import OperationIdentityUnavailable
+
     calls: list[dict] = []
 
     # Attempt 1 completes: [A1, B, A2]
@@ -314,21 +328,50 @@ async def test_case_d_reordered_recovery_does_not_collide(ledger):
     assert calls.count(A) == 2 and calls.count(B) == 1
 
     # Recovery reorders / drops the already-executed first occurrence: [B, A2]
-    await _make_agent(
-        _ScriptedLLM(
-            [
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
+        await _make_agent(
+            _ScriptedLLM(
                 [
-                    _tc("s1", "staging_refund", B),
-                    _tc("s2", "staging_refund", A),
-                ],
-                None,
-            ]
-        ),
+                    [
+                        _tc("s1", "staging_refund", B),
+                        _tc("s2", "staging_refund", A),
+                    ],
+                    None,
+                ]
+            ),
+            calls,
+        )._process_with_tools(_state(), "你是客服。")
+
+    assert calls.count(A) == 2, "ambiguous reordered recovery must not execute another A"
+    assert calls.count(B) == 1, "ambiguous reordered recovery must not execute another B"
+
+
+async def test_shortened_replay_after_two_completed_identical_ops_fails_closed(ledger):
+    """Two completed identical writes + a lone A -> no arbitrary result reuse.
+
+    This covers the all-SUCCEEDED variant of the ambiguity (the original
+    guard only looked at ``executed + unexecuted`` mixed history). Reusing
+    either stored result would silently answer for the wrong business
+    operation, so the resolver must fail closed.
+    """
+    from runtime.operation_identity import OperationIdentityUnavailable
+
+    calls: list[dict] = []
+
+    await _make_agent(
+        _ScriptedLLM([[_tc("m1", "staging_refund", A), _tc("m2", "staging_refund", A)], None]),
         calls,
     )._process_with_tools(_state(), "你是客服。")
+    assert calls.count(A) == 2
 
-    assert calls.count(A) == 2, "reordered recovery must not lose or duplicate A"
-    assert calls.count(B) == 1, "reordered recovery must not duplicate B"
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
+        await _make_agent(
+            _ScriptedLLM([[_tc("m3", "staging_refund", A)], None]), calls
+        )._process_with_tools(_state(), "你是客服。")
+
+    assert calls.count(A) == 2, "a shortened replay must not execute a third refund"
+    statuses = [row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"]
+    assert statuses == ["SUCCEEDED", "SUCCEEDED"], "no extra reservation or success may appear"
 
 
 # ---------------------------------------------------------------------------
@@ -538,15 +581,13 @@ async def test_ambiguous_single_proposal_after_two_reservations_fails_closed(led
         )._process_with_tools(_state(), "你是客服。")
     assert calls == [A]
 
-    with pytest.raises(OperationIdentityUnavailable, match="ambiguous partial replay"):
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
         await _make_agent(
             _ScriptedLLM([[_tc("ambiguous", "staging_refund", A)], None]), calls
         )._process_with_tools(_state(), "你是客服。")
 
     assert calls == [A], "ambiguous replay must not execute a second refund"
-    statuses = [
-        row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"
-    ]
+    statuses = [row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"]
     assert sorted(statuses) == ["PENDING", "SUCCEEDED"]
 
 
@@ -567,15 +608,11 @@ async def test_full_replay_after_partial_execution_preserves_order(ledger):
     )._process_with_tools(_state(), "你是客服。")
 
     assert calls.count(A) == 2, "full replay must execute the missing write only once"
-    statuses = [
-        row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"
-    ]
+    statuses = [row["status"] for row in _all_rows(ledger) if row["tool_name"] == "staging_refund"]
     assert statuses.count("SUCCEEDED") == 2
 
 
-async def test_run_resolver_unavailable_never_falls_back_to_memory_counter(
-    ledger, monkeypatch
-):
+async def test_run_resolver_unavailable_never_falls_back_to_memory_counter(ledger, monkeypatch):
     """A failed durable-identity store must fail closed even if an LLM proposes A."""
     from runtime import side_effects
     from runtime.operation_identity import OperationIdentityUnavailable

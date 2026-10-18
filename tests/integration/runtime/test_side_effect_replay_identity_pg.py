@@ -354,6 +354,9 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
     后 worker 崩溃，occ1 仍是未执行的预占。恢复时只提出一个无业务 ID 的 A，
     无法判断是 A1 重放还是 A2 首次执行，必须 fail-closed；当完整提出 [A1,A2]
     时保留原序号，A1 去重且 A2 执行，合计两笔合法写入。
+
+    两笔都 SUCCEEDED 后的**缩短重放**同样无法判定对应哪一笔，也必须 fail-closed，
+    不得复用任意一笔的历史结果。
     """
     from runtime.operation_identity import ContentOccurrenceResolver
     from runtime.side_effects import build_replay_stable_operation_key
@@ -403,7 +406,7 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
     resolver2 = ContentOccurrenceResolver(
         run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
     )
-    with pytest.raises(OperationIdentityUnavailable, match="ambiguous partial replay"):
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
         resolver2.assign([(tool, args)])
     assert external.executions == 1, "ambiguous shortened replay must not issue another refund"
 
@@ -415,3 +418,12 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
     await _run(key(0))
     await _run(key(1))
     assert external.executions == 2, "full replay must recover exactly the missing refund"
+
+    # Both occurrences are now SUCCEEDED. A shortened replay is still
+    # ambiguous (which result would the caller mean?) and must fail closed.
+    resolver4 = ContentOccurrenceResolver(
+        run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
+    )
+    with pytest.raises(OperationIdentityUnavailable, match="ambiguous shortened replay"):
+        resolver4.assign([(tool, args)])
+    assert external.executions == 2, "ambiguous shortened replay must not issue a third refund"
