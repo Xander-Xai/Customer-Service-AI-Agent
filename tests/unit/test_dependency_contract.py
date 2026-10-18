@@ -202,16 +202,16 @@ def test_prometheus_client_is_declared():
 def test_cryptography_is_declared():
     """回归锁定：cryptography 是会话加密的运行时依赖，必须**直接**声明。
 
-    ``core/session/session_manager.py`` 在配置 ``SESSION_ENCRYPTION_KEY`` 时延迟
-    import ``cryptography.fernet``；缺失时 ``_encrypt_data`` 的
-    ``except ImportError`` 会**静默降级为明文存储**且不报错。此前它只由
-    ``pdfplumber -> pdfminer.six`` 传递提供 —— 该链条一旦断裂就会无声关闭加密。
-    直接声明消除这条静默降级路径，因此不允许退回"某个传递依赖恰好提供"。
+    ``core/session/session_manager.py`` 在配置 ``SESSION_ENCRYPTION_KEY`` 时使用
+    ``cryptography.fernet`` 做 Fernet（AES-128-CBC + HMAC-SHA256）加密。按现在的
+    fail-closed 语义，缺失时加密路径会抛 ``SessionEncryptionError`` 而不是写入明文；
+    直接声明保证该安全功能真的可用，而不是依赖"某个传递依赖恰好提供"。
     """
     declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
     assert "cryptography" in declared, (
         "requirements.txt 必须直接声明 cryptography：core/session/session_manager.py "
-        "在 SESSION_ENCRYPTION_KEY 启用时用它做 AES-256-Fernet 加密，缺失时静默降级为明文"
+        "在 SESSION_ENCRYPTION_KEY 启用时用 Fernet（AES-128-CBC + HMAC-SHA256）加密；"
+        "缺失会导致 fail-closed 加密失败，不能依赖传递依赖碰巧提供"
     )
 
 

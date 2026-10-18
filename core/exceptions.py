@@ -69,6 +69,19 @@ class SessionError(AppError):
         super().__init__(message, code)
 
 
+class SessionEncryptionError(SessionError):
+    """Session data encryption/decryption failure (fail-closed).
+
+    Raised when ``SESSION_ENCRYPTION_KEY`` is configured but the data cannot be
+    encrypted/decrypted safely — e.g. ``cryptography`` (Fernet) is unavailable,
+    the stored value is a corrupted/tampered Fernet token, or the key does not
+    match. Callers must NOT fall back to storing or returning plaintext.
+    """
+
+    def __init__(self, message: str = "会话数据加密失败", code: str = "SESSION_ENCRYPTION_ERROR"):
+        super().__init__(message, code)
+
+
 class ERPError(AppError):
     """ERP system integration error."""
 
