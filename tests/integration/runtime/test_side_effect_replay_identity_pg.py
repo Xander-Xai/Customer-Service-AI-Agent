@@ -400,9 +400,8 @@ async def test_partial_resume_recovers_interrupted_identical_write(store, cleanu
     resolver2 = ContentOccurrenceResolver(
         run_id=run_id, node_id=node_id, agent=agent, store=store, thread_id=thread_id
     )
-    assert resolver2.assign([(tool, args)]) == [1], (
-        "恢复必须解析回被中断的 occ1，而不是重新编号到 occ0 去撞第一笔的成功结果"
-    )
+    assert resolver2.assign([(tool, args)]) == [
+        1
+    ], "恢复必须解析回被中断的 occ1，而不是重新编号到 occ0 去撞第一笔的成功结果"
     await _run(key(1))
     assert external.executions == 2, "第二笔合法写操作恢复后必须恰好执行一次"
-
