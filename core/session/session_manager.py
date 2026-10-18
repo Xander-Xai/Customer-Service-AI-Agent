@@ -44,6 +44,7 @@ from core.config import (
 from core.config import (
     SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
 )
+from core.exceptions import SessionEncryptionError
 from core.logger import get_logger
 
 # Re-exports: symbols imported from split modules by external callers (agents, cache, orchestrator, tests)
@@ -134,7 +135,16 @@ def _dual_mode(async_func):
 
 
 # ---------------------------------------------------------------------------
-# H-2: 会话数据加密（AES-256-Fernet）
+# H-2: 会话数据加密（Fernet：AES-128-CBC + HMAC-SHA256，带时间戳与认证）
+#
+# 安全语义（fail-closed）：一旦配置了 SESSION_ENCRYPTION_KEY，加密就是**必需**的，
+# 不允许把"无法加密/无法解密"静默降级为明文：
+#   * 未配置 key           -> 明文读写（既有的、明确设计的兼容行为）
+#   * 已配置 key + 加密失败 -> 抛 SessionEncryptionError（不写明文）
+#   * 已配置 key + 密文解密失败（坏数据/错误密钥）-> 抛 SessionEncryptionError
+# 为兼容启用加密**之前**写入的历史明文，用 :func:`_is_fernet_token` 区分
+# "密文" 与 "历史明文"：本仓库持久化内容一律是 JSON（以 '[' / '{' 开头），
+# 永远不可能是合法 Fernet token，因此规则可判定、可测试、不混淆两者。
 # ---------------------------------------------------------------------------
 
 
@@ -151,32 +161,64 @@ def _get_encryption_key() -> bytes | None:
     return hashlib.sha256(key_bytes).digest()
 
 
-def _encrypt_data(data: str, key: bytes | None) -> str:
-    """加密数据。无 key 时返回原文（向后兼容）。"""
-    if not key:
-        return data
+def _get_fernet(key: bytes):
+    """构造 Fernet 实例；cryptography 不可用时**明确失败**（不返回明文）。"""
     try:
         from cryptography.fernet import Fernet
+    except ImportError as e:  # 由 test_session_encryption.py 的故障注入覆盖
+        raise SessionEncryptionError(
+            "SESSION_ENCRYPTION_KEY 已配置但 cryptography(Fernet) 不可用，拒绝以明文继续"
+        ) from e
+    try:
+        return Fernet(_base64.urlsafe_b64encode(key))
+    except Exception as e:
+        raise SessionEncryptionError("Fernet 初始化失败（加密密钥非法）") from e
 
-        f = Fernet(_base64.urlsafe_b64encode(key))
-        return f.encrypt(data.encode("utf-8")).decode("utf-8")
-    except ImportError:
+
+def _is_fernet_token(data: str) -> bool:
+    """判断 ``data`` 是否是 Fernet 密文。
+
+    Fernet token 按规范是 ``base64url(0x80 || ...)``，解码后首字节恒为 ``0x80``。
+    历史明文（JSON）以 ``[`` / ``{`` 开头，不是合法 base64url，必然返回 False，
+    因此不会把明文误判为密文、也不会把密文误判为明文。
+    """
+    if not isinstance(data, str) or not data:
+        return False
+    try:
+        raw = _base64.b64decode(data.encode("ascii"), altchars=b"-_", validate=True)
+    except Exception:
+        return False
+    return len(raw) > 0 and raw[0] == 0x80
+
+
+def _encrypt_data(data: str, key: bytes | None) -> str:
+    """加密数据。未配置 key 时返回原文（既有兼容行为）；否则加密失败即抛错。"""
+    if not key:
         return data
+    fernet = _get_fernet(key)
+    try:
+        return fernet.encrypt(data.encode("utf-8")).decode("utf-8")
+    except Exception as e:
+        raise SessionEncryptionError("会话数据加密失败") from e
 
 
 def _decrypt_data(data: str, key: bytes | None) -> str:
-    """解密数据。无 key 时返回原文（向后兼容）。"""
+    """解密数据。
+
+    * 未配置 key -> 原文返回（既有兼容行为）。
+    * 已配置 key + Fernet 密文 -> 解密；失败（坏数据/错误密钥）抛
+      SessionEncryptionError，绝不把失败的密文当作明文返回。
+    * 已配置 key + 历史明文（非 Fernet token）-> 原样返回，兼容启用加密前的数据。
+    """
     if not key:
         return data
+    if not _is_fernet_token(data):
+        return data
+    fernet = _get_fernet(key)
     try:
-        from cryptography.fernet import Fernet
-
-        f = Fernet(_base64.urlsafe_b64encode(key))
-        return f.decrypt(data.encode("utf-8")).decode("utf-8")
-    except ImportError:
-        return data
-    except Exception:
-        return data
+        return fernet.decrypt(data.encode("utf-8")).decode("utf-8")
+    except Exception as e:
+        raise SessionEncryptionError("会话密文解密失败（密钥不匹配或数据损坏）") from e
 
 
 class EnhancedSessionManager:
@@ -283,6 +325,10 @@ class EnhancedSessionManager:
                     key = _get_encryption_key()
                     decrypted = _decrypt_data(raw, key)
                     return json.loads(decrypted)
+                except SessionEncryptionError:
+                    # fail-closed：密文损坏/密钥错误时**不**静默当空会话继续。
+                    logger.error("会话密文解密失败，拒绝加载 session=%s", session_id)
+                    raise
                 except Exception as e:
                     logger.warning(f"加载会话文件失败 session={session_id}: {e}")
         return []
@@ -297,10 +343,18 @@ class EnhancedSessionManager:
                 raw = json.dumps(messages, ensure_ascii=False)
                 key = _get_encryption_key()
                 encrypted = _encrypt_data(raw, key)
+            except SessionEncryptionError:
+                # fail-closed：加密失败时**不**把明文写入磁盘。
+                logger.error("会话加密失败，拒绝写入明文 session=%s", session_id)
+                raise
+            except Exception as e:
+                logger.warning(f"文件保存失败: {e}")
+                return
+            try:
                 with open(fp, "w", encoding="utf-8") as f:
                     f.write(encrypted)
             except Exception as e:
-                logger.warning(f"文件保存失败: {e}")
+                logger.warning(f"文件写入失败: {e}")
 
     # ------------------------------------------------------------------
     # [S3] 会话生命周期（创建 / 获取 / 淘汰 / 删除）
@@ -383,6 +437,10 @@ class EnhancedSessionManager:
                         }
                         logger.debug(f"从 Redis 加载会话: {session_id}")
                         return session_id
+                except SessionEncryptionError:
+                    # fail-closed：不把损坏/错误密钥的密文当成空会话继续。
+                    logger.error("Redis 会话解密失败，拒绝加载 session=%s", session_id)
+                    raise
                 except Exception as e:
                     logger.warning(f"Redis 读取失败: {e}")
 
@@ -545,6 +603,10 @@ class EnhancedSessionManager:
                         )
 
                     await asyncio.to_thread(_redis_save)
+                except SessionEncryptionError:
+                    # fail-closed：加密失败时不写入、也不静默当成保存成功。
+                    logger.error("Redis 会话加密失败 session=%s", session_id)
+                    raise
                 except Exception as e:
                     logger.warning(f"Redis 保存失败: {e}")
 
