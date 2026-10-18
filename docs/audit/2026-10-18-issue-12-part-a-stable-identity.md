@@ -118,6 +118,11 @@ $ pytest tests/unit/test_side_effect_ordinal_scope.py \
 
 - **端到端 exactly-once NOT PROVIDED。** 本修复只保证本仓 ledger 的 application-level
   去重；下游外部系统若需去重，仍须接受本仓传出的 idempotency key（或人工对账）。
+- **部分恢复（同参不同业务操作）残差另有专项修复（2026-10-18）。** 内容寻址身份在当时
+  仍依赖「节点局部 occurrence 计数器」；worker 在「两笔同参写只执行了第一笔」后崩溃并
+  整节点重放、且恢复只提出第二笔时，第二笔会被重新编号到 occurrence 0 撞上第一笔的成功
+  键被静默吞掉。该残差已由持久化 occurrence 预占 + 恢复解析修复，证据见
+  [2026-10-18-issue-12-part-a-partial-resume-identity.md](2026-10-18-issue-12-part-a-partial-resume-identity.md)。
 - **参数须跨重放确定。** 若 LLM 在重放时对同一笔写产生新的 nonce/时间戳，内容寻址会
   把它当成另一笔操作。这是内容寻址的固有边界，不是本仓缺陷。
 - **HITL 语义未变。** `operation_key = run_id:approval:{approval_id}` 保持不变。

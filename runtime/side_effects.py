@@ -343,6 +343,106 @@ class SideEffectStore:
         finally:
             session.close()
 
+    def get_statuses(self, tool_name: str, operation_keys: list[str]) -> dict[str, str]:
+        """批量返回 ``operation_key -> status``（只读，供重放身份解析）。
+
+        用于「同一个内容在此作用域下已经出现过哪些 occurrence、各自进展到哪」：
+        调用方据此区分**真正重放**（复用已完成项）与**被中断后尚未落账的提案**
+        （需要恢复执行），而不是仅凭当前这次尝试里的计数重新从 0 开始。
+        """
+        keys = [k for k in operation_keys if k]
+        if not keys:
+            return {}
+        session = self._session()
+        try:
+            rows = session.execute(
+                select(ToolSideEffect.operation_key, ToolSideEffect.status).where(
+                    ToolSideEffect.tool_name == tool_name,
+                    ToolSideEffect.operation_key.in_(keys),
+                )
+            ).all()
+            return {key: status for key, status in rows}
+        finally:
+            session.close()
+
+    def reserve_operation(
+        self,
+        *,
+        tool_name: str,
+        operation_key: str,
+        run_id: str,
+        thread_id: str | None,
+        fingerprint: str,
+    ) -> None:
+        """持久化一次**尚未执行**的写操作身份（reservation，无 owner）。
+
+        「部分恢复」的核心证据：节点在一次尝试里提出了 N 个**参数完全相同**的写，
+        但只在第 1 个落账后崩溃。若第 2 个的身份从未持久化，恢复时它会被重新编号成
+        occurrence 0、撞上第 1 个已成功的 key，从而被静默吞掉。因此**在执行任何写之前**
+        先把本轮全部同内容 occurrence 的身份写进 ledger（PENDING、无 owner），崩溃也
+        不会丢：恢复编排放置器能读到「这里本来还有一笔未执行的写」。
+
+        无 owner 的 PENDING 行与「已被认领、正在执行」的行**可区分**：
+        :meth:`claim` 把无 owner 的 PENDING 视为可接管（没人持有），有 owner 的
+        PENDING 才受租约保护。唯一约束保证并发插入幂等（``ON CONFLICT DO NOTHING``）。
+        """
+        now = _utcnow()
+        session = self._session()
+        try:
+            dialect = session.bind.dialect.name if session.bind is not None else ""
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+                stmt = (
+                    pg_insert(ToolSideEffect)
+                    .values(
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        tool_name=tool_name,
+                        operation_key=operation_key,
+                        request_fingerprint=fingerprint,
+                        status=STATUS_PENDING,
+                        claim_owner=None,
+                        claim_expires_at=None,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[ToolSideEffect.tool_name, ToolSideEffect.operation_key],
+                    )
+                )
+                session.execute(stmt)
+                session.commit()
+                return
+            existing = session.execute(
+                select(ToolSideEffect.id).where(
+                    ToolSideEffect.tool_name == tool_name,
+                    ToolSideEffect.operation_key == operation_key,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return
+            session.add(
+                ToolSideEffect(
+                    run_id=run_id,
+                    thread_id=thread_id,
+                    tool_name=tool_name,
+                    operation_key=operation_key,
+                    request_fingerprint=fingerprint,
+                    status=STATUS_PENDING,
+                    claim_owner=None,
+                    claim_expires_at=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+        finally:
+            session.close()
+
     def claim(
         self,
         *,
@@ -465,6 +565,38 @@ class SideEffectStore:
                 if row.request_fingerprint == fingerprint:
                     return SideEffectClaim(CLAIM_SUCCEEDED, row.result_reference, owner=None)
                 return SideEffectClaim(CLAIM_CONFLICT, owner=None)
+
+            # 无 owner 的 PENDING = 一次**预占**（reservation，见
+            # :meth:`reserve_operation`）：没人持有它，可以被本次执行接管。
+            # 这与「有 owner、受租约保护的在途执行」不同——后者才必须等租约过期。
+            # 用条件 UPDATE（``claim_owner IS NULL``）原子夺取，避免无行锁方言上
+            # 两个认领者同时判为可执行。
+            if row.status == STATUS_PENDING and row.claim_owner is None:
+                if row.request_fingerprint != fingerprint:
+                    # 同一个预占槽位出现了不同参数：身份无法确认，拒绝执行。
+                    return SideEffectClaim(CLAIM_CONFLICT, owner=None)
+                taken = session.execute(
+                    update(ToolSideEffect)
+                    .where(
+                        ToolSideEffect.tool_name == tool_name,
+                        ToolSideEffect.operation_key == operation_key,
+                        ToolSideEffect.status == STATUS_PENDING,
+                        ToolSideEffect.claim_owner.is_(None),
+                        ToolSideEffect.request_fingerprint == fingerprint,
+                    )
+                    .values(
+                        run_id=run_id,
+                        thread_id=thread_id,
+                        claim_owner=owner,
+                        claim_expires_at=now + timedelta(seconds=claim_ttl_seconds),
+                        updated_at=now,
+                    )
+                )
+                session.commit()
+                if taken.rowcount == 1:
+                    return SideEffectClaim(CLAIM_EXECUTE, owner=owner)
+                # 竞争失败：另一个执行者已夺走预占 -> 交由调用方退避重试。
+                return SideEffectClaim(CLAIM_IN_PROGRESS, owner=None)
 
             lease_expired = _claim_lease_expired(row, claim_ttl_seconds)
             if row.status == STATUS_PENDING and not lease_expired:

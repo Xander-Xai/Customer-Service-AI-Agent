@@ -119,6 +119,17 @@ def _exec_kwargs(stream_callback: Any, tool_call_id: Any, logical_call: Any) -> 
     return kwargs
 
 
+def _logical_node_id(agent: str, state: dict[str, Any]) -> str:
+    """节点身份 = agent 名 + 本 run 内该 agent 的调用序号（见 ``_build_logical_call``）。
+
+    ``agents_used`` 是 **checkpointed** state，节点重放时从本节点输入状态重新开始，
+    序号与首次一致 -> 键跨重放稳定；同一 run 内同名 agent 被第二次调用时序号不同。
+    """
+    used = state.get("agents_used") or []
+    invocation = list(used).count(agent) if isinstance(used, list) else 0
+    return f"{agent}#{invocation}"
+
+
 def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, ordinal: int) -> Any:
     """构造一次写操作调用的**重放稳定**逻辑身份（``tools.LogicalCall``）。
 
@@ -158,9 +169,7 @@ def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, or
     """
     from tools.tool_registry import LogicalCall
 
-    used = state.get("agents_used") or []
-    invocation = list(used).count(agent) if isinstance(used, list) else 0
-    return LogicalCall(node_id=f"{agent}#{invocation}", agent=agent, ordinal=int(ordinal))
+    return LogicalCall(node_id=_logical_node_id(agent, state), agent=agent, ordinal=int(ordinal))
 
 
 def _record_tool_execution(state: dict[str, Any], tool_name: str, *, ok: bool) -> None:
@@ -704,6 +713,35 @@ class BaseAgent(ABC):
 
         return session_id, messages, drift
 
+    def _build_occurrence_resolver(self, state: dict[str, Any]) -> Any:
+        """构造写操作持久化身份解析器；无 Run 上下文时返回 ``None``（实时快路径）。
+
+        只读工具与实时快路径完全不受影响：没有 Run 上下文就没有 side-effect ledger，
+        解析器为 ``None``，工具循环退回纯内存行为（见 ``_process_with_tools``）。
+        """
+        try:
+            from runtime.context import get_current_run_id, get_current_thread_id
+
+            run_id = get_current_run_id()
+        except Exception:
+            return None
+        if not run_id:
+            return None
+        try:
+            from runtime.operation_identity import ContentOccurrenceResolver
+            from runtime.side_effects import get_side_effect_store
+
+            return ContentOccurrenceResolver(
+                run_id=run_id,
+                node_id=_logical_node_id(self.name, state),
+                agent=self.name,
+                thread_id=get_current_thread_id(),
+                store=get_side_effect_store(),
+            )
+        except Exception:
+            self.logger.warning("写操作持久身份解析器不可用", exc_info=True)
+            return None
+
     # NOTE: _process_with_llm and _process_with_tools share identical pre-processing
     # (A/B variant resolution + _prepare_llm_messages + _get_effective_llm) and
     # post-processing (session save + state mutation + A/B recording + event publish).
@@ -759,34 +797,33 @@ class BaseAgent(ABC):
         # 就 break（无工具调用 / LLM 异常），在分支内声明会 NameError。
         _deferred: list[dict] = []
 
-        # ``_logical_ordinals`` 给出「本节点内、**相同调用内容**」的第 n 次出现序号
-        # （按 ``(工具名, 参数内容指纹)`` 分槽）。它是「有意重复」的区分键，不是全
-        # 序列里的位置，因此：
+        # 写操作的逻辑身份解析（Issue #12 Part A 的**部分恢复**残差）。
         #
-        # - 同一笔写即使重放时**重排**到别的槽位，内容指纹不变、内容出现序号不变，
-        #   拿到同一个 ``operation_key``（Issue #12 Part A 修复点）；
-        # - 参数相同的有意重复（两次各退款 100 元）得到不同出现序号 = 不同操作，不会
-        #   被静默合并或被指纹冲突永久拒绝。
+        # 过去每个写操作的身份只看「本节点内、相同内容的第 n 次出现」（``occurrence``
+        # 计数器，节点局部变量）。节点在 checkpoint 提交前崩溃并被整节点重放时，计数器
+        # 从 0 重新开始；若重放只再次提出**第二笔**同参数合法写操作，它会被重新编号到
+        # occurrence 0，撞上第一笔已成功的 key，被 ledger 静默吞掉。
         #
-        # 计数器必须声明在**轮次循环之外**（与 `_deferred` 同理）：一个节点可跨多个
-        # LLM round。若每轮重新初始化，round r 的第 1 次调用与 round r+1 的第 1 次
-        # 调用会拿到同一个出现序号 -> 同一个 operation_key，两次合法写被误合并
-        # （Issue #12 Part B，回归见
-        # ``tests/unit/test_side_effect_ordinal_scope.py``）。
+        # 因此身份改为锚定到**持久化**的 occurrence：本次尝试开始时先快照 ledger 里已有
+        # 的 occurrence（上次中断留下的「未执行提案」或已完成项），据此把本轮每个写操作
+        # 解析到：未执行项（恢复执行）> 已成功项（真重放去重）> 全新 occurrence。新增的
+        # occurrence 在**执行任何写之前**先持久化预占，崩溃也不丢（见
+        # ``runtime/operation_identity.py``）。
         #
-        # 计数器仍是**节点局部**变量：节点重放时整个方法从头执行，序号从 0 重新
-        # 开始，与首次执行一致 —— 这才是「与 checkpoint 回放到本节点起点一致」的
-        # 正确含义。
-        _logical_ordinals: dict[tuple[str, str], int] = {}
+        # 计数器/解析器声明在**轮次循环之外**（与 `_deferred` 同理）：一个节点可跨多个
+        # LLM round，跨轮必须单调推进（Issue #12 Part B）。没有 Run 上下文（实时快路径）
+        # 时解析器为 None，退回纯内存计数——该路径不经 ledger，序号不影响行为。
+        _legacy_ordinals: dict[tuple[str, str], int] = {}
 
-        def _content_occurrence(tool_name: str, args: dict[str, Any]) -> int:
-            """返回并推进「本节点内该工具该内容」的出现序号（内容寻址，非位置）。"""
+        def _legacy_content_occurrence(tool_name: str, args: dict[str, Any]) -> int:
             from runtime.side_effects import request_fingerprint
 
             key = (tool_name, request_fingerprint(args))
-            value = _logical_ordinals.get(key, 0)
-            _logical_ordinals[key] = value + 1
+            value = _legacy_ordinals.get(key, 0)
+            _legacy_ordinals[key] = value + 1
             return value
+
+        _occurrence_resolver = self._build_occurrence_resolver(state)
 
         for round_num in range(max_tool_rounds):
             try:
@@ -844,32 +881,56 @@ class BaseAgent(ABC):
                     )
                 )
 
-                # 执行每个工具调用，追加 ToolMessage
+                # 执行每个工具调用，追加 ToolMessage。
                 #
-                # ``_logical_ordinals``（声明在轮次循环之外）按
-                # ``(工具名, 参数内容指纹)`` 分槽给出「本节点内该工具该内容」的第 n
-                # 次出现序号，跨 LLM round 单调递增。它区分**有意重复**（两轮各退款
-                # 100 元拿到不同序号 = 不同 operation_key，Issue #12 Part B），而同一
-                # 笔写重排到别的槽位不会改变它的内容出现序号（Issue #12 Part A）。
-                for p in parsed_tcs:
-                    _ordinal = _content_occurrence(p["name"], p["args"])
+                # 先做**预解析**：一次性为本轮全部**写操作**提案分配持久化逻辑身份
+                # （并把全新 occurrence 预占落账），再逐条执行。必须在执行前解析，
+                # 否则一次尝试的「提案集合」只会在崩溃前部分落账，恢复时无法区分
+                # 「真重放」与「被中断的第二次合法操作」（Issue #12 Part A 部分恢复）。
+                #
+                # HITL 高风险动作在此**不**分配：它们被摘出、走审批路径，身份由
+                # ``run_id:approval:{approval_id}`` 承担，与内容寻址无关。
+                _round_ordinals: list[int | None] = [None] * len(parsed_tcs)
+                if self.tool_registry is not None:
+                    _side_positions: list[int] = []
+                    _side_proposals: list[tuple[str, dict[str, Any]]] = []
+                    for _idx, p in enumerate(parsed_tcs):
+                        try:
+                            _is_side = self.tool_registry.is_side_effect(p["name"]) is True
+                        except Exception:
+                            _is_side = False
+                        if not _is_side:
+                            continue
+                        if _should_gate_tool(p["name"], p["args"], self.tool_registry):
+                            continue
+                        _side_positions.append(_idx)
+                        _side_proposals.append((p["name"], p["args"]))
+                    if _side_proposals:
+                        if _occurrence_resolver is not None:
+                            _resolved = _occurrence_resolver.assign(_side_proposals)
+                            for _pos, _ord in zip(_side_positions, _resolved, strict=False):
+                                _round_ordinals[_pos] = _ord
+                        else:
+                            for _pos in _side_positions:
+                                _p = parsed_tcs[_pos]
+                                _round_ordinals[_pos] = _legacy_content_occurrence(
+                                    _p["name"], _p["args"]
+                                )
+
+                for _tc_idx, p in enumerate(parsed_tcs):
                     # 只有**写操作**工具需要重放稳定的逻辑身份（只有它们经过
                     # ledger）；只读工具传 `logical_call=None`，既省掉一次构造，
-                    # 也让只读路径的调用签名保持稳定。
-                    #
-                    # 判定用 `is True` 而不是真值：`MagicMock.is_side_effect(...)`
-                    # 返回的是一个真值 Mock，若用真值判定，测试替身会被误认为
-                    # 「是写操作」，凭空给只读工具加上逻辑身份。
+                    # 也让只读路径的调用签名保持稳定。`_round_ordinals[idx]` 为
+                    # ``None`` 即该调用不经过内容寻址身份（只读 / 已摘出的 HITL）。
+                    _ordinal = _round_ordinals[_tc_idx]
                     _logical_call = None
-                    if self.tool_registry is not None:
-                        with contextlib.suppress(Exception):
-                            if self.tool_registry.is_side_effect(p["name"]) is True:
-                                _logical_call = _build_logical_call(
-                                    agent=self.name,
-                                    state=state,
-                                    tool_name=p["name"],
-                                    ordinal=_ordinal,
-                                )
+                    if _ordinal is not None:
+                        _logical_call = _build_logical_call(
+                            agent=self.name,
+                            state=state,
+                            tool_name=p["name"],
+                            ordinal=_ordinal,
+                        )
                     cache_policy = (
                         self.tool_registry.cache_policy_for(p["name"])
                         if hasattr(self.tool_registry, "cache_policy_for")
