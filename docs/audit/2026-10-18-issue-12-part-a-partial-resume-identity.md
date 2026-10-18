@@ -1,5 +1,17 @@
 # Issue #12 Part A 残差 — 同参写操作「部分恢复」身份专项（2026-10-18）
 
+> **最终安全复核补充（覆盖下文早期自动恢复结论）**：当历史 ledger 同时包含
+> SUCCEEDED 的 A₁ 和 PENDING 的 A₂，而恢复模型只提出一个无显式
+> `logical_operation_id` 的同参数 A 时，单靠内容和预占槽位**无法判断**
+> 该 A 是 A₁ 重放还是 A₂ 首次执行。早期“PENDING 优先、自动执行 A₂”
+> 在 A₁ 真重放场景会误执行第二次退款，因此**不再允许**。
+> 当前实现对这种缩短的混合状态恢复 **fail-closed**，不执行任何新的副作用；
+> 对完整 `[A₁,A₂]` 重放按持久化 occurrence 顺序恢复，已完成项去重，
+> 未完成项执行一次；明确持久化的业务 `logical_operation_id` 才能支持
+> 单条 A₂ 的无歧义恢复。同时，异步 Run 的解析器不可用时禁止回退内存计数。
+> 后文关于“只提出 A₂ 即自动执行”的测试与指标属修复前的历史快照，
+> 不得引用为当前行为。外部 Exactly-Once 仍 NOT PROVIDED。
+
 > **对齐报告（HISTORICAL AUDIT SNAPSHOT）**。绑定本修复当时的代码与测试；不硬编码 HEAD，
 > 用 `git rev-parse HEAD` 获取。证据状态词：`REPRODUCED` / `VERIFIED_LOCAL` /
 > `NOT_VERIFIED` / `NOT PROVIDED`。
