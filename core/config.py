@@ -350,6 +350,19 @@ WS_IDLE_TIMEOUT = _int_env("WS_IDLE_TIMEOUT", 300)
 SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # 会话数据加密密钥（用于文件/Redis 后端存储加密；为空则明文存储，向后兼容）
 SESSION_ENCRYPTION_KEY = os.getenv("SESSION_ENCRYPTION_KEY", "")
+# 会话记录明文兼容策略（仅在 SESSION_ENCRYPTION_KEY 已配置时生效）：
+#   legacy（默认）-> 允许读取启用加密**之前**写入的历史明文记录（可审计 + 读后按密文重写）；
+#   reject         -> 严格模式：任何非密文记录一律拒绝（适用于已完成迁移的部署）。
+# 未知取值视为配置错误并 fail closed（见 validate_session_encryption_settings）。
+SESSION_ENCRYPTION_PLAINTEXT_COMPAT = (
+    os.getenv("SESSION_ENCRYPTION_PLAINTEXT_COMPAT", "legacy").strip().lower()
+)
+SESSION_ENCRYPTION_PLAINTEXT_COMPAT_LEGACY = "legacy"
+SESSION_ENCRYPTION_PLAINTEXT_COMPAT_REJECT = "reject"
+SESSION_ENCRYPTION_PLAINTEXT_COMPAT_VALUES = (
+    SESSION_ENCRYPTION_PLAINTEXT_COMPAT_LEGACY,
+    SESSION_ENCRYPTION_PLAINTEXT_COMPAT_REJECT,
+)
 # TLS 配置
 TLS_CERT_FILE = os.getenv("TLS_CERT_FILE", "")  # TLS 证书文件路径
 TLS_KEY_FILE = os.getenv("TLS_KEY_FILE", "")  # TLS 私钥文件路径
@@ -1326,6 +1339,54 @@ def validate_hitl_settings(
     return errors
 
 
+def validate_session_encryption_settings(
+    *,
+    encryption_key: str = SESSION_ENCRYPTION_KEY,
+    plaintext_compat: str = SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+) -> list[str]:
+    """校验会话加密的**格式判别**配置（纯函数，无 IO），返回错误信息列表。
+
+    为什么这里必须 fail closed
+    --------------------------
+    ``SESSION_ENCRYPTION_PLAINTEXT_COMPAT`` 决定"一条既不是带标记密文、也不是旧版
+    Fernet token 的记录"该怎么判。这个判定的两种可能结果安全方向完全相反：
+
+      * ``legacy``  -> 当作历史明文**接受**（数据完整性无法验证，见下方边界）；
+      * ``reject``  -> 拒绝加载。
+
+    若把它静默兜底成 ``legacy``，一个拼写错误的配置（例如 ``REJECT`` 写成 ``rejct``、
+    或写成 ``strict``）就会**无声地**把本该 fail-closed 的部署降级成"接受任意非密文
+    记录"，而运维界面上看不出任何异常——正是本仓反复要防的「声称与事实不符」。
+
+    因此：取值不在枚举内就是配置错误，不猜、不兜底。
+
+    边界（不因本函数通过而声称成立）
+    ------------------------------
+    即便 ``reject`` 全开，它也**不能**证明"没有攻击者能替换会话记录"：攻击者若能写
+    Redis / 会话文件，同样能改这一条配置所依赖的存储内容。``reject`` 消除的是
+    "密文损坏被静默降级成明文"这一类**降级攻击**，不是对存储写权限的整体防护。
+    """
+    errors: list[str] = []
+    if plaintext_compat not in SESSION_ENCRYPTION_PLAINTEXT_COMPAT_VALUES:
+        errors.append(
+            f"SESSION_ENCRYPTION_PLAINTEXT_COMPAT 取值非法：{plaintext_compat!r}"
+            f" —— 只允许 {'/'.join(SESSION_ENCRYPTION_PLAINTEXT_COMPAT_VALUES)}。"
+            " 不做兜底：静默降级成 legacy 会让本应 fail-closed 的部署无声地"
+            "接受任意非密文记录。"
+        )
+    elif not encryption_key and plaintext_compat == SESSION_ENCRYPTION_PLAINTEXT_COMPAT_REJECT:
+        # 与 ``validate_hitl_settings`` 同一条原则：配置要么真的产生该治理效果，
+        # 要么就别声称。未配置密钥时 ``_open_record`` 在 ``if not key`` 处直接返回，
+        # 根本不读这一项 —— 也就是说 reject **完全不起作用**，却让人以为已开启严格模式。
+        errors.append(
+            "SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject 但未配置 SESSION_ENCRYPTION_KEY"
+            " —— 未配置密钥时本项**完全不生效**（所有记录都是明文），"
+            "配置声称的严格模式是假的。要么配置 SESSION_ENCRYPTION_KEY，"
+            "要么改回 legacy。"
+        )
+    return errors
+
+
 # ===== P0-3: 生产环境关键配置启动校验 =====
 def validate_required_config():
     """生产环境启动时校验关键配置项非空非占位符"""
@@ -1372,6 +1433,21 @@ def validate_required_config():
             print(f"🚨 HITL 配置校验失败: {err}", file=sys.stderr)
         raise ConfigurationError(
             f"HITL 治理配置无效（{len(hitl_errors)} 项）：审批开关已开启但配置无法产生任何治理效果"
+        )
+
+    # ---- 会话加密格式判别（**先于** DEV_MODE 早退，同上）----
+    # ``SESSION_ENCRYPTION_PLAINTEXT_COMPAT`` 取值非法时，两种可能结果安全方向相反
+    # （legacy=接受明文 / reject=拒绝），静默兜底成 legacy 会让部署无声地失去
+    # fail-closed 语义。取值非法就是配置错误，不猜。
+    session_enc_errors = validate_session_encryption_settings(
+        encryption_key=SESSION_ENCRYPTION_KEY,
+        plaintext_compat=SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+    )
+    if session_enc_errors:
+        for err in session_enc_errors:
+            print(f"🚨 会话加密配置校验失败: {err}", file=sys.stderr)
+        raise ConfigurationError(
+            f"会话加密配置无效（{len(session_enc_errors)} 项）：明文兼容策略取值不在允许枚举内"
         )
 
     # v4.3 安全加固：生产环境禁止 DEV_MODE
