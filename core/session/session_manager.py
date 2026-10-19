@@ -39,6 +39,12 @@ from core.config import (
     REDIS_URL as _CFG_REDIS_URL,
 )
 from core.config import (
+    SESSION_ENCRYPTION_PLAINTEXT_COMPAT_REJECT as _CFG_PLAINTEXT_COMPAT_REJECT,
+)
+from core.config import (
+    SESSION_ENCRYPTION_PLAINTEXT_COMPAT_VALUES as _CFG_PLAINTEXT_COMPAT_VALUES,
+)
+from core.config import (
     SESSION_MAX_TOKENS as _CFG_SESSION_MAX_TOKENS,
 )
 from core.config import (
@@ -142,10 +148,45 @@ def _dual_mode(async_func):
 #   * 未配置 key           -> 明文读写（既有的、明确设计的兼容行为）
 #   * 已配置 key + 加密失败 -> 抛 SessionEncryptionError（不写明文）
 #   * 已配置 key + 密文解密失败（坏数据/错误密钥）-> 抛 SessionEncryptionError
-# 为兼容启用加密**之前**写入的历史明文，用 :func:`_is_fernet_token` 区分
-# "密文" 与 "历史明文"：本仓库持久化内容一律是 JSON（以 '[' / '{' 开头），
-# 永远不可能是合法 Fernet token，因此规则可判定、可测试、不混淆两者。
+#
+# 持久化格式与"是不是可信明文"的判别
+# ---------------------------------
+# 本仓写入的会话记录**一律是 JSON**（文件后端 ``json.dumps(messages)``；Redis
+# ``json.dumps(messages)`` / ``json.dumps(meta)``）。因此持久化格式是封闭的：
+#
+#   ``csae1:<fernet token>``   带版本标记的密文 —— 本版本写入
+#   ``<fernet token>``          无标记的旧版密文 —— 更早版本写入
+#   ``<JSON>``                  历史明文 —— 启用加密**之前**写入
+#
+# 关键：判别必须是**三分类的显式判定**，不能是"看起来不像 Fernet token 就当明文"。
+# 旧的 :func:`_is_fernet_token` 是一个**否定式**启发式，任何破坏密文**同时**破坏该
+# 启发式的数据（把首字符 ``g`` 改成 ``h``、把 token 换成非法 base64、整个换成
+# 合法 JSON）都会被"降级"成可信明文 —— 损坏得越多反而越不安全，这是反单调的，
+# 且直接抵消了 fail-closed 修复。带版本标记的 envelope 让"本版本写的密文"被
+# **正面识别**，破坏其 token（含首字节 / 截断 / 非法 base64）一律解密失败并抛错。
+#
+# 残留边界（不可夸大）
+# --------------------
+# 1. ``legacy`` 模式下"非密文 => 历史明文"仍是**来源推断**，对"在启用加密之后被
+#    替换进去的明文"没有防护能力：攻击者若能写会话存储，就能写一条长得和历史明文
+#    一模一样的记录。没有可信的历史格式标记或外部来源元数据，这两者**在原理上不可
+#    区分**。本模块不对明文记录声称任何真实性保证。
+# 2. ``reject``（严格模式）也不能防住存储写权限本身：它消除的是"密文损坏被静默
+#    降级为明文"这一类降级攻击，不是对存储写权限的总体防护。
+# 3. 旧版**无标记**密文仍走启发式判定；要消除其歧义只能迁移/重新加标记，本轮不做
+#    破坏性迁移。带标记的 envelope 由 :func:`_seal` 写入，会话下一次被正常改写时
+#    自动升级（读后重写），历史明文集合是自然收敛的，不需要停机迁移。
 # ---------------------------------------------------------------------------
+
+# 带版本标记的加密 envelope 前缀。版本号变更时必须新增前缀而不是改写本前缀，
+# 否则旧记录会被当成新格式解析。
+_SESSION_ENVELOPE_PREFIX = "csae1:"
+
+# _open_record 的分类结果（显式枚举，不靠布尔"像不像"）
+_RECORD_KIND_NO_KEY = "no-key-plaintext"
+_RECORD_KIND_ENVELOPE = "envelope-ciphertext"
+_RECORD_KIND_LEGACY_TOKEN = "legacy-unmarked-ciphertext"
+_RECORD_KIND_LEGACY_PLAINTEXT = "legacy-plaintext"
 
 
 def _get_encryption_key() -> bytes | None:
@@ -176,11 +217,18 @@ def _get_fernet(key: bytes):
 
 
 def _is_fernet_token(data: str) -> bool:
-    """判断 ``data`` 是否是 Fernet 密文。
+    """判断 ``data`` 是否**看起来**像 Fernet 密文（base64url 且解码后首字节为 0x80）。
 
-    Fernet token 按规范是 ``base64url(0x80 || ...)``，解码后首字节恒为 ``0x80``。
-    历史明文（JSON）以 ``[`` / ``{`` 开头，不是合法 base64url，必然返回 False，
-    因此不会把明文误判为密文、也不会把密文误判为明文。
+    .. warning::
+       这是一个**启发式**，不是安全判据，不得单独用于"把东西当可信明文"。
+
+       它对"首字节被改写"的密文返回 False —— 例如把 token 首字符 ``g`` 改成 ``h``，
+       base64url 仍然合法、解码后首字节变成 0x88，于是返回 False。这类密文是**损坏
+       的密文**，不是明文。历史上 :func:`_decrypt_data` 直接把这个 False 解释成
+       "明文，原样返回"，于是"损坏得更厉害"反而"更被信任"，抵消了 fail-closed。
+
+       现在它只用于 :func:`_open_record` 的**旧版无标记密文**兼容分支；带版本标记的
+       envelope 不依赖本启发式（见 :func:`_open_record`）。
     """
     if not isinstance(data, str) or not data:
         return False
@@ -203,22 +251,105 @@ def _encrypt_data(data: str, key: bytes | None) -> str:
 
 
 def _decrypt_data(data: str, key: bytes | None) -> str:
-    """解密数据。
+    """解密 Fernet 密文（**纯原语**，不做任何格式推断）。
 
-    * 未配置 key -> 原文返回（既有兼容行为）。
-    * 已配置 key + Fernet 密文 -> 解密；失败（坏数据/错误密钥）抛
-      SessionEncryptionError，绝不把失败的密文当作明文返回。
-    * 已配置 key + 历史明文（非 Fernet token）-> 原样返回，兼容启用加密前的数据。
+    * 未配置 key -> 原文返回（既有兼容行为；此时不存在任何加密/认证语义）。
+    * 已配置 key -> 输入**必须**是合法 Fernet token。任何解码/认证失败（包括"根本
+      不是 Fernet token"）一律抛 ``SessionEncryptionError``。
+
+    历史上本函数在输入不是 Fernet token 时**原样返回**，由调用方当作"历史明文"。
+    该分支已移除：它把"损坏的密文"和"历史明文"混为一谈，而这两者无法用"看起来像不
+    像"来区分 —— 正是本轮复审复现的绕过（首字符 g->h、非法 base64、整条替换成 JSON
+    都会被"信任"）。明文兼容是**记录层**的显式判定，见 :func:`_open_record`。
     """
     if not key:
-        return data
-    if not _is_fernet_token(data):
         return data
     fernet = _get_fernet(key)
     try:
         return fernet.decrypt(data.encode("utf-8")).decode("utf-8")
     except Exception as e:
         raise SessionEncryptionError("会话密文解密失败（密钥不匹配或数据损坏）") from e
+
+
+def _plaintext_compat_mode() -> str:
+    """读取明文兼容策略；取值非法即 fail closed（不静默兜底成 legacy）。"""
+    from core import config
+
+    mode = getattr(config, "SESSION_ENCRYPTION_PLAINTEXT_COMPAT", "") or os.environ.get(
+        "SESSION_ENCRYPTION_PLAINTEXT_COMPAT", ""
+    )
+    mode = (mode or "").strip().lower()
+    if mode not in _CFG_PLAINTEXT_COMPAT_VALUES:
+        raise SessionEncryptionError(
+            f"SESSION_ENCRYPTION_PLAINTEXT_COMPAT 取值非法：{mode!r}"
+            f"（只允许 {'/'.join(_CFG_PLAINTEXT_COMPAT_VALUES)}）—— "
+            "拒绝猜测：静默兜底成 legacy 会让本应 fail-closed 的部署无声地接受任意明文"
+        )
+    return mode
+
+
+def _seal(record: str, key: bytes | None) -> str:
+    """写入格式：配置了 key 就加**版本标记 envelope**，让密文被正面识别。
+
+    envelope 化的收益是单调的：记录一旦带上 ``csae1:`` 标记，读取端就知道它**必须**
+    是 Fernet token，因此破坏 token 本体（首字节改写、截断、非法 base64）必然解密
+    失败并抛错，不再可能被"降级"成明文。会话被正常改写时会自动升级为 envelope，
+    历史数据无需停机迁移即可自然收敛。
+    """
+    if not key:
+        return record
+    return _SESSION_ENVELOPE_PREFIX + _encrypt_data(record, key)
+
+
+def _decode_record_json(text: str, kind: str) -> tuple[Any, str]:
+    """把记录正文解析为 JSON；解析失败即视为损坏记录，**不**静默退化成空会话。
+
+    本仓持久化的会话记录一律是 JSON，因此"存在但解析不出 JSON"本身就说明这条记录
+    不可信（或写坏了），与底层是不是密文无关 —— 这是一个**损坏检测器**，不是完整性
+    保证：JSON 语法正确**不能**证明记录是历史明文而非被替换的明文。
+    """
+    try:
+        return json.loads(text), kind
+    except Exception as e:
+        raise SessionEncryptionError(
+            f"会话记录不是合法 JSON（格式判定={kind}）"
+            " —— 记录存在但内容不可解析，拒绝静默重建为空会话"
+        ) from e
+
+
+def _open_record(stored: str, key: bytes | None) -> tuple[Any, str]:
+    """读取一条持久化会话记录，返回 ``(值, 类别)``；类别取值见 ``_RECORD_KIND_*``。
+
+    显式三分类，取代"不是 Fernet token 就是明文"的否定式推断：
+
+    ===========================  ====================================================
+    记录形态                      判定
+    ===========================  ====================================================
+    ``csae1:<token>``             必须解密；token 任何损坏都抛错（不降级为明文）
+    ``<token>``（无标记）          旧版密文，按启发式识别后必须解密
+    ``<非密文>``                  历史明文候选，交给明文兼容策略决定接受 / 拒绝
+    ===========================  ====================================================
+
+    注意第三行的**边界**：``legacy`` 策略下"非密文 => 历史明文"仍是来源推断，对
+    "启用加密之后被替换进去的明文"没有防护能力。没有可信的历史格式标记或外部来源
+    元数据时，合法历史明文与被替换明文**在原理上不可区分** —— 本函数不声称能区分，
+    只做到：能判定的密文一律 fail closed，判不了的就明确记录为"来源未经验证的明文"。
+    """
+    if not key:
+        return _decode_record_json(stored, _RECORD_KIND_NO_KEY)
+
+    if stored.startswith(_SESSION_ENVELOPE_PREFIX):
+        token = stored[len(_SESSION_ENVELOPE_PREFIX) :]
+        return _decode_record_json(_decrypt_data(token, key), _RECORD_KIND_ENVELOPE)
+
+    if _is_fernet_token(stored):
+        return _decode_record_json(_decrypt_data(stored, key), _RECORD_KIND_LEGACY_TOKEN)
+
+    if _plaintext_compat_mode() == _CFG_PLAINTEXT_COMPAT_REJECT:
+        raise SessionEncryptionError(
+            "严格模式拒绝加载非密文会话记录（SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject）"
+        )
+    return _decode_record_json(stored, _RECORD_KIND_LEGACY_PLAINTEXT)
 
 
 class EnhancedSessionManager:
@@ -311,9 +442,17 @@ class EnhancedSessionManager:
         return self._redis_client
 
     def _create_memory_backend(self, session_id: str) -> list:
-        """创建简单消息存储（兼容新版 langchain，不依赖已废弃的 ConversationBufferMemory）"""
-        # 所有后端统一使用内存列表存储
-        # 文件后端可从 JSON 加载历史
+        """创建简单消息存储（兼容新版 langchain，不依赖已废弃的 ConversationBufferMemory）
+        所有后端统一使用内存列表存储；文件后端可从 JSON 加载历史。
+
+        失败语义（有意区分两类，不可合并）：
+          * **记录不存在**        -> 正常新建，返回空列表；
+          * **I/O 失败**（权限/磁盘等）-> 普通读取失败，告警后退回空会话（既有行为）；
+          * **记录存在但内容不可信/不可解析** -> 抛 ``SessionEncryptionError``，
+            **不**静默重建为空会话。后者是本轮修复的核心：旧实现里"密文被破坏成
+            非 Fernet 形态 -> 被当成明文 -> json.loads 失败 -> 被宽 except 吞掉"
+            这条链路，会让一次明确的认证失败伪装成一次普通的空会话。
+        """
         if self.storage_backend == "file":
             fp = os.path.join(
                 self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json"
@@ -322,19 +461,23 @@ class EnhancedSessionManager:
                 try:
                     with open(fp, encoding="utf-8") as f:
                         raw = f.read()
-                    key = _get_encryption_key()
-                    decrypted = _decrypt_data(raw, key)
-                    return json.loads(decrypted)
-                except SessionEncryptionError:
-                    # fail-closed：密文损坏/密钥错误时**不**静默当空会话继续。
-                    logger.error("会话密文解密失败，拒绝加载 session=%s", session_id)
-                    raise
-                except Exception as e:
-                    logger.warning(f"加载会话文件失败 session={session_id}: {e}")
+                except OSError as e:
+                    # 普通读取失败（不是数据完整性问题）——保持既有降级语义。
+                    logger.warning(f"读取会话文件失败 session={session_id}: {e}")
+                    return []
+                messages, kind = _open_record(raw, _get_encryption_key())
+                if kind == _RECORD_KIND_LEGACY_PLAINTEXT:
+                    # 可审计：来源未经验证的明文。下次写入会被 _seal 升级为 envelope。
+                    logger.warning(
+                        "读取到启用加密前写入的历史明文会话记录 session=%s"
+                        "（来源未经验证，下次改写时自动升级为密文）",
+                        session_id,
+                    )
+                return messages
         return []
 
     def _save_to_file(self, session_id: str, messages: list):
-        """文件后端持久化（H-2: 加密后写入）"""
+        """文件后端持久化（H-2: 加密后写入，带版本标记 envelope）"""
         if self.storage_backend == "file":
             fp = os.path.join(
                 self.storage_config.get("storage_dir", "./chat_sessions"), f"{session_id}.json"
@@ -342,7 +485,7 @@ class EnhancedSessionManager:
             try:
                 raw = json.dumps(messages, ensure_ascii=False)
                 key = _get_encryption_key()
-                encrypted = _encrypt_data(raw, key)
+                encrypted = _seal(raw, key)
             except SessionEncryptionError:
                 # fail-closed：加密失败时**不**把明文写入磁盘。
                 logger.error("会话加密失败，拒绝写入明文 session=%s", session_id)
@@ -414,14 +557,24 @@ class EnhancedSessionManager:
                         key = _get_encryption_key()
                         stored = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:messages")
                         if stored:
-                            msgs = json.loads(_decrypt_data(stored, key))
+                            msgs, kind = _open_record(stored, key)
                             meta_raw = r.get(f"{_CFG_REDIS_PREFIX}{session_id}:meta")
-                            meta = json.loads(_decrypt_data(meta_raw, key)) if meta_raw else {}
-                            return msgs, meta
-                        return None, None
+                            if meta_raw:
+                                meta, _ = _open_record(meta_raw, key)
+                            else:
+                                meta = {}
+                            return msgs, meta, kind
+                        return None, None, None
 
-                    stored, meta = await asyncio.to_thread(_redis_load)
+                    stored, meta, kind = await asyncio.to_thread(_redis_load)
                     if stored is not None:
+                        if kind == _RECORD_KIND_LEGACY_PLAINTEXT:
+                            # 可审计：来源未经验证的明文。下次写入会被 _seal 升级。
+                            logger.warning(
+                                "读取到启用加密前写入的历史明文会话记录 session=%s"
+                                "（来源未经验证，下次改写时自动升级为密文）",
+                                session_id,
+                            )
                         messages = stored
                         self.sessions[session_id] = {
                             "messages": messages,
@@ -438,10 +591,15 @@ class EnhancedSessionManager:
                         logger.debug(f"从 Redis 加载会话: {session_id}")
                         return session_id
                 except SessionEncryptionError:
-                    # fail-closed：不把损坏/错误密钥的密文当成空会话继续。
-                    logger.error("Redis 会话解密失败，拒绝加载 session=%s", session_id)
+                    # fail-closed：记录存在但不可信/不可解析时**不**静默当空会话继续。
+                    # 注意这条分支原先被下面的宽 except 抢不到（SessionEncryptionError
+                    # 先被匹配），但"密文损坏后被判成明文 -> json 解析失败"会落到宽
+                    # except 里伪装成一次普通读取失败。格式判别前移到 _open_record 后，
+                    # 数据问题一律以 SessionEncryptionError 形式出现，与 I/O 问题分开。
+                    logger.error("Redis 会话记录不可信，拒绝加载 session=%s", session_id)
                     raise
                 except Exception as e:
+                    # 普通读取失败（连接/超时等），既有降级语义。
                     logger.warning(f"Redis 读取失败: {e}")
 
         self.sessions[session_id] = {
@@ -585,7 +743,7 @@ class EnhancedSessionManager:
                         msgs_json = json.dumps(session["messages"], ensure_ascii=False)
                         r.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:messages",
-                            _encrypt_data(msgs_json, key),
+                            _seal(msgs_json, key),
                             ex=ttl,
                         )
                         meta = {
@@ -598,7 +756,7 @@ class EnhancedSessionManager:
                         }
                         r.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:meta",
-                            _encrypt_data(json.dumps(meta, ensure_ascii=False), key),
+                            _seal(json.dumps(meta, ensure_ascii=False), key),
                             ex=ttl,
                         )
 
