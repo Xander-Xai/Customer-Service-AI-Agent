@@ -319,7 +319,7 @@ WAITING_APPROVAL → RUNNING`，任意未终态可 `→ CANCELLED`。其中
 - **Argon2id 密码哈希**（v5.4 升级）：OWASP 2023 推荐，64MB 内存硬度，向后兼容 PBKDF2
 - **时序攻击防护**：`hmac.compare_digest` 替代 `==` 比较
 - **会话令牌签名**：HMAC 签名防会话劫持
-- **会话数据加密**：AES-256-Fernet 可选加密（v5.3 新增）
+- **会话数据加密**：Fernet 可选加密（v5.3 新增；AES-128-CBC + HMAC-SHA256）
 
 ### 4.2 输入安全
 - **输入净化**：控制字符移除 + HTML 标签剥离
@@ -456,7 +456,7 @@ E2E 集成测试（v4.2 时期，硅基流动历史模型）暴露了两个 Mock
 |------|------|------|
 | **v5.3** | Token Quota 持久化（Redis Hash + 内存回退） | 用户级 Token 限额跨重启保留 |
 | **v5.3** | 黑板 Session 隔离（ContextVar） | 多用户并发时 Agent 间数据不串扰 |
-| **v5.3** | 会话数据加密（AES-256-Fernet） | 敏感会话数据落盘加密 |
+| **v5.3** | 会话数据加密（Fernet：AES-128-CBC + HMAC-SHA256） | 敏感会话数据落盘加密 |
 | **v5.4** | Argon2id 密码哈希 | PBKDF2-SHA256 → Argon2id：引入 memory-hard 属性、提高离线破解成本（本项目未测量具体倍数） |
 | **v5.4** | 分级告警（warning/critical/emergency）+ 自动升级 | 7×24 无人值守运维 |
 | **v5.4** | 8 个业务 Prometheus 指标 | 数据驱动决策（满意度/Agent/意图/升级率等） |

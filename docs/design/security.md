@@ -22,7 +22,7 @@ Customer Service AI Agent 多智能体客服系统采用**纵深防御**策略�
 | **WebSocket** | API Key（query/header/message）优先 + JWT 首条消息认证 + 每 IP 连接限制 + 消息限流 + 空闲超时 | ✅ 已实现 |
 | **会话安全** | UUID 格式校验 + HMAC 会话令牌签名 + 用户级会话所有权隔离 + 黑板 ContextVar 隔离 | ✅ 已实现 |
 | **SSRF 防护** | 告警 Webhook URL 验证：阻止私有 IP / 回环 / 链路本地 / 元数据端点 | ✅ 已实现 |
-| **会话数据加密** | AES-256-Fernet 可选加密（`SESSION_ENCRYPTION_KEY`），未配置时明文存储 | ✅ 已实现 |
+| **会话数据加密** | Fernet 可选加密（`SESSION_ENCRYPTION_KEY`），密码学构造为 **AES-128-CBC + HMAC-SHA256**（不是 AES-256；密钥经 SHA-256 派生为 Fernet 的 16 字节签名 + 16 字节加密钥）。已配置密钥时**加密失败即抛 `SessionEncryptionError`**（fail-closed，不静默写明文）；未配置时明文读写（向后兼容） | ✅ 已实现（边界见 `docs/limitations.md`） |
 | **启动校验** | 生产环境强制校验 JWT_SECRET(≥32字符) / SESSION_TOKEN_SECRET / API_KEY | ✅ 已实现 |
 | **密钥管理** | scripts/generate_prod_env.py 使用 secrets 模块生成密码学安全随机密钥 | ✅ 已实现 |
 
@@ -124,7 +124,7 @@ LLM 输出处理链路：`marked.parse()` → `DOMPurify.sanitize()` → 插入 
 - **响应清洗**：移除 LLM 输出中的调试代码、注入泄露、XSS 内容
 - **熔断器保护**：连续 5 次失败后降级到规则引擎
 - **Token Quota**：用户级 Token 消耗限额（每日/每月），Redis 持久化 + 内存回退
-- **会话数据加密**：AES-256-Fernet 可选加密（`SESSION_ENCRYPTION_KEY`），文件后端自动加解密
+- **会话数据加密**：Fernet 可选加密（`SESSION_ENCRYPTION_KEY`；AES-128-CBC + HMAC-SHA256），文件后端自动加解密。已配置密钥时 fail-closed（PR #23）；密文带 `csae1:` 版本标记 envelope（PR #24），明文兼容由 `SESSION_ENCRYPTION_PLAINTEXT_COMPAT=legacy|reject` 显式选择。**边界**：新 envelope 只消除「密文损坏被静默降级为明文」，不防御对存储写权限本身的攻击；`legacy` 模式下历史明文来源无法验证（Issue #25）。详见 `docs/limitations.md`
 
 ### 基础设施安全
 

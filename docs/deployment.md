@@ -222,10 +222,17 @@ curl -s -H "Authorization: Bearer $ADMIN_TOKEN" localhost:8000/api/runs/dead
 `runtime/retry.py:33-66` 的 `reconcile_stuck_runs` 扫描
 长期停在 `QUEUED` / `RETRYING` 但没有活跃 worker 的 run，重新投递。
 
-> ⚠️ **当前是手动 / cron 脚本**（`scripts/reconcile_stuck_runs.py`），
-> **没有接 Celery Beat，也没有 CI 契约保证它会跑**。
-> 生产请显式配置 cron / K8s CronJob 调用它。
-> 接线方案见 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P1-5。
+> ✅ **已接 Celery Beat**：compose 里是**独立 `beat` service**
+> （`deploy/compose/docker-compose.yml`），周期由 `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`
+> 控制（默认 30s）。刻意**不**内嵌 `worker -B`——worker 可被 `--scale` 成多副本，
+> 内嵌 beat 会让每个副本各调度一次；独立 service 保证恰好一个调度者。
+> CI 契约测试直接解析该 compose 文件，断言 `beat` service 存在且 worker 命令不含 `-B`。
+>
+> **边界**：`beat` 是**单实例**，停摆即无自动恢复（只能手工
+> `python3 scripts/reconcile_stuck_runs.py --apply`）；且**beat 存活 ≠ 扫描成功**——
+> 扫描失败时 schedule 文件照样被写、健康检查照样是绿的，由 `AgentReconcileStalled`
+> 告警覆盖（[distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) §3.8）。
+> 详见 [limitations.md](limitations.md) §3。
 
 ---
 

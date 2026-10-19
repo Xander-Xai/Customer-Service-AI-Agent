@@ -40,6 +40,13 @@
 | OpenAPI 路径数 | 63 | `docs/openapi.json`（`make openapi-check` 校验） |
 | RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
 | 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
+| 最新公开 Release | `v1.0.1`（2026-10-08，**仅文档变更**） | [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) |
+
+> **Release ≠ main**：最新公开 Release `v1.0.1` 早于当前 `main`，**不包含**分布式
+> Agent Runtime、HITL 治理与会话加密安全修复（PR #19、#21–#24）。本 README 描述的是
+> **`main` 分支状态**，不是任何已发布产物。CI 的 `build-and-push` 会向 GHCR 推送镜像，
+> 但 `deploy` job 需要仓库变量 `DEPLOY_HOST` 才触发（**当前未配置**，因此该 job 一直是
+> skipped）——本仓库没有生产部署证据。
 
 **入口文档**：[docs/reference/current-state.md](docs/reference/current-state.md)。
 版本变更历史在 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)。
@@ -429,7 +436,7 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 | 分布式追踪 | `core/tracing.py` + `core/telemetry.py`（5 个语义 span，属性白名单 + 敏感键黑名单双层） |
 | 结构化日志 | `core/logger.py`（两层密钥脱敏；`scrub_exception_message()` 就地脱敏，**防止 ASGI 自己的 traceback 泄漏**） |
 | 输入净化与注入防御 | `api/utils.py` + 历史对话包在「不可信数据」边界标记内 |
-| 数据权限与会话隔离 | ContextVar per-session SharedBlackboard + 可选 AES-256-Fernet 会话加密 |
+| 数据权限与会话隔离 | ContextVar per-session SharedBlackboard + 可选 Fernet 会话加密（AES-128-CBC + HMAC-SHA256） |
 | 文档一致性守卫 | `scripts/audit_doc_consistency.py`（链接/配置/OpenAPI/生命周期/指标声明/Mermaid 结构/HITL 默认值/状态机完整性/生产声明） |
 
 ### 证据分级
@@ -547,10 +554,18 @@ npm test           # 前端 Vitest
 | DLQ 人工重放 | `make runtime-replay-help` | 同上 |
 | RAG 正式 649-query 评测 | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649` | 真实 provider + 已索引语料（**当前 NOT_VERIFIED**） |
 
-CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 + MCP 契约
-**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + Redis + chaos）、
-`security`（严格 mypy + bandit + secret guard）、`build-and-push`、`deploy`
-（容器内健康探测 + Celery 原生 worker 就绪断言）。
+CI 有 9 个 job：`lint`（Ruff check + format，blocking）、`test`（3 个 Python 版本 +
+MCP 契约**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + Redis + chaos）、
+`metrics-alerting`（指标暴露面契约 + 官方 `promtool` + 真实 Prometheus 端到端）、
+`agent-eval`（契约阻塞；分数在人工标注完成前必须 `NOT_MEASURED`，不冒充 PASS）、
+`security`、`build-and-push`、`deploy`（容器内健康探测 + Celery 原生 worker 就绪断言）。
+
+> ⚠️ **CI 绿色 ≠ 所有扫描都达到阻塞门禁标准。** `security` job 里有两步是
+> **`continue-on-error: true` 的信息性步骤**，失败不会让 job 变红：
+> **gradual mypy**（存量模块的渐进式类型检查，存量类型错误**仍然存在**、未清零）与
+> **pip-audit**（依赖漏洞扫描）。真正**阻塞**的是：strict mypy（新模块）、
+> bandit、公开仓库边界守卫、secret 检查、Ruff、全部测试 lane 与 runtime-e2e。
+> 看到 `security = success` 时不能推断「依赖无漏洞」或「类型债已清」。
 
 > **为什么有些测试"不允许 skip"？** 一个会因为"依赖没装 / 环境没配"而变绿的测试
 > 证明了不了任何事，却会给人"已验证"的错觉。分布式 Runtime 验收的
@@ -571,6 +586,14 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
 > **不等于**生产验证。
 
 完整清单（含代码级债务与未做方向）见 **[docs/limitations.md](docs/limitations.md)**。
+
+### 展示状态：`SHOWCASE_READY_WITH_DISCLOSED_LIMITATIONS`
+
+主要架构、测试入口与可复现范围已清晰，**活跃文档与实际代码在已核查范围内一致**；
+可作为 AI 大模型应用开发（RAG / Agent）方向的开源工程参考。
+**尚未得到生产环境完整验证。** 本状态**不等于** `PRODUCTION_READY`、
+`SECURITY_CERTIFIED`、Level 3 已验证、端到端 exactly-once，也不代表已随 `v1.0.1`
+发布。后续只有明确缺陷、安全事件、必要依赖更新或真实新需求才触发工程修改。
 
 ### 已知功能断链（声明强于事实）
 
@@ -670,9 +693,15 @@ CI 有 7 条 lane：`lint`（Ruff，blocking）、`test`（3 个 Python 版本 +
   软硬超时全部 `reject(requeue=False)`——**消息被丢弃、不重投**；只有 worker 进程
   被杀（`WorkerLostError`）才重投。恢复因此改为「数据库 AgentRun + beat 周期
   reconciler」（新增独立 `beat` service），并把 attempt 预算闸门补到领取点。
-- **强制中止失去所有权的 worker**：owner CAS 目前只挡**状态提交**，没有 fencing
-  token、也不 abort 旧协程——陈旧 worker 的 checkpoint 写入与工具副作用不受
-  owner CAS 保护。
+- ~~**强制中止失去所有权的 worker**~~ **Partial（本轮收紧，仍非 fencing token）**
+  —— owner CAS 仍只挡**状态提交**；在此之上补了两道：① 心跳 `renewed is False` 时
+  `_FenceGuard` 触发 `_supervise_execution` **取消正在执行的图任务**并抛
+  `ExecutionFenced`，被取消的 worker **不写任何终态、不消耗 attempt**；②
+  `ToolRegistry.set_execution_fence` 让副作用工具在发起外部写**之前**只读复核
+  ownership（失败即 fail-closed），只读工具不受影响。
+  **明确不宣称**单调 fencing token（`AgentRun` 没有 token 列，判定是只读
+  `SELECT COUNT(*)`）；取消前已发出的外部调用无法回收；外部系统端到端
+  exactly-once **NOT PROVIDED**。详见 `docs/limitations.md` §3。
 - 覆盖 `PENDING` 滞留 run（两阶段入队在 `mark_queued` 前被杀会永久滞留）；
   `beat` 单点 HA；runtime 时间参数交叉校验（lease / visibility vs task time limit）；
   side-effect claim TTL 从硬编码变成配置项。

@@ -400,14 +400,22 @@ container）。
 
 ## 14. 已知限制
 
-1. **无 fencing token**：pause 超过 lease TTL 的旧 worker 不会被强制中止。
+1. **无 fencing token**：失去所有权后的执行是**协作式取消**——心跳 `renewed is False`
+   时 `_FenceGuard` 取消正在执行的图任务（`_supervise_execution`），
+   `ToolRegistry.set_execution_fence` 让副作用工具在发起外部写前只读复核 ownership。
+   `AgentRun` 无 token 列，判定不是单调 token 比较；取消前已发出的外部调用无法回收。
 2. **单 Redis 互斥**：不是 Redlock；Redis 故障转移期间可能双持有。
 3. **认领后崩溃的工具调用会重放**：`PENDING` 租约过期后接管重做，若外部系统当时
    其实已成功，会产生重复写。根治需要下游接受 idempotency key。
 4. **事件流仅 best-effort 可续读**（非 exactly-once）：重连可能重复、`$` 与 idle
    超时可能丢、`MAXLEN` 近似裁剪后历史不可恢复。
-5. **取消是协作式的**：不打断已在执行的图。
-6. **无 DLQ 告警**：`agent_run_dead_letter_total` 只计数，没有接 `alerts/`。
+5. **取消的粒度是「图任务」，不是「已发出的外部调用」**：图任务会被协作式取消，但
+   取消前已进入飞行状态的外部写仍可能落地（靠 side-effect ledger 幂等压低重复概率，
+   不归零）。
+6. **DLQ 告警只到「规则可触发」**：`agent_run_dead_letter_total` 已能真实序列化到
+   暴露面，真实 Prometheus 上 `AgentRunDeadLetterDetected` 实际进入 FIRING
+   （`make metrics-exposure-verify`）。**仍未验证**：Alertmanager 实际投递、
+   整套 compose 栈端到端、Grafana 面板真实渲染。
 7. **无 backpressure / admission control**：永久锁死的 thread 会持续 5s 重投。
 8. **Worker pool 未做自动扩缩**：compose 里是固定 worker 服务。
 9. **生产集群未验证**：以上全部为本地 + CI 验证，**PRODUCTION NOT_VERIFIED**。
