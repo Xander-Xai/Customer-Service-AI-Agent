@@ -108,7 +108,7 @@ make db-downgrade # 回滚迁移
 - `api/` — FastAPI 服务层（app_factory/middleware/routes/dependencies）
 - `auth/` — JWT 认证（Argon2id + Redis 黑名单 + Refresh Token）
 - `core/` — 基础设施（DI容器/图构建/MessageBus/SharedBlackboard/Monitoring/PromptManager/ABTest/TokenTracker/TokenQuota）
-- `core/session/` — 会话管理（SessionManager/DriftDetector/TokenCounter + **会话数据加密 AES-256-Fernet**）
+- `core/session/` — 会话管理（SessionManager/DriftDetector/TokenCounter + **会话数据可选 Fernet 加密：`AES-128-CBC + HMAC-SHA256`**）
 - `core/concurrency/` — 跨进程互斥（`distributed_lock.py`：Redis per-thread 分布式锁，owner token + TTL + Lua 原子 compare-and-delete；API 执行边界与 worker 共用同一 key namespace `agent:thread-lock:`）
 - `runtime/` — 分布式 Agent Runtime（`run_service.py` AgentRun 真相源 / `statuses.py` 状态机 / `executor.py` worker 执行与失败分类 / `dispatch.py` Celery 投递 / `celery_app.py`+`tasks.py` worker / `thread_lock.py` per-thread 锁 / `side_effects.py` 工具幂等 ledger / `events.py` Redis Stream 事件 / `bootstrap.py` checkpoint resume / `retry.py` 退避 / `metrics.py` 指标转发 / `errors.py` 错误分类）
 - `db/` — SQLAlchemy 模型 + Alembic 迁移（含 `agent_runs` / `agent_dead_letters` / `tool_side_effects`）
@@ -283,7 +283,15 @@ make db-downgrade # 回滚迁移
 - 结构化日志 + 两层密钥脱敏：**Implemented**（含 `scrub_exception_message()` 就地脱敏，防止 ASGI 自己的 traceback 泄漏）
 - **Token Quota：用户级 Token 消耗限额（每日/每月），Redis 持久化 + 内存回退**
 - **黑板 Session 隔离：ContextVar 按 session 隔离 Agent 间共享数据**
-- **会话数据加密：AES-256-Fernet 可选加密（`SESSION_ENCRYPTION_KEY`）**
+- **会话数据加密**：可选 Fernet 加密（`SESSION_ENCRYPTION_KEY`；密码学构造为
+  `AES-128-CBC + HMAC-SHA256`，**不是** AES-256）。已配置密钥后 fail-closed：加密/
+  解密失败抛 `SessionEncryptionError`（PR #23），不静默退化为明文。写入带版本标记的
+  `csae1:` envelope（PR #24），使「本版本写的密文」被正面识别——破坏其 token 必然
+  解密失败，而不是被「看起来不像 Fernet token」的否定式启发式降级成明文。历史明文
+  由 `SESSION_ENCRYPTION_PLAINTEXT_COMPAT` 显式选择：`legacy`（默认，兼容）或
+  `reject`（严格，拒绝加载非密文记录）；旧版**无标记** Fernet token 走启发式兼容分支。
+  **边界**：envelope 不防御「有存储写权限」的攻击；`legacy` 下历史明文来源无法验证
+  （Issue #25，OPEN）；未配置密钥时仍是明文读写。
 - 生产启动校验（fail-fast，非 warning）：
   - 凭据类：`JWT_SECRET`(≥32字符) / `SESSION_TOKEN_SECRET` / `API_KEY`
   - 分布式运行时（`core/config.py::validate_distributed_runtime_settings`）：

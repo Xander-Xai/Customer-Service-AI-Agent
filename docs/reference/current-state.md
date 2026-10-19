@@ -496,11 +496,17 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     `runtime/statuses.py::ADMINISTRATIVE_TRANSITIONS` 并由
     `ensure_declared_transition()` 把关；「终态没有**自动**出口」这条契约继续成立且
     可测。回归：`tests/unit/test_hitl_run_status.py::TestAdministrativeTransitions`。
-  - 仍**没有** fencing token，且**没有**强制中止：pause 超过 TTL 的旧 worker
-    **不会被强制 abort**，其协程可能继续跑完；它的**外部节点副作用**也不受
-    owner CAS 保护（仍依赖 side-effect ledger 的幂等）。也就是说本层解决的是
-    「stale worker 不能提交 AgentRun 状态」，**不是**完整的 stale-worker fencing，
-    更不是 exactly-once（投递仍是 at-least-once）。
+  - **失去所有权后的执行（`Partial`，仍非 fencing token）**：owner CAS 解决的是
+    「stale worker 不能提交 AgentRun 状态」，这一层**依然成立且未变**。除此之外，
+    失去所有权**已有协作式中止**：心跳 `renewed is False` 时 `_FenceGuard` 触发
+    `_supervise_execution` **取消正在执行的图任务**并抛 `ExecutionFenced`，被取消的
+    worker 不写任何终态、不消耗 attempt；`ToolRegistry.set_execution_fence` 让副作用
+    工具在发起外部写之前只读复核 ownership（fail-closed），只读工具不受影响。
+    回归：`tests/integration/runtime/test_stale_worker_fencing_pg.py`。
+    **仍然没有 fencing token**：`AgentRun` 无 token 列，判定是只读
+    `SELECT COUNT(*)`（`runtime/repository.py::owns_execution`），不是单调 token 比较。
+    取消前已发出的外部调用无法回收；声明 `side_effect=False` 却实际写外部的工具不受
+    治理。更不是 exactly-once（投递仍是 at-least-once）。
   - **broker 投递语义（**实测**，本轮修正了此前的错误表述）**：`make runtime-delivery`
     用真实 Redis broker + 真实 Celery 5.6.3 worker 子进程逐类测出——
     普通 Exception / `RetryPublicationError` / 软时间上限 / 硬时间上限全部走
@@ -516,8 +522,10 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
     被杀）。因此承重结构是 `beat_schedule` → `runtime.reconcile_stuck_runs`，由 compose
     里**独立的 `beat` service** 驱动（`AGENT_RUN_RECONCILE_INTERVAL_SECONDS`，默认
     30s；刻意不内嵌 `worker -B`，因为 worker 可被 `--scale` 成多副本）。
-    实测真实 beat 进程按周期投递该任务；beat 的 healthcheck 判据是 schedule 文件仍在
-    被写（mtime 在 `max(120s, 4x 周期)` 内）。
+    **验证的是接线契约，不是真实投递**：`beat_schedule` 条目存在 + reconciler 任务
+    已注册 + compose 里存在独立 `beat` service 且 worker 命令不含 `-B`，由 CI 契约
+    测试断言。**本仓库没有目标真的拉起 `celery beat` 进程观测周期投递**；beat 的
+    healthcheck 判据（schedule 文件仍在被写）只在生产栈里成立。
     **边界**：`beat` 停摆 = 滞留 run 无自动恢复，只能手工
     `python3 scripts/reconcile_stuck_runs.py --apply`；`--dry-run` 只打印
     `list_recoverable_runs` 的结果，看不到 `--apply` 会走的 stale-`RUNNING` 回收与

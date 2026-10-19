@@ -125,7 +125,13 @@
 
 1. ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
    （需先定义「读可重试、写不可重试」的边界）。
-2. `reconcile_stuck_runs` 接入调度（beat/CronJob），卡死 run 兜底从文档变为运行。
+2. ~~`reconcile_stuck_runs` 接入调度~~ **已完成**：compose 里**独立 `celery beat`
+   service**（刻意不内嵌 `worker -B`，worker 可被 `--scale` 成多副本）+ 周期
+   `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`（默认 30s）。CI 契约测试
+   （`tests/unit/test_runtime_review_findings.py::TestDeliverySemanticsContract`）
+   直接解析 compose YAML，断言 `beat` service 存在且 worker 命令不含 `-B`。
+   **边界**：beat 停摆 = 滞留 run 无自动恢复（`beat` 刻意单实例，HA 未做）；
+   **beat 存活 ≠ 扫描成功**，扫描失败由 `AgentReconcileStalled` 覆盖。
 3. Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
 4. 持久化 trace 后端（Jaeger/Tempo）接入，tracing 从本地验证升级为可查询。
 
