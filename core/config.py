@@ -350,6 +350,19 @@ WS_IDLE_TIMEOUT = _int_env("WS_IDLE_TIMEOUT", 300)
 SESSION_TOKEN_SECRET = os.getenv("SESSION_TOKEN_SECRET", "")
 # 会话数据加密密钥（用于文件/Redis 后端存储加密；为空则明文存储，向后兼容）
 SESSION_ENCRYPTION_KEY = os.getenv("SESSION_ENCRYPTION_KEY", "")
+# 历史密钥（逗号分隔）。用途是**无破坏轮换**：轮换时把旧密钥挪到这里，
+# 旧密文仍可解密，新写入一律用当前密钥，被访问到的旧会话在下次改写时自动升级。
+# 没有它，轮换密钥 = 一次性作废全部既有密文（无 key-id 时无法定向重加密）。
+# 边界：它只保证**可读**，不保证**可验证来源**——见 Issue #25。
+SESSION_ENCRYPTION_KEY_PREVIOUS = os.getenv("SESSION_ENCRYPTION_KEY_PREVIOUS", "")
+# 生产是否**强制**会话加密。默认 false = 保持既有部署行为（缺密钥只告警）；
+# 置 true 后，生产环境缺少密钥（或密钥仍是占位符）一律**拒绝启动**。
+# 为什么单独一个开关而不是无条件强制：无条件强制会让升级 compose 的既有生产环境
+# 直接起不来（连诊断都进不去），而用户可能还没准备好密钥；开关把「何时收紧」
+# 变成一次显式、可审计的决策，而不是随版本漂移的隐式行为变化。
+SESSION_ENCRYPTION_REQUIRED = (
+    os.getenv("SESSION_ENCRYPTION_REQUIRED", "false").strip().lower() == "true"
+)
 # 会话记录明文兼容策略（仅在 SESSION_ENCRYPTION_KEY 已配置时生效）：
 #   legacy（默认）-> 允许读取启用加密**之前**写入的历史明文记录（可审计 + 读后按密文重写）；
 #   reject         -> 严格模式：任何非密文记录一律拒绝（适用于已完成迁移的部署）。
@@ -1343,6 +1356,8 @@ def validate_session_encryption_settings(
     *,
     encryption_key: str = SESSION_ENCRYPTION_KEY,
     plaintext_compat: str = SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+    required: bool = SESSION_ENCRYPTION_REQUIRED,
+    previous_keys: str = SESSION_ENCRYPTION_KEY_PREVIOUS,
 ) -> list[str]:
     """校验会话加密的**格式判别**配置（纯函数，无 IO），返回错误信息列表。
 
@@ -1359,6 +1374,9 @@ def validate_session_encryption_settings(
     记录"，而运维界面上看不出任何异常——正是本仓反复要防的「声称与事实不符」。
 
     因此：取值不在枚举内就是配置错误，不猜、不兜底。
+
+    ``required=True`` 时额外要求**真的**配了密钥（且不是占位符）——见
+    :func:`validate_session_encryption_required`。
 
     边界（不因本函数通过而声称成立）
     ------------------------------
@@ -1384,6 +1402,114 @@ def validate_session_encryption_settings(
             "配置声称的严格模式是假的。要么配置 SESSION_ENCRYPTION_KEY，"
             "要么改回 legacy。"
         )
+    errors.extend(
+        validate_session_encryption_required(
+            encryption_key=encryption_key,
+            required=required,
+            plaintext_compat=plaintext_compat,
+        )
+    )
+    errors.extend(
+        validate_session_encryption_previous_keys(
+            previous_keys=previous_keys,
+            current_key=encryption_key,
+        )
+    )
+    return errors
+
+
+#: 会话密钥的占位符/弱值特征。与 JWT_SECRET / SESSION_TOKEN_SECRET 的判定同口径：
+#: 一个"看起来配了、实际是公开常量"的密钥，等同于没有密钥。
+_SESSION_ENCRYPTION_KEY_PLACEHOLDERS = (
+    "your-",
+    "change-me",
+    "change_me",
+    "changeme",
+    "placeholder",
+    "example",
+    "test-key",
+    "sk-placeholder",
+)
+
+
+def validate_session_encryption_required(
+    *,
+    encryption_key: str,
+    required: bool,
+    plaintext_compat: str = SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+) -> list[str]:
+    """生产是否**强制**会话加密（纯函数，无 IO）。
+
+    为什么是开关而不是无条件强制
+    --------------------------
+    无条件强制会让"刚升级 compose、还没来得及配密钥"的既有生产环境**直接起不来**
+    —— 连诊断都进不去，用户看到的只有 crash loop。而"要不要加密"是一次**部署
+    决策**，不该随版本漂移成隐式行为变化。开关把收紧变成显式、可审计的一步。
+
+    收紧时**不破坏既有真实数据**：``SESSION_ENCRYPTION_PLAINTEXT_COMPAT=legacy``
+    下，启用密钥**不会**让已存在的历史明文会话变得不可读（它们仍按 legacy 规则
+    读取，并在下次被改写时自动升级为密文）。因此"配密钥"与"迁移历史明文"是
+    两件独立的事：前者安全且可回退，后者需要盘点（见 Issue #25）。
+
+    边界：强制加密**只保证新写入的记录是密文**，不证明历史记录的来源可信，
+    也不防御拥有会话存储写权限的攻击者。
+    """
+    errors: list[str] = []
+    if not required:
+        return errors
+    if not encryption_key or not encryption_key.strip():
+        errors.append(
+            "SESSION_ENCRYPTION_REQUIRED=true 但未配置 SESSION_ENCRYPTION_KEY —— "
+            "生产会话数据将以**明文**落盘/落 Redis。拒绝启动："
+            "配置声称会话数据已加密，实际没有。"
+        )
+        return errors
+    lowered = encryption_key.strip().lower()
+    if any(marker in lowered for marker in _SESSION_ENCRYPTION_KEY_PLACEHOLDERS):
+        errors.append(
+            "SESSION_ENCRYPTION_REQUIRED=true 但 SESSION_ENCRYPTION_KEY 仍是占位符/弱值 —— "
+            "拒绝启动：占位符密钥与没有密钥在安全性上等价。"
+        )
+    if (
+        plaintext_compat == SESSION_ENCRYPTION_PLAINTEXT_COMPAT_REJECT
+        and not encryption_key.strip()
+    ):
+        errors.append(
+            "SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject 需要已配置的 SESSION_ENCRYPTION_KEY。"
+        )
+    return errors
+
+
+def validate_session_encryption_previous_keys(
+    *,
+    previous_keys: str,
+    current_key: str,
+) -> list[str]:
+    """校验历史密钥列表（纯函数，无 IO）。
+
+    历史密钥用于**无破坏轮换**：旧密文仍可解密，新写入用当前密钥。没有它，
+    轮换密钥 = 一次性作废全部既有密文。
+
+    这里只校验**配置形状**，不校验任何密钥的正确性 —— 正确密钥解不开旧密文时，
+    读路径会明确报错（而不是回退成明文），那是运行期信号。
+    """
+    errors: list[str] = []
+    entries = [item.strip() for item in (previous_keys or "").split(",")]
+    entries = [item for item in entries if item]
+    if not entries:
+        return errors
+    if not (current_key or "").strip():
+        errors.append(
+            "配置了 SESSION_ENCRYPTION_KEY_PREVIOUS 却没有 SESSION_ENCRYPTION_KEY —— "
+            "当前没有可用于写入的密钥，历史密钥只能读不能写。"
+        )
+    current = (current_key or "").strip()
+    for item in entries:
+        if item == current:
+            errors.append(
+                "SESSION_ENCRYPTION_KEY_PREVIOUS 里出现了与当前密钥相同的值 —— "
+                "轮换必须换成**不同**的密钥，否则等于没轮换。"
+            )
     return errors
 
 
@@ -1439,9 +1565,15 @@ def validate_required_config():
     # ``SESSION_ENCRYPTION_PLAINTEXT_COMPAT`` 取值非法时，两种可能结果安全方向相反
     # （legacy=接受明文 / reject=拒绝），静默兜底成 legacy 会让部署无声地失去
     # fail-closed 语义。取值非法就是配置错误，不猜。
+    #
+    # 注意 ``required``（生产强制加密）这一项在这里**只在生产分支**生效：
+    # 开发机默认不强制，否则本地/CI 会被迫配置密钥；而生产分支在 DEV_MODE 早退
+    # **之后**（见下方 errors 收集段），那里再叠加"缺密钥即拒绝启动"。
     session_enc_errors = validate_session_encryption_settings(
         encryption_key=SESSION_ENCRYPTION_KEY,
         plaintext_compat=SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+        required=False,
+        previous_keys=SESSION_ENCRYPTION_KEY_PREVIOUS,
     )
     if session_enc_errors:
         for err in session_enc_errors:
@@ -1517,6 +1649,17 @@ def validate_required_config():
 
     if not _DEV_MODE:
         errors.extend(validate_app_database_dsn(dev_mode=_DEV_MODE, database_url=DATABASE_URL))
+        # 生产是否强制会话加密。默认 false = 保持既有部署行为（缺密钥只告警）；
+        # 置 true 后缺密钥/占位符密钥一律拒绝启动。收紧**不破坏既有真实数据**：
+        # legacy 模式下历史明文仍可读，下次改写自动升级为密文（见
+        # validate_session_encryption_required 的说明）。
+        errors.extend(
+            validate_session_encryption_required(
+                encryption_key=SESSION_ENCRYPTION_KEY,
+                required=SESSION_ENCRYPTION_REQUIRED,
+                plaintext_compat=SESSION_ENCRYPTION_PLAINTEXT_COMPAT,
+            )
+        )
     elif not _DEV_MODE and not DATABASE_URL.startswith(("postgresql://", "postgres://")):
         # 应用库必须是 PostgreSQL：非 PostgreSQL 方言（SQLite/MySQL）没有行级锁，
         # side-effect ledger 的接管路径无法排除并发重复执行（Issue #13）。注意
@@ -1591,7 +1734,15 @@ def validate_required_config():
     if not _DEV_MODE and ERP_MODE == "mock":
         warnings.append("ERP_MODE=mock: using fake ERP data, set to 'real' for production")
     if not _DEV_MODE and not SESSION_ENCRYPTION_KEY:
-        warnings.append("SESSION_ENCRYPTION_KEY not set: session data stored in plaintext")
+        if SESSION_ENCRYPTION_REQUIRED:
+            # 已在上面的生产分支 fail closed，走到这里说明是别的错误路径。
+            warnings.append("SESSION_ENCRYPTION_KEY not set: session data stored in plaintext")
+        else:
+            warnings.append(
+                "SESSION_ENCRYPTION_KEY not set: session data stored in plaintext. "
+                "Set SESSION_ENCRYPTION_KEY and SESSION_ENCRYPTION_REQUIRED=true to make "
+                "this fail closed instead of a warning."
+            )
     # v6.3: 当 EMBEDDING_API_KEY 为空（即从 OPENAI_API_KEY 回退）时发出警告
     _embedding_raw = os.getenv("EMBEDDING_API_KEY", "")
     if not _DEV_MODE and not _embedding_raw:

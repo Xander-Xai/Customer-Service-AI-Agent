@@ -124,7 +124,7 @@ LLM 输出处理链路：`marked.parse()` → `DOMPurify.sanitize()` → 插入 
 - **响应清洗**：移除 LLM 输出中的调试代码、注入泄露、XSS 内容
 - **熔断器保护**：连续 5 次失败后降级到规则引擎
 - **Token Quota**：用户级 Token 消耗限额（每日/每月），Redis 持久化 + 内存回退
-- **会话数据加密**：Fernet 可选加密（`SESSION_ENCRYPTION_KEY`；AES-128-CBC + HMAC-SHA256），文件后端自动加解密。已配置密钥时 fail-closed（PR #23）；密文带 `csae1:` 版本标记 envelope（PR #24），明文兼容由 `SESSION_ENCRYPTION_PLAINTEXT_COMPAT=legacy|reject` 显式选择。**边界**：新 envelope 只消除「密文损坏被静默降级为明文」，**不防御对存储写权限本身的攻击**；`legacy` 模式下历史明文来源无法验证（Issue #25）。完整边界与生产部署缺口见 [`docs/limitations.md`](../limitations.md) §9（已知代码债务：会话记录的 provenance / 生产契约缺少 `SESSION_ENCRYPTION_KEY` / 无迁移工具 / 存储访问控制）
+- **会话数据加密**：Fernet 可选加密（`SESSION_ENCRYPTION_KEY`；AES-128-CBC + HMAC-SHA256），文件后端自动加解密。已配置密钥时 fail-closed（PR #23）；密文带 `csae1:` 版本标记 envelope（PR #24），明文兼容由 `SESSION_ENCRYPTION_PLAINTEXT_COMPAT=legacy|reject` 显式选择。生产可用 `SESSION_ENCRYPTION_REQUIRED=true` 让**缺密钥/占位符密钥直接拒绝启动**（不是告警后照跑）。轮换用 `SESSION_ENCRYPTION_KEY_PREVIOUS` 保留旧密钥，既有密文仍可读（无破坏轮换）。**边界**：新 envelope 只消除「密文损坏被静默降级为明文」，**不防御对存储写权限本身的攻击**；`legacy` 模式下历史明文来源无法验证（Issue #25）。完整边界、生产部署缺口与运维步骤见 [`docs/limitations.md`](../limitations.md) §9 与 [`docs/operations/production-operations-guide.md`](../operations/production-operations-guide.md) §会话数据加密
 
 ### 基础设施安全
 

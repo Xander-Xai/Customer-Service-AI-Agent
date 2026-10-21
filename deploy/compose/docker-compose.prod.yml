@@ -21,6 +21,21 @@ services:
       - LOG_FORMAT=json
       - API_KEY_ENABLED=${API_KEY_ENABLED:-true}
       - SESSION_STORAGE_BACKEND=redis
+      # 会话数据加密（生产）。基座 compose 已注入同一组变量，这里显式重申是为了
+      # 让"生产必须加密"这件事在**生产覆盖层**里可见 —— 生产是唯一把
+      # SESSION_ENCRYPTION_REQUIRED 默认收紧到 true 的环境。
+      #
+      # 收紧**不破坏既有真实数据**：legacy 模式下历史明文仍可读，被改写的会话
+      # 自动升级为密文（迁移与切换 reject 是另一件事，见 Issue #25）。
+      #
+      # 升级影响（运维须知）：既有生产环境若**还没配** SESSION_ENCRYPTION_KEY，
+      # 升级 compose 后 app/worker 会**拒绝启动**并给出指名变量的错误。这是
+      # 有意的 fail closed（此前是"静默明文"），处理办法见
+      # docs/operations/production-operations-guide.md §会话数据加密。
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-true}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       - ERP_MODE=${ERP_MODE:-mock}
     volumes:
       - ../../chat_sessions:/app/chat_sessions

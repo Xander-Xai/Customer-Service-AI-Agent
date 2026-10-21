@@ -64,13 +64,40 @@ else
     else
         check_pass "SESSION_TOKEN_SECRET 已配置"
     fi
-    
-    if [ -z "${REDIS_PASSWORD:-}" ] || [[ "${REDIS_PASSWORD}" == *"CHANGE_ME"* ]]; then
-        check_warn "REDIS_PASSWORD 未设置强密码"
+
+    # ===== 会话数据加密 =====
+    #
+    # 收紧**不破坏既有真实数据**：legacy 模式下历史明文仍可读，被改写的会话自动
+    # 升级为密文。这里只做"配置形状"检查，不碰任何会话内容。
+    if [ "${SESSION_ENCRYPTION_REQUIRED:-false}" = "true" ]; then
+        if [ -z "${SESSION_ENCRYPTION_KEY:-}" ] || [[ "${SESSION_ENCRYPTION_KEY}" == *"CHANGE_ME"* ]]; then
+            check_fail "SESSION_ENCRYPTION_REQUIRED=true 但 SESSION_ENCRYPTION_KEY 缺失或仍是占位符 —— 应用会拒绝启动（会话数据将明文落盘）"
+        else
+            check_pass "SESSION_ENCRYPTION_KEY 已配置（生产强制加密已开启）"
+        fi
+    elif [ -z "${SESSION_ENCRYPTION_KEY:-}" ]; then
+        check_warn "SESSION_ENCRYPTION_KEY 未设置：会话数据以明文存储。设置 SESSION_ENCRYPTION_KEY 并把 SESSION_ENCRYPTION_REQUIRED=true 可让缺失时拒绝启动"
+    else
+        check_pass "SESSION_ENCRYPTION_KEY 已配置（SESSION_ENCRYPTION_REQUIRED 未开启，缺失时只告警）"
+    fi
+
+    # 明文兼容策略：reject 要求已完成迁移，否则历史明文会话直接不可读。
+    case "${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}" in
+        legacy|reject) check_pass "SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}" ;;
+        *) check_fail "SESSION_ENCRYPTION_PLAINTEXT_COMPAT 取值非法（只允许 legacy|reject）" ;;
+    esac
+
+    # Redis 访问控制：密码是**唯一**的存储侧控制（无 ACL / 无 TLS）。
+    # 拥有它的人就能读**和写**会话存储 —— 加密不是对存储写权限的防护（Issue #25）。
+    if [ -z "${REDIS_PASSWORD:-}" ] || [[ "${REDIS_PASSWORD}" == *"CHANGE_ME"* ]] || [ "${REDIS_PASSWORD}" = "changeme" ]; then
+        check_warn "REDIS_PASSWORD 未设置强密码或仍是默认值 —— 同一密码同时治理 JWT 黑名单/限流/Celery broker/线程锁/工具结果缓存/会话，建议按子系统拆分并启用 Redis ACL"
     else
         check_pass "REDIS_PASSWORD 已配置"
     fi
-    
+    if [[ "${REDIS_URL:-}" == redis://* ]] && [[ "${REDIS_URL:-}" != rediss://* ]]; then
+        check_warn "REDIS_URL 未使用 TLS（rediss://）—— 会话与队列流量在网内是明文"
+    fi
+
     if [ -z "${POSTGRES_PASSWORD:-}" ] || [[ "${POSTGRES_PASSWORD}" == *"CHANGE_ME"* ]]; then
         check_warn "POSTGRES_PASSWORD 未设置强密码"
     else

@@ -42,6 +42,10 @@ def main() -> None:
         "CHANGE_ME_TO_SECURE_RANDOM_TOKEN": generate_key(32, "hex"),
         "CHANGE_ME_TO_SECURE_PASSWORD": generate_key(24, "base64url"),
         "CHANGE_ME_TO_STRONG_PASSWORD": generate_key(24, "base64url"),
+        # 会话数据加密密钥：32 字节随机（base64url）。它派生出的 Fernet 密钥用于
+        # 会话记录加密；轮换时旧值必须挪到 SESSION_ENCRYPTION_KEY_PREVIOUS，
+        # 否则既有密文一次性作废（见 core/config.py::SESSION_ENCRYPTION_KEY_PREVIOUS）。
+        "CHANGE_ME_TO_SECURE_RANDOM_SESSION_KEY": generate_key(32, "base64url"),
     }
 
     # GRAFANA_PASSWORD 使用独立的占位符（与 POSTGRES 不同行上可能同名，需按上下文处理）

@@ -164,6 +164,16 @@ services:
       - WS_MESSAGE_RATE_LIMIT=${WS_MESSAGE_RATE_LIMIT:-10}
       - WS_IDLE_TIMEOUT=${WS_IDLE_TIMEOUT:-300}
       - SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-}
+      # 会话数据加密（见 core/config.py::SESSION_ENCRYPTION_KEY）。
+      # 刻意**不用** `${SESSION_ENCRYPTION_KEY:?}`：那会让 `docker compose config`
+      # 在**配置阶段**就失败，既有生产环境（还没配密钥）连诊断都进不去，只能看到
+      # 一条 compose 报错。策略放在**应用启动校验**里（core/config.py::
+      # validate_session_encryption_required），失败信息指名变量、可读、可操作。
+      # SESSION_ENCRYPTION_REQUIRED=true 时，生产缺密钥/占位符密钥一律拒绝启动。
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-false}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       - TLS_CERT_FILE=${TLS_CERT_FILE:-}
       - TLS_KEY_FILE=${TLS_KEY_FILE:-}
       # v3.9: Gunicorn 多 Worker
@@ -254,6 +264,13 @@ services:
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       - DATABASE_URL=${DATABASE_URL:-}
       - SESSION_STORAGE_BACKEND=${SESSION_STORAGE_BACKEND:-redis}
+      # 会话数据加密：worker 同样读写会话记录（工具执行与响应后处理都会落会话），
+      # 因此**必须**与 app 使用**同一把**密钥，否则 worker 写出的密文 app 解不开。
+      # 取值口径与 app 一致；策略同样由 core/config.py 的启动校验统一执行。
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-false}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       - ERP_MODE=mock
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
