@@ -85,9 +85,12 @@ def _load_live_session_ids() -> set[str]:
             pass
     if DEV_MODE:
         try:
-            from core.session.session_manager import get_session_manager
+            # ``core.session.session_manager`` 只导出 ``default_session_manager``；
+            # 之前 import 的是不存在的 ``get_session_manager``，ImportError 被下面的
+            # 宽 except 吞掉 —— dev 模式的内存会话回退路径从未真正生效。
+            from core.session.session_manager import default_session_manager
 
-            mgr = get_session_manager()
+            mgr = default_session_manager
             ids.update(getattr(mgr, "sessions", {}).keys())
         except Exception:
             pass
