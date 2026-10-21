@@ -122,6 +122,16 @@ def main() -> None:
         "ADMIN_PASSWORD": {"bytes": 24, "encoding": "base64url", "risk": "high"},
         "GRAFANA_PASSWORD": {"bytes": 16, "encoding": "base64url", "risk": "medium"},
         "REDIS_PASSWORD": {"bytes": 24, "encoding": "base64url", "risk": "high"},
+        # 会话加密密钥：可轮换，但**不能直接替换**。
+        #
+        # 没有 key-id 时，直接换掉当前密钥 = 一次性作废全部既有密文（读不开了）。
+        # 正确做法（本脚本生成的新值写入 SESSION_ENCRYPTION_KEY，同时要求把**旧值**
+        # 挪进 SESSION_ENCRYPTION_KEY_PREVIOUS）：旧密文仍可解密，新写入用新密钥，
+        # 旧会话在被改写时自动升级为密文 —— 无破坏轮换，不需要导出任何会话内容。
+        #
+        # 因此这里只**生成**新密钥并提示后续步骤；替换与"旧值入 previous"由操作者
+        # 按 docs/operations/production-operations-guide.md §会话数据加密 执行。
+        "SESSION_ENCRYPTION_KEY": {"bytes": 32, "encoding": "base64url", "risk": "high"},
     }
 
     if check_only:
@@ -174,6 +184,9 @@ def main() -> None:
     new_lines = []
     rotated_keys = []
     now = datetime.now().isoformat()
+    # 会话加密密钥的旧值：轮换时必须挪进 SESSION_ENCRYPTION_KEY_PREVIOUS，
+    # 否则既有密文一次性作废（没有 key-id 时无法定向重加密）。见下方 special case。
+    previous_session_key: str | None = None
 
     for line in lines:
         stripped = line.strip()
@@ -185,6 +198,8 @@ def main() -> None:
             if key in rotation_rules:
                 rule = rotation_rules[key]
                 new_val = generate_key(rule["bytes"], rule["encoding"])
+                if key == "SESSION_ENCRYPTION_KEY" and val.strip():
+                    previous_session_key = val.strip()
                 new_line = f"{key}={new_val}\n"
                 rotated_keys.append(key)
 
@@ -198,6 +213,32 @@ def main() -> None:
                 ledger["keys"][key]["risk_level"] = rule["risk"]
 
         new_lines.append(new_line)
+
+    # 会话加密密钥：把**旧值**写进 SESSION_ENCRYPTION_KEY_PREVIOUS（保留原有历史项）。
+    # 这是"无破坏轮换"的关键一步 —— 旧密文仍可解密，新写入用新密钥，旧会话在被改写
+    # 时自动升级为密文。不做这一步，轮换 = 一次性作废全部既有会话密文。
+    if previous_session_key is not None:
+        _previous_line_idx = None
+        for idx, line in enumerate(new_lines):
+            if line.strip().startswith("SESSION_ENCRYPTION_KEY_PREVIOUS="):
+                _previous_line_idx = idx
+                break
+        existing = ""
+        if _previous_line_idx is not None:
+            existing = new_lines[_previous_line_idx].split("=", 1)[1].strip()
+        merged = [item for item in existing.split(",") if item]
+        if previous_session_key not in merged:
+            merged.insert(0, previous_session_key)
+        merged_value = ",".join(merged)
+        if _previous_line_idx is not None:
+            new_lines[_previous_line_idx] = f"SESSION_ENCRYPTION_KEY_PREVIOUS={merged_value}\n"
+        else:
+            new_lines.append(f"SESSION_ENCRYPTION_KEY_PREVIOUS={merged_value}\n")
+        print(
+            "🔄 SESSION_ENCRYPTION_KEY 已轮换；旧值已写入 SESSION_ENCRYPTION_KEY_PREVIOUS。"
+            "既有密文仍可解密（旧会话在被改写时自动升级为新密钥）。"
+            "排空后（session_encryption_key_fallback_total 归零）可清空该历史项。"
+        )
 
     # 保存新配置
     result = "".join(new_lines)

@@ -57,6 +57,13 @@ services:
       - SESSION_IDLE_TTL=3600
       - MONITORING_ADMIN_TOKEN=${MONITORING_ADMIN_TOKEN:-}
       - SESSION_TOKEN_SECRET=${SESSION_TOKEN_SECRET:-}
+      # 会话数据加密：canary 与 app 共用同一会话存储，必须用**同一把**密钥，
+      # 否则 canary 写出的密文 app 解不开（会话在灰度与稳定版之间来回读）。
+      # 口径与 base compose 的 app 一致；策略由 core/config.py 启动校验统一执行。
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-false}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       # canary 与 app 共用同一镜像、同一个入口（Dockerfile CMD → api.app_factory:app），
       # 因此同样会在模块导入期执行 auth/service.py::init_default_admin()，缺失
       # ADMIN_PASSWORD 一样 crash loop。这里必须与 base compose 的 app 保持同口径的

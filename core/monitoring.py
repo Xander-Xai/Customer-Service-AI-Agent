@@ -113,6 +113,35 @@ try:
         multiprocess_mode="mostrecent",
     )
 
+    # 会话加密相关计数（Issue #25 的**盘点**信号）
+    #
+    # `session_legacy_plaintext_read_total` 回答的是迁移前必须先知道的问题：
+    # "还有多少条**来源未经验证**的历史明文记录在被读取？" 没有它，切换到
+    # ``SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject`` 之前只能靠猜 —— 而猜错的后果
+    # 是历史会话直接不可读。
+    #
+    # 计数**只按类别**，绝不把 session_id / 记录内容放进 label（那会让时序数无界
+    # 增长，且等于把会话内容送进监控系统）。
+    session_legacy_plaintext_read_total = _counter(
+        "session_legacy_plaintext_read_total",
+        "Session records read as source-unverified legacy plaintext (no-key-plaintext "
+        "and legacy-plaintext kinds). Non-zero means the legacy plaintext population "
+        "is still live; it does NOT prove those records are authentic (see Issue #25).",
+        ["kind"],
+    )
+    session_encryption_error_total = _counter(
+        "session_encryption_error_total",
+        "Session encryption/decryption failures by reason. "
+        "reason=decrypt_failed covers wrong key, corrupted ciphertext and non-ciphertext "
+        "records alike (they are deliberately indistinguishable).",
+        ["reason"],
+    )
+    session_encryption_key_fallback_total = _counter(
+        "session_encryption_key_fallback_total",
+        "Session records decrypted with a previous key (SESSION_ENCRYPTION_KEY_PREVIOUS) "
+        "during key rotation. Non-zero means rotation backlogs are still draining.",
+    )
+
     # 人工升级率
     escalation_rate = _gauge(
         "escalation_rate",
@@ -534,6 +563,9 @@ except ImportError:
     collaboration_mode_total = _NoopMetric()
     session_resolution_rate = _NoopMetric()
     escalation_rate = _NoopMetric()
+    session_legacy_plaintext_read_total = _NoopMetric()
+    session_encryption_error_total = _NoopMetric()
+    session_encryption_key_fallback_total = _NoopMetric()
     business_cache_hit_rate = _NoopMetric()
     cache_l1_hits_total = _NoopMetric()
     cache_l2_hits_total = _NoopMetric()

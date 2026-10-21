@@ -38,6 +38,12 @@ services:
     environment:
       # 水平扩展必须使用 Redis 存储会话（内存模式无法跨实例共享）
       - SESSION_STORAGE_BACKEND=redis
+      # 多副本共用同一会话存储，因此必须共用**同一把**会话加密密钥
+      # （否则副本之间互相解不开对方写的密文）。
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-false}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       # 使用 PostgreSQL（SQLite 不支持多实例写入）
       - DATABASE_URL=${DATABASE_URL:-postgresql://csai:password@postgres:5432/csai}
       # 多副本必须外部化图状态（内存 checkpoint 是每进程独立的）

@@ -189,8 +189,40 @@ _RECORD_KIND_LEGACY_TOKEN = "legacy-unmarked-ciphertext"
 _RECORD_KIND_LEGACY_PLAINTEXT = "legacy-plaintext"
 
 
+def _record_metric(metric_name: str, **labels: str) -> None:
+    """递增一个监控计数（监控不可用时静默 no-op，绝不影响会话读写）。
+
+    刻意**不**记录 session_id / 记录内容：那会让 Prometheus 时序数无界增长，
+    等于把会话内容送进监控系统。这里只记类别。
+    """
+    try:
+        from core import monitoring
+
+        metric = getattr(monitoring, metric_name, None)
+        if metric is None:
+            return
+        if labels:
+            metric.labels(**labels).inc()
+        else:
+            metric.inc()
+    except Exception:  # pragma: no cover - 监控是旁路，绝不能拖垮会话路径
+        pass
+
+
+def _derive_key(key_str: str) -> bytes:
+    """把口令字符串派生成 Fernet 用的对称密钥。
+
+    .. warning::
+       直接 SHA-256 **没有盐、没有 KDF**。这是既有行为，本轮不改动（改动会使全部
+       既有密文不可解，属于**破坏性变更**，必须走显式迁移）。因此本函数对
+       "弱口令"没有抵抗力：攻击者拿到存储后可离线爆破整个语料。运维侧应使用
+       高熵随机串（``scripts/generate_prod_env.py`` 生成 32 字节随机值）。
+    """
+    return hashlib.sha256(key_str.encode("utf-8")).digest()
+
+
 def _get_encryption_key() -> bytes | None:
-    """获取加密密钥。未配置时返回 None（向后兼容）。"""
+    """获取**当前**加密密钥。未配置时返回 None（向后兼容）。"""
     from core import config
 
     key_str = getattr(config, "SESSION_ENCRYPTION_KEY", "") or os.environ.get(
@@ -198,8 +230,41 @@ def _get_encryption_key() -> bytes | None:
     )
     if not key_str:
         return None
-    key_bytes = key_str.encode("utf-8")
-    return hashlib.sha256(key_bytes).digest()
+    return _derive_key(key_str)
+
+
+def _get_previous_encryption_keys() -> list[bytes]:
+    """获取历史密钥（``SESSION_ENCRYPTION_KEY_PREVIOUS``，逗号分隔）。
+
+    用途是**无破坏轮换**：轮换时把旧密钥挪进这里，旧密文仍可解密，新写入一律用
+    当前密钥，被访问到的旧会话在下次改写时自动升级为密文。没有它，轮换密钥 =
+    一次性作废全部既有密文（没有 key-id 时无法定向重加密）。
+
+    边界：历史密钥只保证**可读**，不证明记录来源可信（Issue #25）。
+    """
+    from core import config
+
+    raw = getattr(config, "SESSION_ENCRYPTION_KEY_PREVIOUS", "") or os.environ.get(
+        "SESSION_ENCRYPTION_KEY_PREVIOUS", ""
+    )
+    entries = [item.strip() for item in (raw or "").split(",")]
+    return [_derive_key(item) for item in entries if item]
+
+
+def _get_all_encryption_keys() -> list[bytes]:
+    """当前密钥在前，历史密钥在后（读路径的候选顺序）。
+
+    读路径实际由 :func:`_open_record` 传入**权威**的当前密钥组装候选列表；
+    本函数供"当前密钥 + 历史密钥"的整体视图使用（例如运维自检）。
+    """
+    keys: list[bytes] = []
+    current = _get_encryption_key()
+    if current is not None:
+        keys.append(current)
+    for key in _get_previous_encryption_keys():
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _get_fernet(key: bytes):
@@ -247,6 +312,7 @@ def _encrypt_data(data: str, key: bytes | None) -> str:
     try:
         return fernet.encrypt(data.encode("utf-8")).decode("utf-8")
     except Exception as e:
+        _record_metric("session_encryption_error_total", reason="encrypt_failed")
         raise SessionEncryptionError("会话数据加密失败") from e
 
 
@@ -269,6 +335,42 @@ def _decrypt_data(data: str, key: bytes | None) -> str:
         return fernet.decrypt(data.encode("utf-8")).decode("utf-8")
     except Exception as e:
         raise SessionEncryptionError("会话密文解密失败（密钥不匹配或数据损坏）") from e
+
+
+def _decrypt_with_any_key(data: str, keys: list[bytes]) -> tuple[str, bool]:
+    """依次尝试候选密钥解密，返回 ``(明文, 是否用了历史密钥)``。
+
+    为什么需要多把密钥
+    ------------------
+    没有 key-id 时，**轮换**密钥 = 一次性作废全部既有密文。引入
+    ``SESSION_ENCRYPTION_KEY_PREVIOUS`` 后：旧密钥保留在列表里，旧密文仍可解密，
+    新写入一律用当前密钥，被访问到的旧会话在下次改写时自动升级为密文 ——
+    **无破坏轮换**，且不需要停机迁移、不需要导出任何会话内容。
+
+    顺序：当前密钥在前。用当前密钥解开的记录**不**计入轮换回退计数。
+
+    失败语义：全部候选都失败 → 抛 ``SessionEncryptionError``（**不回退成明文**）。
+    注意"错密钥"与"密文损坏"在这里**故意不可区分** —— Fernet 的认证标签只能证明
+    "这把密钥（或这把错的）解不开它"，不能告诉你是哪一种。这正是我们不想在错误
+    信息里泄露的细节。
+    """
+    if not keys:
+        return data, False
+    last_error: SessionEncryptionError | None = None
+    for index, key in enumerate(keys):
+        try:
+            plaintext = _decrypt_data(data, key)
+        except SessionEncryptionError as exc:
+            last_error = exc
+            continue
+        if index == 0:
+            return plaintext, False
+        # 命中历史密钥：轮换还有尾巴没排空，记一笔（只记计数，不记密钥/内容）。
+        _record_metric("session_encryption_key_fallback_total")
+        return plaintext, True
+    assert last_error is not None
+    _record_metric("session_encryption_error_total", reason="decrypt_failed")
+    raise last_error
 
 
 def _plaintext_compat_mode() -> str:
@@ -311,6 +413,7 @@ def _decode_record_json(text: str, kind: str) -> tuple[Any, str]:
     try:
         return json.loads(text), kind
     except Exception as e:
+        _record_metric("session_encryption_error_total", reason="not_json")
         raise SessionEncryptionError(
             f"会话记录不是合法 JSON（格式判定={kind}）"
             " —— 记录存在但内容不可解析，拒绝静默重建为空会话"
@@ -318,7 +421,7 @@ def _decode_record_json(text: str, kind: str) -> tuple[Any, str]:
 
 
 def _open_record(stored: str, key: bytes | None) -> tuple[Any, str]:
-    """读取一条持久化会话记录，返回 ``(值, 类别)``；类别取值见 ``_RECORD_KIND_*``。
+    """读取一条持久化会话记录，返回 ``(值, 类别)``；类别取值见 ``_RECORD_KIND_*`。
 
     显式三分类，取代"不是 Fernet token 就是明文"的否定式推断：
 
@@ -334,21 +437,36 @@ def _open_record(stored: str, key: bytes | None) -> tuple[Any, str]:
     "启用加密之后被替换进去的明文"没有防护能力。没有可信的历史格式标记或外部来源
     元数据时，合法历史明文与被替换明文**在原理上不可区分** —— 本函数不声称能区分，
     只做到：能判定的密文一律 fail closed，判不了的就明确记录为"来源未经验证的明文"。
+
+    ``key`` 为当前密钥；历史密钥（``SESSION_ENCRYPTION_KEY_PREVIOUS``）在解密阶段
+    依次尝试（见 :func:`_decrypt_with_any_key`），因此**轮换不破坏既有密文**。
     """
     if not key:
+        _record_metric("session_legacy_plaintext_read_total", kind=_RECORD_KIND_NO_KEY)
         return _decode_record_json(stored, _RECORD_KIND_NO_KEY)
+
+    # 候选密钥 = 传入的当前密钥（权威）+ 历史密钥（轮换兼容）。
+    candidates = [key]
+    for previous in _get_previous_encryption_keys():
+        if previous not in candidates:
+            candidates.append(previous)
 
     if stored.startswith(_SESSION_ENVELOPE_PREFIX):
         token = stored[len(_SESSION_ENVELOPE_PREFIX) :]
-        return _decode_record_json(_decrypt_data(token, key), _RECORD_KIND_ENVELOPE)
+        plaintext, _used_previous = _decrypt_with_any_key(token, candidates)
+        return _decode_record_json(plaintext, _RECORD_KIND_ENVELOPE)
 
     if _is_fernet_token(stored):
-        return _decode_record_json(_decrypt_data(stored, key), _RECORD_KIND_LEGACY_TOKEN)
+        plaintext, _used_previous = _decrypt_with_any_key(stored, candidates)
+        return _decode_record_json(plaintext, _RECORD_KIND_LEGACY_TOKEN)
 
     if _plaintext_compat_mode() == _CFG_PLAINTEXT_COMPAT_REJECT:
+        _record_metric("session_encryption_error_total", reason="reject_non_ciphertext")
         raise SessionEncryptionError(
             "严格模式拒绝加载非密文会话记录（SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject）"
         )
+    # 来源未经验证的历史明文：计数即"迁移前盘点"的运行时信号（见 Issue #25）。
+    _record_metric("session_legacy_plaintext_read_total", kind=_RECORD_KIND_LEGACY_PLAINTEXT)
     return _decode_record_json(stored, _RECORD_KIND_LEGACY_PLAINTEXT)
 
 

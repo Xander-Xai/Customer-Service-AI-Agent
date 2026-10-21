@@ -1079,6 +1079,100 @@ docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-com
 # 5. 通知所有客户端更新 API Key
 ```
 
+### 会话数据加密（配置、收紧与轮换）
+
+本节覆盖 `SESSION_ENCRYPTION_KEY` / `SESSION_ENCRYPTION_REQUIRED` /
+`SESSION_ENCRYPTION_PLAINTEXT_COMPAT` / `SESSION_ENCRYPTION_KEY_PREVIOUS` 四个变量。
+
+**边界（先读，不要夸大）**：会话加密保护的是**会话记录内容**，**不是会话存储本身**。
+拥有 Redis / 会话文件**写权限**的攻击者仍然可以替换记录 —— 真正的控制是**存储侧访问
+控制**（Redis ACL / 独立凭据 / TLS / 卷权限）。本节的所有步骤都**不**改变这个边界
+（见 Issue #25）。
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `SESSION_ENCRYPTION_KEY` | 空 | 会话记录加密密钥（配了才加密） |
+| `SESSION_ENCRYPTION_REQUIRED` | `false`（生产模板 `true`） | 缺密钥/占位符密钥时**拒绝启动** |
+| `SESSION_ENCRYPTION_PLAINTEXT_COMPAT` | `legacy` | `legacy` 允许读历史明文；`reject` 一律拒绝 |
+| `SESSION_ENCRYPTION_KEY_PREVIOUS` | 空 | 历史密钥（逗号分隔），用于无破坏轮换 |
+
+#### 启用加密（不破坏既有数据）
+
+```
+# 1. 生成密钥（写进 .env.prod 的 SESSION_ENCRYPTION_KEY）
+python3 scripts/generate_prod_env.py     # 或：openssl rand -base64 32
+
+# 2. 打开强制开关（生产模板默认已开）
+#    .env.prod: SESSION_ENCRYPTION_REQUIRED=true
+
+# 3. 重启并确认
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml up -d
+docker compose -f deploy/compose/docker-compose.yml -f deploy/compose/docker-compose.prod.yml \
+  exec app \
+  curl -s http://localhost:8000/api/health
+```
+
+**既有历史明文会话不会因此不可读**：`legacy` 模式下它们仍按原规则读取，并在会话
+**下次被改写时**自动升级为密文（读后重写）。因此"配密钥"与"迁移历史明文"是**两件
+独立的事**：前者安全且可回退；后者需要盘点与人工决策（见下方"迁移"）。
+
+#### 迁移历史明文 → 切换 reject（**需要 owner 授权**）
+
+```
+# 1. 盘点（运行时信号，只读、不导出内容）
+#    指标 session_legacy_plaintext_read_total 按类别计数；
+#    归零 = 历史明文已自然收敛（全部被改写升级）
+# 2. 决定：历史集合是否可验证（备份时间戳 / 审计日志 / 部署记录）
+#    —— 若无法证明，它就**按构造不可验证**（Issue #25）
+# 3. 授权后切 reject
+#    .env.prod: SESSION_ENCRYPTION_PLAINTEXT_COMPAT=reject
+# 4. 重启后观察 session_encryption_error_total{reason="reject_non_ciphertext"}
+```
+
+> ⚠️ **不要在未完成盘点与授权前切 `reject`**：它会让仍存留的历史明文会话**直接不可读**
+> （表现为 `SESSION_ENCRYPTION_ERROR` / 500）。这是**可用性**取舍，不是安全性取舍。
+
+#### 无破坏轮换（不丢数据）
+
+```
+# 1. 生成新密钥，把**旧值**挪进 SESSION_ENCRYPTION_KEY_PREVIOUS
+#    .env.prod:
+#      SESSION_ENCRYPTION_KEY=<新值>
+#      SESSION_ENCRYPTION_KEY_PREVIOUS=<旧值>
+#    （scripts/rotate_secrets.py 会自动完成这一步：生成新值 + 把旧值写进 previous）
+
+# 2. 重启。此时：旧密文仍可解密；新写入用新密钥；旧会话在被改写时自动升级
+
+# 3. 观察轮换是否排空
+#    session_encryption_key_fallback_total 归零 = 没有记录还在用旧密钥
+
+# 4. 排空后清空 SESSION_ENCRYPTION_KEY_PREVIOUS，再重启
+```
+
+#### 排障
+
+| 症状 | 含义 | 处理 |
+|---|---|---|
+| 启动失败 + `SESSION_ENCRYPTION_REQUIRED=true 但未配置 SESSION_ENCRYPTION_KEY` | 生产强制加密已开但没配密钥 | 生成密钥写入 `.env.prod` |
+| 启动失败 + `SESSION_ENCRYPTION_KEY 仍是占位符/弱值` | 用了模板占位符 | 同上，跑 `generate_prod_env.py` |
+| HTTP 500 + `code=SESSION_ENCRYPTION_ERROR` | 记录解不开（错密钥 / 密文损坏 / 非 JSON） | 看 `session_encryption_error_total{reason}`；**不要**导出记录内容排查 |
+| `session_legacy_plaintext_read_total` 持续 > 0 | 还有历史明文在被读 | 这是**盘点信号**，别急着切 reject |
+
+#### Redis 访问控制（存储侧，真正的控制）
+
+```
+# 必须做的
+- REDIS_PASSWORD 用强随机值（compose 默认 changeme 只是占位）
+- 按子系统拆分凭据（会话 / 队列 / 锁 / 缓存 / 限流），而不是共用一个
+- Redis ACL：按 key pattern 限制（会话 key 前缀单独授权）
+- 网络隔离：Redis 不对宿主机发布端口，只在内部网络
+# 建议
+- rediss://（TLS）：会话与队列流量在网内也是明文
+```
+
+`scripts/pre_deploy_check.sh` 会对以上几项给出 WARN（不阻断），并在
+`SESSION_ENCRYPTION_REQUIRED=true` 但密钥缺失/占位时**阻断**。
+
 ### 安全事件响应
 
 ```

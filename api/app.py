@@ -420,6 +420,30 @@ def create_app(
     app.add_exception_handler(ThreadBusyError, _thread_busy_handler)
     app.add_exception_handler(ThreadLockUnavailableError, _thread_lock_unavailable_handler)
 
+    # ── SessionEncryptionError -> 500（会话记录解不开时的稳定错误契约）──
+    #
+    # 为什么需要一个专门的处理：会话密文解不开（错密钥 / 密文损坏 / 记录不是
+    # JSON）此前一律表现为**未处理的 500**：没有稳定错误码，客户端无法区分
+    # "服务端坏了"与"这条会话坏了"，运维也无法在告警里归类。
+    #
+    # 响应体**只含**固定错误码，**不含**：密钥、密文、记录内容、session_id。
+    # 详情只进服务端日志（且日志里同样不带内容）。计数由 session_manager 在
+    # 抛出点递增（`session_encryption_error_total`），因此即便某条路由自己
+    # catch 了宽异常，计数也不会丢。
+    from core.exceptions import SessionEncryptionError
+
+    async def _session_encryption_error_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        assert isinstance(exc, SessionEncryptionError)
+        logger.error("SESSION_ENCRYPTION_ERROR path=%s", request.url.path)
+        return JSONResponse(
+            {"error": "SESSION_ENCRYPTION_ERROR", "code": "SESSION_ENCRYPTION_ERROR"},
+            status_code=500,
+        )
+
+    app.add_exception_handler(SessionEncryptionError, _session_encryption_error_handler)
+
     # ── 挂载路由模块 ──
     from api.routes.approvals import router as approvals_router
     from api.routes.chat import router as chat_router
