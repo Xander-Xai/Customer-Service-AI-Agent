@@ -789,3 +789,13 @@ customer-service-ai-agent/
 [Apache 2.0](LICENSE).
 
 企业级实践参考实现；生产环境所需凭据与基础设施不在本仓库内。
+
+
+## 生态定位与公开工程证据边界（2026-10-30）
+
+这是公开工程参考仓库，不是任何私有经营系统的客户事实或生产应用替代品。
+
+- **唯一工程主责**：LangGraph customer-service workflow and distributed execution/HITL reference implementation。
+- **验证边界**：CI/runtime tests are not a production SLA; real ERP writes, live traffic and the published RAG relevance metrics remain unverified in the stated scope.
+- **公开交叉索引**：[Beauty RAG](https://github.com/Xander-Xai/Beauty-Industry-RAG-QA-System) owns a different domain-focused retrieval reference; an ecosystem link is not a shared production deployment.
+- 代码、测试、指标及发布的唯一技术权威在本仓；任何外部商业研究、PR、演示、内容制作或私人计划均不能替本仓证明生产安全、真实客户验收或收入。
