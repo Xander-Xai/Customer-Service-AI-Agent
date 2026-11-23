@@ -40,6 +40,9 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
+      - name: Temporary Ruff diff diagnostic
+        run: ruff format --diff core/graph_builder.py tests/unit/test_graph_quality_upgrade.py
+
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
