@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build an auditable, balanced human-review worklist for Agent route labels.
 
-A model-generated route is a *candidate*, never ground truth. This script does
-not approve, relabel, or score any case. An independent reviewer must use the
-existing approve_agent_eval_annotations.py workflow after reading each query.
+A model-generated route is a *candidate*, never ground truth. Candidate labels
+are hidden from the reviewer worklist, even though the deterministic sampling
+is stratified by them. This script does not approve, relabel, or score cases.
+An independent reviewer supplies corrected labels with --label CASE_ID=ROUTE.
 
 Example:
     python3 scripts/build_agent_eval_review_worklist.py --per-route 3 --limit 24
@@ -55,11 +56,12 @@ def build_worklist(dataset, *, per_route: int = 3, limit: int = 24) -> dict:
         "selected_count": len(selected),
         "review_status": "DRAFT_UNVERIFIED",
         "formal_route_accuracy": "NOT_MEASURED_UNTIL_HUMAN_CONFIRMED",
+        "blind_review": True,
         "cases": [
             {
                 "case_id": case.case_id,
                 "query": case.input,
-                "candidate_route_not_ground_truth": case.expected_route,
+                # Omit candidate route so reviewers do not rubber-stamp it.
                 "tags": list(case.tags),
                 "reviewer_route": None,
                 "reviewer_id": None,
