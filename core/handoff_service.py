@@ -446,7 +446,11 @@ class HandoffService:
             if not result:
                 raise HandoffNotFound("Ticket not found")
             return [
-                {"actor_id": event.actor_id, "event": event.event, "created_at": event.created_at}
+                {
+                    "actor_id": event.actor_id,
+                    "event": event.event,
+                    "created_at": event.created_at,
+                }
                 for _, event in result
                 if event is not None
             ]
