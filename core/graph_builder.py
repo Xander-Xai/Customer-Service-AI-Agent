@@ -240,6 +240,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                 state["response"] = "人工客服通道暂不可用，请稍后重试。"
                 state["cached"] = True
                 state["collaboration_mode"] = "handoff_unavailable"
+                state["degraded_reason"] = "handoff_lookup_unavailable"
                 return state
             if ticket:
                 state["handoff_ticket_id"] = ticket["ticket_id"]
@@ -490,6 +491,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                         logger.error("[Handoff] unable to persist ticket", exc_info=True)
                         state["response"] = "暂未成功创建人工客服工单，请稍后重试。"
                         state["handoff_status"] = "UNAVAILABLE"
+                        state["degraded_reason"] = "handoff_ticket_create_failed"
                     else:
                         state["handoff_ticket_id"] = ticket["ticket_id"]
                         state["handoff_status"] = ticket["status"]
@@ -500,6 +502,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                 else:
                     state["response"] = "无法确认会话用户身份，尚未创建人工工单。请登录后重试。"
                     state["handoff_status"] = "IDENTITY_REQUIRED"
+                    state["degraded_reason"] = "handoff_identity_unverified"
 
         if c.response_agent:
             try:
