@@ -1066,8 +1066,10 @@ class BaseAgent(ABC):
                             _record_tool_execution(
                                 state, p["name"], ok=bool(receipt and receipt.ok)
                             )
-                            if receipt is not None and not receipt.ok and _is_durable_side_effect(
-                                self.tool_registry, p["name"]
+                            if (
+                                receipt is not None
+                                and not receipt.ok
+                                and _is_durable_side_effect(self.tool_registry, p["name"])
                             ):
                                 # Error strings and explicit refusals from a
                                 # durable write are failures, not successful runs.
