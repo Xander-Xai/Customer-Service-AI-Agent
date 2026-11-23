@@ -27,7 +27,7 @@
 
 | 编号 | 执行项 | 通过标准 | 当前状态 / 关联变更 |
 | --- | --- | --- | --- |
-| CSA-P0-01 | 原生无框架 Agent Loop × 8 场景：无工具、单工具、依赖工具、Schema 纠错、读写超时、循环预算、取消、HITL | 一组可复跑的独立测试，模型选工具与服务端授权分开断言，写操作状态未知时不得报成功 | **REFERENCE_IMPLEMENTED / LOCAL_TESTED**：`core/standalone_agent_loop.py` + `tests/unit/test_standalone_agent_loop.py` 覆盖 8 条隔离场景；尚未接入实际 LangGraph/HITL/ERP 业务，因此仍 **NOT_VERIFIED_E2E** |
+| CSA-P0-01 | 原生无框架 Agent Loop × 8 场景：无工具、单工具、依赖工具、Schema 纠错、读写超时、循环预算、取消、HITL | 一组可复跑的独立测试，模型选工具与服务端授权分开断言，写操作状态未知时不得报成功 | **REFERENCE_IMPLEMENTED / LOCAL_TESTED**：`core/standalone_agent_loop.py` + `tests/unit/test_standalone_agent_loop.py` 覆盖 8 条基础场景 + 2 条写操作状态核验安全回归；仅通过可信外部查询确认已执行，不自动重投未知写操作；尚未接入实际 LangGraph/HITL/ERP 业务，因此仍 **NOT_VERIFIED_E2E** |
 | CSA-P0-02 | 服务端直接 ERP 只读工具超时/失败治理，协作模式传播失败状态 | 真实被测调用点、五种协作路径回归、异常不泄密 | **PR #40 Draft**；未合并，禁止写成完成 |
 | CSA-P0-03 | 真实图路由金标审查及真实 Provider 任务评测 | 人工确认标注；混合/故障场景可复测；分母/跳过/成本来源完整；模型调用经授权 | **PR #41、#42 Open**，尚无正式模型任务完成率 |
 | CSA-P0-04 | 模拟退款状态闭环：审批、ledger、外部状态查询/对账、取消后的在途核实 | kill -9/重复投递/取消/未知写结果/并发时最多一次可确认有效副作用；提供 DB & trace 证据 | **PARTIAL**；现仅 staging 工具，本仓 ledger 不保证下游 exactly-once |
