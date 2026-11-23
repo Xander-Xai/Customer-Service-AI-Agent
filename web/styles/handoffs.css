@@ -1,40 +1,180 @@
 /* Human handoff desk: deliberately simple, keyboard-accessible, no inline styles. */
-body { margin: 0; background: var(--bg-primary, #f7f8fa); color: var(--text-primary, #17212d); font-family: system-ui, sans-serif; }
-.handoff-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 16px 24px; border-bottom: 1px solid #d8dde5; background: var(--bg-secondary, #fff); }
-.handoff-header strong { font-size: 1.25rem; }
-.handoff-header p { margin: 4px 0 0; color: var(--text-secondary, #64748b); }
-.handoff-header nav { display: flex; gap: 16px; }
-.handoff-header a { color: #2367c3; }
-.handoff-layout { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); max-width: 1360px; margin: 0 auto; min-height: calc(100vh - 90px); }
-.handoff-sidebar { border-right: 1px solid #d8dde5; padding: 18px; overflow: auto; }
-.handoff-detail { padding: 24px; min-width: 0; }
-.handoff-sidebar h1, .handoff-detail h2 { font-size: 1.1rem; margin: 0 0 10px; }
-.muted { color: var(--text-secondary, #64748b); font-size: .875rem; }
-label { display: block; margin: 12px 0 6px; font-weight: 600; }
-textarea, select { display: block; box-sizing: border-box; width: 100%; background: var(--bg-secondary, #fff); color: inherit; border: 1px solid #9ca6b4; border-radius: 6px; padding: 10px; font: inherit; }
-button { padding: 9px 13px; margin: 8px 8px 8px 0; border: 1px solid #5477b3; border-radius: 7px; background: #eef4ff; color: #173f81; cursor: pointer; font: inherit; }
-button:hover { background: #d9e9ff; }
-button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid #387fea; outline-offset: 2px; }
-.ticket-list { list-style: none; margin: 10px 0; padding: 0; }
-.ticket-list li { margin: 0 0 5px; }
-.ticket-picker { width: 100%; overflow-wrap: anywhere; text-align: left; }
-.ticket-picker[aria-current=true] { border-color: #2367c3; background: #d9e9ff; }
-.ticket-header { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
-.ticket-actions { display: flex; flex-wrap: wrap; }
-.ticket-reason { padding: 8px 0; overflow-wrap: anywhere; }
-.message-list { list-style: none; margin: 14px 0; padding: 0; overflow-y: auto; max-height: min(55vh, 640px); border-block: 1px solid #d8dde5; }
-.message-list li { margin: 12px; max-width: 90%; padding: 12px; border-radius: 12px; background: var(--bg-secondary, #fff); border: 1px solid #d8dde5; overflow-wrap: anywhere; }
-.message-list li.customer-message { margin-right: auto; }
-.message-list li.staff-message { margin-left: auto; border-color: #a4c8f6; }
-.message-list li p { white-space: pre-wrap; margin: 7px 0; }
-.message-list li time { display: block; font-size: .75rem; color: #64748b; }
-#operationStatus { min-height: 1.3em; }
-#operationStatus[data-error=true] { color: #aa2929; }
-[hidden] { display: none !important; }
+body {
+  margin: 0;
+  background: var(--bg-primary, #f7f8fa);
+  color: var(--text-primary, #17212d);
+  font-family: system-ui, sans-serif;
+}
+.handoff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #d8dde5;
+  background: var(--bg-secondary, #fff);
+}
+.handoff-header strong {
+  font-size: 1.25rem;
+}
+.handoff-header p {
+  margin: 4px 0 0;
+  color: var(--text-secondary, #64748b);
+}
+.handoff-header nav {
+  display: flex;
+  gap: 16px;
+}
+.handoff-header a {
+  color: #2367c3;
+}
+.handoff-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  max-width: 1360px;
+  margin: 0 auto;
+  min-height: calc(100vh - 90px);
+}
+.handoff-sidebar {
+  border-right: 1px solid #d8dde5;
+  padding: 18px;
+  overflow: auto;
+}
+.handoff-detail {
+  padding: 24px;
+  min-width: 0;
+}
+.handoff-sidebar h1, .handoff-detail h2 {
+  font-size: 1.1rem;
+  margin: 0 0 10px;
+}
+.muted {
+  color: var(--text-secondary, #64748b);
+  font-size: .875rem;
+}
+label {
+  display: block;
+  margin: 12px 0 6px;
+  font-weight: 600;
+}
+textarea, select {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--bg-secondary, #fff);
+  color: inherit;
+  border: 1px solid #9ca6b4;
+  border-radius: 6px;
+  padding: 10px;
+  font: inherit;
+}
+button {
+  padding: 9px 13px;
+  margin: 8px 8px 8px 0;
+  border: 1px solid #5477b3;
+  border-radius: 7px;
+  background: #eef4ff;
+  color: #173f81;
+  cursor: pointer;
+  font: inherit;
+}
+button:hover {
+  background: #d9e9ff;
+}
+button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 3px solid #387fea;
+  outline-offset: 2px;
+}
+.ticket-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+}
+.ticket-list li {
+  margin: 0 0 5px;
+}
+.ticket-picker {
+  width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.ticket-picker[aria-current=true] {
+  border-color: #2367c3;
+  background: #d9e9ff;
+}
+.ticket-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+.ticket-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+.ticket-reason {
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+}
+.message-list {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  overflow-y: auto;
+  max-height: min(55vh, 640px);
+  border-block: 1px solid #d8dde5;
+}
+.message-list li {
+  margin: 12px;
+  max-width: 90%;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--bg-secondary, #fff);
+  border: 1px solid #d8dde5;
+  overflow-wrap: anywhere;
+}
+.message-list li.customer-message {
+  margin-right: auto;
+}
+.message-list li.staff-message {
+  margin-left: auto;
+  border-color: #a4c8f6;
+}
+.message-list li p {
+  white-space: pre-wrap;
+  margin: 7px 0;
+}
+.message-list li time {
+  display: block;
+  font-size: .75rem;
+  color: #64748b;
+}
+#operationStatus {
+  min-height: 1.3em;
+}
+#operationStatus[data-error=true] {
+  color: #aa2929;
+}
+[hidden] {
+  display: none !important;
+}
 @media (max-width: 720px) {
-  .handoff-layout { display: flex; flex-direction: column; }
-  .handoff-header, .ticket-header { align-items: flex-start; flex-direction: column; }
-  .handoff-sidebar { border-right: 0; border-bottom: 1px solid #d8dde5; }
-  .handoff-detail { padding: 14px; }
-  .message-list { max-height: 45vh; }
+  .handoff-layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .handoff-header, .ticket-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .handoff-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #d8dde5;
+  }
+  .handoff-detail {
+    padding: 14px;
+  }
+  .message-list {
+    max-height: 45vh;
+  }
 }
