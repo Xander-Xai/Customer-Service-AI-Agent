@@ -156,7 +156,7 @@ def _tool_payload_ok(value: Any) -> bool:
     if isinstance(value, str):
         message = value.strip()
         if not message or message.startswith(
-            ("错误：", "错误:", "Error:", "error:", "工具暂时不可用")
+            ("错误：", "错误:", "Error:", "error:", "工具暂时不可用", "查询完成，无结果")
         ):
             return False
         if message.startswith("工具 '") and ("执行失败" in message or "执行超时" in message):
