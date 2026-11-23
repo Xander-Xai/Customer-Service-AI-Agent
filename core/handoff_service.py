@@ -94,8 +94,7 @@ class HandoffService:
     def _event(db, row: HandoffTicket, actor_id: str, name: str) -> None:
         db.add(
             HandoffEvent(
-                id=str(uuid4()), ticket_id=row.id, actor_id=actor_id,
-                event=name, created_at=_now()
+                id=str(uuid4()), ticket_id=row.id, actor_id=actor_id, event=name, created_at=_now()
             )
         )
 
@@ -108,8 +107,13 @@ class HandoffService:
         )
 
     def create_or_get(
-        self, *, session_id: str, customer_id: str, reason: str,
-        source: str = "customer", initial_message: str | None = None,
+        self,
+        *,
+        session_id: str,
+        customer_id: str,
+        reason: str,
+        source: str = "customer",
+        initial_message: str | None = None,
     ) -> dict:
         """One persistent ticket per session; a closed ticket may be reopened.
 
@@ -127,9 +131,14 @@ class HandoffService:
                 raise HandoffForbidden("Session belongs to another customer")
             if row is None:
                 row = HandoffTicket(
-                    id=str(uuid4()), session_id=session_id, customer_id=customer_id,
-                    reason=reason, source=source, status=OPEN,
-                    created_at=_now(), updated_at=_now()
+                    id=str(uuid4()),
+                    session_id=session_id,
+                    customer_id=customer_id,
+                    reason=reason,
+                    source=source,
+                    status=OPEN,
+                    created_at=_now(),
+                    updated_at=_now(),
                 )
                 db.add(row)
                 try:
@@ -141,9 +150,13 @@ class HandoffService:
                     if initial_message:
                         db.add(
                             HandoffMessage(
-                                id=str(uuid4()), ticket_id=row.id, author_id=customer_id,
-                                sender_role="customer", client_message_id="initial",
-                                body=self._text(initial_message), created_at=_now()
+                                id=str(uuid4()),
+                                ticket_id=row.id,
+                                author_id=customer_id,
+                                sender_role="customer",
+                                client_message_id="initial",
+                                body=self._text(initial_message),
+                                created_at=_now(),
                             )
                         )
                     db.commit()
@@ -161,8 +174,13 @@ class HandoffService:
                     update(HandoffTicket)
                     .where(HandoffTicket.id == row.id, HandoffTicket.status == CLOSED)
                     .values(
-                        status=OPEN, assigned_to=None, claimed_at=None,
-                        closed_at=None, resolution=None, reason=reason, updated_at=_now()
+                        status=OPEN,
+                        assigned_to=None,
+                        claimed_at=None,
+                        closed_at=None,
+                        resolution=None,
+                        reason=reason,
+                        updated_at=_now(),
                     )
                 ).rowcount
                 if changed:
@@ -173,9 +191,13 @@ class HandoffService:
                         # original ticket with its obsolete first message.
                         db.add(
                             HandoffMessage(
-                                id=str(uuid4()), ticket_id=row.id, author_id=customer_id,
-                                sender_role="customer", client_message_id=f"reopen:{uuid4().hex}",
-                                body=self._text(initial_message), created_at=_now()
+                                id=str(uuid4()),
+                                ticket_id=row.id,
+                                author_id=customer_id,
+                                sender_role="customer",
+                                client_message_id=f"reopen:{uuid4().hex}",
+                                body=self._text(initial_message),
+                                created_at=_now(),
                             )
                         )
                 db.commit()
@@ -211,7 +233,9 @@ class HandoffService:
                 raise HandoffNotFound("Ticket not found")
             return _ticket(row)
 
-    def queue(self, *, actor_id: str, role: str, status: str | None = None, limit: int = 50) -> list[dict]:
+    def queue(
+        self, *, actor_id: str, role: str, status: str | None = None, limit: int = 50
+    ) -> list[dict]:
         actor, role = self._actor(actor_id, role)
         if role not in STAFF_ROLES:
             raise HandoffForbidden("Staff role required")
@@ -220,9 +244,7 @@ class HandoffService:
         with self._session_factory() as db:
             q = select(HandoffTicket)
             if role == "agent":
-                q = q.where(
-                    or_(HandoffTicket.status == OPEN, HandoffTicket.assigned_to == actor)
-                )
+                q = q.where(or_(HandoffTicket.status == OPEN, HandoffTicket.assigned_to == actor))
             if status:
                 q = q.where(HandoffTicket.status == status)
             return [
@@ -244,9 +266,7 @@ class HandoffService:
                     HandoffTicket.status == OPEN,
                     HandoffTicket.assigned_to.is_(None),
                 )
-                .values(
-                    status=CLAIMED, assigned_to=actor, claimed_at=_now(), updated_at=_now()
-                )
+                .values(status=CLAIMED, assigned_to=actor, claimed_at=_now(), updated_at=_now())
             ).rowcount
             row = db.get(HandoffTicket, ticket_id)
             if row is None:
@@ -260,8 +280,13 @@ class HandoffService:
             return _ticket(row)
 
     def post_message(
-        self, ticket_id: str, *, actor_id: str, role: str,
-        body: str, client_message_id: str,
+        self,
+        ticket_id: str,
+        *,
+        actor_id: str,
+        role: str,
+        body: str,
+        client_message_id: str,
     ) -> dict:
         actor, role = self._actor(actor_id, role)
         body = self._text(body)
@@ -288,9 +313,13 @@ class HandoffService:
             if row.status == CLOSED:
                 raise HandoffConflict("Ticket is closed")
             message = HandoffMessage(
-                id=str(uuid4()), ticket_id=row.id, author_id=actor,
+                id=str(uuid4()),
+                ticket_id=row.id,
+                author_id=actor,
                 sender_role="customer" if customer else "agent",
-                client_message_id=key, body=body, created_at=_now()
+                client_message_id=key,
+                body=body,
+                created_at=_now(),
             )
             db.add(message)
             try:
@@ -307,7 +336,9 @@ class HandoffService:
                 if existing is None:
                     raise
                 if existing.body != body:
-                    raise HandoffConflict("Idempotency key already used with different content") from None
+                    raise HandoffConflict(
+                        "Idempotency key already used with different content"
+                    ) from None
                 return _message(existing)
             db.refresh(message)
             return _message(message)
@@ -330,9 +361,7 @@ class HandoffService:
             row = db.get(HandoffTicket, ticket_id)
             if row is None:
                 raise HandoffNotFound("Ticket not found")
-            if role not in MANAGER_ROLES and (
-                role != "agent" or row.assigned_to != actor
-            ):
+            if role not in MANAGER_ROLES and (role != "agent" or row.assigned_to != actor):
                 raise HandoffForbidden("Assigned staff or supervisor required")
             if row.status == CLOSED:
                 if row.resolution == resolution:
@@ -362,8 +391,12 @@ class HandoffService:
                 update(HandoffTicket)
                 .where(HandoffTicket.id == ticket_id, HandoffTicket.status == CLOSED)
                 .values(
-                    status=OPEN, assigned_to=None, claimed_at=None, closed_at=None,
-                    resolution=None, updated_at=_now()
+                    status=OPEN,
+                    assigned_to=None,
+                    claimed_at=None,
+                    closed_at=None,
+                    resolution=None,
+                    updated_at=_now(),
                 )
             ).rowcount
             if changed:
