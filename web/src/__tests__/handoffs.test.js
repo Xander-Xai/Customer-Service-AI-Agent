@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const fetchWithAuth = vi.fn();
+const { fetchWithAuth } = vi.hoisted(() => ({ fetchWithAuth: vi.fn() }));
 vi.mock('../auth/index.js', () => ({ fetchWithAuth }));
 vi.mock('../api/rest.js', () => ({ getUserMe: vi.fn() }));
 
