@@ -40,9 +40,6 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
-      - name: Temporary Ruff diff diagnostic
-        run: ruff format --diff runtime/executor.py
-
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
