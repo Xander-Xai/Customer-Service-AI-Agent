@@ -11,7 +11,11 @@ from uuid import uuid4
 
 import pytest
 
-from tools.tool_registry import SideEffectExecutionError, ToolExecutionReceipt, ToolReportedFailure
+from tools.tool_registry import (
+    SideEffectExecutionError,
+    ToolExecutionReceipt,
+    ToolReportedFailure,
+)
 
 pytestmark = pytest.mark.unit
 
