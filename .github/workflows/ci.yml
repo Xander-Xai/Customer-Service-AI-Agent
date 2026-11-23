@@ -40,6 +40,9 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
+      - name: Ruff format diff (diagnostic, temporary)
+        run: ruff format --diff agents/base_agent.py tools/tool_registry.py tests/unit/test_tool_execution_receipts.py
+
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
