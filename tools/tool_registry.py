@@ -142,11 +142,7 @@ def _tool_payload_ok(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, dict):
-        if (
-            value.get("ok") is False
-            or value.get("success") is False
-            or value.get("error")
-        ):
+        if value.get("ok") is False or value.get("success") is False or value.get("error"):
             return False
         if str(value.get("status", "")).lower() in {
             "error",
