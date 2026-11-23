@@ -469,8 +469,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             if (
                 not state.get("pending_actions")
                 and not state.get("approval_results")
-                and (customer_asked_human or assistant_requested_human)
-                and classify_outcome(state).requires_human_action
+                and (
+                    customer_asked_human
+                    or (
+                        assistant_requested_human
+                        and classify_outcome(state).requires_human_action
+                    )
+                )
             ):
                 if state.get("user_id") and state.get("session_id"):
                     from core.handoff_service import get_handoff_service
