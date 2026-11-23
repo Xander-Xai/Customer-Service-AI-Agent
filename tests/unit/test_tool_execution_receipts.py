@@ -93,9 +93,7 @@ async def test_failed_side_effect_cannot_be_recorded_as_success():
     # This is the same _call_handler path wrapped inside the side-effect
     # ledger. Raising ensures the ledger cannot commit a failed string.
     with pytest.raises(ToolReportedFailure):
-        await registry._call_handler(
-            registry._tools["refund"], {}, None, raise_on_timeout=True
-        )
+        await registry._call_handler(registry._tools["refund"], {}, None, raise_on_timeout=True)
 
 
 async def test_real_graph_forwards_successful_read_only_tool_evidence():
@@ -109,11 +107,8 @@ async def test_real_graph_forwards_successful_read_only_tool_evidence():
         observed = await _drain_graph(container, thread_id=f"evidence-read-{uuid4().hex}")
         executions = observed.get("tool_executions") or []
         assert any(
-            item.get("tool") == "staging_readonly_lookup" and item.get("ok")
-            for item in executions
-        ), (
-            "An actual successful tool call was lost at the collaboration -> graph boundary"
-        )
+            item.get("tool") == "staging_readonly_lookup" and item.get("ok") for item in executions
+        ), "An actual successful tool call was lost at the collaboration -> graph boundary"
         outcome = observed["outcome"]
         assert outcome.outcome_verified is True
     finally:
@@ -141,8 +136,7 @@ async def test_real_graph_does_not_verify_failed_tool():
         observed = await _drain_graph(container, thread_id=f"evidence-fail-{uuid4().hex}")
         executions = observed.get("tool_executions") or []
         assert any(
-            item.get("tool") == "broken_lookup" and item.get("ok") is False
-            for item in executions
+            item.get("tool") == "broken_lookup" and item.get("ok") is False for item in executions
         )
         assert observed["outcome"].outcome_verified is False
     finally:
