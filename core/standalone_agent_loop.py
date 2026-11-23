@@ -87,9 +87,12 @@ def run_agent_loop(
     for _ in range(limits.model_steps):
         if cancelled():
             return finish("cancelled", "cancel_requested")
-        choice = model(task, list(history))
+        try:
+            choice = model(task, list(history))
+        except Exception:
+            return finish("blocked", "model_execution_failed")
         steps += 1
-        if type(choice.tokens) is not int or choice.tokens < 0:
+        if not isinstance(choice.tokens, int) or isinstance(choice.tokens, bool) or choice.tokens < 0:
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
         if tokens > limits.tokens:
