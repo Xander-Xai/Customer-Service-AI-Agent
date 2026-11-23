@@ -452,7 +452,26 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         if cfg.HUMAN_HANDOFF_ENABLED and not state.get("cached"):
             from core.outcome import classify_outcome
 
-            if classify_outcome(state).requires_human_action:
+            # Refund/ERP approval (HITL) is not customer support takeover.
+            # Only an explicit customer request or an explicit support-transfer
+            # answer can create a human service ticket. Do not interpret a
+            # rejected/pending write approval as an automatic support transfer.
+            query_text = str(state.get("customer_query") or "")
+            response_text = str(state.get("response") or "")
+            customer_asked_human = any(
+                phrase in query_text
+                for phrase in ("转人工", "人工客服", "真人客服", "人工坐席", "人工接管")
+            )
+            assistant_requested_human = any(
+                phrase in response_text
+                for phrase in ("请转人工客服", "为您转接人工", "建议联系人工客服", "转接人工客服")
+            )
+            if (
+                not state.get("pending_actions")
+                and not state.get("approval_results")
+                and (customer_asked_human or assistant_requested_human)
+                and classify_outcome(state).requires_human_action
+            ):
                 if state.get("user_id") and state.get("session_id"):
                     from core.handoff_service import get_handoff_service
 
