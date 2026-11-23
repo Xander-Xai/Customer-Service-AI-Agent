@@ -106,23 +106,16 @@ def test_end_to_end_handoff_customer_and_staff_roles(client):
 
     assert client.get("/api/handoffs").status_code == 401
     assert client.get("/api/handoffs", headers=_headers()).status_code == 403
-    assert (
-        client.get(f"/api/handoffs/{tid}", headers=_headers("customer-2")).status_code
-        == 404
-    )
+    assert client.get(f"/api/handoffs/{tid}", headers=_headers("customer-2")).status_code == 404
     queue = client.get("/api/handoffs?status=OPEN", headers=_headers("agent-1", "agent"))
     assert queue.status_code == 200
     assert len(queue.json()["tickets"]) == 1
 
-    claimed = client.post(
-        f"/api/handoffs/{tid}/claim", headers=_headers("agent-1", "agent")
-    )
+    claimed = client.post(f"/api/handoffs/{tid}/claim", headers=_headers("agent-1", "agent"))
     assert claimed.status_code == 200
     assert claimed.json()["assigned_to"] == "agent-1"
     assert (
-        client.post(
-            f"/api/handoffs/{tid}/claim", headers=_headers("agent-2", "agent")
-        ).status_code
+        client.post(f"/api/handoffs/{tid}/claim", headers=_headers("agent-2", "agent")).status_code
         == 409
     )
 
