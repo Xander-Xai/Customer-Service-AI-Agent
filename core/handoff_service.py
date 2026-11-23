@@ -361,15 +361,23 @@ class HandoffService:
             return _message(message)
 
     def messages(self, ticket_id: str, *, actor_id: str, role: str, limit: int = 100) -> list[dict]:
-        self.get(ticket_id, actor_id=actor_id, role=role)
+        actor, role = self._actor(actor_id, role)
         with self._session_factory() as db:
-            rows = db.scalars(
-                select(HandoffMessage)
-                .where(HandoffMessage.ticket_id == ticket_id)
+            # One database snapshot checks the caller's current visibility
+            # and returns messages; no independent authorization/read sessions.
+            result = db.execute(
+                select(HandoffTicket.id, HandoffMessage)
+                .outerjoin(HandoffMessage, HandoffMessage.ticket_id == HandoffTicket.id)
+                .where(
+                    HandoffTicket.id == ticket_id,
+                    self._visibility_predicate(actor, role),
+                )
                 .order_by(HandoffMessage.created_at.asc(), HandoffMessage.id.asc())
                 .limit(min(max(limit, 1), 200))
             ).all()
-            return [_message(row) for row in rows]
+            if not result:
+                raise HandoffNotFound("Ticket not found")
+            return [_message(message) for _, message in result if message is not None]
 
     def close(self, ticket_id: str, *, actor_id: str, role: str, resolution: str) -> dict:
         actor, role = self._actor(actor_id, role)
@@ -423,16 +431,24 @@ class HandoffService:
             return _ticket(row)
 
     def events(self, ticket_id: str, *, actor_id: str, role: str) -> list[dict]:
-        self.get(ticket_id, actor_id=actor_id, role=role)
+        actor, role = self._actor(actor_id, role)
         with self._session_factory() as db:
-            rows = db.scalars(
-                select(HandoffEvent)
-                .where(HandoffEvent.ticket_id == ticket_id)
+            result = db.execute(
+                select(HandoffTicket.id, HandoffEvent)
+                .outerjoin(HandoffEvent, HandoffEvent.ticket_id == HandoffTicket.id)
+                .where(
+                    HandoffTicket.id == ticket_id,
+                    self._visibility_predicate(actor, role),
+                )
                 .order_by(HandoffEvent.created_at.asc(), HandoffEvent.id.asc())
+                .limit(1000)
             ).all()
+            if not result:
+                raise HandoffNotFound("Ticket not found")
             return [
-                {"actor_id": row.actor_id, "event": row.event, "created_at": row.created_at}
-                for row in rows
+                {"actor_id": event.actor_id, "event": event.event, "created_at": event.created_at}
+                for _, event in result
+                if event is not None
             ]
 
 
