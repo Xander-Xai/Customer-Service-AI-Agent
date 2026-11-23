@@ -84,31 +84,28 @@ preflight gate），**缺的是人工相关度标注**。
 面板引用的**每个** metric name 都出现在暴露面里 —— 这类「注册了却没暴露」的断链
 不再依赖人记得检查。
 
-### 1.3 "转人工"不是已实现的功能
+### 1.3 转人工：持久化工单后端已实现，完整运营闭环未验证
 
-**状态：Partial（仅状态标记）**
+**状态：部分实现（`HUMAN_HANDOFF_ENABLED` 默认关闭）**
 
-这一条**本轮未改代码**，结论不变：人工**审批**与人工**坐席接管**是两件事，
-仓库只有前者。
+人工**审批**高风险副作用与人工**坐席接管会话**是不同机制。
+PR #38 新增 `handoff_tickets` / `handoff_messages` / `handoff_events`、
+Alembic 007、带 JWT 与会话令牌校验的 API、坐席原子认领、消息持久化、
+关闭/重开和图执行期间的机器人暂停机制。
 
-| 机制 | 人工**审批**高危副作用 | 转**人工坐席**处理会话 |
+| 机制 | 高危写操作审批 | 人工客服接管 |
 |---|---|---|
-| 介入时机 | 工具**执行之前** | 响应生成**之后** |
-| 实现状态 | **Implemented**（`HITL_ENABLED` 默认 `false`） | **无工单、无队列、无坐席台、无推送** |
-| 代码证据 | `core/hitl/*`、`human_approvals` 表、`/api/approvals` × 4 | 仅 `resolution_status="escalated"` 标签 + 提示词 |
+| 权限与目标 | 主管审批工具副作用，审批不等于已执行 | 客户申请、坐席领取和持续消息交接 |
+| 已提交实现 | `core/hitl/*` + `/api/approvals` | `core/handoff_service.py` + `/api/handoffs` |
+| 默认状态 | `HITL_ENABLED=false` | `HUMAN_HANDOFF_ENABLED=false` |
+| 仍缺 | 企业真实 ERP 写操作验收 | 坐席 Web 工作台、推送通知、SLA 升级和真实值守验收 |
 
-escalation 的真实实现只有两处，都不是"转交"：
+**证据边界**：以上是代码和 CI 可核验的实现，**不是**已有真实坐席在线
+接管的企业级验收。生产启用前须实际完成数据库迁移、坐席运营配置、
+客户/坐席权限验证，并证明转交后消息能被及时领取及闭环。
 
-- `agents/response_agent.py:280`：`any(phrase in response for phrase in ESCALATION_PHRASES)`
-  —— 检查回复文本里是否出现"转人工"等词。
-- `agents/complaint_agent.py:88`：`escalation_flag` —— 给下游**注入一句提示词**。
+→ [人工客服工单操作与验收](human-handoff-operations.md)
 
-全仓 `handoff|ticket|human_handoff` 在生产代码中 **0 命中**。
-
-**准确表述**：本系统能*说出* "建议转人工"，但**没有任何东西接住这句话**。
-它是一个**会话级状态标记 + 响应策略提示**，不是工单系统。
-
-→ [agent-design.md](agent-design.md) §4
 
 ---
 
@@ -290,7 +287,7 @@ escalation 的真实实现只有两处，都不是"转交"：
 | **自动蓝绿 / 金丝雀切换** | 有 `make canary`（90/10 流量分割），但自动判据与自动回滚**未经真实流量验证** |
 | **Serverless 部署** | checkpoint + 长时 worker + Redis 锁的生命周期与 FaaS 冲突 |
 | **多 LLM 供应商容灾** | 默认单一 provider；熔断只降级到规则引擎，不切换供应商 |
-| **坐席工作台 / 工单系统** | 见 §1.3 |
+| **坐席工作台 / 工单系统** | 工单后端已提交；坐席 Web 工作台及运营闭环待完成，见 §1.3 |
 | **真实 ERP 写操作验证** | 见 §2 |
 | **跨会话长期记忆** | 见 §5 |
 | **多语言 / 多租户** | 单语言、单租户设计 |
@@ -323,7 +320,7 @@ escalation 的真实实现只有两处，都不是"转交"：
 | Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
 | ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |
-| 坐席工作台 | 需产品定义（工单模型、SLA、坐席权限） | 未开始 |
+| 坐席工作台 | 后端工单模型已提交；需定义 UI、SLA、通知和值守交付 | 未开始（前端） |
 | RAG gold 人工标注 | 需标注预算 + Kappa 一致性度量 | 未开始 |
 | 持久化 trace 后端 | 需选定 Jaeger / Tempo 并配 retention | 未开始 |
 | 压测与容量基线 | 需先定义 SLO | 未开始 |
