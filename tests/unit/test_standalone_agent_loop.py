@@ -89,7 +89,8 @@ def test_05_read_retry_but_no_blind_write_retry():
 
 
 def test_06_loop_and_token_budgets_stop():
-    repeating = lambda _task, _history: Decision("tool", "read", {}, tokens=1)
+    def repeating(_task, _history):
+        return Decision("tool", "read", {}, tokens=1)
     tools = {"read": Tool("read", {}, lambda _args: "same")}
     step = run_agent_loop("loop", repeating, tools, limits=Limits(model_steps=3, tool_calls=5))
     token = run_agent_loop(
