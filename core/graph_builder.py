@@ -471,10 +471,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                 and not state.get("approval_results")
                 and (
                     customer_asked_human
-                    or (
-                        assistant_requested_human
-                        and classify_outcome(state).requires_human_action
-                    )
+                    or (assistant_requested_human and classify_outcome(state).requires_human_action)
                 )
             ):
                 if state.get("user_id") and state.get("session_id"):
