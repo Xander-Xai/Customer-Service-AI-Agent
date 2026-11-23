@@ -84,3 +84,71 @@ async def test_previous_degradation_reason_not_overwritten(agent):
     await agent._safe_erp_query(read, state=state)
     assert state["degraded_reason"] == "embedding_unavailable"
     assert state["erp_read_status"] == "error"
+
+
+class _DegradedExpert:
+    async def process_with_retry(self, state):
+        return {
+            "response": "ERP 数据暂不可用",
+            "degraded_reason": "erp_read_timeout",
+            "erp_read_status": "timeout",
+        }
+
+
+class _NormalExpert:
+    async def process_with_retry(self, state):
+        return {"response": "正常知识库答复"}
+
+
+@pytest.mark.parametrize(
+    ("mode_name", "ctx", "agents"),
+    [
+        (
+            "sequential",
+            {"primary_agent": "billing_agent"},
+            {"billing_agent": _DegradedExpert()},
+        ),
+        (
+            "parallel",
+            {"agent_list": ["billing_agent", "general_agent"]},
+            {"billing_agent": _DegradedExpert(), "general_agent": _NormalExpert()},
+        ),
+        (
+            "consultation",
+            {"primary_agent": "general_agent", "consult_agents": ["billing_agent"]},
+            {"billing_agent": _DegradedExpert(), "general_agent": _NormalExpert()},
+        ),
+        (
+            "hierarchical",
+            {"coordinator": "general_agent", "sub_tasks": {"billing_agent": "refund"}},
+            {"billing_agent": _DegradedExpert(), "general_agent": _NormalExpert()},
+        ),
+        (
+            "react",
+            {},
+            {"react_agent": _DegradedExpert()},
+        ),
+    ],
+)
+async def test_all_collaboration_modes_keep_erp_read_failure(mode_name, ctx, agents):
+    from collaboration.modes import (
+        ConsultationMode,
+        HierarchicalMode,
+        ParallelMode,
+        ReActMode,
+        SequentialMode,
+    )
+
+    modes = {
+        "sequential": SequentialMode(),
+        "parallel": ParallelMode(),
+        "consultation": ConsultationMode(),
+        "hierarchical": HierarchicalMode(),
+        "react": ReActMode(),
+    }
+    result = await modes[mode_name].execute(
+        agents, {"customer_query": "请查询订单"}, ctx
+    )
+    assert result["erp_read_status"] == "timeout"
+    assert result["degraded_reason"] == "erp_read_timeout"
+    assert classify_outcome(result).degraded
