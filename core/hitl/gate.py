@@ -318,7 +318,21 @@ async def execute_approved_actions(
             continue
 
         try:
-            result = await registry.execute_raw(tool_name, args, tool_call_id=tool_call_id)
+            # A refusal may be returned as an error payload without raising.
+            # Do not mark it executed simply because execute_raw returned.
+            from tools.tool_registry import ToolExecutionReceipt, ToolRegistry
+
+            if isinstance(registry, ToolRegistry):
+                receipt = await registry.execute_raw(
+                    tool_name, args, tool_call_id=tool_call_id, return_receipt=True
+                )
+                if not isinstance(receipt, ToolExecutionReceipt) or not receipt.ok:
+                    raise RuntimeError("approved side-effect was not confirmed as executed")
+                result = receipt.value
+            else:
+                # Legacy injected registries retain the existing API contract.
+                # Production uses ToolRegistry and requires a positive receipt.
+                result = await registry.execute_raw(tool_name, args, tool_call_id=tool_call_id)
             results.append(
                 {
                     "tool": tool_name,
