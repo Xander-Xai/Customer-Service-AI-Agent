@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 
 from db.models import HandoffEvent, HandoffMessage, HandoffTicket
@@ -97,6 +97,19 @@ class HandoffService:
                 id=str(uuid4()), ticket_id=row.id, actor_id=actor_id, event=name, created_at=_now()
             )
         )
+
+    @staticmethod
+    def _visibility_predicate(actor: str, role: str):
+        """Authorization checked by the *same SQL statement* that returns messages."""
+        if role in MANAGER_ROLES:
+            return true()
+        if role == "agent":
+            return or_(
+                HandoffTicket.customer_id == actor,
+                HandoffTicket.status == OPEN,
+                HandoffTicket.assigned_to == actor,
+            )
+        return HandoffTicket.customer_id == actor
 
     @staticmethod
     def _visible(row: HandoffTicket, actor: str, role: str) -> bool:
@@ -292,7 +305,11 @@ class HandoffService:
         body = self._text(body)
         key = self._text(client_message_id, maximum=64)
         with self._session_factory() as db:
-            row = db.get(HandoffTicket, ticket_id)
+            row = db.scalar(
+                select(HandoffTicket)
+                .where(HandoffTicket.id == ticket_id)
+                .with_for_update()
+            )
             if row is None:
                 raise HandoffNotFound("Ticket not found")
             customer = row.customer_id == actor
