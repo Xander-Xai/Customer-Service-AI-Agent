@@ -40,9 +40,6 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
-      - name: Temporary ERP read Ruff diff
-        run: ruff format --diff collaboration/modes.py tests/unit/test_erp_read_contract.py
-
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
