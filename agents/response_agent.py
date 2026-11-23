@@ -219,6 +219,7 @@ class ResponseAgent(BaseAgent):
                 and eval_result["score"] < EVAL_RETRY_THRESHOLD
                 and mode == "sequential"
                 and not state.get("_retried")
+                and not state.get("_quality_gate_checked")
             ):
                 state["_retried"] = True
                 state["_needs_upgrade"] = True
