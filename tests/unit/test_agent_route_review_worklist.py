@@ -12,7 +12,6 @@ import pytest
 from evaluation.agent_eval.cases import AgentCase, Annotation
 from scripts.build_agent_eval_review_worklist import main, select_candidates
 
-
 pytestmark = pytest.mark.unit
 
 
