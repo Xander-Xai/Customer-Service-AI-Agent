@@ -278,6 +278,8 @@ async def run_real_provider_lane(
     tokens_used = 0
     cost_used = 0.0
     cost_observed = False
+    token_usage_complete = True
+    cost_usage_complete = True
     budget_reason: str | None = None
 
     for case in list(cases)[: plan.max_queries]:
@@ -293,6 +295,8 @@ async def run_real_provider_lane(
         try:
             outcome = await case_runner(case)
         except Exception as exc:  # noqa: BLE001 - a failing case is evidence, not a crash
+            token_usage_complete = False
+            cost_usage_complete = False
             results.append(
                 RealCaseResult(
                     case_id=case_id,
@@ -342,6 +346,10 @@ async def run_real_provider_lane(
         # lane after this case rather than sending more unmetered requests.
         # This is not a pre-call hard cap: one already-started request may exceed
         # a budget. The real graph currently does not expose per-call usage.
+        if not usage_is_metered:
+            token_usage_complete = False
+        if not cost_is_metered:
+            cost_usage_complete = False
         if plan.max_total_tokens is not None and not usage_is_metered:
             budget_reason = "provider_token_usage_unavailable"
         if plan.max_cost_usd is not None and not cost_is_metered:
@@ -373,8 +381,11 @@ async def run_real_provider_lane(
             "attempted": len(results),
             "ok": ok,
             "error": len(results) - ok,
-            "tokens_used": tokens_used,
-            "cost_used_usd": round(cost_used, 6) if cost_observed else None,
+            "tokens_used": tokens_used if token_usage_complete and results else None,
+            "cost_used_usd": (
+                round(cost_used, 6) if cost_usage_complete and cost_observed else None
+            ),
+            "provider_request_count": None,
         },
         "budget_exceeded": budget_reason,
     }
