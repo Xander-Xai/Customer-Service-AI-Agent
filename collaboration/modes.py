@@ -23,8 +23,22 @@ from core.config import (
 from core.logger import get_logger
 from core.message_bus import Message, MessageBus, MessageType
 from core.shared_blackboard import SharedBlackboard
+from tools.tool_registry import SideEffectExecutionError
 
 logger = get_logger("collaboration.modes")
+
+
+def _durable_run() -> bool:
+    from runtime.context import get_current_run_id
+
+    return bool(get_current_run_id())
+
+
+def _raise_write_failures(results: list) -> None:
+    """Never aggregate a failed durable write into a successful answer."""
+    for result in results:
+        if isinstance(result, SideEffectExecutionError):
+            raise result
 
 
 class CollaborationMode(ABC):
@@ -103,6 +117,8 @@ class SequentialMode(CollaborationMode):
                 timeout=self._SEQUENTIAL_TIMEOUT,
             )
         except asyncio.TimeoutError:
+            if _durable_run():
+                raise  # Unknown result; RunService must classify the timeout.
             logger.warning(
                 f"Sequential {agent_name} 超时 ({self._SEQUENTIAL_TIMEOUT}s)，返回降级回复"
             )
@@ -200,9 +216,12 @@ class ParallelMode(CollaborationMode):
                 timeout=self._PARALLEL_TIMEOUT,  # v3.6: 超时保护
             )
         except asyncio.TimeoutError:
+            if _durable_run():
+                raise
             logger.warning(f"Parallel 执行超时 ({self._PARALLEL_TIMEOUT}s)")
             results = []
 
+        _raise_write_failures(results)
         responses = []
         agents_used = []
         collected_pending: list[dict] = []
@@ -332,8 +351,11 @@ class ConsultationMode(CollaborationMode):
                     timeout=self.consult_timeout,  # v3.6: 强制超时，防止慢 Agent 阻塞
                 )
             except asyncio.TimeoutError:
+                if _durable_run():
+                    raise
                 logger.warning(f"Consultation 辅助 Agent 超时 ({self.consult_timeout}s)")
                 done = []
+            _raise_write_failures(done)
             for r in done:
                 if not isinstance(r, Exception):
                     consult_results.append(r)
@@ -455,9 +477,12 @@ class HierarchicalMode(CollaborationMode):
                 timeout=self._HIERARCHICAL_TIMEOUT,  # v3.6: 超时保护
             )
         except asyncio.TimeoutError:
+            if _durable_run():
+                raise
             logger.warning(f"Hierarchical 子任务执行超时 ({self._HIERARCHICAL_TIMEOUT}s)")
             results = []
 
+        _raise_write_failures(results)
         sub_responses = []
         agents_used = []
         collected_pending: list[dict] = []
@@ -536,6 +561,8 @@ class ReActMode(SequentialMode):
                 timeout=self._REACT_TIMEOUT,
             )
         except asyncio.TimeoutError:
+            if _durable_run():
+                raise
             logger.warning(f"ReAct {agent_name} 超时 ({self._REACT_TIMEOUT}s)，返回降级回复")
             return {
                 "response": "抱歉，推理过程耗时过长，请稍后重试或简化您的提问。",
