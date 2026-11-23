@@ -73,7 +73,7 @@ function renderTicketList() {
   }
 }
 
-function renderMessages(messages) {
+export function renderMessages(messages) {
   const list = $('messageList');
   list.replaceChildren();
   for (const message of messages) {
@@ -288,4 +288,4 @@ async function init() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', init);
+if ($('ticketList')) document.addEventListener('DOMContentLoaded', init);
