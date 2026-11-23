@@ -114,3 +114,37 @@ def test_budgeted_provider_error_does_not_trigger_another_billable_case():
     assert calls == ["first"]
     assert report["budget_exceeded"] == "provider_usage_unknown_after_error"
     assert report["results"][0]["status"] == "ERROR"
+
+
+def test_explicit_provider_cost_without_rate_card_is_accounted():
+    async def runner(case):
+        return {"cost_usd": 0.012, "response_nonempty": True}
+
+    report = asyncio.run(
+        run_real_provider_lane(
+            plan=_plan(max_cost_usd=0.10),
+            cases=["first"],
+            case_runner=runner,
+        )
+    )
+    assert report["summary"]["cost_used_usd"] == 0.012
+    assert report["results"][0]["cost_usd"] == 0.012
+    assert report["budget_exceeded"] is None
+
+
+def test_nonfinite_or_negative_usage_is_not_accepted_as_budget_evidence():
+    async def runner(case):
+        return {"input_tokens": -2, "output_tokens": 4, "cost_usd": float("nan")}
+
+    report = asyncio.run(
+        run_real_provider_lane(
+            plan=_plan(max_total_tokens=100, max_cost_usd=0.1),
+            cases=["first", "second"],
+            case_runner=runner,
+        )
+    )
+    assert report["summary"]["attempted"] == 1
+    assert report["results"][0]["input_tokens"] is None
+    assert report["results"][0]["cost_usd"] is None
+    assert report["summary"]["cost_used_usd"] is None
+    assert report["budget_exceeded"] == "provider_cost_usage_unavailable"
