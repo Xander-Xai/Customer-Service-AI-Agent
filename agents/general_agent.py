@@ -38,7 +38,7 @@ class GeneralAgent(BaseAgent):
         cid_match = re.search(r"C\d{3}", customer_query)
         if cid_match:
             customer = await self._safe_erp_query(
-                lambda: self.erp.query_customer(cid_match.group())
+                lambda: self.erp.query_customer(cid_match.group()), state=state
             )
             if customer and isinstance(customer, dict) and customer.get("name"):
                 erp_data = (

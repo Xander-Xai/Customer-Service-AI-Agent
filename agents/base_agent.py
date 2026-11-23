@@ -528,13 +528,41 @@ class BaseAgent(ABC):
             except Exception as e:
                 self.logger.debug(f"黑板写入失败: {e}")
 
-    async def _safe_erp_query(self, query_fn, fallback: str = "") -> str:
-        """v3.4: 统一 ERP 查询包装（消除 4 处 try/except 重复）"""
+    async def _safe_erp_query(
+        self, query_fn, fallback: Any = "", *, state: dict[str, Any] | None = None
+    ) -> Any:
+        """Govern direct ERP reads without pretending they are ToolRegistry writes.
+
+        Direct domain reads retain their existing authenticated ERP adapter but
+        share the ToolRegistry call deadline and explicit failure classification.
+        A failure is *not* evidence of a successful business operation.
+        """
+        from core import config
+
+        timeout = float(config.TOOL_EXECUTION_TIMEOUT_SECONDS)
         try:
-            return await query_fn()
-        except Exception as e:
-            self.logger.warning(f"ERP 查询失败，降级处理: {e}")
+            if timeout > 0:
+                result = await asyncio.wait_for(query_fn(), timeout=timeout)
+            else:
+                result = await query_fn()
+        except (asyncio.TimeoutError, TimeoutError) as exc:
+            if state is not None:
+                state["erp_read_status"] = "timeout"
+                if not state.get("degraded_reason"):
+                    state["degraded_reason"] = "erp_read_timeout"
+            self.logger.warning("ERP read timed out (%s)", type(exc).__name__)
             return fallback or "[ERP 暂时不可用，请告知用户稍后再试或提供通用信息]"
+        except Exception as exc:
+            if state is not None:
+                state["erp_read_status"] = "error"
+                if not state.get("degraded_reason"):
+                    state["degraded_reason"] = "erp_read_error"
+            # Never log ERP data, exception content or customer query here.
+            self.logger.warning("ERP read failed (%s)", type(exc).__name__)
+            return fallback or "[ERP 暂时不可用，请告知用户稍后再试或提供通用信息]"
+        if state is not None:
+            state["erp_read_status"] = "ok"
+        return result
 
     async def _retrieve_knowledge(
         self,

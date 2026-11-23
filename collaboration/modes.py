@@ -28,6 +28,20 @@ from tools.tool_registry import SideEffectExecutionError
 logger = get_logger("collaboration.modes")
 
 
+def _read_path_signal(*results: dict[str, Any]) -> dict[str, str]:
+    """Propagate read-path degradation from nested per-Agent state copies."""
+    for result in results:
+        if isinstance(result, dict) and result.get("erp_read_status") in ("error", "timeout"):
+            return {
+                "erp_read_status": str(result["erp_read_status"]),
+                "degraded_reason": str(result.get("degraded_reason") or "erp_read_error"),
+            }
+    for result in results:
+        if isinstance(result, dict) and result.get("degraded_reason"):
+            return {"degraded_reason": str(result["degraded_reason"])}
+    return {}
+
+
 def _durable_run() -> bool:
     from runtime.context import get_current_run_id
 
@@ -142,6 +156,7 @@ class SequentialMode(CollaborationMode):
             "mode": "sequential",
             "agents_used": [agent_name],
             "elapsed": elapsed,
+            **_read_path_signal(result),
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
@@ -226,6 +241,7 @@ class ParallelMode(CollaborationMode):
         agents_used = []
         collected_pending: list[dict] = []
         collected_tool_executions: list[dict] = []
+        read_path_results: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 responses.append(f"[error] {r}")
@@ -235,6 +251,7 @@ class ParallelMode(CollaborationMode):
                 agents_used.append(name)
                 collected_pending.extend(agent_result.get("pending_actions") or [])
                 collected_tool_executions.extend(agent_result.get("tool_executions") or [])
+                read_path_results.append(agent_result)
 
         aggregated = "\n\n---\n\n".join(responses) if responses else "无可用 Agent 响应"
         elapsed = time.time() - start
@@ -249,6 +266,7 @@ class ParallelMode(CollaborationMode):
             "mode": "parallel",
             "agents_used": agents_used,
             "elapsed": elapsed,
+            **_read_path_signal(*read_path_results),
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
@@ -290,6 +308,7 @@ class ConsultationMode(CollaborationMode):
 
         # 先让辅助 Agent 提供信息
         consult_results = []
+        consult_read_results: list[dict] = []
         if consultees:
 
             async def consult(name: str):
@@ -308,6 +327,7 @@ class ConsultationMode(CollaborationMode):
                 )
 
                 result = await agent.process_with_retry(consult_state)
+                consult_read_results.append(result)
                 response = result.get("response", "")
 
                 prefix = (
@@ -401,6 +421,7 @@ class ConsultationMode(CollaborationMode):
             "mode": "consultation",
             "agents_used": [primary] + [n for n, _ in consult_results],
             "elapsed": elapsed,
+            **_read_path_signal(result, *consult_read_results),
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
@@ -487,6 +508,7 @@ class HierarchicalMode(CollaborationMode):
         agents_used = []
         collected_pending: list[dict] = []
         collected_tool_executions: list[dict] = []
+        read_path_results: list[dict] = []
         for r in results:
             if isinstance(r, Exception):
                 continue
@@ -495,6 +517,7 @@ class HierarchicalMode(CollaborationMode):
             agents_used.append(name)
             collected_pending.extend(agent_result.get("pending_actions") or [])
             collected_tool_executions.extend(agent_result.get("tool_executions") or [])
+            read_path_results.append(agent_result)
 
         # 从 Blackboard 读取所有子任务结果作为汇总补充
         bb_subtask_data = await self._safe_bb_read_prefix("hierarchical.subtask.")
@@ -517,6 +540,7 @@ class HierarchicalMode(CollaborationMode):
             "mode": "hierarchical",
             "agents_used": [coordinator_name] + agents_used,
             "elapsed": elapsed,
+            **_read_path_signal(final, *read_path_results),
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
@@ -582,6 +606,7 @@ class ReActMode(SequentialMode):
             "mode": "react",
             "agents_used": [agent_name],
             "elapsed": elapsed,
+            **_read_path_signal(result),
             # human-in-the-loop：把 Agent 工具循环摘出的 HIGH 风险动作透传出去。
             #
             # 少了这一行，``core/graph_builder.py`` 里的
