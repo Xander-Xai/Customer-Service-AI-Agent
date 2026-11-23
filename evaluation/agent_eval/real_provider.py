@@ -301,6 +301,11 @@ async def run_real_provider_lane(
                     error=f"{type(exc).__name__}: {exc}",
                 )
             )
+            # The failed provider call may still have consumed tokens/cost.
+            # With an active budget, unknown usage cannot authorize a retry.
+            if plan.max_total_tokens is not None or plan.max_cost_usd is not None:
+                budget_reason = "provider_usage_unknown_after_error"
+                break
             continue
 
         names, calls = _coerce_tools(outcome.get("tool_calls") or outcome.get("tool_names"))
