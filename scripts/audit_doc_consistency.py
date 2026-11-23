@@ -2165,7 +2165,7 @@ API_REFERENCE_DOC = "docs/reference/api-reference.md"
 # statement about what this repository ships (not a dated audit snapshot), it is
 # in ACTIVE_EXTRA so every guard scans it, and `scripts/
 # check_public_repository_boundary.py` enforces that README keeps linking it.
-ROOT_ALLOWED_MARKDOWN = {"README.md", "CLAUDE.md", "DATA_PROVENANCE.md"}
+ROOT_ALLOWED_MARKDOWN = {path.name for path in ACTIVE_EXTRA if path.parent == Path(".")}
 
 
 def _capability_is_implemented(root: Path, markers: tuple[str, ...]) -> bool:
