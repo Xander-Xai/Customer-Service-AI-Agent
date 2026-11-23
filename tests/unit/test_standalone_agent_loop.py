@@ -125,3 +125,52 @@ def test_08_high_risk_write_requires_server_approval():
     )
     assert (result.status, result.reason) == ("approval_required", "server_policy_denied")
     assert was_called == []
+
+
+def test_09_authoritative_write_reconciliation_does_not_repeat_effect():
+    executed = []
+    checked = []
+
+    def write(args):
+        executed.append(args["operation_id"])
+        raise TimeoutError("response lost after downstream commit")
+
+    def verify(_tool, args):
+        checked.append(args["operation_id"])
+        return True  # Simulated authoritative external ledger reports applied.
+
+    result = run_agent_loop(
+        "refund",
+        scripted(
+            Decision("tool", "refund", {"operation_id": "op-1"}),
+            Decision("finish", response="verified"),
+        ),
+        {"refund": Tool("refund", {"operation_id": str}, write, side_effect=True)},
+        authorize_write=lambda _tool, _args: True,
+        reconcile_write=verify,
+    )
+    assert result.status == "completed" and result.response == "verified"
+    assert executed == checked == ["op-1"]
+    assert "write_applied_verified:refund" in result.trace
+
+
+def test_10_reconciliation_unknown_stays_uncertain_without_retry():
+    executed = []
+
+    def write(_args):
+        executed.append("one")
+        raise ConnectionError("ambiguous transport failure")
+
+    def unavailable(_tool, _args):
+        raise TimeoutError("downstream status lookup unavailable")
+
+    result = run_agent_loop(
+        "refund",
+        scripted(Decision("tool", "refund", {})),
+        {"refund": Tool("refund", {}, write, side_effect=True)},
+        authorize_write=lambda _tool, _args: True,
+        reconcile_write=unavailable,
+    )
+    assert result.status == "write_uncertain"
+    assert result.reason == "reconcile_external_state"
+    assert executed == ["one"]
