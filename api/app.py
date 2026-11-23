@@ -449,6 +449,7 @@ def create_app(
     from api.routes.chat import router as chat_router
     from api.routes.chat_multimodal import router as chat_multimodal_router
     from api.routes.feedback import router as feedback_router
+    from api.routes.handoffs import router as handoffs_router
     from api.routes.monitoring import router as monitoring_router
     from api.routes.runs import router as runs_router
     from api.routes.sessions import router as sessions_router
@@ -461,6 +462,7 @@ def create_app(
     app.include_router(chat_multimodal_router)
     app.include_router(runs_router)
     app.include_router(approvals_router)
+    app.include_router(handoffs_router)
     app.include_router(ws_router)
 
     # ── 静态资源（使用缓存包装器，不依赖中间件）──
