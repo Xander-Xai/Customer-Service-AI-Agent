@@ -41,8 +41,6 @@ def _read_path_signal(*results: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
-
-
 def _durable_run() -> bool:
     from runtime.context import get_current_run_id
 
