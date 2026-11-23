@@ -79,9 +79,7 @@ async def create_handoff(data: CreateHandoffRequest, request: Request):
     if sm is None:
         raise HTTPException(status_code=503, detail="会话服务不可用")
     try:
-        session = await get_authenticated_session(
-            request, data.session_id, data.session_token
-        )
+        session = await get_authenticated_session(request, data.session_id, data.session_token)
     except _SessionValidationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     if session.sid != data.session_id or session.user_id != actor:
@@ -143,11 +141,7 @@ async def claim_handoff(ticket_id: str, request: Request):
 async def list_messages(ticket_id: str, request: Request, limit: int = 100):
     actor, role = _identity(request)
     try:
-        return {
-            "messages": _service().messages(
-                ticket_id, actor_id=actor, role=role, limit=limit
-            )
-        }
+        return {"messages": _service().messages(ticket_id, actor_id=actor, role=role, limit=limit)}
     except Exception as exc:
         _handle_error(exc)
 
@@ -180,9 +174,7 @@ async def list_events(ticket_id: str, request: Request):
 async def close_handoff(ticket_id: str, data: CloseHandoffRequest, request: Request):
     actor, role = _identity(request)
     try:
-        return _service().close(
-            ticket_id, actor_id=actor, role=role, resolution=data.resolution
-        )
+        return _service().close(ticket_id, actor_id=actor, role=role, resolution=data.resolution)
     except Exception as exc:
         _handle_error(exc)
 
