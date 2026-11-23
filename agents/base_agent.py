@@ -49,6 +49,7 @@ from core.tool_result_cache import cacheable_result
 from core.tool_result_optimizer import ToolResultOptimizer, compact_old_tool_messages
 from llm.client import LLMServiceError
 from rag.retrieval_contract import RetrievalRequest
+from tools.tool_registry import ToolExecutionReceipt, ToolRegistry
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3  # 最大重试次数
@@ -1008,9 +1009,17 @@ class BaseAgent(ABC):
                                 )
                             )
                             continue
-                        if (
-                            not cache_hit
-                            and (self.tool_result_optimizer.enabled or cache_enabled)
+                        if not cache_hit and isinstance(self.tool_registry, ToolRegistry):
+                            # A real registry returns a typed receipt; an error string,
+                            # refusal or timeout must never become verified evidence.
+                            result = await self.tool_registry.execute_raw(
+                                p["name"],
+                                p["args"],
+                                **_exec_kwargs(stream_callback, tool_call_id, _logical_call),
+                                return_receipt=True,
+                            )
+                        elif not cache_hit and (
+                            (self.tool_result_optimizer.enabled or cache_enabled)
                             and hasattr(self.tool_registry, "execute_raw")
                         ):
                             result = await self.tool_registry.execute_raw(
@@ -1029,12 +1038,22 @@ class BaseAgent(ABC):
                         result = "工具暂时不可用，请稍后重试"
                         _record_tool_execution(state, p["name"], ok=False)
                     else:
-                        # 只有真正跑完的工具调用才算「有执行证据」。记进 state 是
-                        # 为了让业务结果契约（core.outcome）能区分"我们给出了一段
-                        # 回答"与"某个业务动作**确实执行了**"——见 outcome.py 的
-                        # ASSESSED / EVIDENCED 分级。不记录 arguments：state 会被
-                        # checkpointer 序列化落盘，不该把业务参数带进去。
-                        _record_tool_execution(state, p["name"], ok=True)
+                        # Only a typed successful execution receipt is evidence.
+                        # A cache hit never executed a tool in this turn; a legacy
+                        # registry without receipts cannot prove that it succeeded.
+                        if not cache_hit:
+                            receipt = result if isinstance(result, ToolExecutionReceipt) else None
+                            if receipt is not None:
+                                result = receipt.value
+                            _record_tool_execution(
+                                state, p["name"], ok=bool(receipt and receipt.ok)
+                            )
+                        if isinstance(self.tool_registry, ToolRegistry) and not (
+                            self.tool_result_optimizer.enabled or cache_enabled
+                        ) and result is not None:
+                            # Preserve legacy execute() string semantics with the
+                            # optimizer disabled; normal requests keep raw values.
+                            result = str(result)
 
                     if cache_enabled and not cache_hit and cacheable_result(result, cache_policy):
                         cache_started = time.perf_counter()
