@@ -132,16 +132,20 @@ class HandoffService:
                     created_at=_now(), updated_at=_now()
                 )
                 db.add(row)
-                self._event(db, row, customer_id, "created")
-                if initial_message:
-                    db.add(
-                        HandoffMessage(
-                            id=str(uuid4()), ticket_id=row.id, author_id=customer_id,
-                            sender_role="customer", client_message_id="initial",
-                            body=self._text(initial_message), created_at=_now()
-                        )
-                    )
                 try:
+                    # Flush the parent before inserting child audit/message rows.
+                    # An existing concurrent creator is resolved by the DB's
+                    # unique session index, never a process-local mutex.
+                    db.flush()
+                    self._event(db, row, customer_id, "created")
+                    if initial_message:
+                        db.add(
+                            HandoffMessage(
+                                id=str(uuid4()), ticket_id=row.id, author_id=customer_id,
+                                sender_role="customer", client_message_id="initial",
+                                body=self._text(initial_message), created_at=_now()
+                            )
+                        )
                     db.commit()
                 except IntegrityError:
                     db.rollback()
@@ -163,6 +167,17 @@ class HandoffService:
                 ).rowcount
                 if changed:
                     self._event(db, row, customer_id, "reopened")
+                    if initial_message:
+                        # A new escalation after closure must deliver the new
+                        # customer request, rather than silently reusing the
+                        # original ticket with its obsolete first message.
+                        db.add(
+                            HandoffMessage(
+                                id=str(uuid4()), ticket_id=row.id, author_id=customer_id,
+                                sender_role="customer", client_message_id=f"reopen:{uuid4().hex}",
+                                body=self._text(initial_message), created_at=_now()
+                            )
+                        )
                 db.commit()
             db.refresh(row)
             return _ticket(row)
