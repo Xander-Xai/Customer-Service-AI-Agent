@@ -31,9 +31,7 @@ async def test_durable_write_failure_escapes_real_graph(monkeypatch, as_exceptio
     container = ServiceContainer()
     await container.initialize()
     try:
-        _prepare(
-            container, "staging_refund", {"order_id": "FAIL-EVIDENCE-1", "amount": 99}
-        )
+        _prepare(container, "staging_refund", {"order_id": "FAIL-EVIDENCE-1", "amount": 99})
 
         async def fail_write(*args, **kwargs):
             if as_exception:
