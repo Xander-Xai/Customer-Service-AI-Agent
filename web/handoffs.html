@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="人工客服工单：客户与坐席消息交接">
+  <title>人工客服工单 | Customer Service AI Agent</title>
+</head>
+<body>
+  <header class="handoff-header">
+    <div><strong>人工客服工单</strong><p>客户请求、坐席接管与消息处理</p></div>
+    <nav aria-label="返回导航"><a href="/">返回对话</a><a href="/admin.html" id="adminNavLink" hidden>管理后台</a></nav>
+  </header>
+  <main class="handoff-layout">
+    <section class="handoff-sidebar" aria-labelledby="queueTitle">
+      <h1 id="queueTitle">工单列表</h1>
+      <p id="actorLabel" class="muted">加载身份中...</p>
+      <div id="customerCreate" hidden>
+        <label for="handoffReason">申请转人工</label>
+        <textarea id="handoffReason" maxlength="2000" rows="3" placeholder="请描述您希望坐席解决的问题"></textarea>
+        <button type="button" id="createTicketBtn">提交转人工申请</button>
+        <p class="muted">仅能为当前已登录的会话创建工单。</p>
+      </div>
+      <div id="staffQueueControls" hidden>
+        <label for="queueFilter">工单状态</label>
+        <select id="queueFilter">
+          <option value="">全部可见工单</option>
+          <option value="OPEN">待领取</option>
+          <option value="CLAIMED">处理中</option>
+          <option value="CLOSED">已关闭</option>
+        </select>
+      </div>
+      <button type="button" id="refreshTicketsBtn">刷新工单</button>
+      <ol id="ticketList" class="ticket-list" aria-label="工单队列"></ol>
+    </section>
+    <section class="handoff-detail" aria-labelledby="ticketTitle">
+      <div class="ticket-header">
+        <div><h2 id="ticketTitle">请选择一张工单</h2><p id="ticketStatus" class="muted"></p></div>
+        <div class="ticket-actions">
+          <button type="button" id="claimTicketBtn" hidden>领取工单</button>
+          <button type="button" id="closeTicketBtn" hidden>结单</button>
+          <button type="button" id="reopenTicketBtn" hidden>重新打开</button>
+        </div>
+      </div>
+      <p id="ticketReason" class="ticket-reason"></p>
+      <ul id="messageList" class="message-list" aria-label="工单消息"></ul>
+      <form id="messageForm" hidden>
+        <label for="messageBody">发送消息</label>
+        <textarea id="messageBody" maxlength="4096" rows="3" placeholder="回复工单消息"></textarea>
+        <button type="submit" id="sendMessageBtn">发送</button>
+      </form>
+      <section id="resolutionPanel" hidden>
+        <label for="resolutionText">结单说明（必填）</label>
+        <textarea id="resolutionText" maxlength="2000" rows="3"></textarea>
+        <button type="button" id="submitCloseBtn">确认结单</button>
+        <button type="button" id="cancelCloseBtn">取消</button>
+      </section>
+      <p id="operationStatus" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <script type="module" src="/src/handoffs.js"></script>
+</body>
+</html>
