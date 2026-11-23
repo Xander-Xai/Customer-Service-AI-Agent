@@ -120,6 +120,54 @@ class LogicalCall:
     logical_operation_id: str | None = None
 
 
+@dataclass(frozen=True)
+class ToolExecutionReceipt:
+    """Tool execution result with an explicit success signal for business evidence.
+
+    Used only by opted-in Agent calls. Public execute_raw/execute retain their
+    historical payload types by default.
+    """
+
+    value: Any
+    ok: bool
+
+
+def _tool_payload_ok(value: Any) -> bool:
+    """Conservative check for explicit handler failures (not a semantic judge).
+
+    A handler returning an error string did not execute successfully, even if
+    no Python exception was raised. A successful lookup is still not proof
+    that the user's entire business request has been resolved.
+    """
+    if value is None:
+        return False
+    if isinstance(value, dict):
+        if value.get("ok") is False or value.get("success") is False or value.get("error"):
+            return False
+        if str(value.get("status", "")).lower() in {
+            "error",
+            "failed",
+            "failure",
+            "rejected",
+            "denied",
+            "timeout",
+        }:
+            return False
+    if isinstance(value, str):
+        message = value.strip()
+        if not message or message.startswith(
+            ("错误：", "错误:", "Error:", "error:", "工具暂时不可用", "查询完成，无结果")
+        ):
+            return False
+        if message.startswith("工具 '") and ("执行失败" in message or "执行超时" in message):
+            return False
+    return True
+
+
+class ToolReportedFailure(RuntimeError):
+    """A side-effect handler explicitly reported failure; never commit its ledger as success."""
+
+
 @dataclass
 class ToolDefinition:
     """工具定义（JSON Schema 格式，兼容 OpenAI Function Calling）"""
@@ -304,11 +352,21 @@ class ToolRegistry:
         stream_callback: Callable | None = None,
         tool_call_id: str | None = None,
         logical_call: LogicalCall | None = None,
+        *,
+        return_receipt: bool = False,
     ) -> Any:
-        """执行工具并保留结构化返回值，供 Context Engineering 使用。"""
+        """执行工具；仅显式 return_receipt 时提供可判定的执行结果。"""
+
+        def wrap(value: Any) -> Any:
+            return (
+                ToolExecutionReceipt(value=value, ok=_tool_payload_ok(value))
+                if return_receipt
+                else value
+            )
+
         tool = self._tools.get(name)
         if not tool:
-            return f"错误：工具 '{name}' 不存在"
+            return wrap(f"错误：工具 '{name}' 不存在")
 
         # 执行权 fencing（第二道防线）：失去 ownership 的 worker 不得再发起外部写。
         # 只读工具不受影响；失败一律 fail-closed。
@@ -316,7 +374,7 @@ class ToolRegistry:
             logger.warning(
                 "已失去执行权，拒绝执行写操作工具 tool=%s（协作式取消的窗口内兜底）", name
             )
-            return (
+            return wrap(
                 f"错误：本 worker 已失去该 run 的执行权，写操作工具 '{name}' 已拒绝执行，"
                 "以避免与新执行者重复写入。请等待当前 run 由持有执行权的 worker 完成。"
             )
@@ -334,7 +392,7 @@ class ToolRegistry:
                 name,
                 tool.side_effect,
             )
-            return refusal
+            return wrap(refusal)
 
         # Lightweight tracing: one span per tool execution. Records the tool NAME,
         # whether it is a declared side effect, and its risk level — never
@@ -359,9 +417,10 @@ class ToolRegistry:
                 "csai.risk_level": tool.risk_level,
             },
         ):
-            return await self._execute_raw_inner(
+            result = await self._execute_raw_inner(
                 tool, name, arguments, stream_callback, tool_call_id, logical_call
             )
+            return wrap(result)
 
     def _ungoverned_side_effect_refusal(
         self, tool: ToolDefinition, name: str, arguments: dict[str, Any]
@@ -598,7 +657,10 @@ class ToolRegistry:
         """
         timeout = _tool_timeout_seconds()
         if timeout <= 0:
-            return await ToolRegistry._invoke_handler(tool, arguments, stream_callback)
+            result = await ToolRegistry._invoke_handler(tool, arguments, stream_callback)
+            if raise_on_timeout and not _tool_payload_ok(result):
+                raise ToolReportedFailure(f"Side-effect tool {tool.name} reported failure")
+            return result
         started = time.perf_counter()
         try:
             result = await asyncio.wait_for(
@@ -612,6 +674,9 @@ class ToolRegistry:
             if raise_on_timeout:
                 raise ToolExecutionTimeout(tool.name, timeout, message) from exc
             return f"错误：{message}。请稍后重试或改用其它查询方式。"
+        if raise_on_timeout and not _tool_payload_ok(result):
+            _observe_tool_execution("error", tool.name, time.perf_counter() - started)
+            raise ToolReportedFailure(f"Side-effect tool {tool.name} reported failure")
         _observe_tool_execution("ok", tool.name, time.perf_counter() - started)
         return result
 
