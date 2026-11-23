@@ -66,11 +66,11 @@ async def test_graph_creates_and_then_respects_human_takeover(monkeypatch):
         assert first["resolution_status"] == "escalated"
         assert mode.calls == 1
 
-        ticket = svc.by_session(
-            thread, actor_id="hitl-e2e-user", role="customer"
-        )
+        ticket = svc.by_session(thread, actor_id="hitl-e2e-user", role="customer")
         assert ticket["ticket_id"] == first["handoff_ticket_id"]
-        assert len(svc.messages(ticket["ticket_id"], actor_id="hitl-e2e-user", role="customer")) == 1
+        assert (
+            len(svc.messages(ticket["ticket_id"], actor_id="hitl-e2e-user", role="customer")) == 1
+        )
 
         svc.claim(ticket["ticket_id"], actor_id="human-1", role="agent")
         second = await _drain_graph(container, thread_id=thread)
@@ -100,9 +100,7 @@ async def test_handoff_disabled_leaves_graph_without_ticket(monkeypatch):
     container.cache = _NullCache()
     container.response_agent.cache = _NullCache()
     try:
-        result = await _drain_graph(
-            container, thread_id=f"handoff-disabled-{uuid4().hex}"
-        )
+        result = await _drain_graph(container, thread_id=f"handoff-disabled-{uuid4().hex}")
         assert not result.get("handoff_ticket_id")
         assert mode.calls == 1
     finally:
@@ -141,9 +139,7 @@ async def test_hitl_approval_failure_does_not_create_customer_handoff(monkeypatc
     try:
         result = await _drain_graph(container, thread_id=thread)
         assert not result.get("handoff_ticket_id")
-        assert svc.by_session(
-            thread, actor_id="hitl-e2e-user", role="customer"
-        ) is None
+        assert svc.by_session(thread, actor_id="hitl-e2e-user", role="customer") is None
     finally:
         await container.close()
         dispose(engine, path)
