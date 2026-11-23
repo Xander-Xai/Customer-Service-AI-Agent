@@ -146,9 +146,7 @@ async def test_all_collaboration_modes_keep_erp_read_failure(mode_name, ctx, age
         "hierarchical": HierarchicalMode(),
         "react": ReActMode(),
     }
-    result = await modes[mode_name].execute(
-        agents, {"customer_query": "请查询订单"}, ctx
-    )
+    result = await modes[mode_name].execute(agents, {"customer_query": "请查询订单"}, ctx)
     assert result["erp_read_status"] == "timeout"
     assert result["degraded_reason"] == "erp_read_timeout"
     assert classify_outcome(result).degraded
