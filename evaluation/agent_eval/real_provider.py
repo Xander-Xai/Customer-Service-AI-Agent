@@ -322,6 +322,20 @@ async def run_real_provider_lane(
             cost_used += derived
             cost = round(derived, 6)
 
+        # A limit whose usage source is missing cannot be enforced. Stop the
+        # lane after this case rather than sending more unmetered requests.
+        # This is not a pre-call hard cap: one already-started request may exceed
+        # a budget. The real graph currently does not expose per-call usage.
+        if plan.max_total_tokens is not None and (
+            type(in_tok) is not int or type(out_tok) is not int
+            or in_tok < 0 or out_tok < 0
+        ):
+            budget_reason = "provider_token_usage_unavailable"
+        if plan.max_cost_usd is not None and (
+            type(cost) not in (int, float) or cost < 0
+        ):
+            budget_reason = "provider_cost_usage_unavailable"
+
         results.append(
             RealCaseResult(
                 case_id=case_id,
@@ -337,6 +351,8 @@ async def run_real_provider_lane(
                 cost_usd=cost if isinstance(cost, int | float) else None,
             )
         )
+        if budget_reason is not None:
+            break
 
     ok = sum(1 for r in results if r.status == STATUS_OK)
     return {
