@@ -114,7 +114,8 @@ class TestRunLane:
         # The failure is recorded as evidence, not swallowed and not retried
         # against a mock.
         assert results["boom"]["status"] == "ERROR"
-        assert "provider 500" in results["boom"]["error"]
+        assert results["boom"]["error"] == "RuntimeError"
+        assert "provider 500" not in json.dumps(run)
 
     def test_max_queries_caps_external_calls(self):
         plan = _authorized_plan(max_queries=2)
