@@ -306,9 +306,7 @@ class HandoffService:
         key = self._text(client_message_id, maximum=64)
         with self._session_factory() as db:
             row = db.scalar(
-                select(HandoffTicket)
-                .where(HandoffTicket.id == ticket_id)
-                .with_for_update()
+                select(HandoffTicket).where(HandoffTicket.id == ticket_id).with_for_update()
             )
             if row is None:
                 raise HandoffNotFound("Ticket not found")
