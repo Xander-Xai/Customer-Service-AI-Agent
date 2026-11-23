@@ -762,6 +762,8 @@ customer-service-ai-agent/
 
 ---
 
+**2026 Agent 求职定位与验收责任：**[客服 Agent：多 Agent 编排、Runtime、HITL 与业务级 Eval](docs/portfolio/2026-agent-interview-positioning.md)。本文区分代码证据、真实外部验证与个人任职贡献。
+
 ## Docs
 
 | 我想知道… | 去哪 |
