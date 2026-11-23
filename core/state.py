@@ -40,3 +40,10 @@ class AgentState(TypedDict, total=False):
     # ``approval_results``：闸门恢复后每条动作的执行/拒绝结果。
     pending_actions: list[dict]
     approval_results: list[dict]
+    # Quality upgrade runs at most once, before final response side effects.
+    _quality_gate_checked: bool
+    _upgrade_attempts: int
+    _needs_upgrade: bool
+    _upgrade_target: str
+    _upgrade_context: dict
+    _retried: bool
