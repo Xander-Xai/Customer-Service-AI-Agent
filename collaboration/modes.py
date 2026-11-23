@@ -252,7 +252,7 @@ class ParallelMode(CollaborationMode):
                 agents_used.append(name)
                 collected_pending.extend(agent_result.get("pending_actions") or [])
                 collected_tool_executions.extend(agent_result.get("tool_executions") or [])
-            read_path_results.append(agent_result)
+                read_path_results.append(agent_result)
 
         aggregated = "\n\n---\n\n".join(responses) if responses else "无可用 Agent 响应"
         elapsed = time.time() - start
