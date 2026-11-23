@@ -2502,6 +2502,24 @@
           }
         ]
       }
+    },
+    "/handoffs.html": {
+      "get": {
+        "summary": "Serve Handoffs",
+        "operationId": "serve_handoffs_handoffs_html_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
