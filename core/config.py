@@ -1011,6 +1011,10 @@ AB_TEST_ENABLED = os.getenv("AB_TEST_ENABLED", "false").lower() == "true"
 EVAL_LOW_SCORE_THRESHOLD = _int_env("EVAL_LOW_SCORE_THRESHOLD", 40)  # 低于此分触发告警
 EVAL_ALERT_ENABLED = os.getenv("EVAL_ALERT_ENABLED", "true").lower() == "true"
 
+# Human support handoff requires an applied DB migration and staff operations.
+# Off by default until the deployment has an enabled customer support queue.
+HUMAN_HANDOFF_ENABLED = os.getenv("HUMAN_HANDOFF_ENABLED", "false").lower() == "true"
+
 # ===== v4.3: 低分重试与模式升级配置 =====
 EVAL_RETRY_THRESHOLD = _int_env("EVAL_RETRY_THRESHOLD", 30)  # 低于此分触发自动重试/升级
 EVAL_RETRY_ENABLED = os.getenv("EVAL_RETRY_ENABLED", "true").lower() == "true"

@@ -739,7 +739,7 @@ customer-service-ai-agent/
 ├── web/            # 前端（原生 JS + Vite 8 + Vitest）
 ├── tests/          # unit / integration / runtime / e2e / stress / eval
 ├── docs/           # 文档与 ADR
-├── alembic/        # 数据库迁移脚本（7 个版本）
+├── alembic/        # 数据库迁移脚本（8 个版本）
 └── scripts/        # 运维 / 验证 / 评测脚本（51 个 Python + 5 shell）
 ```
 

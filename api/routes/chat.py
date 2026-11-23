@@ -244,6 +244,8 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                 "cached": result.get("cached", False),
                 "agents_used": result.get("agents_used", []),
                 "resolution_status": result.get("resolution_status", ""),
+                "handoff_ticket_id": result.get("handoff_ticket_id", ""),
+                "handoff_status": result.get("handoff_status", ""),
                 "session_id": ctx.sid,
                 "session_token": session_token,
             }
@@ -284,6 +286,8 @@ async def rest_chat(data: ChatRequest, request: Request):
             "cached": result.get("cached", False),
             "agents_used": result.get("agents_used", []),
             "resolution_status": result.get("resolution_status", ""),
+            "handoff_ticket_id": result.get("handoff_ticket_id", ""),
+            "handoff_status": result.get("handoff_status", ""),
             "session_id": session.sid,
         }
         if session.session_manager:

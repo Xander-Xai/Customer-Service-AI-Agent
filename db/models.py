@@ -311,3 +311,66 @@ class HumanApproval(Base):
         Index("ix_human_approvals_status_requested", "status", "requested_at"),
         Index("ix_human_approvals_run_status", "run_id", "status"),
     )
+
+
+class HandoffTicket(Base):
+    """Durable customer-to-human handoff, distinct from high-risk tool HITL.
+
+    One ticket per session, reopened on a later escalation. The session ID is
+    unique so concurrent workers cannot create competing human owners.
+    """
+
+    __tablename__ = "handoff_tickets"
+
+    id = Column(String(36), primary_key=True)
+    session_id = Column(String(64), nullable=False, unique=True, index=True)
+    customer_id = Column(String(64), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    source = Column(String(24), nullable=False, default="customer")
+    status = Column(String(16), nullable=False, default="OPEN", index=True)
+    assigned_to = Column(String(64), nullable=True, index=True)
+    resolution = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_handoff_queue", "status", "created_at"),
+        Index("ix_handoff_customer_status", "customer_id", "status"),
+    )
+
+
+class HandoffMessage(Base):
+    """Append-only customer/staff message with per-sender idempotency."""
+
+    __tablename__ = "handoff_messages"
+
+    id = Column(String(36), primary_key=True)
+    ticket_id = Column(String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True)
+    author_id = Column(String(64), nullable=False)
+    sender_role = Column(String(16), nullable=False)
+    client_message_id = Column(String(64), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ticket_id", "author_id", "client_message_id", name="uq_handoff_message_delivery"
+        ),
+        Index("ix_handoff_messages_ticket_created", "ticket_id", "created_at"),
+    )
+
+
+class HandoffEvent(Base):
+    """Audit trail for ticket state transitions; written in the same transaction."""
+
+    __tablename__ = "handoff_events"
+
+    id = Column(String(36), primary_key=True)
+    ticket_id = Column(String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True)
+    actor_id = Column(String(64), nullable=False)
+    event = Column(String(24), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("ix_handoff_events_ticket_created", "ticket_id", "created_at"),)

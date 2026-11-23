@@ -306,6 +306,11 @@ class ResponseAgent(BaseAgent):
         if response in ("处理出错，请重试", "处理出错"):
             return RESOLUTION_FAILED
 
+        # Persisted human ticket is explicit escalation evidence, not a normal
+        # answered/resolved response. Keep the final event/metrics consistent.
+        if state.get("handoff_ticket_id"):
+            return RESOLUTION_ESCALATED
+
         # 需要人工介入（HITL 挂起 / 审批被拒 / 明确转人工）
         if outcome.requires_human_action:
             return RESOLUTION_ESCALATED

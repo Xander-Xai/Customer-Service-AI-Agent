@@ -217,6 +217,39 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         state["_upgrade_attempts"] = 0
         state["_upgrade_target"] = ""
         state["_upgrade_context"] = {}
+        state["handoff_ticket_id"] = ""
+        state["handoff_status"] = ""
+
+        # A live human takeover suspends automatic replies for this session.
+        # Check before cached answer delivery as well as before the router.
+        from core import config as cfg
+
+        if cfg.HUMAN_HANDOFF_ENABLED and state.get("user_id") and state.get("session_id"):
+            from core.handoff_service import get_handoff_service
+
+            try:
+                ticket = await asyncio.to_thread(
+                    get_handoff_service().active_for_session,
+                    session_id=state["session_id"],
+                    customer_id=state["user_id"],
+                )
+            except Exception:
+                # With the human channel enabled, do not silently fall back to
+                # the autonomous bot while the handoff DB is unavailable.
+                logger.error("[Handoff] active ticket lookup unavailable", exc_info=True)
+                state["response"] = "人工客服通道暂不可用，请稍后重试。"
+                state["cached"] = True
+                state["collaboration_mode"] = "handoff_unavailable"
+                state["degraded_reason"] = "handoff_lookup_unavailable"
+                return state
+            if ticket:
+                state["handoff_ticket_id"] = ticket["ticket_id"]
+                state["handoff_status"] = ticket["status"]
+                state["response"] = "会话已转人工客服，请通过人工工单继续沟通。"
+                state["cached"] = True
+                state["current_agent"] = "human_handoff"
+                state["collaboration_mode"] = "human_handoff"
+                return state
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
@@ -414,6 +447,62 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         """Finalize once, after quality retry and the approval gate are finished."""
         if not c.agents_dict:
             await c._init_agents()
+
+        from core import config as cfg
+
+        if cfg.HUMAN_HANDOFF_ENABLED and not state.get("cached"):
+            from core.outcome import classify_outcome
+
+            # Refund/ERP approval (HITL) is not customer support takeover.
+            # Only an explicit customer request or an explicit support-transfer
+            # answer can create a human service ticket. Do not interpret a
+            # rejected/pending write approval as an automatic support transfer.
+            query_text = str(state.get("customer_query") or "")
+            response_text = str(state.get("response") or "")
+            customer_asked_human = any(
+                phrase in query_text
+                for phrase in ("转人工", "人工客服", "真人客服", "人工坐席", "人工接管")
+            )
+            assistant_requested_human = any(
+                phrase in response_text
+                for phrase in ("请转人工客服", "为您转接人工", "建议联系人工客服", "转接人工客服")
+            )
+            if (
+                not state.get("pending_actions")
+                and not state.get("approval_results")
+                and (
+                    customer_asked_human
+                    or (assistant_requested_human and classify_outcome(state).requires_human_action)
+                )
+            ):
+                if state.get("user_id") and state.get("session_id"):
+                    from core.handoff_service import get_handoff_service
+
+                    try:
+                        ticket = await asyncio.to_thread(
+                            get_handoff_service().create_or_get,
+                            session_id=state["session_id"],
+                            customer_id=state["user_id"],
+                            reason=state.get("customer_query", "")[:2000],
+                            source="agent",
+                            initial_message=state.get("customer_query", "")[:4096],
+                        )
+                    except Exception:
+                        logger.error("[Handoff] unable to persist ticket", exc_info=True)
+                        state["response"] = "暂未成功创建人工客服工单，请稍后重试。"
+                        state["handoff_status"] = "UNAVAILABLE"
+                        state["degraded_reason"] = "handoff_ticket_create_failed"
+                    else:
+                        state["handoff_ticket_id"] = ticket["ticket_id"]
+                        state["handoff_status"] = ticket["status"]
+                        state["response"] = (
+                            "已创建人工客服工单，请通过该工单继续沟通。"
+                            f" 工单编号：{ticket['ticket_id']}"
+                        )
+                else:
+                    state["response"] = "无法确认会话用户身份，尚未创建人工工单。请登录后重试。"
+                    state["handoff_status"] = "IDENTITY_REQUIRED"
+                    state["degraded_reason"] = "handoff_identity_unverified"
 
         if c.response_agent:
             try:
