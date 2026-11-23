@@ -18,7 +18,9 @@ export async function handoffRequest(method, path, body = undefined) {
   if (!response.ok) {
     const problem = await response.json().catch(() => null);
     const detail = problem?.detail || problem?.error || `请求失败（HTTP ${response.status}）`;
-    throw new Error(typeof detail === 'string' ? detail : '请求处理失败');
+    const failure = new Error(typeof detail === 'string' ? detail : '请求处理失败');
+    failure.status = response.status;
+    throw failure;
   }
   return response.json();
 }
@@ -105,7 +107,7 @@ function renderSelection(ticket) {
   $('reopenTicketBtn').hidden = !ticket || !closed || !(state.user?.role === 'customer' || isManager());
   $('messageForm').hidden = !ticket || closed || (isStaff() && !(own || isManager()));
   $('resolutionPanel').hidden = true;
-  if (!ticket) renderMessages([]);
+  renderMessages([]);
 }
 
 async function selectTicket(id) {
@@ -119,6 +121,7 @@ async function selectTicket(id) {
     const data = await handoffRequest('GET', `/api/handoffs/${encodeURIComponent(id)}/messages`);
     if (state.selected?.ticket_id === id) renderMessages(data.messages || []);
   } catch (error) {
+    renderSelection(null);
     tell(error.message, true);
   }
 }
@@ -146,7 +149,7 @@ async function loadTickets(silent = false) {
           );
           state.tickets = [ticket];
         } catch (error) {
-          if (error.message === '工单不存在或无权访问') state.tickets = [];
+          if (error.status === 404) state.tickets = [];
           else throw error;
         }
       }
