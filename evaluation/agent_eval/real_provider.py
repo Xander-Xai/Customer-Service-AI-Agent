@@ -30,6 +30,7 @@ provider, no network and no application container.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -278,6 +279,7 @@ async def run_real_provider_lane(
     results: list[RealCaseResult] = []
     tokens_used = 0
     cost_used = 0.0
+    cost_observed = False
     budget_reason: str | None = None
 
     for case in list(cases)[: plan.max_queries]:
@@ -312,27 +314,33 @@ async def run_real_provider_lane(
         in_tok = outcome.get("input_tokens")
         out_tok = outcome.get("output_tokens")
         cost = outcome.get("cost_usd")
-        if isinstance(in_tok, int):
+        # A provider might return missing, negative, non-finite or bool values.
+        # None of those values is trustworthy metering evidence.
+        input_is_metered = type(in_tok) is int and in_tok >= 0
+        output_is_metered = type(out_tok) is int and out_tok >= 0
+        usage_is_metered = input_is_metered and output_is_metered
+        if input_is_metered:
             tokens_used += in_tok
-        if isinstance(out_tok, int):
+        if output_is_metered:
             tokens_used += out_tok
-        if isinstance(cost, int | float):
+        cost_is_metered = (
+            type(cost) in (int, float) and math.isfinite(cost) and cost >= 0
+        )
+        if cost_is_metered:
             cost_used += float(cost)
-        elif (
-            plan.cost_per_1k_tokens is not None
-            and isinstance(in_tok, int)
-            and isinstance(out_tok, int)
-        ):
+            cost_observed = True
+        elif plan.cost_per_1k_tokens is not None and usage_is_metered:
             derived = (in_tok + out_tok) / 1000.0 * plan.cost_per_1k_tokens
-            cost_used += derived
-            cost = round(derived, 6)
+            if math.isfinite(derived) and derived >= 0:
+                cost_used += derived
+                cost = round(derived, 6)
+                cost_is_metered = True
+                cost_observed = True
 
         # A limit whose usage source is missing cannot be enforced. Stop the
         # lane after this case rather than sending more unmetered requests.
         # This is not a pre-call hard cap: one already-started request may exceed
         # a budget. The real graph currently does not expose per-call usage.
-        usage_is_metered = all(type(value) is int and value >= 0 for value in (in_tok, out_tok))
-        cost_is_metered = type(cost) in (int, float) and cost >= 0
         if plan.max_total_tokens is not None and not usage_is_metered:
             budget_reason = "provider_token_usage_unavailable"
         if plan.max_cost_usd is not None and not cost_is_metered:
@@ -348,9 +356,9 @@ async def run_real_provider_lane(
                 tool_calls=calls,
                 response_nonempty=bool(outcome.get("response_nonempty")),
                 latency_ms=round((clock() - started) * 1000, 3),
-                input_tokens=in_tok if isinstance(in_tok, int) else None,
-                output_tokens=out_tok if isinstance(out_tok, int) else None,
-                cost_usd=cost if isinstance(cost, int | float) else None,
+                input_tokens=in_tok if input_is_metered else None,
+                output_tokens=out_tok if output_is_metered else None,
+                cost_usd=cost if cost_is_metered else None,
             )
         )
         if budget_reason is not None:
@@ -365,7 +373,7 @@ async def run_real_provider_lane(
             "ok": ok,
             "error": len(results) - ok,
             "tokens_used": tokens_used,
-            "cost_used_usd": round(cost_used, 6) if plan.cost_per_1k_tokens else None,
+            "cost_used_usd": round(cost_used, 6) if cost_observed else None,
         },
         "budget_exceeded": budget_reason,
     }
