@@ -280,12 +280,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "real_provider": {
                 "status": "MEASURED",
                 "model": plan.model,
-                "network_calls_made": run["summary"]["attempted"],
+                "network_calls_made": None,
+                "agent_cases_attempted": run["summary"]["attempted"],
             },
             "scripted_lane_artifact": "artifacts/agent-eval/<ts>/report.json",
             "note": (
-                "Real-model results. Never blended with the scripted-LLM regression "
-                "lane; token/cost are NOT_MEASURED unless the provider surfaces usage."
+                "Real-model results, separate from scripted replay. A graph may "
+                "issue multiple provider calls per agent case; provider network-call "
+                "count is NOT_MEASURED. Token/cost totals are only reported when "
+                "the metering is complete for all attempted cases."
             ),
         },
         "results": run["results"],
