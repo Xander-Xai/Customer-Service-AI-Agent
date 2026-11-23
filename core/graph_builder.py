@@ -204,6 +204,13 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         """缓存检查节点（v6.0: SSE 状态流式 + 缓存伪流式）"""
         query = state["customer_query"]
 
+        # A new turn must not inherit evidence or approval proposals from the
+        # previous checkpointed turn. An interrupt resume restarts at the gate,
+        # not at this entry node, so pending approvals remain durable on resume.
+        state["tool_executions"] = []
+        state["pending_actions"] = []
+        state["approval_results"] = []
+
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
         if c.cache is not None:
@@ -287,13 +294,17 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         state["response"] = result.get("response", "")
         state["collaboration_mode"] = result.get("mode", mode_name)
         state["agents_used"] = result.get("agents_used", [])
+        # Collaboration modes execute on dict(state) copies. Propagate their
+        # real tool execution receipts to the graph before outcome evaluation.
+        # Replace (do not append): checkpoint state may contain a prior turn.
+        state["tool_executions"] = list(result.get("tool_executions") or [])
         # human-in-the-loop：Agent 工具循环把 HIGH 风险副作用**摘出**到
         # pending_actions（此处并未执行）。必须透传给下游 human_approval_gate
         # 节点，否则被摘出的动作会被静默丢弃 —— 那等于「高风险写操作既没执行
         # 也没审批」，是最危险的失败模式。
         pending = result.get("pending_actions") or []
+        state["pending_actions"] = list(pending)
         if pending:
-            state["pending_actions"] = list(state.get("pending_actions") or []) + list(pending)
             logger.info("[%s] %d 个高风险动作待人工审批", mode_name, len(state["pending_actions"]))
         logger.info(f"[{mode_name}] agents={state['agents_used']} {_format_duration(elapsed)}")
         return state
