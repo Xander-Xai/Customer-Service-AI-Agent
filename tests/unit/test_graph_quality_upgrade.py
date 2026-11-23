@@ -81,9 +81,7 @@ async def test_low_quality_retries_before_single_finalization(monkeypatch):
     upgraded = _Mode("consultation", "这是升级后的最终客服回答，包含完整明确的处理说明。")
     container, cache = await _make_container(first, upgraded)
     try:
-        observed = await _drain_graph(
-            container, thread_id=f"quality-gate-{uuid4().hex}"
-        )
+        observed = await _drain_graph(container, thread_id=f"quality-gate-{uuid4().hex}")
         assert first.calls == 1
         assert upgraded.calls == 1
         assert observed["collaboration_mode"] == "consultation"
@@ -107,9 +105,7 @@ async def test_tool_activity_suppresses_quality_retry(monkeypatch):
     upgraded = _Mode("consultation", "不应该调用的升级协作响应。")
     container, cache = await _make_container(first, upgraded)
     try:
-        observed = await _drain_graph(
-            container, thread_id=f"quality-safe-{uuid4().hex}"
-        )
+        observed = await _drain_graph(container, thread_id=f"quality-safe-{uuid4().hex}")
         assert first.calls == 1
         assert upgraded.calls == 0
         assert observed["_upgrade_attempts"] == 0
