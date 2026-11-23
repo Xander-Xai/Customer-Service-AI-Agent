@@ -548,13 +548,15 @@ class BaseAgent(ABC):
         except (asyncio.TimeoutError, TimeoutError) as exc:
             if state is not None:
                 state["erp_read_status"] = "timeout"
-                state.setdefault("degraded_reason", "erp_read_timeout")
+                if not state.get("degraded_reason"):
+                    state["degraded_reason"] = "erp_read_timeout"
             self.logger.warning("ERP read timed out (%s)", type(exc).__name__)
             return fallback or "[ERP 暂时不可用，请告知用户稍后再试或提供通用信息]"
         except Exception as exc:
             if state is not None:
                 state["erp_read_status"] = "error"
-                state.setdefault("degraded_reason", "erp_read_error")
+                if not state.get("degraded_reason"):
+                    state["degraded_reason"] = "erp_read_error"
             # Never log ERP data, exception content or customer query here.
             self.logger.warning("ERP read failed (%s)", type(exc).__name__)
             return fallback or "[ERP 暂时不可用，请告知用户稍后再试或提供通用信息]"
