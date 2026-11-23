@@ -20,6 +20,20 @@ class Tool:
     side_effect: bool = False
     high_risk: bool = False
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError("Tool name must be nonempty")
+        if type(self.side_effect) is not bool or type(self.high_risk) is not bool:
+            raise ValueError("Tool risk flags must be boolean")
+        # This minimal reference only supports a sensitive write policy; an
+        # inconsistent classification must never silently bypass its gate.
+        if self.high_risk and not self.side_effect:
+            raise ValueError("A high-risk tool must declare side_effect=True")
+        if not isinstance(self.schema, Mapping) or any(
+            not isinstance(k, str) or type(v) is not type for k, v in self.schema.items()
+        ):
+            raise ValueError("Invalid static tool schema")
+
 
 @dataclass(frozen=True)
 class Decision:
@@ -95,6 +109,8 @@ def run_agent_loop(
         except Exception:
             return finish("blocked", "model_execution_failed")
         steps += 1
+        if not isinstance(choice, Decision):
+            return finish("blocked", "invalid_model_response")
         if not isinstance(choice.tokens, int) or isinstance(choice.tokens, bool) or choice.tokens < 0:
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
@@ -105,6 +121,8 @@ def run_agent_loop(
             return finish("completed", "model_finished", choice.response)
         if choice.kind != "tool":
             return finish("blocked", "invalid_decision")
+        if not isinstance(choice.name, str) or not isinstance(choice.arguments, dict):
+            return finish("blocked", "invalid_tool_decision")
         if calls >= limits.tool_calls:
             return finish("blocked", "tool_budget_exceeded")
         spec = tools.get(choice.name)
