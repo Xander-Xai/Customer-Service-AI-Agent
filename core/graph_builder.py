@@ -210,6 +210,12 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         state["tool_executions"] = []
         state["pending_actions"] = []
         state["approval_results"] = []
+        state["_quality_gate_checked"] = False
+        state["_needs_upgrade"] = False
+        state["_retried"] = False
+        state["_upgrade_attempts"] = 0
+        state["_upgrade_target"] = ""
+        state["_upgrade_context"] = {}
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
@@ -333,10 +339,74 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         state.update(result)
         return state
 
+    async def _quality_gate_node(state: AgentState) -> AgentState:
+        """Score a candidate before cache/events and allow at most one safe retry.
+
+        No response side effects are emitted here. Never replay a tool-backed,
+        pending-approval or approved action simply because a heuristic score is
+        low. This intentionally prioritizes write safety over recovery rate.
+        """
+        from core import config as cfg
+
+        state["_quality_gate_checked"] = True
+        state["_needs_upgrade"] = False
+        if not (cfg.EVAL_RETRY_ENABLED and cfg.MODE_UPGRADE_ENABLED):
+            return state
+        if state.get("cached") or state.get("collaboration_mode") != "sequential":
+            return state
+        if state.get("_upgrade_attempts", 0) >= 1:
+            return state
+        if (
+            state.get("pending_actions")
+            or state.get("approval_results")
+            or state.get("tool_executions")
+        ):
+            logger.info("[ModeUpgrade] Skip retry: tool activity or human action exists")
+            return state
+        if not c.response_agent or not c.orchestrator:
+            return state
+
+        evaluated = c.response_agent._evaluate_quality(dict(state))
+        if not evaluated or evaluated.get("score", 100) >= cfg.EVAL_RETRY_THRESHOLD:
+            return state
+        target, upgrade_context = c.orchestrator.upgrade_mode("sequential", state)
+        if target == "sequential" or target not in c.orchestrator._modes:
+            return state
+        state["_needs_upgrade"] = True
+        state["_upgrade_target"] = target
+        state["_upgrade_context"] = dict(upgrade_context)
+        logger.info("[ModeUpgrade] pre-finalization retry sequential -> %s", target)
+        return state
+
+    async def _mode_upgrade_retry_node(state: AgentState) -> AgentState:
+        """Execute one upgraded collaboration, then revisit the HITL gate."""
+        mode_name = state.get("_upgrade_target", "")
+        mode = c.orchestrator._modes.get(mode_name)
+        state["_upgrade_attempts"] = int(state.get("_upgrade_attempts", 0)) + 1
+        state["_needs_upgrade"] = False
+        state["_retried"] = True
+        if not mode:
+            logger.warning("[ModeUpgrade] no mode found: %s", mode_name)
+            return state
+
+        result = await mode.execute(
+            c.agents_dict,
+            dict(state),
+            dict(state.get("_upgrade_context") or {}),
+        )
+        if result.get("response"):
+            state["response"] = result["response"]
+            state["collaboration_mode"] = result.get("mode", mode_name)
+            state["agents_used"] = list(result.get("agents_used") or [])
+            state["tool_executions"] = list(result.get("tool_executions") or [])
+            state["pending_actions"] = list(result.get("pending_actions") or [])
+        return state
+
+    def _select_quality_path(state: AgentState) -> str:
+        return "mode_upgrade_retry" if state.get("_needs_upgrade") else "final_response"
+
     async def _final_response_node(state: AgentState) -> AgentState:
-        """最终响应节点（v4.3: 集成质量评估 + 自动模式升级重试）
-        三层架构的最终环节：缓存写入、会话记录、SLA 监控、事件广播。
-        v4.3: 当质量评分极低时，自动升级到更复杂模式重新处理。"""
+        """Finalize once, after quality retry and the approval gate are finished."""
         if not c.agents_dict:
             await c._init_agents()
 
@@ -346,36 +416,6 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             except Exception as e:
                 logger.error(f"[ResponseAgent] error: {e}, 降级到基础处理", exc_info=True)
                 _fallback_post_process(state)
-
-            # v4.3: 质量评估触发模式升级重试
-            if state.get("_needs_upgrade") and not state.get("_retried_failed"):
-                current_mode = state.get("collaboration_mode", "sequential")
-                new_mode, upgrade_ctx = c.orchestrator.upgrade_mode(current_mode, state)
-                if new_mode != current_mode:
-                    logger.info(f"[ModeUpgrade] 执行升级重试: {current_mode} -> {new_mode}")
-                    state["_retried_failed"] = True  # 防止无限循环
-                    state["collaboration_mode"] = new_mode
-                    try:
-                        mode = c.orchestrator._modes.get(new_mode)
-                        if mode:
-                            result = await mode.execute(c.agents_dict, dict(state), upgrade_ctx)
-                            state["response"] = result.get("response", state.get("response", ""))
-                            state["agents_used"] = result.get("agents_used", [])
-                            state["collaboration_mode"] = result.get("mode", new_mode)
-                            # v5.0: 升级重试后只更新缓存，不重复完整后处理（避免重复写入会话/SLA/事件）
-                            if state.get("response") and not state.get("cached", False) and c.cache:
-                                # v6.1: 写入缓存时携带完整 metadata
-                                # P0-02: 携带可信 user_id，个性化回答进入用户作用域
-                                cache_meta = {
-                                    "intent_type": state.get("query_type", "default"),
-                                    "user_id": state.get("user_id"),
-                                }
-                                c.cache.put(
-                                    state["customer_query"], state["response"], metadata=cache_meta
-                                )
-                            logger.info(f"[ModeUpgrade] 升级重试完成: mode={new_mode}")
-                    except Exception as e:
-                        logger.error(f"[ModeUpgrade] 升级重试失败: {e}，保留原响应", exc_info=True)
         else:
             logger.warning("[ResponseAgent] 未初始化，使用基础后处理")
             _fallback_post_process(state)
@@ -422,6 +462,8 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     # 统一拦截；而 final_response 之前完成审批，才能让最终回复反映真实执行结果
     # （被拒绝时不能让 Agent 宣称「已退款」）。
     workflow.add_node("human_approval_gate", _human_approval_gate_node)
+    workflow.add_node("quality_gate", _quality_gate_node)
+    workflow.add_node("mode_upgrade_retry", _mode_upgrade_retry_node)
     workflow.add_node("final_response", _final_response_node)
 
     # 入口：缓存检查（命中直接跳到 final_response，跳过 LLM 路由）
@@ -456,7 +498,16 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     workflow.add_edge("consultation", "human_approval_gate")
     workflow.add_edge("hierarchical", "human_approval_gate")
     workflow.add_edge("react", "human_approval_gate")
-    workflow.add_edge("human_approval_gate", "final_response")
+    workflow.add_edge("human_approval_gate", "quality_gate")
+    workflow.add_conditional_edges(
+        "quality_gate",
+        _select_quality_path,
+        {
+            "mode_upgrade_retry": "mode_upgrade_retry",
+            "final_response": "final_response",
+        },
+    )
+    workflow.add_edge("mode_upgrade_retry", "human_approval_gate")
 
     # 结束
     workflow.set_finish_point("final_response")
@@ -466,7 +517,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     if checkpointer is not None:
         compile_kwargs["checkpointer"] = checkpointer
     app = workflow.compile(**compile_kwargs)
-    logger.info("[Graph] LangGraph v4.5 构建完成 - 缓存前置 + 5种协作模式 + RAG + 模式升级")
+    logger.info("[Graph] LangGraph v4.5 构建完成 - 缓存前置 + 5种协作模式 + RAG + 审批前置的单次质量升级")
     return app
 
 
