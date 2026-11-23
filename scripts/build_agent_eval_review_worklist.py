@@ -27,7 +27,9 @@ DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "agent-eval" / "route-review-worklist
 CONTRACT = "agent-route-review-worklist/v1"
 
 
-def select_candidates(cases: tuple[AgentCase, ...], *, per_route: int = 3, limit: int = 24) -> list[AgentCase]:
+def select_candidates(
+    cases: tuple[AgentCase, ...], *, per_route: int = 3, limit: int = 24
+) -> list[AgentCase]:
     """Deterministic round-robin across candidate routes, excluding confirmed labels."""
     if per_route <= 0 or limit <= 0:
         raise ValueError("per_route and limit must be positive")
@@ -85,9 +87,15 @@ def main(argv=None) -> int:
     dataset = load_dataset(args.dataset)
     report = build_worklist(dataset, per_route=args.per_route, limit=args.limit)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"draft human-review worklist: {report['selected_count']} cases -> {args.out}")
-    print("No labels approved. Formal route accuracy remains NOT_MEASURED until independent review.")
+    args.out.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(
+        f"draft human-review worklist: {report['selected_count']} cases -> {args.out}"
+    )
+    print(
+        "No labels approved. Formal route accuracy remains NOT_MEASURED until independent review."
+    )
     return 0
 
 
