@@ -309,6 +309,7 @@ class ConsultationMode(CollaborationMode):
 
         # 先让辅助 Agent 提供信息
         consult_results = []
+        consult_read_results: list[dict] = []
         if consultees:
 
             async def consult(name: str):
@@ -327,6 +328,7 @@ class ConsultationMode(CollaborationMode):
                 )
 
                 result = await agent.process_with_retry(consult_state)
+                consult_read_results.append(result)
                 response = result.get("response", "")
 
                 prefix = (
@@ -420,7 +422,7 @@ class ConsultationMode(CollaborationMode):
             "mode": "consultation",
             "agents_used": [primary] + [n for n, _ in consult_results],
             "elapsed": elapsed,
-            **_read_path_signal(result),
+            **_read_path_signal(result, *consult_read_results),
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
