@@ -42,7 +42,21 @@
 | **B. 分布式 Runtime** | 跨进程 checkpoint、同 thread 串行、跨 thread 并行、工具幂等、崩溃恢复 | **Level 2 已验证**（有 artifact） | `make runtime-e2e` / `make runtime-chaos` / `make runtime-verify` |
 | **C. 可观测性链路** | 5 个语义 span 是否真实到达 Collector | **Level 2 本地已验证** | `make otel-collector-smoke` |
 | **D. 响应质量** | 完整性/准确性/简洁性/礼貌/相关性 | **Implemented，但是启发式**（关键词打分，非 LLM 判官） | `agents/evaluator.py` |
-| **E. Agent 行为回归** | Agent 选择、工具选择、路由正确性 | **未实现** | — |
+| **E. Agent 行为回归** | Agent 选择、工具选择、路由正确性 | **离线 Scripted 回放已实现；正式路由准确率 NOT_MEASURED（待人工确认）** | `python3 scripts/evaluate_agent.py` |
+
+### E 类评测：人工确认路由标签的最小可复核路径
+
+原始 `tests/eval/agent_cases.jsonl` 中的 `llm_candidate` 只是候选标签，不能作为 `route_accuracy` 的真值。为了避免依靠人工随机挑选造成样本偏差，提供了确定性的**按 route 分层轮转抽样**：
+
+```bash
+python3 scripts/build_agent_eval_review_worklist.py --per-route 3 --limit 24
+python3 scripts/approve_agent_eval_annotations.py --list
+python3 scripts/evaluate_agent.py --print-annotation-status
+```
+
+抽样工作单默认落在 `artifacts/agent-eval/route-review-worklist.json`，每个 case 的 `reviewer_route` 和 `reviewer_id` 始终为 null；`DRAFT_UNVERIFIED` **不自动变成** `human_confirmed`。独立审核者必须逐条看 query，核对业务意图后再使用已有的 `approve_agent_eval_annotations.py --confirm ... --reviewer ...` 流程；模型、生成脚本和仓库维护者不得将候选标签当作已确认真实标签。
+
+**证据边界**：本次新增的是人工评测准备工具 + 回归测试，不是实际人工审核完成，更不是提供商真实模型跑分或生产准确率。
 
 ---
 
