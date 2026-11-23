@@ -107,3 +107,43 @@ async def test_handoff_disabled_leaves_graph_without_ticket(monkeypatch):
         assert mode.calls == 1
     finally:
         await container.close()
+
+
+async def test_hitl_approval_failure_does_not_create_customer_handoff(monkeypatch):
+    """An approval workflow failure is not authorization to transfer the customer."""
+    from core.container import ServiceContainer
+
+    factory, engine, path = make_sqlite_session_factory()
+    svc = HandoffService(session_factory=factory)
+    monkeypatch.setattr("core.config.HUMAN_HANDOFF_ENABLED", True)
+    monkeypatch.setattr("core.config.EVAL_RETRY_ENABLED", False)
+    monkeypatch.setattr("core.handoff_service.get_handoff_service", lambda: svc)
+
+    async def denied_write_approval(state, config, container):
+        return {
+            "approval_results": [{"tool": "staging_refund", "status": "error"}],
+            "pending_actions": [],
+        }
+
+    monkeypatch.setattr("core.hitl.gate.run_approval_gate", denied_write_approval)
+    container = ServiceContainer()
+    await container.initialize()
+    mode = _Mode("请转人工客服处理您的退款申请。")
+    container.orchestrator._modes["sequential"] = mode
+    container.orchestrator.select_mode_name = lambda *args: "sequential"
+    container.orchestrator.build_context = lambda *args: (
+        "sequential",
+        {"primary_agent": "general_agent"},
+    )
+    container.cache = _NullCache()
+    container.response_agent.cache = _NullCache()
+    thread = f"hitl-not-handoff-{uuid4().hex}"
+    try:
+        result = await _drain_graph(container, thread_id=thread)
+        assert not result.get("handoff_ticket_id")
+        assert svc.by_session(
+            thread, actor_id="hitl-e2e-user", role="customer"
+        ) is None
+    finally:
+        await container.close()
+        dispose(engine, path)
