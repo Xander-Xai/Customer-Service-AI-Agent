@@ -11,7 +11,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
-from db.models import Base
 from core.handoff_service import (
     CLAIMED,
     CLOSED,
@@ -21,6 +20,7 @@ from core.handoff_service import (
     HandoffNotFound,
     HandoffService,
 )
+from db.models import Base
 from tests.unit.runtime_helpers import dispose
 
 pytestmark = pytest.mark.unit
