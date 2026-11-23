@@ -170,30 +170,28 @@ def resolve_plan(
 
 
 def estimate_request_volume(plan: RealProviderPlan, dataset_size: int) -> dict[str, Any]:
-    """Worst-case request / token estimate shown *before* any call is made.
+    """Report a bounded case count without inventing a provider-call upper bound.
 
-    The estimate is deliberately an upper bound (one request per query at the
-    per-request token cap). Real token use is usually lower; the point is that
-    the operator sees the ceiling they are authorizing.
+    The compiled Agent graph can make multiple model calls per case. The CLI's
+    max_tokens_per_request field is not currently wired to all provider calls,
+    so multiplying case count by that field is *not* a token or cost ceiling.
     """
     effective = min(max(0, dataset_size), plan.max_queries)
-    worst_tokens = effective * plan.max_tokens_per_request
-    estimate: dict[str, Any] = {
+    return {
         "dataset_size": dataset_size,
         "effective_queries": effective,
-        "summarization": (f"at most {effective} provider request(s) (one per query)"),
-        "worst_case_tokens": worst_tokens,
+        "summarization": f"at most {effective} agent cases; provider call count not bounded",
+        "provider_request_upper_bound": None,
+        "worst_case_tokens": None,
         "per_request_token_cap": plan.max_tokens_per_request,
+        "per_request_token_cap_enforced": False,
+        "worst_case_cost_usd": None,
+        "cost_note": (
+            "The real graph can call the provider multiple times per case; "
+            "per-request token cap and total usage are not wired end-to-end. "
+            "No defensible pre-run cost upper bound is available."
+        ),
     }
-    if plan.cost_per_1k_tokens is not None:
-        estimate["worst_case_cost_usd"] = round(worst_tokens / 1000.0 * plan.cost_per_1k_tokens, 6)
-    else:
-        estimate["worst_case_cost_usd"] = None
-        estimate["cost_note"] = (
-            "no cost_per_1k_tokens configured: the cost cap is NOT_MEASURED and "
-            "cannot be enforced, only the token budget can"
-        )
-    return estimate
 
 
 @dataclass
