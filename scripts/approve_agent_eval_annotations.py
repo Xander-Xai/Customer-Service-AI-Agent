@@ -65,7 +65,8 @@ def _load_approvals() -> dict:
 def _save_approvals(data: dict) -> None:
     APPROVALS_PATH.parent.mkdir(parents=True, exist_ok=True)
     APPROVALS_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -101,7 +102,9 @@ def _list(args) -> int:
     return 0
 
 
-def _mutate(args, ids: list[str], grant: bool, route_overrides: dict[str, str] | None = None) -> int:
+def _mutate(
+    args, ids: list[str], grant: bool, route_overrides: dict[str, str] | None = None
+) -> int:
     dataset = load_dataset(args.dataset)
     known = {c.case_id for c in dataset.cases}
     unknown = [case_id for case_id in ids if case_id not in known]
@@ -142,10 +145,14 @@ def _mutate(args, ids: list[str], grant: bool, route_overrides: dict[str, str] |
     _save_approvals(data)
     verb = "确认" if grant else "撤销"
     print(f"✅ 已{verb} {len(ids)} 条：{ids}")
-    print(f"   记录写入 {APPROVALS_PATH.relative_to(REPO_ROOT)}")
+    try:
+        approval_location = str(APPROVALS_PATH.relative_to(REPO_ROOT))
+    except ValueError:
+        approval_location = str(APPROVALS_PATH)
+    print(f"   记录写入 {approval_location}")
     print(
         "   下一步：python3 scripts/generate_agent_eval_cases.py --apply-approvals "
-        f"{APPROVALS_PATH.relative_to(REPO_ROOT)}"
+        f"{approval_location}"
     )
     return 0
 
@@ -176,7 +183,9 @@ def main(argv=None) -> int:
     operations.add_argument("--confirm", nargs="+", default=None, metavar="CASE_ID")
     operations.add_argument("--revoke", nargs="+", default=None, metavar="CASE_ID")
     operations.add_argument("--label", nargs="+", default=None, metavar="CASE_ID=ROUTE")
-    parser.add_argument("--reviewer", default=None, help="人工审核者标识（--confirm/--label 必填）")
+    parser.add_argument(
+        "--reviewer", default=None, help="人工审核者标识（--confirm/--label 必填）"
+    )
     args = parser.parse_args(argv)
 
     if args.list:
