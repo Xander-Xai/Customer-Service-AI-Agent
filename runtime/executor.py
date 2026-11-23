@@ -55,6 +55,17 @@ def _new_worker_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
+def _approved_write_failed(result: Any) -> bool:
+    """Failed approved side effects must not be persisted as SUCCEEDED runs."""
+    if not isinstance(result, dict):
+        return False
+    items = result.get("approval_results") or []
+    return isinstance(items, list) and any(
+        isinstance(item, dict) and str(item.get("status", "")).lower() == "error"
+        for item in items
+    )
+
+
 def _awaiting_approval(result: Any) -> bool:
     """执行结果是否表示图正挂在人工审批的 interrupt 上。
 
@@ -522,6 +533,21 @@ async def execute_run(
                             trace_ctx.set_attribute("csai.approval_id", _approval_id)
                         trace_ctx.set_attribute("csai.risk_level", "high")
                     return await _park_for_approval(svc, run_id, result, expected_worker_id=owner)
+                if _approved_write_failed(result):
+                    # Approval was already consumed and the downstream write may
+                    # have partially completed. Never report SUCCEEDED, and do
+                    # not auto-replay an ambiguous external write. Operations
+                    # must reconcile the ledger / ERP before reattempting.
+                    return await _handle_failure(
+                        svc,
+                        run_id,
+                        error_type="permanent",
+                        error_code="ApprovedSideEffectFailed",
+                        error_message="Approved tool execution failed or is unconfirmed",
+                        dispatcher=dispatcher,
+                        cfg=cfg,
+                        worker_id=owner,
+                    )
                 try:
                     svc.mark_succeeded(run_id, result, expected_worker_id=owner)
                 except RunOwnershipLost as lost:
