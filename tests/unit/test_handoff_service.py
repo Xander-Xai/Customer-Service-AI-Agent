@@ -224,9 +224,10 @@ def test_authorized_ticket_reads_use_single_sql_visibility_snapshot(service, mon
 
     monkeypatch.setattr(service, "get", deny_out_of_band_get)
     assert len(service.messages(tid, actor_id="customer-1", role="customer")) == 1
-    assert [event["event"] for event in service.events(
-        tid, actor_id="customer-1", role="customer"
-    )] == ["created"]
+    assert [
+        event["event"]
+        for event in service.events(tid, actor_id="customer-1", role="customer")
+    ] == ["created"]
     with pytest.raises(HandoffNotFound):
         service.events(tid, actor_id="customer-2", role="customer")
     with pytest.raises(HandoffNotFound):
@@ -246,7 +247,9 @@ def test_agent_loses_message_and_event_visibility_after_other_agent_claims(servi
 
 def test_empty_visible_ticket_has_empty_messages_not_false_404(service):
     ticket = service.create_or_get(
-        session_id="no-initial", customer_id="customer-1", reason="回访",
+        session_id="no-initial",
+        customer_id="customer-1",
+        reason="回访",
     )
     assert service.messages(
         ticket["ticket_id"], actor_id="customer-1", role="customer"
