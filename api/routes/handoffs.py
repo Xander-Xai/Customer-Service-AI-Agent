@@ -47,6 +47,10 @@ def _identity(request: Request) -> tuple[str, str]:
 
 
 def _service():
+    from core.config import HUMAN_HANDOFF_ENABLED
+
+    if not HUMAN_HANDOFF_ENABLED:
+        raise HTTPException(status_code=503, detail="人工客服通道尚未启用")
     return get_handoff_service()
 
 
