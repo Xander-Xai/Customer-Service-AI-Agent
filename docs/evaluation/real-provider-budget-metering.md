@@ -18,7 +18,7 @@ The runner now:
 4. If a requested budget cannot be reconciled after a case, reports `provider_token_usage_unavailable`, `provider_cost_usage_unavailable`, or `provider_usage_unknown_after_error` and stops scheduling further cases.
 5. Keeps each case in the evidence report, including errors, instead of switching to scripted completion.
 
-This is **not a pre-call hard spending limit**: an already-started provider request may exceed the operator's quota. A strict bound requires provider-side per-request generation caps, actual usage propagation and explicit admission control at the complete graph request boundary.
+This is **not a pre-call hard spending limit**: an already-started provider request may exceed the operator's quota. A strict bound requires provider-side per-request generation caps, actual usage propagation and explicit admission control at the complete graph request boundary. The previous estimate of **one provider request per case** was incorrect because a compiled Agent graph can make multiple model calls. The plan now marks provider-request count, worst-case Token usage and maximum cost as unavailable rather than inventing upper bounds.
 
 ## Verification
 
