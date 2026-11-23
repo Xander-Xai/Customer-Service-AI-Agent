@@ -38,6 +38,7 @@ def test_token_budget_stops_on_missing_provider_usage():
     assert calls == ["first"]
     assert report["budget_exceeded"] == "provider_token_usage_unavailable"
     assert report["summary"]["attempted"] == 1
+    assert report["summary"]["tokens_used"] is None
     assert report["results"][0]["input_tokens"] is None
 
 
@@ -95,6 +96,8 @@ def test_unbudgeted_replay_can_record_unknown_usage_without_faking_cost():
     assert calls == ["first", "second"]
     assert report["budget_exceeded"] is None
     assert all(row["cost_usd"] is None for row in report["results"])
+    assert report["summary"]["tokens_used"] is None
+    assert report["summary"]["provider_request_count"] is None
 
 
 def test_budgeted_provider_error_does_not_trigger_another_billable_case():
@@ -128,6 +131,7 @@ def test_explicit_provider_cost_without_rate_card_is_accounted():
         )
     )
     assert report["summary"]["cost_used_usd"] == 0.012
+    assert report["summary"]["tokens_used"] is None
     assert report["results"][0]["cost_usd"] == 0.012
     assert report["budget_exceeded"] is None
 
