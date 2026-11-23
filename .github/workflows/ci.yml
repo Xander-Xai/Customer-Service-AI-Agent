@@ -60,6 +60,9 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
+      - name: Temporary handoff Ruff formatting diagnostic
+        run: ruff format --diff core/handoff_service.py tests/unit/test_handoff_service.py
+
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
