@@ -103,8 +103,9 @@ class TestRunLane:
             "attempted": 2,
             "ok": 1,
             "error": 1,
-            "tokens_used": 0,
+            "tokens_used": None,
             "cost_used_usd": None,
+            "provider_request_count": None,
         }
         results = {r["case_id"]: r for r in run["results"]}
         assert results["ok"]["status"] == "OK"
