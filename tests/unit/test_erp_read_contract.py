@@ -86,6 +86,15 @@ async def test_previous_degradation_reason_not_overwritten(agent):
     assert state["erp_read_status"] == "error"
 
 
+async def test_empty_checkpoint_reason_is_replaced_by_erp_failure(agent):
+    async def read():
+        raise ConnectionError("backend-unreachable")
+
+    state = {"degraded_reason": ""}
+    await agent._safe_erp_query(read, state=state)
+    assert state["degraded_reason"] == "erp_read_error"
+
+
 class _DegradedExpert:
     async def process_with_retry(self, state):
         return {
