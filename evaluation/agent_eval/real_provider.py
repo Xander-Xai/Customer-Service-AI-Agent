@@ -302,7 +302,7 @@ async def run_real_provider_lane(
                     case_id=case_id,
                     status=STATUS_ERROR,
                     latency_ms=round((clock() - started) * 1000, 3),
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=type(exc).__name__,
                 )
             )
             # The failed provider call may still have consumed tokens/cost.
