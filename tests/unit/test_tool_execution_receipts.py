@@ -106,14 +106,14 @@ async def test_real_graph_forwards_successful_read_only_tool_evidence():
     await container.initialize()
     try:
         _prepare(container, "staging_readonly_lookup", {"order_id": "EVIDENCE-1"})
-        observed = await _drain_graph(
-            container, thread_id=f"evidence-read-{uuid4().hex}"
-        )
+        observed = await _drain_graph(container, thread_id=f"evidence-read-{uuid4().hex}")
         executions = observed.get("tool_executions") or []
         assert any(
             item.get("tool") == "staging_readonly_lookup" and item.get("ok")
             for item in executions
-        ), "An actual successful tool call was lost at the collaboration -> graph boundary"
+        ), (
+            "An actual successful tool call was lost at the collaboration -> graph boundary"
+        )
         outcome = observed["outcome"]
         assert outcome.outcome_verified is True
     finally:
@@ -138,9 +138,7 @@ async def test_real_graph_does_not_verify_failed_tool():
             parameters={"type": "object", "properties": {}},
             handler=handler,
         )
-        observed = await _drain_graph(
-            container, thread_id=f"evidence-fail-{uuid4().hex}"
-        )
+        observed = await _drain_graph(container, thread_id=f"evidence-fail-{uuid4().hex}")
         executions = observed.get("tool_executions") or []
         assert any(
             item.get("tool") == "broken_lookup" and item.get("ok") is False
