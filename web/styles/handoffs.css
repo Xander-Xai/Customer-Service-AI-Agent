@@ -44,20 +44,22 @@ body {
   padding: 24px;
   min-width: 0;
 }
-.handoff-sidebar h1, .handoff-detail h2 {
+.handoff-sidebar h1,
+.handoff-detail h2 {
   font-size: 1.1rem;
   margin: 0 0 10px;
 }
 .muted {
   color: var(--text-secondary, #64748b);
-  font-size: .875rem;
+  font-size: 0.875rem;
 }
 label {
   display: block;
   margin: 12px 0 6px;
   font-weight: 600;
 }
-textarea, select {
+textarea,
+select {
   display: block;
   box-sizing: border-box;
   width: 100%;
@@ -81,7 +83,10 @@ button {
 button:hover {
   background: #d9e9ff;
 }
-button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visible {
+button:focus-visible,
+a:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: 3px solid #387fea;
   outline-offset: 2px;
 }
@@ -98,7 +103,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visi
   overflow-wrap: anywhere;
   text-align: left;
 }
-.ticket-picker[aria-current=true] {
+.ticket-picker[aria-current="true"] {
   border-color: #2367c3;
   background: #d9e9ff;
 }
@@ -146,13 +151,13 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visi
 }
 .message-list li time {
   display: block;
-  font-size: .75rem;
+  font-size: 0.75rem;
   color: #64748b;
 }
 #operationStatus {
   min-height: 1.3em;
 }
-#operationStatus[data-error=true] {
+#operationStatus[data-error="true"] {
   color: #aa2929;
 }
 [hidden] {
@@ -163,7 +168,8 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visi
     display: flex;
     flex-direction: column;
   }
-  .handoff-header, .ticket-header {
+  .handoff-header,
+  .ticket-header {
     align-items: flex-start;
     flex-direction: column;
   }
