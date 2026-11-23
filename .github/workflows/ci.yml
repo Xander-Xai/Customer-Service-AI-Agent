@@ -40,6 +40,9 @@ jobs:
       - name: Ruff lint (blocking)
         run: ruff check .
 
+      - name: Temporary handoff Ruff diff
+        run: ruff format --diff db/models.py alembic/versions/007_durable_human_handoff.py core/handoff_service.py api/routes/handoffs.py core/graph_builder.py core/state.py api/app.py api/routes/chat.py tests/unit/test_handoff_service.py tests/unit/test_handoff_api.py tests/unit/test_handoff_graph.py
+
       - name: Ruff format check (blocking)
         run: ruff format --check .
 
