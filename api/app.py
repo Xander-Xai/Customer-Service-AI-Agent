@@ -520,6 +520,10 @@ def create_app(
     async def serve_admin(request: Request):
         return _serve_html(request, _html_path("admin.html"), "管理后台未找到")
 
+    @app.get("/handoffs.html", response_class=HTMLResponse)
+    async def serve_handoffs(request: Request):
+        return _serve_html(request, _html_path("handoffs.html"), "人工客服页面未找到")
+
     @app.get("/widget.html", response_class=HTMLResponse)
     async def serve_widget(request: Request):
         widget_path = os.path.join(web_dir, "widget.html")
