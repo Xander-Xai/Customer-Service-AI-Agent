@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 
+from db.models import Base
 from core.handoff_service import (
     CLAIMED,
     CLOSED,
@@ -15,14 +21,28 @@ from core.handoff_service import (
     HandoffNotFound,
     HandoffService,
 )
-from tests.unit.runtime_helpers import dispose, make_sqlite_session_factory
+from tests.unit.runtime_helpers import dispose
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
 def service():
-    factory, engine, path = make_sqlite_session_factory()
+    # Use distinct physical SQLite connections for simultaneous staff claims.
+    # The generic test fixture uses StaticPool, which is unsuitable for
+    # transactions running concurrently in different threads.
+    fd, path = tempfile.mkstemp(suffix=".db", prefix="csai-handoff-")
+    os.close(fd)
+    engine = create_engine(
+        f"sqlite:///{path}",
+        connect_args={"check_same_thread": False, "timeout": 10},
+        poolclass=NullPool,
+    )
+    with engine.connect() as connection:
+        connection.execute(text("PRAGMA journal_mode=WAL"))
+        connection.commit()
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, autoflush=False)
     try:
         yield HandoffService(session_factory=factory)
     finally:
