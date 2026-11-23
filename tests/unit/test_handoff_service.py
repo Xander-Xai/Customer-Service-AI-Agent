@@ -220,7 +220,9 @@ def test_authorized_ticket_reads_use_single_sql_visibility_snapshot(service, mon
     tid = _ticket(service)["ticket_id"]
 
     def deny_out_of_band_get(*args, **kwargs):
-        raise AssertionError("Ticket read must not invoke a separate get() authorization transaction")
+        raise AssertionError(
+            "Ticket read must not invoke a separate get() authorization transaction"
+        )
 
     monkeypatch.setattr(service, "get", deny_out_of_band_get)
     assert len(service.messages(tid, actor_id="customer-1", role="customer")) == 1
