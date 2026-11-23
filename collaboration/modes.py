@@ -27,6 +27,7 @@ from tools.tool_registry import SideEffectExecutionError
 
 logger = get_logger("collaboration.modes")
 
+
 def _read_path_signal(*results: dict[str, Any]) -> dict[str, str]:
     """Propagate read-path degradation from nested per-Agent state copies."""
     for result in results:
