@@ -517,7 +517,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     if checkpointer is not None:
         compile_kwargs["checkpointer"] = checkpointer
     app = workflow.compile(**compile_kwargs)
-    logger.info("[Graph] LangGraph v4.5 构建完成 - 缓存前置 + 5种协作模式 + RAG + 审批前置的单次质量升级")
+    logger.info(
+        "[Graph] LangGraph v4.5 构建完成 - 缓存前置 + 5种协作模式 + RAG + 审批前置的单次质量升级"
+    )
     return app
 
 
