@@ -66,12 +66,15 @@ def run_agent_loop(
     cancelled: Callable[[], bool] = lambda: False,
     authorize_write: Callable[[Tool, dict[str, Any]], bool] = lambda _tool, _args: False,
     backoff: Callable[[int], None] = lambda _attempt: None,
+    reconcile_write: Callable[[Tool, dict[str, Any]], bool | None] = lambda _tool, _args: None,
 ) -> Result:
     """Run a minimal safe loop; never infer backend authorization from model text.
 
     Read operations may retry on transient errors. Writes never retry on a
-    timeout because the downstream result is unknown. Cancellation is
-    cooperative: an in-flight external call needs independent reconciliation.
+    timeout because the downstream result is unknown. Only a caller-supplied,
+    authoritative downstream state query may confirm an already-applied write;
+    unknown or negative results NEVER authorize an automatic retry. Cancellation
+    is cooperative: an in-flight external call needs independent reconciliation.
     """
     history: list[dict[str, Any]] = []
     trace: list[str] = []
@@ -133,6 +136,19 @@ def run_agent_loop(
                 break
             except (TimeoutError, ConnectionError):
                 if spec.side_effect:
+                    # The model has no authority to certify a write result.
+                    # An external business system must expose a trusted lookup;
+                    # a premature "not found" is NOT permission to retry.
+                    try:
+                        applied = reconcile_write(spec, dict(choice.arguments)) is True
+                    except Exception:
+                        applied = False
+                    if applied:
+                        trace.append("write_applied_verified:" + spec.name)
+                        history.append(
+                            {"tool": spec.name, "result": {"execution_status": "verified_applied"}}
+                        )
+                        break
                     trace.append("write_outcome_unknown:" + spec.name)
                     return finish("write_uncertain", "reconcile_external_state")
                 if attempt >= attempts:
