@@ -2060,6 +2060,448 @@
           }
         }
       }
+    },
+    "/api/handoffs": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "List Queue",
+        "operationId": "list_queue_api_handoffs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Create Handoff",
+        "operationId": "create_handoff_api_handoffs_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/handoffs/session/{session_id}": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Get Session Handoff",
+        "operationId": "get_session_handoff_api_handoffs_session_session_id_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/handoffs/{ticket_id}": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Get Handoff",
+        "operationId": "get_handoff_api_handoffs_ticket_id_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/handoffs/{ticket_id}/claim": {
+      "post": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Claim Handoff",
+        "operationId": "claim_handoff_api_handoffs_ticket_id_claim_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/handoffs/{ticket_id}/messages": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "List Messages",
+        "operationId": "list_messages_api_handoffs_ticket_id_messages_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Send Message",
+        "operationId": "send_message_api_handoffs_ticket_id_messages_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/handoffs/{ticket_id}/events": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "List Events",
+        "operationId": "list_events_api_handoffs_ticket_id_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ]
+      }
+    },
+    "/api/handoffs/{ticket_id}/close": {
+      "post": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Close Handoff",
+        "operationId": "close_handoff_api_handoffs_ticket_id_close_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseHandoffRequest"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
+    "/api/handoffs/{ticket_id}/reopen": {
+      "post": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Reopen Handoff",
+        "operationId": "reopen_handoff_api_handoffs_ticket_id_reopen_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2344,14 +2786,14 @@
           },
           "rating": {
             "type": "integer",
-            "maximum": 1.0,
-            "minimum": -1.0,
+            "maximum": 1,
+            "minimum": -1,
             "title": "Rating",
             "default": 1
           },
           "message_index": {
             "type": "integer",
-            "minimum": 0.0,
+            "minimum": 0,
             "title": "Message Index",
             "default": 0
           },
@@ -2563,6 +3005,78 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "CreateHandoffRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Session Id"
+          },
+          "session_token": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Session Token"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4096,
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "session_token",
+          "reason"
+        ],
+        "title": "CreateHandoffRequest"
+      },
+      "SendMessageRequest": {
+        "properties": {
+          "body": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Body"
+          },
+          "client_message_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Message Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "body",
+          "client_message_id"
+        ],
+        "title": "SendMessageRequest"
+      },
+      "CloseHandoffRequest": {
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Resolution"
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolution"
+        ],
+        "title": "CloseHandoffRequest"
       }
     }
   }
