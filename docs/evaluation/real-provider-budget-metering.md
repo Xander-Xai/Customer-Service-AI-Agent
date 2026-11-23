@@ -17,6 +17,7 @@ The runner now:
 3. Uses provider-reported monetary cost when present, otherwise derives an **estimate** only if a declared Token rate and valid input/output usage exist. An estimate is not an invoice.
 4. If a requested budget cannot be reconciled after a case, reports `provider_token_usage_unavailable`, `provider_cost_usage_unavailable`, or `provider_usage_unknown_after_error` and stops scheduling further cases.
 5. Keeps each case in the evidence report, including errors, instead of switching to scripted completion.
+6. Reports aggregate Token/cost as unknown when any attempted case lacks the corresponding valid metering; an observed partial sum is not a total. `agent_cases_attempted` is distinct from provider network-call count, which is also unknown without graph-wide request instrumentation.
 
 This is **not a pre-call hard spending limit**: an already-started provider request may exceed the operator's quota. A strict bound requires provider-side per-request generation caps, actual usage propagation and explicit admission control at the complete graph request boundary. The previous estimate of **one provider request per case** was incorrect because a compiled Agent graph can make multiple model calls. The plan now marks provider-request count, worst-case Token usage and maximum cost as unavailable rather than inventing upper bounds.
 
