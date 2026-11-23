@@ -214,3 +214,40 @@ def test_repeated_escalation_reopens_same_ticket(service):
     assert again["ticket_id"] == first["ticket_id"]
     assert again["status"] == OPEN
     assert again["assigned_to"] is None
+
+
+def test_authorized_ticket_reads_use_single_sql_visibility_snapshot(service, monkeypatch):
+    tid = _ticket(service)["ticket_id"]
+
+    def deny_out_of_band_get(*args, **kwargs):
+        raise AssertionError("Ticket read must not invoke a separate get() authorization transaction")
+
+    monkeypatch.setattr(service, "get", deny_out_of_band_get)
+    assert len(service.messages(tid, actor_id="customer-1", role="customer")) == 1
+    assert [event["event"] for event in service.events(
+        tid, actor_id="customer-1", role="customer"
+    )] == ["created"]
+    with pytest.raises(HandoffNotFound):
+        service.events(tid, actor_id="customer-2", role="customer")
+    with pytest.raises(HandoffNotFound):
+        service.messages(tid, actor_id="customer-2", role="customer")
+
+
+def test_agent_loses_message_and_event_visibility_after_other_agent_claims(service):
+    tid = _ticket(service)["ticket_id"]
+    assert service.messages(tid, actor_id="agent-2", role="agent")
+    service.claim(tid, actor_id="agent-1", role="agent")
+    with pytest.raises(HandoffNotFound):
+        service.messages(tid, actor_id="agent-2", role="agent")
+    with pytest.raises(HandoffNotFound):
+        service.events(tid, actor_id="agent-2", role="agent")
+    assert service.messages(tid, actor_id="agent-1", role="agent")
+
+
+def test_empty_visible_ticket_has_empty_messages_not_false_404(service):
+    ticket = service.create_or_get(
+        session_id="no-initial", customer_id="customer-1", reason="回访",
+    )
+    assert service.messages(
+        ticket["ticket_id"], actor_id="customer-1", role="customer"
+    ) == []
