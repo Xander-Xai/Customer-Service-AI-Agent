@@ -174,3 +174,30 @@ def test_10_reconciliation_unknown_stays_uncertain_without_retry():
     assert result.status == "write_uncertain"
     assert result.reason == "reconcile_external_state"
     assert executed == ["one"]
+
+
+def test_11_untyped_model_response_is_fail_closed():
+    result = run_agent_loop(
+        "malformed provider output", lambda _task, _history: {"kind": "finish"}, {}
+    )
+    assert (result.status, result.reason) == ("blocked", "invalid_model_response")
+
+
+def test_12_malformed_tool_payload_does_not_crash_and_is_not_executed():
+    executed = []
+    result = run_agent_loop(
+        "malformed tool response",
+        scripted(Decision("tool", name="read", arguments=["not-a-json-object"])),
+        {"read": Tool("read", {}, lambda _args: executed.append("called"))},
+    )
+    assert (result.status, result.reason) == ("blocked", "invalid_tool_decision")
+    assert executed == []
+
+
+def test_13_high_risk_tool_cannot_hide_behind_read_only_risk_flag():
+    try:
+        Tool("refund", {}, lambda _args: "irrelevant", high_risk=True, side_effect=False)
+    except ValueError as exc:
+        assert "side_effect" in str(exc)
+    else:
+        raise AssertionError("Conflicting tool risk metadata must be rejected")
