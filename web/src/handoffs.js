@@ -98,6 +98,9 @@ function renderSelection(ticket) {
     ? `状态：${ticket.status} · 坐席：${ticket.assigned_to || '尚未认领'}`
     : '';
   $('ticketReason').textContent = ticket?.reason || '';
+  $('ticketResolution').textContent = ticket?.resolution
+    ? `处理结果：${ticket.resolution}`
+    : '';
   const own = String(ticket?.assigned_to || '') === String(state.user?.user_id || '');
   const open = ticket?.status === 'OPEN';
   const claimed = ticket?.status === 'CLAIMED';
