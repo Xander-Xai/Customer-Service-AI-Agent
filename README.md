@@ -23,6 +23,8 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
+**V1.0 项目责任与验收**：[Agent Runtime 责任清单](docs/portfolio/AGENT_V1_OWNERSHIP_AND_ACCEPTANCE.md)。本仓与化妆品 RAG 属于同一历史任职阶段的不同项目，主责客服 Agent 编排、运行时、审批与可靠性；Gaobao 属于另一任职阶段。此清单所列新增代码在 PR 合并前只属于对应分支，后续开源增量不自动等于任职期间的生产成果。
+
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
