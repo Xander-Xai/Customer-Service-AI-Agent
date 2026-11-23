@@ -61,8 +61,7 @@ def _approved_write_failed(result: Any) -> bool:
         return False
     items = result.get("approval_results") or []
     return isinstance(items, list) and any(
-        isinstance(item, dict) and str(item.get("status", "")).lower() == "error"
-        for item in items
+        isinstance(item, dict) and str(item.get("status", "")).lower() == "error" for item in items
     )
 
 
