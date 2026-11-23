@@ -95,3 +95,22 @@ def test_unbudgeted_replay_can_record_unknown_usage_without_faking_cost():
     assert calls == ["first", "second"]
     assert report["budget_exceeded"] is None
     assert all(row["cost_usd"] is None for row in report["results"])
+
+
+def test_budgeted_provider_error_does_not_trigger_another_billable_case():
+    calls = []
+
+    async def runner(case):
+        calls.append(case)
+        raise RuntimeError("provider connection interrupted")
+
+    report = asyncio.run(
+        run_real_provider_lane(
+            plan=_plan(max_total_tokens=500),
+            cases=["first", "second"],
+            case_runner=runner,
+        )
+    )
+    assert calls == ["first"]
+    assert report["budget_exceeded"] == "provider_usage_unknown_after_error"
+    assert report["results"][0]["status"] == "ERROR"
