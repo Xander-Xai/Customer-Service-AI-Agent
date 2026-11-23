@@ -168,6 +168,21 @@ class ToolReportedFailure(RuntimeError):
     """A side-effect handler explicitly reported failure; never commit its ledger as success."""
 
 
+class SideEffectExecutionError(RuntimeError):
+    """Durable write failed or was refused; the AgentRun must not succeed.
+
+    Preserve the timeout marker used by runtime error classification, but avoid
+    leaking potentially sensitive tool arguments or downstream error messages.
+    """
+
+    is_side_effect_execution_error = True
+
+    def __init__(self, tool_name: str, cause: Exception | None = None):
+        self.tool_name = tool_name
+        self.is_tool_timeout = bool(getattr(cause, "is_tool_timeout", False))
+        super().__init__(f"Side-effect tool {tool_name!r} did not complete successfully")
+
+
 @dataclass
 class ToolDefinition:
     """工具定义（JSON Schema 格式，兼容 OpenAI Function Calling）"""

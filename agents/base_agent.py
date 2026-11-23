@@ -49,7 +49,7 @@ from core.tool_result_cache import cacheable_result
 from core.tool_result_optimizer import ToolResultOptimizer, compact_old_tool_messages
 from llm.client import LLMServiceError
 from rag.retrieval_contract import RetrievalRequest
-from tools.tool_registry import ToolExecutionReceipt, ToolRegistry
+from tools.tool_registry import SideEffectExecutionError, ToolExecutionReceipt, ToolRegistry
 
 # ===== 重试参数 =====
 RETRY_MAX_ATTEMPTS = 3  # 最大重试次数
@@ -171,6 +171,19 @@ def _build_logical_call(*, agent: str, state: dict[str, Any], tool_name: str, or
     from tools.tool_registry import LogicalCall
 
     return LogicalCall(node_id=_logical_node_id(agent, state), agent=agent, ordinal=int(ordinal))
+
+
+def _is_durable_side_effect(registry: Any, tool_name: str) -> bool:
+    """Only durable runs can carry write failures to retry / DLQ machinery."""
+    try:
+        from runtime.context import get_current_run_id
+
+        if not get_current_run_id():
+            return False
+        return bool(registry.is_side_effect(tool_name))
+    except Exception:
+        # Do not mistake an unclassified tool as a proven successful write.
+        return False
 
 
 def _record_tool_execution(state: dict[str, Any], tool_name: str, *, ok: bool) -> None:
@@ -1036,8 +1049,12 @@ class BaseAgent(ABC):
                             )
                     except Exception as e:
                         self.logger.error(f"工具执行失败 [{p['name']}]: {e}", exc_info=True)
-                        result = "工具暂时不可用，请稍后重试"
                         _record_tool_execution(state, p["name"], ok=False)
+                        if _is_durable_side_effect(self.tool_registry, p["name"]):
+                            # Otherwise the run would be marked SUCCEEDED and
+                            # its retry/DLQ machinery would never see a failed write.
+                            raise SideEffectExecutionError(p["name"], e) from e
+                        result = "工具暂时不可用，请稍后重试"
                     else:
                         # Only a typed successful execution receipt is evidence.
                         # A cache hit never executed a tool in this turn; a legacy
@@ -1049,6 +1066,14 @@ class BaseAgent(ABC):
                             _record_tool_execution(
                                 state, p["name"], ok=bool(receipt and receipt.ok)
                             )
+                            if (
+                                receipt is not None
+                                and not receipt.ok
+                                and _is_durable_side_effect(self.tool_registry, p["name"])
+                            ):
+                                # Error strings and explicit refusals from a
+                                # durable write are failures, not successful runs.
+                                raise SideEffectExecutionError(p["name"])
                         if (
                             isinstance(self.tool_registry, ToolRegistry)
                             and not (self.tool_result_optimizer.enabled or cache_enabled)

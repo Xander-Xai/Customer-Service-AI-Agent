@@ -27,6 +27,7 @@ from core.logger import get_logger, set_trace_id
 from core.state import AgentState
 from core.streaming_context import get_stream_callback
 from router.query_router import RoutingResult
+from tools.tool_registry import SideEffectExecutionError
 
 logger = get_logger("graph")
 
@@ -284,6 +285,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
             logger.error(f"[{mode_name}] error: {e}", exc_info=True)
+            if isinstance(e, SideEffectExecutionError):
+                # Never convert a failed durable write into a successful
+                # customer-response run. Let AgentRun classify/retry/DLQ it.
+                raise
             result = {
                 "response": "处理出错，请重试",
                 "mode": mode_name,
