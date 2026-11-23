@@ -142,15 +142,26 @@ def _tool_payload_ok(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, dict):
-        if value.get("ok") is False or value.get("success") is False or value.get("error"):
+        if (
+            value.get("ok") is False
+            or value.get("success") is False
+            or value.get("error")
+        ):
             return False
         if str(value.get("status", "")).lower() in {
-            "error", "failed", "failure", "rejected", "denied", "timeout"
+            "error",
+            "failed",
+            "failure",
+            "rejected",
+            "denied",
+            "timeout",
         }:
             return False
     if isinstance(value, str):
         message = value.strip()
-        if not message or message.startswith(("错误：", "错误:", "Error:", "error:", "工具暂时不可用")):
+        if not message or message.startswith(
+            ("错误：", "错误:", "Error:", "error:", "工具暂时不可用")
+        ):
             return False
         if message.startswith("工具 '") and ("执行失败" in message or "执行超时" in message):
             return False
@@ -351,7 +362,11 @@ class ToolRegistry:
         """执行工具；仅显式 return_receipt 时提供可判定的执行结果。"""
 
         def wrap(value: Any) -> Any:
-            return ToolExecutionReceipt(value=value, ok=_tool_payload_ok(value)) if return_receipt else value
+            return (
+                ToolExecutionReceipt(value=value, ok=_tool_payload_ok(value))
+                if return_receipt
+                else value
+            )
 
         tool = self._tools.get(name)
         if not tool:
