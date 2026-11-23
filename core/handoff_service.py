@@ -307,7 +307,7 @@ class HandoffService:
                 if existing is None:
                     raise
                 if existing.body != body:
-                    raise HandoffConflict("Idempotency key already used with different content")
+                    raise HandoffConflict("Idempotency key already used with different content") from None
                 return _message(existing)
             db.refresh(message)
             return _message(message)
