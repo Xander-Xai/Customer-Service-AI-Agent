@@ -1043,9 +1043,7 @@ class BaseAgent(ABC):
                         # A cache hit never executed a tool in this turn; a legacy
                         # registry without receipts cannot prove that it succeeded.
                         if not cache_hit:
-                            receipt = (
-                                result if isinstance(result, ToolExecutionReceipt) else None
-                            )
+                            receipt = result if isinstance(result, ToolExecutionReceipt) else None
                             if receipt is not None:
                                 result = receipt.value
                             _record_tool_execution(
