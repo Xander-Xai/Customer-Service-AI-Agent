@@ -248,3 +248,22 @@ class TestExecuteApprovedActions:
             results = asyncio.run(execute_approved_actions(container, _pending(tool="no_such")))
         assert results[0]["status"] == "error"
         assert results[0]["error"] == "ToolNotDeclaredSideEffect"
+
+    def test_approval_without_durable_run_is_not_reported_executed(self, container):
+        """The registry refuses an ungoverned write via a string, not an exception."""
+        results = asyncio.run(execute_approved_actions(container, _pending()))
+        assert results[0]["status"] == "error"
+        assert staging_call_count("O-1") == 0
+
+    def test_negative_execution_receipt_is_error(self, container, monkeypatch):
+        """A negative receipt after an approval must never claim a successful write."""
+        from tools.tool_registry import ToolExecutionReceipt
+
+        async def refusal(*args, **kwargs):
+            return ToolExecutionReceipt("错误：操作未成功", ok=False)
+
+        monkeypatch.setattr(container.tool_registry, "execute_raw", refusal)
+        with _run_context():
+            results = asyncio.run(execute_approved_actions(container, _pending()))
+        assert results[0]["status"] == "error"
+        assert staging_call_count("O-1") == 0
