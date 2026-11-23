@@ -126,18 +126,27 @@ def test_idempotent_message_delivery_and_staff_reply(service):
     tid = _ticket(service)["ticket_id"]
     service.claim(tid, actor_id="agent-1", role="agent")
     first = service.post_message(
-        tid, actor_id="agent-1", role="agent", body="您好，正在跟进。",
+        tid,
+        actor_id="agent-1",
+        role="agent",
+        body="您好，正在跟进。",
         client_message_id="delivery-1",
     )
     second = service.post_message(
-        tid, actor_id="agent-1", role="agent", body="您好，正在跟进。",
+        tid,
+        actor_id="agent-1",
+        role="agent",
+        body="您好，正在跟进。",
         client_message_id="delivery-1",
     )
     assert first["message_id"] == second["message_id"]
     assert len(service.messages(tid, actor_id="customer-1", role="customer")) == 2
     with pytest.raises(HandoffConflict):
         service.post_message(
-            tid, actor_id="agent-1", role="agent", body="不同的内容",
+            tid,
+            actor_id="agent-1",
+            role="agent",
+            body="不同的内容",
             client_message_id="delivery-1",
         )
 
@@ -147,7 +156,10 @@ def test_unassigned_staff_cannot_post_to_claimed_ticket(service):
     service.claim(tid, actor_id="agent-1", role="agent")
     with pytest.raises(HandoffNotFound):
         service.post_message(
-            tid, actor_id="agent-2", role="agent", body="违规发言",
+            tid,
+            actor_id="agent-2",
+            role="agent",
+            body="违规发言",
             client_message_id="bad-1",
         )
 
@@ -157,47 +169,47 @@ def test_only_assigned_staff_can_close_and_customer_can_reopen(service):
     service.claim(tid, actor_id="agent-1", role="agent")
     with pytest.raises(HandoffForbidden):
         service.close(tid, actor_id="agent-2", role="agent", resolution="done")
-    closed = service.close(
-        tid, actor_id="agent-1", role="agent", resolution="已核查并答复"
-    )
+    closed = service.close(tid, actor_id="agent-1", role="agent", resolution="已核查并答复")
     assert closed["status"] == CLOSED
-    assert service.close(
-        tid, actor_id="agent-1", role="agent", resolution="已核查并答复"
-    )["status"] == CLOSED
+    assert (
+        service.close(tid, actor_id="agent-1", role="agent", resolution="已核查并答复")["status"]
+        == CLOSED
+    )
     with pytest.raises(HandoffConflict):
         service.post_message(
-            tid, actor_id="customer-1", role="customer", body="新问题",
+            tid,
+            actor_id="customer-1",
+            role="customer",
+            body="新问题",
             client_message_id="late-1",
         )
     reopened = service.reopen(tid, actor_id="customer-1", role="customer")
     assert reopened["status"] == OPEN
     assert reopened["assigned_to"] is None
-    assert [e["event"] for e in service.events(
-        tid, actor_id="customer-1", role="customer"
-    )] == ["created", "claimed", "closed", "reopened"]
+    assert [e["event"] for e in service.events(tid, actor_id="customer-1", role="customer")] == [
+        "created",
+        "claimed",
+        "closed",
+        "reopened",
+    ]
 
 
 def test_active_for_session_suspends_bot_only_when_open(service):
     tid = _ticket(service)["ticket_id"]
-    assert service.active_for_session(
-        session_id="session-a", customer_id="customer-1"
-    )["ticket_id"] == tid
-    assert service.active_for_session(
-        session_id="session-a", customer_id="customer-2"
-    ) is None
+    assert (
+        service.active_for_session(session_id="session-a", customer_id="customer-1")["ticket_id"]
+        == tid
+    )
+    assert service.active_for_session(session_id="session-a", customer_id="customer-2") is None
     service.claim(tid, actor_id="agent-1", role="agent")
     service.close(tid, actor_id="agent-1", role="agent", resolution="完成")
-    assert service.active_for_session(
-        session_id="session-a", customer_id="customer-1"
-    ) is None
+    assert service.active_for_session(session_id="session-a", customer_id="customer-1") is None
 
 
 def test_repeated_escalation_reopens_same_ticket(service):
     first = _ticket(service)
     service.claim(first["ticket_id"], actor_id="agent-1", role="agent")
-    service.close(
-        first["ticket_id"], actor_id="agent-1", role="agent", resolution="处理完毕"
-    )
+    service.close(first["ticket_id"], actor_id="agent-1", role="agent", resolution="处理完毕")
     again = _ticket(service)
     assert again["ticket_id"] == first["ticket_id"]
     assert again["status"] == OPEN
