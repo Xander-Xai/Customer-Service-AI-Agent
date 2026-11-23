@@ -141,3 +141,27 @@ async def test_real_graph_does_not_verify_failed_tool():
         assert observed["outcome"].outcome_verified is False
     finally:
         await container.close()
+
+
+async def test_new_turn_does_not_inherit_prior_tool_execution_evidence():
+    """Checkpointed thread state must not turn a second text-only answer into evidence."""
+    from core.container import ServiceContainer
+    from tests.unit.test_hitl_real_graph_gate import _drain_graph, _prepare
+
+    container = ServiceContainer()
+    await container.initialize()
+    try:
+        _prepare(container, "staging_readonly_lookup", {"order_id": "TURN-1"})
+        thread_id = f"evidence-two-turns-{uuid4().hex}"
+        first = await _drain_graph(container, thread_id=thread_id)
+        assert any(item.get("ok") for item in first.get("tool_executions") or [])
+
+        # The scripted LLM emits tools only on its first invocation. The next
+        # request reuses the same checkpointed thread, but executes no tool.
+        second = await _drain_graph(container, thread_id=thread_id)
+        assert second.get("tool_executions") == []
+        assert second.get("pending_actions") == []
+        assert second.get("approval_results") == []
+        assert second["outcome"].outcome_verified is False
+    finally:
+        await container.close()
