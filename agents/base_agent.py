@@ -1018,8 +1018,9 @@ class BaseAgent(ABC):
                                 **_exec_kwargs(stream_callback, tool_call_id, _logical_call),
                                 return_receipt=True,
                             )
-                        elif not cache_hit and (
-                            (self.tool_result_optimizer.enabled or cache_enabled)
+                        elif (
+                            not cache_hit
+                            and (self.tool_result_optimizer.enabled or cache_enabled)
                             and hasattr(self.tool_registry, "execute_raw")
                         ):
                             result = await self.tool_registry.execute_raw(
@@ -1042,15 +1043,19 @@ class BaseAgent(ABC):
                         # A cache hit never executed a tool in this turn; a legacy
                         # registry without receipts cannot prove that it succeeded.
                         if not cache_hit:
-                            receipt = result if isinstance(result, ToolExecutionReceipt) else None
+                            receipt = (
+                                result if isinstance(result, ToolExecutionReceipt) else None
+                            )
                             if receipt is not None:
                                 result = receipt.value
                             _record_tool_execution(
                                 state, p["name"], ok=bool(receipt and receipt.ok)
                             )
-                        if isinstance(self.tool_registry, ToolRegistry) and not (
-                            self.tool_result_optimizer.enabled or cache_enabled
-                        ) and result is not None:
+                        if (
+                            isinstance(self.tool_registry, ToolRegistry)
+                            and not (self.tool_result_optimizer.enabled or cache_enabled)
+                            and result is not None
+                        ):
                             # Preserve legacy execute() string semantics with the
                             # optimizer disabled; normal requests keep raw values.
                             result = str(result)
