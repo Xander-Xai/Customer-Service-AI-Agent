@@ -347,9 +347,7 @@ class HandoffMessage(Base):
     __tablename__ = "handoff_messages"
 
     id = Column(String(36), primary_key=True)
-    ticket_id = Column(
-        String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True
-    )
+    ticket_id = Column(String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True)
     author_id = Column(String(64), nullable=False)
     sender_role = Column(String(16), nullable=False)
     client_message_id = Column(String(64), nullable=False)
@@ -370,9 +368,7 @@ class HandoffEvent(Base):
     __tablename__ = "handoff_events"
 
     id = Column(String(36), primary_key=True)
-    ticket_id = Column(
-        String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True
-    )
+    ticket_id = Column(String(36), ForeignKey("handoff_tickets.id"), nullable=False, index=True)
     actor_id = Column(String(64), nullable=False)
     event = Column(String(24), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
