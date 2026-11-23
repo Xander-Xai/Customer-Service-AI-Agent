@@ -326,14 +326,11 @@ async def run_real_provider_lane(
         # lane after this case rather than sending more unmetered requests.
         # This is not a pre-call hard cap: one already-started request may exceed
         # a budget. The real graph currently does not expose per-call usage.
-        if plan.max_total_tokens is not None and (
-            type(in_tok) is not int or type(out_tok) is not int
-            or in_tok < 0 or out_tok < 0
-        ):
+        usage_is_metered = all(type(value) is int and value >= 0 for value in (in_tok, out_tok))
+        cost_is_metered = type(cost) in (int, float) and cost >= 0
+        if plan.max_total_tokens is not None and not usage_is_metered:
             budget_reason = "provider_token_usage_unavailable"
-        if plan.max_cost_usd is not None and (
-            type(cost) not in (int, float) or cost < 0
-        ):
+        if plan.max_cost_usd is not None and not cost_is_metered:
             budget_reason = "provider_cost_usage_unavailable"
 
         results.append(
