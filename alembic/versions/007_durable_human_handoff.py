@@ -39,14 +39,14 @@ def upgrade() -> None:
     op.create_index("ix_handoff_tickets_status", "handoff_tickets", ["status"])
     op.create_index("ix_handoff_tickets_assigned_to", "handoff_tickets", ["assigned_to"])
     op.create_index("ix_handoff_queue", "handoff_tickets", ["status", "created_at"])
-    op.create_index(
-        "ix_handoff_customer_status", "handoff_tickets", ["customer_id", "status"]
-    )
+    op.create_index("ix_handoff_customer_status", "handoff_tickets", ["customer_id", "status"])
 
     op.create_table(
         "handoff_messages",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("ticket_id", sa.String(length=36), sa.ForeignKey("handoff_tickets.id"), nullable=False),
+        sa.Column(
+            "ticket_id", sa.String(length=36), sa.ForeignKey("handoff_tickets.id"), nullable=False
+        ),
         sa.Column("author_id", sa.String(length=64), nullable=False),
         sa.Column("sender_role", sa.String(length=16), nullable=False),
         sa.Column("client_message_id", sa.String(length=64), nullable=False),
@@ -65,7 +65,9 @@ def upgrade() -> None:
     op.create_table(
         "handoff_events",
         sa.Column("id", sa.String(length=36), nullable=False),
-        sa.Column("ticket_id", sa.String(length=36), sa.ForeignKey("handoff_tickets.id"), nullable=False),
+        sa.Column(
+            "ticket_id", sa.String(length=36), sa.ForeignKey("handoff_tickets.id"), nullable=False
+        ),
         sa.Column("actor_id", sa.String(length=64), nullable=False),
         sa.Column("event", sa.String(length=24), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
