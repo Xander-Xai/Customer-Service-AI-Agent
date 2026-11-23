@@ -4,7 +4,7 @@ const { fetchWithAuth } = vi.hoisted(() => ({ fetchWithAuth: vi.fn() }));
 vi.mock('../auth/index.js', () => ({ fetchWithAuth }));
 vi.mock('../api/rest.js', () => ({ getUserMe: vi.fn() }));
 
-import { handoffRequest } from '../handoffs.js';
+import { handoffRequest, renderMessages } from '../handoffs.js';
 
 describe('human handoff API transport', () => {
   beforeEach(() => {
@@ -59,5 +59,22 @@ describe('human handoff API transport', () => {
       },
     });
     await expect(handoffRequest('GET', '/api/handoffs')).rejects.toThrow('HTTP 503');
+  });
+});
+
+describe('message rendering safety', () => {
+  it('renders customer-supplied markup as text, not as executable HTML', () => {
+    document.body.innerHTML = '<ul id="messageList"></ul>';
+    renderMessages([
+      {
+        sender_role: 'customer',
+        body: '<img src=x onerror=alert(1)>',
+        created_at: '2026-11-24',
+      },
+    ]);
+    const list = document.querySelector('#messageList');
+    expect(list?.querySelector('img')).toBeNull();
+    expect(list?.textContent).toContain('<img src=x onerror=alert(1)>');
+    document.body.replaceChildren();
   });
 });
