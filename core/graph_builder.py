@@ -209,6 +209,8 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         # previous checkpointed turn. An interrupt resume restarts at the gate,
         # not at this entry node, so pending approvals remain durable on resume.
         state["tool_executions"] = []
+        state["erp_read_status"] = ""
+        state["degraded_reason"] = ""
         state["pending_actions"] = []
         state["approval_results"] = []
         state["_quality_gate_checked"] = False
@@ -309,6 +311,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         # real tool execution receipts to the graph before outcome evaluation.
         # Replace (do not append): checkpoint state may contain a prior turn.
         state["tool_executions"] = list(result.get("tool_executions") or [])
+        if result.get("erp_read_status"):
+            state["erp_read_status"] = str(result["erp_read_status"])
+        if result.get("degraded_reason"):
+            state["degraded_reason"] = str(result["degraded_reason"])
         # human-in-the-loop：Agent 工具循环把 HIGH 风险副作用**摘出**到
         # pending_actions（此处并未执行）。必须透传给下游 human_approval_gate
         # 节点，否则被摘出的动作会被静默丢弃 —— 那等于「高风险写操作既没执行
@@ -404,6 +410,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             state["collaboration_mode"] = result.get("mode", mode_name)
             state["agents_used"] = list(result.get("agents_used") or [])
             state["tool_executions"] = list(result.get("tool_executions") or [])
+            if result.get("erp_read_status"):
+                state["erp_read_status"] = str(result["erp_read_status"])
+            if result.get("degraded_reason"):
+                state["degraded_reason"] = str(result["degraded_reason"])
             state["pending_actions"] = list(result.get("pending_actions") or [])
         return state
 
