@@ -253,3 +253,38 @@ def test_empty_visible_ticket_has_empty_messages_not_false_404(service):
         reason="回访",
     )
     assert service.messages(ticket["ticket_id"], actor_id="customer-1", role="customer") == []
+
+def test_handoff_task_episode_only_exposes_matching_claimed_session(service):
+    from db.models import AgentRun
+
+    tid = _ticket(service)["ticket_id"]
+    with service._session_factory() as db:
+        for run_id, owner, thread in (
+            ("same-run", "customer-1", "session-a"),
+            ("foreign-run", "customer-2", "session-a"),
+            ("wrong-thread", "customer-1", "other-session"),
+        ):
+            db.add(
+                AgentRun(
+                    id=run_id,
+                    thread_id=thread,
+                    session_id="session-a",
+                    user_id=owner,
+                    status="QUEUED",
+                    query="PRIVATE_QUERY",
+                )
+            )
+        db.commit()
+    with pytest.raises(HandoffNotFound):
+        service.latest_task_episode(tid, actor_id="agent-1", role="agent")
+    with pytest.raises(HandoffForbidden):
+        service.latest_task_episode(tid, actor_id="customer-1", role="customer")
+    service.claim(tid, actor_id="agent-1", role="agent")
+    with pytest.raises(HandoffNotFound):
+        service.latest_task_episode(tid, actor_id="agent-2", role="agent")
+    episode = service.latest_task_episode(tid, actor_id="agent-1", role="agent")
+    assert episode["run_id"] == "same-run"
+    assert episode["execution_authorized"] is False
+    assert "PRIVATE_QUERY" not in str(episode)
+    assert "query" not in episode
+    assert "foreign-run" not in str(episode)
