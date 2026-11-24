@@ -103,8 +103,9 @@ class TestRunLane:
             "attempted": 2,
             "ok": 1,
             "error": 1,
-            "tokens_used": 0,
+            "tokens_used": None,
             "cost_used_usd": None,
+            "provider_request_count": None,
         }
         results = {r["case_id"]: r for r in run["results"]}
         assert results["ok"]["status"] == "OK"
@@ -113,7 +114,8 @@ class TestRunLane:
         # The failure is recorded as evidence, not swallowed and not retried
         # against a mock.
         assert results["boom"]["status"] == "ERROR"
-        assert "provider 500" in results["boom"]["error"]
+        assert results["boom"]["error"] == "RuntimeError"
+        assert "provider 500" not in json.dumps(run)
 
     def test_max_queries_caps_external_calls(self):
         plan = _authorized_plan(max_queries=2)
@@ -173,7 +175,17 @@ class TestEstimate:
         plan = _authorized_plan(max_queries=10, max_tokens_per_request=100)
         est = estimate_request_volume(plan, dataset_size=50)
         assert est["effective_queries"] == 10
-        assert est["worst_case_tokens"] == 1000
+        assert est["provider_request_upper_bound"] is None
+        assert est["worst_case_tokens"] is None
+        assert est["per_request_token_cap_enforced"] is False
+        assert est["per_request_token_cap"] == 100
+
+    def test_configured_rate_does_not_create_a_fake_cost_upper_bound(self):
+        plan = _authorized_plan(cost_per_1k_tokens=0.01)
+        estimate = estimate_request_volume(plan, dataset_size=4)
+        assert estimate["worst_case_tokens"] is None
+        assert estimate["worst_case_cost_usd"] is None
+        assert estimate["per_request_token_cap_enforced"] is False
 
     def test_cost_estimate_none_without_price(self):
         plan = _authorized_plan(cost_per_1k_tokens=None)

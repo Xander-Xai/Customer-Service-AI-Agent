@@ -45,7 +45,7 @@ class ProductAgent(BaseAgent):
         customer_query = state["customer_query"]
 
         # ERP 产品数据查询
-        erp_data = await self._safe_erp_query(lambda: self._query_erp(customer_query))
+        erp_data = await self._safe_erp_query(lambda: self._query_erp(customer_query), state=state)
         if erp_data:
             await self._write_blackboard("erp.product_data", erp_data, ttl=300)
 
