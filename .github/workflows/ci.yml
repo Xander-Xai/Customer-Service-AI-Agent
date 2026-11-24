@@ -7,6 +7,26 @@ on:
     branches: [main]
 
 jobs:
+  # Human support UI: real Vite build + targeted browser-layer contracts.
+  # A Python-only green CI would not prove the new staff workbench bundles.
+  handoff-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install locked frontend dependencies
+        run: npm ci
+      - name: Check handoff frontend source
+        run: npx --no-install biome check web/src/handoffs.js web/src/__tests__/handoffs.test.js web/styles/handoffs.css
+      - name: Exercise handoff API transport tests
+        run: npm run test -- web/src/__tests__/handoffs.test.js
+      - name: Bundle all HTML entrypoints
+        run: npm run build
+
   # ===== Canonical Ruff gate (blocking) =====
   #
   # The repository declares `ruff==0.4.0` as the canonical lint/format

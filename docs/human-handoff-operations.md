@@ -42,6 +42,12 @@ announcing the handoff, then prevents further autonomous answers while the
 ticket is OPEN or CLAIMED. Chat REST/SSE exposes `handoff_ticket_id` and
 `handoff_status` so a client can switch to message polling.
 
+## Browser entrypoints
+
+- `/handoffs.html`: customer creates/reuses a current-session ticket, reads messages and can reopen a closed ticket; agent/supervisor/admin sees the queue and can claim, reply and close according to server-side roles.
+- `/` and `/admin.html` link to the handoff page. Frontend requires the same authenticated JWT as the rest of the application. Message content is rendered using `textContent` rather than HTML insertion.
+- Vite builds the page as a fourth HTML entry. If the server has not deployed fresh built assets, the page may return HTTP 404 even when the backend API has been deployed.
+
 ## Operational validation
 
 1. With the flag disabled, ticket APIs return 503 and normal bot behavior
@@ -62,8 +68,7 @@ ticket is OPEN or CLAIMED. Chat REST/SSE exposes `handoff_ticket_id` and
 
 - Database-backed tickets, staff queue and message polling are code-level
   features; this is **not** a connected human-contact-center provider.
-- There is no Web agent desk UI, push notifier, SLA escalation scheduler or
-  staff shift management in this PR. A staff member must poll the queue.
+- A minimal authenticated browser ticket desk is available at `/handoffs.html` for customers and staff. It polls the existing REST APIs; there is still no push notifier, SLA escalation scheduler or staff shift management. A staff member must keep the queue actively monitored.
 - Automatic handoff requires authenticated identity; anonymous requests do
   not create tickets.
 - End-to-end production/staging tests with real staff and actual ERP are

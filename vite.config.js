@@ -30,6 +30,7 @@ export default defineConfig({
         main: 'index.html',
         login: 'login.html',
         admin: 'admin.html',
+        handoffs: 'handoffs.html',
       },
     },
   },

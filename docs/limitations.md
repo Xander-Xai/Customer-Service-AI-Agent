@@ -98,7 +98,7 @@ Alembic 007、带 JWT 与会话令牌校验的 API、坐席原子认领、消息
 | 权限与目标 | 主管审批工具副作用，审批不等于已执行 | 客户申请、坐席领取和持续消息交接 |
 | 已提交实现 | `core/hitl/*` + `/api/approvals` | `core/handoff_service.py` + `/api/handoffs` |
 | 默认状态 | `HITL_ENABLED=false` | `HUMAN_HANDOFF_ENABLED=false` |
-| 仍缺 | 企业真实 ERP 写操作验收 | 坐席 Web 工作台、推送通知、SLA 升级和真实值守验收 |
+| 仍缺 | 企业真实 ERP 写操作验收 | 基础坐席 Web 工作台已提交；推送通知、SLA 升级和真实值守验收 |
 
 **证据边界**：以上是代码和 CI 可核验的实现，**不是**已有真实坐席在线
 接管的企业级验收。生产启用前须实际完成数据库迁移、坐席运营配置、
@@ -287,7 +287,7 @@ Alembic 007、带 JWT 与会话令牌校验的 API、坐席原子认领、消息
 | **自动蓝绿 / 金丝雀切换** | 有 `make canary`（90/10 流量分割），但自动判据与自动回滚**未经真实流量验证** |
 | **Serverless 部署** | checkpoint + 长时 worker + Redis 锁的生命周期与 FaaS 冲突 |
 | **多 LLM 供应商容灾** | 默认单一 provider；熔断只降级到规则引擎，不切换供应商 |
-| **坐席工作台 / 工单系统** | 工单后端已提交；坐席 Web 工作台及运营闭环待完成，见 §1.3 |
+| **坐席工作台 / 工单系统** | 工单后端及基础 Web 页面已提交；通知、SLA 和运营闭环待完成，见 §1.3 |
 | **真实 ERP 写操作验证** | 见 §2 |
 | **跨会话长期记忆** | 见 §5 |
 | **多语言 / 多租户** | 单语言、单租户设计 |
@@ -320,7 +320,7 @@ Alembic 007、带 JWT 与会话令牌校验的 API、坐席原子认领、消息
 | Alertmanager 通知投递端到端 | 需可送达的 webhook/SMTP 接收端 | 未开始（§1.2） |
 | ~~Agent 行为评测 harness~~ | — | **已完成**（Agent Eval V1）：真实编译图 + 脚本化 LLM（零出网）+ JSONL 行为用例集；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge | 需固定 judge 模型 + 判官一致性验证 | 未开始（`agents/evaluator.py` 仍为启发式） |
-| 坐席工作台 | 后端工单模型已提交；需定义 UI、SLA、通知和值守交付 | 未开始（前端） |
+| 坐席工作台 | 基础页面已提交；需定义 SLA、推送通知和值守交付 | 部分完成（生产 NOT_VERIFIED） |
 | RAG gold 人工标注 | 需标注预算 + Kappa 一致性度量 | 未开始 |
 | 持久化 trace 后端 | 需选定 Jaeger / Tempo 并配 retention | 未开始 |
 | 压测与容量基线 | 需先定义 SLO | 未开始 |

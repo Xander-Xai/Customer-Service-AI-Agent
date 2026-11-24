@@ -86,7 +86,7 @@
 | 审批主动通知（push / 邮件 / IM）、审批 SLA | `NOT_VERIFIED` / `NOT_MEASURED` | 只有轮询队列 |
 | Agent 行为回归评测（Agent Eval V1） | `LEVEL_2_APPLICATION_MEASURED` | 已实现评测框架与**真实图脚本化回放**（零出网、JSONL 用例集、显式分子/分母/证据边界）。测编排/治理/路由行为，**不测**模型能力；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge 语义质量 | 未实现 | 需固定 judge 模型 + 判官一致性验证；`agents/evaluator.py` 仍为启发式 |
-| 「转人工」坐席台 / 工单闭环 | 部分实现，生产 NOT_VERIFIED | 已提交持久化工单、坐席领取、消息和关闭/重开 API（默认关闭）；**无坐席 Web 工作台 / 推送 / SLA 运营验收**，详见 [human-handoff-operations.md](human-handoff-operations.md) |
+| 「转人工」坐席台 / 工单闭环 | 部分实现，生产 NOT_VERIFIED | 已提交持久化工单、坐席领取、消息和关闭/重开 API（默认关闭）；**已有基础坐席 Web 工单页面，但无推送 / SLA 运营验收**，详见 [human-handoff-operations.md](human-handoff-operations.md) |
 | **Alertmanager 通知实际送达** | `NOT_VERIFIED` | 指标可达与告警表达式已在真实 Prometheus 上验证（告警实际 FIRING），但 webhook / SMTP 投递、整套 compose 栈端到端、Grafana 面板真实渲染均未验证 |
 | 工具级重试 / 熔断 / 并行调用 | 未实现 | 仅 LLM 客户端有重试与熔断；工具层此前无超时，现已补 `TOOL_EXECUTION_TIMEOUT_SECONDS`（重试/熔断/并行仍缺） |
 

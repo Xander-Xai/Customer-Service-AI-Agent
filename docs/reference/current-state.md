@@ -22,7 +22,7 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`71`**（`docs/openapi.json` 快照；
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`72`**（`docs/openapi.json` 快照；
   数字随 approval / metrics endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 

@@ -13,14 +13,14 @@
 
 ## 当前接口总览
 
-<!-- openapi-surface: paths=71 operations=75 api_operations=68 -->
+<!-- openapi-surface: paths=72 operations=76 api_operations=68 -->
 
 | 类型 | 数量 | 来源 |
 |------|------|------|
-| HTTP 路径 | **71** | `app.openapi()["paths"]` |
-| HTTP 操作 | **75** | 同一路径可含多 method |
+| HTTP 路径 | **72** | `app.openapi()["paths"]` |
+| HTTP 操作 | **76** | 同一路径可含多 method |
 | `/api/*` 业务操作 | **68** | 认证、对话、多模态、异步 Run、人工审批、人工客服工单、会话、监控、知识库、缓存、告警、Prompt 管理 |
-| 非 `/api/*` 路径 | 6 | `/`、`/login.html`、`/admin.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
+| 非 `/api/*` 路径 | 7 | `/`、`/login.html`、`/admin.html`、`/handoffs.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话（OpenAPI 不含 WebSocket 路由，单独列出） |
 
 ### 按域分组（同样由生成结果导出）
@@ -37,7 +37,7 @@
 | `/api/history` | 2 | `/api/tts` | 2 |
 | `/api/health` | 1 | `/api/kpi` | 1 |
 | `/api/metrics` | 1 | `/api/circuit-breaker` | 1 |
-| `/metrics/prometheus` | 1 | HTML 页面 | 5 |
+| `/metrics/prometheus` | 1 | HTML 页面 | 6 |
 
 ---
 
