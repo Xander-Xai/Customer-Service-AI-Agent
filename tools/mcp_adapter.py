@@ -914,7 +914,18 @@ class MCPToolAdapter:
             )
             raise mapped from e
         else:
-            normalized = self._normalize_result(result)
+            try:
+                normalized = self._normalize_result(result)
+                self._validate_result_budget(normalized)
+            except MCPToolExecutionError as e:
+                status = "tool_error"
+                _inc(
+                    "mcp_tool_error_total",
+                    server=self.config.name,
+                    tool=mcp_name,
+                    reason=e.reason,
+                )
+                raise
             if isinstance(normalized, MCPToolExecutionError):
                 status = "tool_error"
                 _inc(
@@ -967,6 +978,25 @@ class MCPToolAdapter:
         return args
 
     @staticmethod
+    def _validate_result_budget(result: Any) -> None:
+        """Bound normalized data before it enters the tool registry or model context.
+
+        This is an application boundary, not a transport/frame allocation limit.
+        Error strings are subject to the same boundary as successful results.
+        """
+        payload = str(result) if isinstance(result, MCPToolExecutionError) else result
+        try:
+            size = len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+        except (TypeError, ValueError, UnicodeError, RecursionError) as e:
+            raise MCPToolExecutionError(
+                "MCP result is not valid JSON", reason="result_not_serializable"
+            ) from e
+        if size > 32768:
+            raise MCPToolExecutionError(
+                "MCP result exceeds 32768 normalized JSON bytes", reason="result_too_large"
+            )
+
+    @staticmethod
     def _map_error(exc: Exception) -> MCPError:
         """把 SDK / transport 异常映射到本模块的错误分类。"""
         if isinstance(exc, MCPError):
@@ -1005,7 +1035,15 @@ class MCPToolAdapter:
                 "MCP 结果既无 isError 也无 is_error 字段，无法判定调用是否成功",
                 reason="unreadable_result",
             )
-        if bool(is_error):
+        if not isinstance(is_error, bool):
+            return MCPToolExecutionError(
+                "MCP result error flag must be boolean", reason="unreadable_result"
+            )
+        if content is not _MISSING and content is not None and not isinstance(content, list):
+            return MCPToolExecutionError(
+                "MCP result content must be a list", reason="unreadable_result"
+            )
+        if is_error:
             text = MCPToolAdapter._extract_text(content)
             return MCPToolExecutionError(text or "MCP tool 返回错误")
         structured = _read_field(result, "structured_content")

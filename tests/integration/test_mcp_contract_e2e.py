@@ -942,24 +942,24 @@ class TestOversizedContract:
         )
         assert after - before == 1
 
-    async def test_oversized_result_passes_through_unbounded(self, adapter_factory, registry):
-        """**已知缺口**：响应体积当前**不受任何限制** —— 如实刻画，不掩盖。
-
-        ``MCPToolAdapter.invoke`` 只在**发送前**检查 payload 大小，返回值直接经
-        ``_normalize_result`` 变成 Agent 上下文里的一段文本。一个恶意的 / 失控的
-        MCP server 可以返回任意大的结果并把它灌进上下文与 Token 预算。
-
-        本仓的兜底不在适配器里，而在下游：``core/tool_result_*`` 的 Tool Result
-        Context Budget（截断 / 压缩 / offload）。也就是说当前依赖的是**通用**防线，
-        而不是 MCP 边界自身的限制。
-
-        与上一条同理，这条断言锁住当前真实行为：补上响应侧上限后它会红。
-        """
+    async def test_oversized_result_fails_closed(self, adapter_factory, registry):
+        """Bound normalized output after SDK decoding; do not claim a transport cap."""
         adapter = adapter_factory()
         await register_mcp_tools(registry, adapter)
-
-        big = await registry.execute("mcp__fake__bulk_dump", {"size": 200_000})
-        assert len(big) == 200_000  # 全量透传，没有被适配器截断
+        before = _counter(
+            "mcp_tool_error_total", server="fake", tool="bulk_dump", reason="result_too_large"
+        )
+        with pytest.raises(MCPToolExecutionError) as excinfo:
+            await adapter.invoke("bulk_dump", {"size": 200_000})
+        assert excinfo.value.reason == "result_too_large"
+        after = _counter(
+            "mcp_tool_error_total", server="fake", tool="bulk_dump", reason="result_too_large"
+        )
+        assert after - before == 1
+        out = await registry.execute("mcp__fake__bulk_dump", {"size": 200_000})
+        assert out == "工具 'mcp__fake__bulk_dump' 执行失败，请稍后重试"
+        small = await registry.execute("mcp__fake__bulk_dump", {"size": 100})
+        assert len(small) == 100
 
 
 # ===== 5. failing =====
