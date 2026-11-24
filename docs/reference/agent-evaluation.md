@@ -176,7 +176,9 @@ artifact：`artifacts/agent-eval/<ts>/report.json`（schema `agent-eval-evidence
    **从不由命令行传入**）；
 2. `AGENT_EVAL_REAL_PROVIDER_AUTHORIZED=1`；
 3. 显式 `--i-authorize-external-calls`；
-4. 先打印计划（模型 / host / 查询上限 / token 预算 / 成本上限 / 预估请求量与最坏 token）。
+4. 先打印计划（模型 / host / 查询上限；未知的 token/成本上界保留 NOT_MEASURED）。
+
+实际运行前另行检查 `OPENAI_MODEL`、`OPENAI_BASE_URL`、`OPENAI_API_KEY` 与评测计划完全一致；仅允许 mock ERP、关闭 MCP/多模态且 embedding/reranker 为 local 的隔离评测配置。当前图没有完整计量，因此带 `--max-total-tokens` 或 `--max-cost-usd` 的实际运行在启动前拒绝。无预算上限的案例数受限探针须另加 `--allow-unmetered-provider`；不代表有硬成本上限。应使用独立、限额的测试凭证和隔离环境。空选集或不完整执行不得报告成功，输出证据不得覆盖。
 
 缺任一条件 → 写出 `NOT_MEASURED` artifact 且**零网络请求**；失败案例逐条记为 `ERROR`，
 **绝不**静默切回 mock。artifact schema `agent-eval-real-provider/v1`，落
