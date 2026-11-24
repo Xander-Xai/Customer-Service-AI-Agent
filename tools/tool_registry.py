@@ -180,6 +180,7 @@ class SideEffectExecutionError(RuntimeError):
     def __init__(self, tool_name: str, cause: Exception | None = None):
         self.tool_name = tool_name
         self.is_tool_timeout = bool(getattr(cause, "is_tool_timeout", False))
+        self.requires_reconciliation = bool(getattr(cause, "requires_reconciliation", False))
         super().__init__(f"Side-effect tool {tool_name!r} did not complete successfully")
 
 
@@ -612,6 +613,8 @@ class ToolRegistry:
                 thread_id=thread_id,
                 arguments=arguments,
                 min_claim_ttl_seconds=claim_floor,
+                # No downstream idempotency/reconciliation contract is verified here.
+                allow_reclaim=False,
                 # 副作用工具超时时**必须冒泡**：ledger 只有在收到异常时才会把这次
                 # 执行标记为 failed。若在这里把超时转成字符串返回，ledger 会把
                 # 一个「结果未知」的写操作记成 SUCCEEDED 并缓存，重投递时直接返回

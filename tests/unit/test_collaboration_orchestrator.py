@@ -60,6 +60,13 @@ class TestSelectMode:
         assert ctx["coordinator"] == "general_agent"
         assert "complaint_agent" in ctx["sub_tasks"]
 
+    def test_single_domain_complaint_does_not_require_coordinator(self):
+        routing = _routing(query_type="complaint", complexity=90, agent_name="complaint_agent")
+        with patch("collaboration.orchestrator._has_keywords", return_value=False):
+            mode, ctx = self.orch._select_mode(routing, _state("我要投诉"))
+        assert mode == "sequential"
+        assert ctx == {"primary_agent": "complaint_agent"}
+
     def test_complaint_with_product_keywords(self):
         """投诉查询包含产品关键词时，product_agent 加入子任务"""
         routing = _routing(query_type="complaint")
@@ -73,6 +80,12 @@ class TestSelectMode:
         mode, ctx = self.orch._select_mode(routing, _state("退款投诉订单有问题"))
         assert mode == "hierarchical"
         assert "billing_agent" in ctx["sub_tasks"]
+
+    def test_complaint_with_technical_keywords(self):
+        routing = _routing(query_type="complaint", agent_name="complaint_agent")
+        mode, ctx = self.orch.build_context(routing, _state("我要投诉！皮肤过敏了"))
+        assert mode == "hierarchical"
+        assert set(ctx["sub_tasks"]) == {"complaint_agent", "tech_agent"}
 
     def test_high_complexity_multi_domain_returns_react(self):
         """高复杂度(≥60) + 多领域关键词 → ReAct 模式"""
@@ -200,3 +213,17 @@ class TestUpgradeMode:
         with patch("collaboration.orchestrator.MODE_UPGRADE_ENABLED", True):
             mode, ctx = self.orch.upgrade_mode("unknown_mode", {"current_agent": "general_agent"})
         assert mode == "unknown_mode"
+
+
+def test_parallel_preserves_primary_domain_not_found_in_keyword_hints():
+    orch = CollaborationOrchestrator(_mock_bus(), _mock_bb())
+    routing = _routing(
+        query_type="after_sales",
+        complexity=30,
+        agent_name="aftersales_agent",
+    )
+    mode, context = orch.build_context(routing, _state("产品和退款问题"))
+    assert mode == "parallel"
+    assert context["agent_list"][0] == "aftersales_agent"
+    assert set(context["agent_list"]) == {"aftersales_agent", "product_agent", "billing_agent"}
+    assert len(context["agent_list"]) == 3

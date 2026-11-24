@@ -3,12 +3,12 @@
 
 核心职责：
 1. 根据查询复杂度、类型、关键词动态选择最佳协作模式
-2. 管理5种协作模式的实例化与执行
+2. 管理 Routing / Parallel / 固定 Supervisor–Workers 的执行与兼容标识
 3. 支持运行时模式升级（低质量响应自动升级到更复杂模式）
 
 协作模式选择策略：
 - 简单查询 (fast_path=True) → Sequential（顺序执行，最快）
-- 投诉类 (complaint) → Hierarchical（层级协调，需要多方参与）
+- 投诉类 (complaint) → 单域 Sequential；存在其他领域子任务才进入 Hierarchical
 - 多领域/高复杂度 (>70) → ReAct（推理+行动，处理复杂问题）
 - 单一领域中等复杂度 → Parallel/Consultation（并行或咨询）
 
@@ -26,7 +26,7 @@ from core.message_bus import MessageBus
 from core.session.session_manager import INTENT_KEYWORDS
 from core.shared_blackboard import SharedBlackboard
 
-from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, SequentialMode
+from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, RoutingMode
 
 logger = get_logger("collaboration.orchestrator")
 
@@ -84,7 +84,7 @@ class CollaborationOrchestrator:
         self.bus = message_bus
         self.bb = blackboard
         self._modes = {
-            "sequential": SequentialMode(bus=message_bus, bb=blackboard),
+            "sequential": RoutingMode(bus=message_bus, bb=blackboard),
             "parallel": ParallelMode(bus=message_bus, bb=blackboard),
             "consultation": ConsultationMode(bus=message_bus, bb=blackboard),
             "hierarchical": HierarchicalMode(bus=message_bus, bb=blackboard),
@@ -130,7 +130,7 @@ class CollaborationOrchestrator:
 
         决策流程：
         1. 快速通道判断 (< threshold) → Sequential
-        2. 投诉类查询 → Hierarchical（需要协调多方）
+        2. 投诉类查询 → 单域 Sequential；跨领域 Hierarchical
         3. 高复杂度多领域 → ReAct（推理+行动）
         4. 其他情况根据领域数量选择 Parallel/Consultation
 
@@ -163,6 +163,10 @@ class CollaborationOrchestrator:
                 sub_tasks["product_agent"] = f"[辅助] 检查产品相关信息：{query}"
             if _has_keywords(query, _BILLING_KEYWORDS):
                 sub_tasks["billing_agent"] = f"[辅助] 检查订单/退款信息：{query}"
+            if _has_keywords(query, _TECH_KEYWORDS):
+                sub_tasks["tech_agent"] = f"[辅助] 检查使用与技术安全问题：{query}"
+            if len(sub_tasks) == 1:
+                return "sequential", {"primary_agent": "complaint_agent"}
             return "hierarchical", {"coordinator": "general_agent", "sub_tasks": sub_tasks}
 
         # 涉及多领域 → 并行模式 或 ReAct 推理模式
@@ -179,7 +183,9 @@ class CollaborationOrchestrator:
             return "react", {"primary_agent": primary_agent}
 
         if len(multi_agent_hints) >= 2:
-            return "parallel", {"agent_list": multi_agent_hints}
+            # Keyword hints identify auxiliary domains; never drop the routed owner.
+            agent_list = list(dict.fromkeys([primary_agent, *multi_agent_hints]))
+            return "parallel", {"agent_list": agent_list}
 
         # 需要专业补充 → 咨询模式
         consult_map = {

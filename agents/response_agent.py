@@ -8,9 +8,11 @@ from typing import Any
 
 from agents.base_agent import BaseAgent
 from agents.evaluator import ResponseEvaluator
+from cache.cache_policy import graph_response_cache_allowed
 from core.logger import get_logger
 from core.message_bus import MessageBus
 from core.shared_blackboard import SharedBlackboard
+from runtime.context import get_current_run_id
 
 logger = get_logger("agent.response_agent")
 from cache.response_cache import ResponseCache  # noqa: E402
@@ -232,7 +234,12 @@ class ResponseAgent(BaseAgent):
                 await self._alert_low_score(state, eval_result)
 
         # 3. 写入缓存（非缓存命中时，且仅缓存确定性解决的响应）
-        if response and not cached and self.cache:
+        if (
+            response
+            and not cached
+            and self.cache
+            and graph_response_cache_allowed(state, durable_run=bool(get_current_run_id()))
+        ):
             # v3.2: 仅缓存 resolved 状态的响应，避免缓存低质量回复
             if resolution_status == RESOLUTION_RESOLVED:
                 try:

@@ -691,8 +691,12 @@ class TestRoutingLogic:
             fast_path=False,
         )
 
-        mode_name = orch.select_mode_name(routing, _make_state("我要投诉！皮肤过敏了"))
+        mode_name, context = orch.build_context(routing, _make_state("我要投诉！皮肤过敏了"))
         assert mode_name == "hierarchical"
+        assert set(context["sub_tasks"]) == {"complaint_agent", "tech_agent"}
+        mode_name, context = orch.build_context(routing, _make_state("我要投诉"))
+        assert mode_name == "sequential"
+        assert context == {"primary_agent": "complaint_agent"}
 
     @pytest.mark.asyncio
     async def test_high_complexity_multi_domain_routes_to_react(self):

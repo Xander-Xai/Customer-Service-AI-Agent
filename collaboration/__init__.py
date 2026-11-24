@@ -1,11 +1,21 @@
-"""5种协作模式（Sequential/Parallel/Consultation/Hierarchical/ReAct）"""
+"""Canonical orchestration and legacy checkpoint adapters."""
 
-from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, SequentialMode
+from .modes import (
+    ConsultationMode,
+    HierarchicalMode,
+    ParallelMode,
+    ReActMode,
+    RoutingMode,
+    SequentialMode,
+    SupervisorWorkersMode,
+)
 from .orchestrator import CollaborationOrchestrator
 
 __all__ = [
-    "SequentialMode",
+    "RoutingMode",
     "ParallelMode",
+    "SupervisorWorkersMode",
+    "SequentialMode",
     "ConsultationMode",
     "HierarchicalMode",
     "ReActMode",

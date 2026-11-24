@@ -214,10 +214,11 @@ make runtime-delivery
 
 ## 稳定的架构事实
 
-- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 协作模式（Sequential /
-  Parallel / Consultation / Hierarchical / ReAct）→ 响应后处理。
+- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 执行分支 → 响应后处理。
+  五个兼容标识（Sequential / Parallel / Consultation / Hierarchical / ReAct）分别对应直接单专家、并行分发、固定咨询汇总、固定子任务汇总、单 Agent 工具循环。
+  Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 不是多 Agent 协作；规则质量门控最多一次安全重试。参见 [架构术语裁决](../architecture.md)。
   入口：`core/graph_builder.py::build_graph`。
-- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）:
+- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）: 图层 `graph_response_cache_allowed` 阻止耐久任务和多模态/人工接管请求使用文本缓存；正常后处理拒绝缓存工具回执、审批、降级及转人工结果，异常 fallback 不写入。语义误命中与多轮上下文隔离仍需专项配对验证。
   L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退；scope/version/ttl 由
   CachePolicy 统一决定。
 - **Tool Result Context Engineering**（`core/tool_result_*.py`）是独立机制：
@@ -237,6 +238,7 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
+- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，当前已合并服务仅 loopback，不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
 - **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，

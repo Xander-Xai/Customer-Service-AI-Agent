@@ -36,6 +36,12 @@ class PermanentError(AgentRunError):
     error_type = PERMANENT
 
 
+class SideEffectReconciliationRequired(PermanentError):
+    """Unknown external result: no automatic re-execution of this operation."""
+
+    requires_reconciliation = True
+
+
 class RunTimeoutError(TransientError):
     """运行超时（可重试）。"""
 
@@ -61,7 +67,7 @@ class SideEffectOwnershipLost(TransientError):
     ----------------------------------
     外部调用**可能已经落地**，只是结果无法确认。可重试是因为下一次尝试会经过
     ledger：如果对方已经提交成功，本次会直接拿到已存结果而不重复执行；如果对方
-    也失败了，则由新 owner 接管。真正无法确认的情况最终落 DLQ 并由人工核对，
+    也失败了，真实工具入口拒绝再认领并要求人工对账。
     不会被静默当成成功。
 
     旧实现**忽略**了 ``mark_succeeded`` 的 False 返回值，于是外部已写入、ledger
@@ -120,6 +126,8 @@ def _http_status(exc: BaseException) -> int | None:
 
 def classify_exception(exc: BaseException) -> str:
     """返回错误类别字符串。"""
+    if getattr(exc, "requires_reconciliation", False):
+        return PERMANENT
     if isinstance(exc, AgentRunError):
         return exc.error_type
     # 工具层超时（``tools.tool_registry.ToolExecutionTimeout``）。按**属性**识别而非

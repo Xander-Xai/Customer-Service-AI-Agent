@@ -26,7 +26,7 @@ def answer(query):
 
 | 断点 | 真实场景 | 裸 Chain 的失败方式 |
 |---|---|---|
-| **条件分支爆炸** | 9 个 Agent × 5 种协作模式 = 45 种组合 | `if/elif` 嵌套到无法 review，组合逻辑无法穷举验证 |
+| **条件分支爆炸** | 多个领域角色与执行分支，非全组合 | `if/elif` 嵌套到无法 review，组合逻辑无法穷举验证 |
 | **工具副作用需要人工闸门** | 退款、改单 | 没有"暂停在这里等一个人"的机制，只能同步阻塞或直接跳过 |
 | **长任务要能崩溃恢复** | 审批等了 40 分钟，worker 被 OOM kill | 进程死了状态就没了，要么重头跑（危险，因为有副作用）要么人工重来 |
 | **多 Agent 协作的中间结果要可见** | 投诉要产品+技术+客服三方意见 | 中间状态没有统一载体，只能靠 print/日志猜 |
@@ -54,7 +54,7 @@ def answer(query):
 | `interrupt_before` / `interrupt_after` | 静态断点只能"在节点 X 前停"。我们需要的是"**只有 HIGH 风险工具调用**才停"，这是数据相关条件，静态断点表达不了 |
 | `store`（长期记忆） | 会与 `core/session/session_manager.py` 职责重叠。没有 memory schema 与失效策略之前，加 store 只会制造两套"记忆" |
 | `astream` / `astream_events` | 自建 callback 总线（`core/streaming_context.py`）。**这是有代价的**：`stream_callback` 若作为 state channel 会破坏 checkpoint 的 msgpack 序列化，所以生产改走 ContextVar。详见 [limitations.md](limitations.md) |
-| Subgraph 组合 | 5 种协作模式共享同一实现体（`_make_collaboration_node`），模式名只影响调度。拆 subgraph 会让 checkpoint 结构变复杂，收益不匹配 |
+| Subgraph 组合 | 5 个兼容执行节点共享同一图节点工厂（`_make_collaboration_node`），模式名只影响调度。拆 subgraph 会让 checkpoint 结构变复杂，收益不匹配 |
 | 多 Agent 自治 | 本项目是**受控编排**（LangGraph 决定调谁），不是 Agent 之间自由对话。客服场景要可预测的成本与延迟 |
 
 ---
@@ -270,30 +270,30 @@ lease 信息**全部缺失时判定为"未过期"**（`:62-63`）——宁可重
 会让成本和延迟翻倍，收益只在少数复杂问题上出现。
 ReAct 是按 complexity 门槛**按需**启用的。
 
-### 3.2 五种协作模式：按复杂度递增成本
+### 3.2 路由式编排与五个兼容标识
 
-`collaboration/orchestrator.py:149-198` 的选择顺序：
+`collaboration/orchestrator.py::_select_mode` 的实际选择顺序：
 
 ```
-1. fast_path（缓存/规则短路）        → sequential
-2. query_type == "complaint"         → hierarchical   ← 投诉固定升级
+1. fast_path                         → sequential
+2. 投诉：单域                         → sequential（complaint_agent）
+   投诉：产品/订单/技术等跨域               → hierarchical
 3. complexity ≥ 阈值 且 ≥2 领域线索   → react
-4. ≥2 领域线索                       → parallel
-5. 命中 consult_map 且 complexity 高  → consultation
-6. 默认                              → sequential
+4. ≥2 领域线索                        → parallel（主责保留、去重）
+5. 命中 consult_map 且 complexity 高   → consultation
+6. 默认                               → sequential
 ```
 
-| 模式 | 语义 | 何时用 | 成本 |
-|---|---|---|---|
-| `sequential` | 串行传递，前一个的输出进后一个的上下文 | 默认；简单问题 | 最低 |
-| `parallel` | 并行取多个领域意见后汇总 | 跨领域问题（成分+价格+售后） | 中 |
-| `consultation` | 主 Agent 主导，按需咨询专家 | 需要专家但不需要全面会诊 | 中 |
-| `hierarchical` | 分层，下级汇报给上级 | 投诉（需要决策权与统一口径） | 高 |
-| `react` | 推理-行动-观察循环 | 复杂度最高门槛 | 最高 |
+| 兼容标识 | 实际编排 | 适用条件 |
+|---|---|---|
+| `sequential` | Routing → 单专家直接执行，非多 Agent 串行链 | 简单或单域问题 |
+| `parallel` | 固定 fan-out/fan-in，确定性结果拼接 | 独立跨域查询 |
+| `consultation` | 固定辅助专家并发 → 主专家综合 | 需要专业补充 |
+| `hierarchical` | 代码定义子任务 → 并发 → 协调者综合 | 跨域投诉 |
+| `react` | 单 Agent 有界工具循环 | 复杂多步任务 |
 
-**为什么投诉固定走 hierarchical？** 投诉回复需要**一个统一对外口径**，
-多个 Agent 各说各话会互相矛盾，而且投诉有升级与合规要求。
-这不只是"复杂度高"，是**结构需求**。
+Consultation/Hierarchical 仅是 `SupervisorWorkersMode` 的兼容适配器，共用 worker 执行、取消清理、回执传播及 supervisor 汇总实现；Parallel 与固定主从共用 `_fan_out`。两条汇总路径属于同一固定主从模式族，不是模型动态规划或 AI handoff。黑板与总线用于诊断，合成输入以本次调用的返回记录为准，不读取旧会话黑板前缀。并行角色去重，咨询排除自身及重复辅助角色。兼容标识保留，不改变 checkpoint 节点名称。规则质量门控仅在无工具/审批活动时允许一次安全升级；不是双模型 Evaluator–Optimizer。无真实配对任务数据前，不宣称协作提升正确率或降低成本。详见 [架构术语裁决](architecture.md)。
+
 
 ---
 
