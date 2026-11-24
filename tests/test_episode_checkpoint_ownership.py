@@ -249,7 +249,7 @@ async def test_real_memory_saver_terminal_recovery_does_not_repeat_node():
 @pytest.mark.parametrize("approval_resume", [False, True])
 @pytest.mark.parametrize("field", ["session_id", "customer_query", "user_id"])
 @pytest.mark.parametrize("missing", [False, True])
-async def test_pending_checkpoint_refuses_changed_or_missing_identity(field, missing, approval_resume):
+async def test_pending_checkpoint_rejects_identity_drift(field, missing, approval_resume):
     state = _terminal_state()
     values = dict(state)
     if missing:

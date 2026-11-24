@@ -161,7 +161,9 @@ async def invoke_graph_with_resume(
                 key in state and (key not in values or state[key] != values[key])
                 for key in ("session_id", "customer_query", "user_id")
             ):
-                raise CheckpointEpisodeMismatch("Pending checkpoint identity requires reconciliation")
+                raise CheckpointEpisodeMismatch(
+                    "Pending checkpoint identity requires reconciliation"
+                )
     else:
         pending = await pending_steps(graph, config)
 
