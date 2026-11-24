@@ -697,3 +697,57 @@ async def test_consultation_excludes_self_and_duplicate_auxiliary():
     auxiliary.process_with_retry.assert_awaited_once()
     assert result["agents_used"] == ["product_agent", "tech_agent"]
     assert "本轮证据" in primary.process_with_retry.call_args.args[0]["customer_query"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_mode", ["consultation", "hierarchical"])
+async def test_supervisor_profiles_share_partial_result_contract(legacy_mode):
+    from collaboration.modes import SupervisorWorkersMode
+
+    receipt = {"tool": "read_order", "status": "success"}
+    approval = {"tool": "refund", "arguments": {"order_id": "synthetic"}}
+    good = _mock_agent()
+    good.process_with_retry.return_value = {
+        "response": "current evidence",
+        "tool_executions": [receipt],
+        "pending_actions": [approval],
+    }
+    cancelled = asyncio.Event()
+
+    async def slow(_state):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    manager = _mock_agent("summary")
+    agents = {"general_agent": manager, "good": good, "slow": _mock_agent(side_effect=slow)}
+    if legacy_mode == "consultation":
+        mode = ConsultationMode(consult_timeout=0.05)
+        context = {"consult_agents": ["good", "slow"]}
+    else:
+        mode = HierarchicalMode()
+        mode._HIERARCHICAL_TIMEOUT = 0.05
+        context = {"sub_tasks": {"good": "read", "slow": "read"}}
+    assert isinstance(mode, SupervisorWorkersMode)
+    result = await mode.execute(agents, _state(), context)
+    assert result["agents_used"] == ["general_agent", "good"]
+    assert result["tool_executions"] == [receipt]
+    assert result["pending_actions"] == [approval]
+    assert result["degraded_reason"].endswith("timeout")
+    assert cancelled.is_set()
+    manager.process_with_retry.assert_awaited_once()
+    assert "current evidence" in manager.process_with_retry.call_args.args[0]["customer_query"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_cannot_execute_itself_as_worker():
+    manager = _mock_agent("summary")
+    result = await HierarchicalMode().execute(
+        {"general_agent": manager},
+        _state(),
+        {"sub_tasks": {"general_agent": "duplicate"}},
+    )
+    manager.process_with_retry.assert_awaited_once()
+    assert result["agents_used"] == ["general_agent"]
+    assert result["degraded_reason"] == "hierarchical_subtask_missing_or_empty"

@@ -3,7 +3,7 @@
 
 核心职责：
 1. 根据查询复杂度、类型、关键词动态选择最佳协作模式
-2. 管理5种协作模式的实例化与执行
+2. 管理 Routing / Parallel / 固定 Supervisor–Workers 的执行与兼容标识
 3. 支持运行时模式升级（低质量响应自动升级到更复杂模式）
 
 协作模式选择策略：
@@ -26,7 +26,7 @@ from core.message_bus import MessageBus
 from core.session.session_manager import INTENT_KEYWORDS
 from core.shared_blackboard import SharedBlackboard
 
-from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, SequentialMode
+from .modes import ConsultationMode, HierarchicalMode, ParallelMode, ReActMode, RoutingMode
 
 logger = get_logger("collaboration.orchestrator")
 
@@ -84,7 +84,7 @@ class CollaborationOrchestrator:
         self.bus = message_bus
         self.bb = blackboard
         self._modes = {
-            "sequential": SequentialMode(bus=message_bus, bb=blackboard),
+            "sequential": RoutingMode(bus=message_bus, bb=blackboard),
             "parallel": ParallelMode(bus=message_bus, bb=blackboard),
             "consultation": ConsultationMode(bus=message_bus, bb=blackboard),
             "hierarchical": HierarchicalMode(bus=message_bus, bb=blackboard),

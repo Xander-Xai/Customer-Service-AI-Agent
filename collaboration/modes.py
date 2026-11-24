@@ -1,11 +1,7 @@
-"""
-4+1 种协作模式实现（v4.3: 独立 SLA 超时 + ReAct 推理模式）
-核心改造：
-- 移除 asyncio.to_thread，直接 await Agent（消除死锁风险）
-- 集成 MessageBus 事件发布 + SharedBlackboard 数据共享
-- 结构化日志
-- v3.5: ReActMode 支持 RAG + Function Calling 自主推理
-- v4.3: 各模式独立 SLA 超时配置
+"""Canonical Routing, Parallel and fixed Supervisor/Workers orchestration.
+
+Legacy node identifiers and event labels are adapters for persisted checkpoints.
+ReAct is a single-agent execution strategy, not a fourth orchestration pattern.
 """
 
 import asyncio
@@ -55,6 +51,35 @@ def _raise_write_failures(results: list) -> None:
             raise result
 
 
+async def _fan_out(coroutines, timeout):
+    """One deadline/cancellation boundary; adopt only children done by the deadline."""
+    tasks = [asyncio.create_task(coro) for coro in coroutines]
+    done: set[asyncio.Task] = set()
+    pending: set[asyncio.Task] = set()
+    try:
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=timeout)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = []
+    for task in tasks:
+        if task not in done:
+            continue
+        if task.cancelled():
+            results.append(asyncio.CancelledError())
+        elif task.exception() is not None:
+            results.append(task.exception())
+        else:
+            results.append(task.result())
+    _raise_write_failures(results)
+    return results, bool(pending)
+
+
 class CollaborationMode(ABC):
     """协作模式基类"""
 
@@ -101,7 +126,7 @@ class CollaborationMode(ABC):
         return {}
 
 
-class SequentialMode(CollaborationMode):
+class RoutingMode(CollaborationMode):
     """Direct routed single specialist; legacy sequential node identifier."""
 
     _SEQUENTIAL_TIMEOUT = SLA_SEQUENTIAL_MAX
@@ -163,6 +188,10 @@ class SequentialMode(CollaborationMode):
         }
 
 
+# Compatibility alias for historic imports and checkpoint node names.
+SequentialMode = RoutingMode
+
+
 class ParallelMode(CollaborationMode):
     """并行模式：多 Agent 同时处理 + 结果聚合（v3.4: Semaphore 限流，v3.6: 超时保护）"""
 
@@ -221,32 +250,10 @@ class ParallelMode(CollaborationMode):
         failure_reason = (
             "parallel_agent_missing" if any(n not in agents for n in agent_names) else ""
         )
-        tasks = [asyncio.create_task(run_agent(n)) for n in agent_names if n in agents]
-        done: set[asyncio.Task] = set()
-        pending: set[asyncio.Task] = set()
-        try:
-            if tasks:
-                done, pending = await asyncio.wait(tasks, timeout=self._PARALLEL_TIMEOUT)
-        finally:
-            # Drain all children on deadline or caller cancellation. Never adopt
-            # a late result from a child that had not completed by the deadline.
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-
-        results = []
-        for task in tasks:
-            if task in done:
-                if task.cancelled():
-                    results.append(asyncio.CancelledError())
-                elif task.exception() is not None:
-                    results.append(task.exception())
-                else:
-                    results.append(task.result())
-
-        _raise_write_failures(results)
+        results, pending = await _fan_out(
+            [run_agent(n) for n in agent_names if n in agents],
+            self._PARALLEL_TIMEOUT,
+        )
         if pending:
             if _durable_run():
                 raise asyncio.TimeoutError("parallel agent deadline exceeded")
@@ -298,8 +305,183 @@ class ParallelMode(CollaborationMode):
         }
 
 
-class ConsultationMode(CollaborationMode):
-    """Fixed specialist fan-out followed by primary synthesis (manager-style)."""
+class SupervisorWorkersMode(CollaborationMode):
+    """Fixed worker assignment -> parallel fan-out -> single supervisor synthesis.
+
+    Worker assignments are supplied by application routing, not LLM planning.
+    Historic event names and result modes are compatibility policies only.
+    """
+
+    async def _supervise(
+        self,
+        agents,
+        state,
+        *,
+        supervisor,
+        workers,
+        mode,
+        timeout,
+    ):
+        started = time.time()
+        manager = agents.get(supervisor)
+        consultation = mode == "consultation"
+        sender = f"{mode}_mode"
+        if not manager:
+            label = "Primary agent" if consultation else "Coordinator"
+            return {
+                "response": f"{label} {supervisor} not found",
+                "mode": mode,
+                "agents_used": [],
+            }
+
+        if not consultation:
+            await self._safe_publish(
+                "hierarchical.task.assign",
+                sender,
+                {
+                    "coordinator": supervisor,
+                    "sub_tasks": {name: query[:100] for name, query in workers.items()},
+                },
+            )
+        missing_reason = (
+            "consultation_agent_missing"
+            if consultation
+            else "hierarchical_subtask_missing_or_empty"
+        )
+        failure_reason = (
+            missing_reason
+            if any(
+                name == supervisor or name not in agents or not query.strip()
+                for name, query in workers.items()
+            )
+            else ""
+        )
+
+        async def run_worker(name, query):
+            worker_state = dict(state)
+            worker_state["customer_query"] = query
+            if consultation:
+                await self._safe_publish(
+                    "consultation.consultee.start",
+                    sender,
+                    {"agent": name, "primary": supervisor},
+                )
+            else:
+                await self._safe_publish(
+                    "hierarchical.subtask.start", sender, {"agent": name, "sub_query": query[:100]}
+                )
+            result = await agents[name].process_with_retry(worker_state)
+            response = result.get("response", "")
+            if consultation:
+                prefix = (
+                    "tech."
+                    if "tech" in name
+                    else "erp."
+                    if "billing" in name
+                    else f"consult.{name}."
+                )
+                await self._safe_bb_write(
+                    f"{prefix}consult_result", {"agent": name, "response": response}
+                )
+                try:
+                    if self.bus:
+                        await self.bus.publish(
+                            Message(
+                                msg_type=MessageType.RESPONSE,
+                                topic=f"consultation.{supervisor}",
+                                sender=name,
+                                receiver=supervisor,
+                                payload={"response": response, "agent": name},
+                            )
+                        )
+                except Exception:
+                    logger.debug("Consultation diagnostic event failed", exc_info=True)
+                await self._safe_publish(
+                    "consultation.consultee.complete",
+                    sender,
+                    {"agent": name, "primary": supervisor},
+                )
+            else:
+                await self._safe_bb_write(
+                    f"hierarchical.subtask.{name}", {"response": response, "sub_query": query}
+                )
+                await self._safe_publish("hierarchical.subtask.complete", sender, {"agent": name})
+            return name, response, result
+
+        results, timed_out = await _fan_out(
+            [
+                run_worker(name, query)
+                for name, query in workers.items()
+                if name != supervisor and name in agents and query.strip()
+            ],
+            timeout,
+        )
+        if timed_out:
+            if _durable_run():
+                raise asyncio.TimeoutError(f"{mode} worker deadline exceeded")
+            failure_reason = (
+                "consultation_timeout" if consultation else "hierarchical_subtask_timeout"
+            )
+
+        completed = []
+        for item in results:
+            if isinstance(item, BaseException):
+                failure_reason = failure_reason or (
+                    "consultation_agent_failed" if consultation else "hierarchical_subtask_failed"
+                )
+            else:
+                completed.append(item)
+
+        # Synthesis reads only current invocation results, in assignment order.
+        enriched = dict(state)
+        if completed or not consultation:
+            header = "[辅助信息]" if consultation else "[子任务汇总]"
+            lines = [
+                f"[{name}补充] {response}" if consultation else f"[{name}] {response}"
+                for name, response, _ in completed
+            ]
+            enriched["customer_query"] = (
+                f"{state.get('customer_query', '')}\\n\\n{header}\\n" + "\\n".join(lines)
+            )
+
+        if consultation:
+            await self._safe_publish(
+                "consultation.primary.start",
+                sender,
+                {"agent": supervisor, "consultees": [name for name, _, _ in completed]},
+            )
+        final = await manager.process_with_retry(enriched)
+        elapsed = time.time() - started
+        if consultation:
+            await self._safe_publish(
+                "consultation.primary.complete", sender, {"agent": supervisor, "elapsed": elapsed}
+            )
+
+        child_results = [item for _, _, item in completed]
+        read_signal = _read_path_signal(final, *child_results)
+        if failure_reason:
+            read_signal.setdefault("degraded_reason", failure_reason)
+        return {
+            "response": final.get("response", ""),
+            "mode": mode,
+            "agents_used": [supervisor] + [name for name, _, _ in completed],
+            "elapsed": elapsed,
+            **read_signal,
+            "pending_actions": [
+                action
+                for item in [*child_results, final]
+                for action in (item.get("pending_actions") or [])
+            ],
+            "tool_executions": [
+                record
+                for item in [*child_results, final]
+                for record in (item.get("tool_executions") or [])
+            ],
+        }
+
+
+class ConsultationMode(SupervisorWorkersMode):
+    """Legacy checkpoint adapter: specialist consultation assignment."""
 
     def __init__(
         self,
@@ -314,289 +496,37 @@ class ConsultationMode(CollaborationMode):
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
         primary = context.get("primary_agent", "general_agent")
-        consultees = [
-            name for name in dict.fromkeys(context.get("consult_agents", [])) if name != primary
-        ]
-        start = time.time()
-
-        primary_agent = agents.get(primary)
-        if not primary_agent:
-            return {
-                "response": f"Primary agent {primary} not found",
-                "mode": "consultation",
-                "agents_used": [],
-            }
-
-        # 先让辅助 Agent 提供信息
-        consult_results = []
-        consult_read_results: list[dict] = []
-        consult_failure_reason = (
-            "consultation_agent_missing" if any(n not in agents for n in consultees) else ""
-        )
-        if consultees:
-
-            async def consult(name: str):
-                agent = agents.get(name)
-                if not agent:
-                    return name, ""
-                consult_state = dict(state)
-                consult_state["customer_query"] = (
-                    f"[辅助请求] 请为以下问题提供专业补充信息：{state.get('customer_query', '')}"
-                )
-
-                await self._safe_publish(
-                    "consultation.consultee.start",
-                    "consultation_mode",
-                    {"agent": name, "primary": primary},
-                )
-
-                result = await agent.process_with_retry(consult_state)
-                consult_read_results.append(result)
-                response = result.get("response", "")
-
-                prefix = (
-                    "tech."
-                    if "tech" in name
-                    else "erp."
-                    if "billing" in name
-                    else f"consult.{name}."
-                )
-                await self._safe_bb_write(
-                    f"{prefix}consult_result", {"agent": name, "response": response}
-                )
-
-                # 通过 Bus request 模式向主 Agent 发送补充信息
-                try:
-                    if self.bus:
-                        await self.bus.publish(
-                            Message(
-                                msg_type=MessageType.RESPONSE,
-                                topic=f"consultation.{primary}",
-                                sender=name,
-                                receiver=primary,
-                                payload={"response": response, "agent": name},
-                            )
-                        )
-                except Exception as e:
-                    logger.debug(f"Consultation: 发送补充信息失败 ({name} -> {primary}): {e}")
-
-                await self._safe_publish(
-                    "consultation.consultee.complete",
-                    "consultation_mode",
-                    {"agent": name, "primary": primary},
-                )
-
-                return name, response
-
-            tasks = [consult(n) for n in consultees if n in agents]
-            try:
-                done = await asyncio.wait_for(
-                    asyncio.gather(*tasks, return_exceptions=True),
-                    timeout=self.consult_timeout,  # v3.6: 强制超时，防止慢 Agent 阻塞
-                )
-            except asyncio.TimeoutError:
-                if _durable_run():
-                    raise
-                logger.warning(f"Consultation 辅助 Agent 超时 ({self.consult_timeout}s)")
-                consult_failure_reason = "consultation_timeout"
-                done = []
-            _raise_write_failures(done)
-            for r in done:
-                if isinstance(r, BaseException):
-                    consult_failure_reason = consult_failure_reason or "consultation_agent_failed"
-                else:
-                    consult_results.append(r)
-
-        # 将辅助信息注入主 Agent 上下文
-        enriched_state = dict(state)
-        if consult_results:
-            consult_text = "\n".join([f"[{name}补充] {resp}" for name, resp in consult_results])
-            enriched_state["customer_query"] = (
-                f"{state.get('customer_query', '')}\n\n[辅助信息]\n{consult_text}"
-            )
-
-        # Only current invocation results are synthesis input. Session blackboard
-        # entries have no turn receipt and can survive earlier or concurrent turns.
-
-        await self._safe_publish(
-            "consultation.primary.start",
-            "consultation_mode",
-            {"agent": primary, "consultees": [n for n, _ in consult_results]},
+        query = f"[辅助请求] 请为以下问题提供专业补充信息：{state.get('customer_query', '')}"
+        workers = {name: query for name in context.get("consult_agents", []) if name != primary}
+        return await self._supervise(
+            agents,
+            state,
+            supervisor=primary,
+            workers=workers,
+            mode="consultation",
+            timeout=self.consult_timeout,
         )
 
-        result = await primary_agent.process_with_retry(enriched_state)
-        elapsed = time.time() - start
 
-        await self._safe_publish(
-            "consultation.primary.complete",
-            "consultation_mode",
-            {"agent": primary, "elapsed": elapsed},
-        )
+class HierarchicalMode(SupervisorWorkersMode):
+    """Legacy checkpoint adapter: fixed subtask assignment."""
 
-        logger.info(f"Consultation primary={primary} {elapsed:.1f}s")
-        # Preserve only execution-produced structured records, not inferred facts
-        # from the auxiliary response or Blackboard text.
-        pending_actions = [
-            action
-            for item in consult_read_results
-            for action in (item.get("pending_actions") or [])
-        ]
-        tool_executions = [
-            record
-            for item in consult_read_results
-            for record in (item.get("tool_executions") or [])
-        ]
-        read_signal = _read_path_signal(result, *consult_read_results)
-        if consult_failure_reason:
-            read_signal.setdefault("degraded_reason", consult_failure_reason)
-        return {
-            "response": result.get("response", ""),
-            "mode": "consultation",
-            "agents_used": [primary] + [n for n, _ in consult_results],
-            "elapsed": elapsed,
-            **read_signal,
-            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
-            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
-            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
-            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
-            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
-            "pending_actions": pending_actions + list(result.get("pending_actions") or []),
-            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
-            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
-            "tool_executions": tool_executions + list(result.get("tool_executions") or []),
-        }
-
-
-class HierarchicalMode(CollaborationMode):
-    """Fixed subtask fan-out and coordinator synthesis; not dynamic LLM planning."""
-
-    _HIERARCHICAL_TIMEOUT = SLA_HIERARCHICAL_MAX  # v4.3: 使用配置化超时
+    _HIERARCHICAL_TIMEOUT = SLA_HIERARCHICAL_MAX
 
     async def execute(
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
-        coordinator_name = context.get("coordinator", "general_agent")
-        sub_tasks = context.get("sub_tasks", {})
-        start = time.time()
-
-        coordinator = agents.get(coordinator_name)
-        if not coordinator:
-            return {
-                "response": f"Coordinator {coordinator_name} not found",
-                "mode": "hierarchical",
-                "agents_used": [],
-            }
-
-        # 协调者通过 Bus 广播子任务分配
-        await self._safe_publish(
-            "hierarchical.task.assign",
-            "hierarchical_mode",
-            {
-                "coordinator": coordinator_name,
-                "sub_tasks": {n: q[:100] for n, q in sub_tasks.items()},
-            },
+        return await self._supervise(
+            agents,
+            state,
+            supervisor=context.get("coordinator", "general_agent"),
+            workers=context.get("sub_tasks", {}),
+            mode="hierarchical",
+            timeout=self._HIERARCHICAL_TIMEOUT,
         )
 
-        # Keep execution-produced receipts even if a later sibling times out.
-        completed_subtasks: list[tuple[str, str, dict[str, Any]]] = []
-        subtask_failure_reason = (
-            "hierarchical_subtask_missing_or_empty"
-            if any(n not in agents or not q.strip() for n, q in sub_tasks.items())
-            else ""
-        )
 
-        # 并行执行子任务
-        async def run_subtask(name: str, sub_query: str):
-            agent = agents.get(name)
-            if not agent:
-                return name, ""
-
-            await self._safe_publish(
-                "hierarchical.subtask.start",
-                "hierarchical_mode",
-                {"agent": name, "sub_query": sub_query[:100]},
-            )
-
-            sub_state = dict(state)
-            sub_state["customer_query"] = sub_query
-            result = await agent.process_with_retry(sub_state)
-            response = result.get("response", "")
-            completed_subtasks.append((name, response, result))
-
-            await self._safe_bb_write(
-                f"hierarchical.subtask.{name}", {"response": response, "sub_query": sub_query}
-            )
-
-            await self._safe_publish(
-                "hierarchical.subtask.complete", "hierarchical_mode", {"agent": name}
-            )
-
-            return name, response, result
-
-        tasks = [run_subtask(n, q) for n, q in sub_tasks.items() if n in agents and q.strip()]
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=self._HIERARCHICAL_TIMEOUT,  # v3.6: 超时保护
-            )
-        except asyncio.TimeoutError:
-            if _durable_run():
-                raise
-            logger.warning(f"Hierarchical 子任务执行超时 ({self._HIERARCHICAL_TIMEOUT}s)")
-            subtask_failure_reason = "hierarchical_subtask_timeout"
-            results = completed_subtasks
-
-        _raise_write_failures(results)
-        sub_responses = []
-        agents_used = []
-        collected_pending: list[dict] = []
-        collected_tool_executions: list[dict] = []
-        read_path_results: list[dict] = []
-        for r in results:
-            if isinstance(r, BaseException):
-                subtask_failure_reason = subtask_failure_reason or "hierarchical_subtask_failed"
-                continue
-            name, resp, agent_result = r
-            sub_responses.append(f"[{name}] {resp}")
-            agents_used.append(name)
-            collected_pending.extend(agent_result.get("pending_actions") or [])
-            collected_tool_executions.extend(agent_result.get("tool_executions") or [])
-            read_path_results.append(agent_result)
-
-        # Do not recover missing subtask text from session-level diagnostics.
-        # Only completed results from this invocation may contribute evidence.
-
-        # 协调者汇总
-        summary_state = dict(state)
-        summary_state["customer_query"] = (
-            f"{state.get('customer_query', '')}\n\n[子任务汇总]\n" + "\n".join(sub_responses)
-        )
-        final = await coordinator.process_with_retry(summary_state)
-        elapsed = time.time() - start
-
-        read_signal = _read_path_signal(final, *read_path_results)
-        if subtask_failure_reason:
-            read_signal.setdefault("degraded_reason", subtask_failure_reason)
-        logger.info(f"Hierarchical sub_tasks={list(sub_tasks.keys())} {elapsed:.1f}s")
-        return {
-            "response": final.get("response", ""),
-            "mode": "hierarchical",
-            "agents_used": [coordinator_name] + agents_used,
-            "elapsed": elapsed,
-            **read_signal,
-            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
-            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
-            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
-            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
-            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
-            "pending_actions": collected_pending + list(final.get("pending_actions") or []),
-            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
-            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
-            "tool_executions": collected_tool_executions + list(final.get("tool_executions") or []),
-        }
-
-
-class ReActMode(SequentialMode):
+class ReActMode(RoutingMode):
     """ReAct 推理模式（v3.5→v6.3: 添加 SLA 超时保护）
     复用 SequentialMode 流程，仅覆盖 Agent 选择逻辑。
     """

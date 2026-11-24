@@ -51,6 +51,12 @@
 
 **状态归属整改**：consultation/hierarchical 的合成输入仅使用本次调用返回的结果，不再读取 session Blackboard 的历史前缀。Blackboard/Bus 可继续用于诊断与现有兼容接口，非当前任务事实来源；结构化工具回执/审批与自然语言分离。Parallel 去重、consultation 禁止主专家自我咨询及重复辅助。以回归测试验证旧黑板内容不进入汇总、同一角色不重复执行。咨询与层级的业务收益及关键词选择阈值仍需配对任务评测；不凭命名或 fixture 通过宣称质量提升，不贸然删掉已存在的兼容路径。
 
+### 标准执行实现收敛
+
+`RoutingMode` 是单专家执行器，旧 `SequentialMode` 仅保留导入别名；ReAct 复用 Routing 执行边界。Parallel 与固定 `SupervisorWorkersMode` 共用 `_fan_out` 的任务创建、超时、取消清理、已完成结果采纳及写失败传播。Consultation / Hierarchical 不再分别拥有汇总执行实现，仅负责将旧上下文转换成固定 worker 分配与 SLA/事件兼容策略，统一由 supervisor 汇总当前调用结果。固定 Supervisor–Workers 是静态 workflow，非动态规划型 Orchestrator–Workers。
+
+不迁移持久化图节点标识：旧 checkpoint、SSE、metrics 和审计仍能解析，保留旧标识不代表保留五种实现。新增两个兼容 profile 的同契约测试（已完成兄弟回执、审批、超时降级和取消清理），及 supervisor 自执行防护。真实任务收益仍需配对评估，同 SHA CI 未完成前不宣称已上线。
+
 ## 1. 一句话架构
 
 > 一个**同步快路径 + 异步耐久路径**并存的企业客服 Agent 服务：

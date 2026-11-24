@@ -292,7 +292,7 @@ ReAct 是按 complexity 门槛**按需**启用的。
 | `hierarchical` | 代码定义子任务 → 并发 → 协调者综合 | 跨域投诉 |
 | `react` | 单 Agent 有界工具循环 | 复杂多步任务 |
 
-后两种汇总路径（consultation/hierarchical）属于同一固定主从模式族，不是模型动态规划或 AI handoff。黑板与总线用于诊断，合成输入以本次调用的返回记录为准，不读取旧会话黑板前缀。并行角色去重，咨询排除自身及重复辅助角色。兼容标识保留，不改变 checkpoint 节点名称。规则质量门控仅在无工具/审批活动时允许一次安全升级；不是双模型 Evaluator–Optimizer。无真实配对任务数据前，不宣称协作提升正确率或降低成本。详见 [架构术语裁决](architecture.md)。
+Consultation/Hierarchical 仅是 `SupervisorWorkersMode` 的兼容适配器，共用 worker 执行、取消清理、回执传播及 supervisor 汇总实现；Parallel 与固定主从共用 `_fan_out`。两条汇总路径属于同一固定主从模式族，不是模型动态规划或 AI handoff。黑板与总线用于诊断，合成输入以本次调用的返回记录为准，不读取旧会话黑板前缀。并行角色去重，咨询排除自身及重复辅助角色。兼容标识保留，不改变 checkpoint 节点名称。规则质量门控仅在无工具/审批活动时允许一次安全升级；不是双模型 Evaluator–Optimizer。无真实配对任务数据前，不宣称协作提升正确率或降低成本。详见 [架构术语裁决](architecture.md)。
 
 
 ---
