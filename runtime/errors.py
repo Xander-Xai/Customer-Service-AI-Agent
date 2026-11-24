@@ -39,6 +39,8 @@ class PermanentError(AgentRunError):
 class SideEffectReconciliationRequired(PermanentError):
     """Unknown external result: no automatic re-execution of this operation."""
 
+    requires_reconciliation = True
+
 
 class RunTimeoutError(TransientError):
     """运行超时（可重试）。"""
@@ -124,6 +126,8 @@ def _http_status(exc: BaseException) -> int | None:
 
 def classify_exception(exc: BaseException) -> str:
     """返回错误类别字符串。"""
+    if getattr(exc, "requires_reconciliation", False):
+        return PERMANENT
     if isinstance(exc, AgentRunError):
         return exc.error_type
     # 工具层超时（``tools.tool_registry.ToolExecutionTimeout``）。按**属性**识别而非

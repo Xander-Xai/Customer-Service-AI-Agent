@@ -180,6 +180,7 @@ class SideEffectExecutionError(RuntimeError):
     def __init__(self, tool_name: str, cause: Exception | None = None):
         self.tool_name = tool_name
         self.is_tool_timeout = bool(getattr(cause, "is_tool_timeout", False))
+        self.requires_reconciliation = bool(getattr(cause, "requires_reconciliation", False))
         super().__init__(f"Side-effect tool {tool_name!r} did not complete successfully")
 
 
