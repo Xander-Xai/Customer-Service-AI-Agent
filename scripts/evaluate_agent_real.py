@@ -271,7 +271,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_not_measured(out, plan=plan, estimate=estimate, dataset=dataset, reason=str(exc))
         return 2
     if not cases:
-        _write_not_measured(out, plan=plan, estimate=estimate, dataset=dataset, reason="empty_selection")
+        _write_not_measured(
+            out, plan=plan, estimate=estimate, dataset=dataset, reason="empty_selection"
+        )
         return 2
 
     print("\nrunning the real graph against the real provider…")
@@ -324,7 +326,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "budget_exceeded": run["budget_exceeded"],
     }
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with out.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     print()
     print(
         f"status = {status}  attempted={run['summary']['attempted']} "
