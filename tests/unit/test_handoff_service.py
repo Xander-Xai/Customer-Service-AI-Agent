@@ -254,6 +254,7 @@ def test_empty_visible_ticket_has_empty_messages_not_false_404(service):
     )
     assert service.messages(ticket["ticket_id"], actor_id="customer-1", role="customer") == []
 
+
 def test_handoff_task_episode_only_exposes_matching_claimed_session(service):
     from db.models import AgentRun
 

@@ -164,6 +164,7 @@ def test_api_off_by_default(client, monkeypatch):
     monkeypatch.setattr("core.config.HUMAN_HANDOFF_ENABLED", False)
     assert client.get("/api/handoffs", headers=_headers("agent-1", "agent")).status_code == 503
 
+
 def test_staff_task_episode_requires_claim_and_never_authorizes_execution(client):
     tid = _create(client).json()["ticket_id"]
     url = f"/api/handoffs/{tid}/task-episode"
