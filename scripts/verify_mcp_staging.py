@@ -27,6 +27,16 @@ def _canonical(value: Any) -> str:
     )
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous reviewer input rather than silently keeping the last value."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate manifest field")
+        result[key] = value
+    return result
+
+
 def parse_manifest(manifest: Any):
     """Accept one explicitly approved read-only tool and independent expected result."""
     if not isinstance(manifest, dict) or set(manifest) != {
@@ -134,10 +144,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.permit_staging_mcp:
         parser.error("Explicit staging connection permission required")
+    if args.out.exists() or args.out.is_symlink():
+        parser.error("Output must be a new evidence file")
     # Keep the published report free of application/SDK log content.
     logging.disable(logging.CRITICAL)
     try:
-        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        manifest = json.loads(
+            args.manifest.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object
+        )
         report = asyncio.run(run_probe(manifest))
     except Exception:
         report = {
@@ -146,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
             "failure_reason": "invalid_or_unavailable",
         }
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    with args.out.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(report, indent=2) + "\n")
     return 0 if report["overall_status"] == "PASS" else 1
 
 

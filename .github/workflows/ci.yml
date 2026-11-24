@@ -165,6 +165,9 @@ jobs:
         # actually verified. Skips are treated as FAIL, not as partial success.
         run: python3 scripts/verify_mcp_contract.py
 
+      - name: MCP staging CLI real wire smoke (local synthetic server)
+        run: python -m pytest -q -o addopts="" tests/integration/test_mcp_staging_cli.py
+
       - name: Upload MCP contract evidence
         if: always()
         uses: actions/upload-artifact@v6

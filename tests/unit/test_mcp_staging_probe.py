@@ -1,5 +1,6 @@
 """Staging probe contract; no live external server or paid provider."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -88,3 +89,35 @@ def test_cli_requires_explicit_permission(tmp_path):
         )
     assert exc.value.code == 2
     assert not (tmp_path / "report.json").exists()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"tool":"first","tool":"second"}',
+        '{"server":{"risk_level":"high","risk_level":"low"}}',
+        '{"arguments":{"id":"first","id":"second"}}',
+    ],
+)
+def test_duplicate_manifest_fields_fail_before_probe(tmp_path, monkeypatch, payload):
+    source = tmp_path / "manifest.json"
+    source.write_text(payload, encoding="utf-8")
+    out = tmp_path / "report.json"
+    run_probe = AsyncMock()
+    monkeypatch.setattr(probe, "run_probe", run_probe)
+    assert (
+        probe.main(
+            [
+                "--manifest",
+                str(source),
+                "--out",
+                str(out),
+                "--permit-staging-mcp",
+            ]
+        )
+        == 1
+    )
+    run_probe.assert_not_called()
+    evidence = json.loads(out.read_text(encoding="utf-8"))
+    assert evidence["overall_status"] == "FAIL"
+    assert evidence["failure_reason"] == "invalid_or_unavailable"

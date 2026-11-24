@@ -38,3 +38,10 @@ timeout -k 5s 60s python -m scripts.verify_mcp_staging \
 ```
 
 退出码 0 且报告 PASS 仅表示该工具注册、白名单拒绝、执行回执与独立期望结果匹配。超时、缺少报告或任何检查失败都不能通过。报告不保存原始参数、输出、凭据或远端异常。外部服务日志仍应由运维隔离与审查。报告不证明第三方身份、生产鉴权、写操作幂等性或业务 SLA。应同时记录服务版本、被测 Git SHA 和脱敏授权证据。
+
+## 本地协议验收与外部服务边界
+
+CI 额外运行 `tests/integration/test_mcp_staging_cli.py`，使用官方 MCP 客户端 SDK、
+真实 stdio 子进程、ToolRegistry 与完整 staging CLI，分别验证预期结果匹配/不匹配、
+输出脱敏及既有证据不可覆盖。协议对端仍是仓库内合成服务，不是第三方 staging，
+不能据此宣称外部鉴权、ERP 连通性或生产验收已完成。输出路径必须为新文件。
