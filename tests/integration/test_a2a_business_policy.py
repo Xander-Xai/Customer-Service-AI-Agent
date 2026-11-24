@@ -82,3 +82,36 @@ async def test_actual_sdk_policy_review_roundtrip(catalog, monkeypatch):
         monkeypatch.setenv("A2A_AFTERSALES_POLICY_SHA256", "a" * 64)
         with pytest.raises(A2AContractError):
             await review_after_sales_procedure(REQUEST, httpx_client=client)
+
+
+@pytest.mark.asyncio
+async def test_peer_rejects_actual_oversized_chunked_rpc_before_sdk(catalog):
+    pytest.importorskip("a2a")
+    from integrations.a2a_policy.business_server import build_business_app
+
+    path, _ = catalog
+
+    async def chunks():
+        yield b"x" * 4096
+        yield b"x" * 4096
+        yield b"x"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=build_business_app(path)),
+        base_url=BASE,
+        headers={"Authorization": "Bearer " + "b" * 64},
+    ) as peer:
+        response = await peer.post("/a2a/jsonrpc", content=chunks())
+        assert response.status_code == 413
+        response = await peer.post(
+            "/a2a/jsonrpc", content=b"{}", headers={"Content-Length": "1"}
+        )
+        assert response.status_code == 400
+        response = await peer.post(
+            "/a2a/jsonrpc",
+            content=b"{}",
+            headers=[("Authorization", "Bearer " + "b" * 64), ("Authorization", "Bearer other")],
+        )
+        assert response.status_code == 401
+        result = await review_after_sales_procedure(REQUEST, httpx_client=peer)
+        assert result["route"] == "collect_evidence"

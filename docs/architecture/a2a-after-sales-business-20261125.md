@@ -67,3 +67,11 @@ expired catalog, oversized request and timeout fail closed; independent policy
 owner approves disclosure. TaskStore remains in-memory for synchronous read-only
 tasks; do not use it for durable business writes. No real remote deployment,
 certificate, ERP integration, or availability measurement is claimed by this PR.
+
+Application request boundary: the shared A2A ASGI middleware now authenticates
+before consuming the body, rejects ambiguous credentials/length headers and
+enforces 8 KiB on actual received bytes even without Content-Length. It replays
+only the bounded body to the SDK. The reverse proxy must still enforce body
+timeouts, rate/concurrency limits and request size; the application boundary
+does not replace those network controls. CI regression exercises streaming
+oversize, length mismatch, duplicate auth and normal SDK round trip.

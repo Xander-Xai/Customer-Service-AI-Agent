@@ -32,7 +32,7 @@ from a2a.types import (
 )
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
-from starlette.requests import Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from integrations.a2a_policy.contracts import (
     A2AContractError,
@@ -124,6 +124,80 @@ def build_app(base_url: str = "http://127.0.0.1:41243") -> FastAPI:
     return build_peer_app(card, SyntheticFAQExecutor(), secret)
 
 
+class PeerRequestBoundary:
+    """Authenticate and bound actual RPC bytes before the SDK parses any JSON."""
+
+    MAX_BODY_BYTES = 8192
+
+    def __init__(self, app: ASGIApp, secret: str):
+        self.app = app
+        self.secret = b"Bearer " + secret.encode("ascii")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        method, path = scope["method"], scope["path"]
+        if method == "GET" and path == "/.well-known/agent-card.json":
+            await self.app(scope, receive, send)
+            return
+        if method != "POST" or path != "/a2a/jsonrpc":
+            await JSONResponse({"detail": "Not found"}, status_code=404)(scope, receive, send)
+            return
+
+        async def reject(status: int, detail: str) -> None:
+            headers = {"WWW-Authenticate": "Bearer"} if status == 401 else None
+            await JSONResponse({"detail": detail}, status_code=status, headers=headers)(
+                scope, receive, send
+            )
+
+        headers = scope["headers"]
+        authorization = [value for name, value in headers if name.lower() == b"authorization"]
+        if len(authorization) != 1 or not hmac.compare_digest(authorization[0], self.secret):
+            await reject(401, "A2A peer authentication required")
+            return
+        lengths = [value for name, value in headers if name.lower() == b"content-length"]
+        declared = None
+        if lengths:
+            if len(lengths) != 1 or not lengths[0].isdigit() or len(lengths[0]) > 10:
+                await reject(400, "Invalid request size")
+                return
+            declared = int(lengths[0])
+            if declared > self.MAX_BODY_BYTES:
+                await reject(413, "Payload too large")
+                return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                await reject(400, "Invalid request body")
+                return
+            chunk = message.get("body", b"")
+            if len(chunk) > self.MAX_BODY_BYTES - len(body):
+                await reject(413, "Payload too large")
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+        if declared is not None and declared != len(body):
+            await reject(400, "Invalid request size")
+            return
+
+        delivered = False
+
+        async def replay():
+            nonlocal delivered
+            if delivered:
+                return await receive()
+            delivered = True
+            return {"type": "http.request", "body": bytes(body), "more_body": False}
+
+        await self.app(scope, replay, send)
+
+
 def build_peer_app(card: AgentCard, executor: AgentExecutor, secret: str) -> FastAPI:
     """Common authenticated local peer transport, independent of domain policy."""
     handler = DefaultRequestHandler(
@@ -141,31 +215,7 @@ def build_peer_app(card: AgentCard, executor: AgentExecutor, secret: str) -> Fas
         openapi_url=None,
     )
 
-    @app.middleware("http")
-    async def require_peer_auth(request: Request, call_next):
-        # The public card is intentionally non-secret, and describes Bearer auth.
-        if request.method == "GET" and request.url.path == "/.well-known/agent-card.json":
-            return await call_next(request)
-        if request.method != "POST" or request.url.path != "/a2a/jsonrpc":
-            return JSONResponse({"detail": "Not found"}, status_code=404)
-        auth = request.headers.get("authorization", "")
-        prefix = "Bearer "
-        if not auth.startswith(prefix) or not hmac.compare_digest(
-            auth[len(prefix) :].encode("utf-8"), secret.encode("ascii")
-        ):
-            return JSONResponse(
-                {"detail": "A2A peer authentication required"},
-                status_code=401,
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        declared_length = request.headers.get("content-length")
-        if declared_length:
-            try:
-                if int(declared_length) > 8192:
-                    return JSONResponse({"detail": "Payload too large"}, status_code=413)
-            except ValueError:
-                return JSONResponse({"detail": "Invalid request size"}, status_code=400)
-        return await call_next(request)
+    app.add_middleware(PeerRequestBoundary, secret=secret)
 
     return app
 
