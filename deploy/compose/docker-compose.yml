@@ -144,6 +144,11 @@ services:
       - API_KEY_ENABLED=${API_KEY_ENABLED:-true}
       - API_KEY=${API_KEY:-}
       - ERP_MODE=mock
+      # Mock deployment: enable approval and deterministic context management together.
+      - HITL_ENABLED=${HITL_ENABLED:-true}
+      - HITL_HIGH_RISK_TOOLS=${HITL_HIGH_RISK_TOOLS:-}
+      - HITL_HIGH_AMOUNT_THRESHOLD=${HITL_HIGH_AMOUNT_THRESHOLD:-1.0}
+      - TOOL_RESULT_OPTIMIZATION_ENABLED=${TOOL_RESULT_OPTIMIZATION_ENABLED:-true}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       # SLA 告警配置
       - SLA_ALERT_WINDOW=50
@@ -272,6 +277,11 @@ services:
       - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
       - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
       - ERP_MODE=mock
+      # Mock deployment: enable approval and deterministic context management together.
+      - HITL_ENABLED=${HITL_ENABLED:-true}
+      - HITL_HIGH_RISK_TOOLS=${HITL_HIGH_RISK_TOOLS:-}
+      - HITL_HIGH_AMOUNT_THRESHOLD=${HITL_HIGH_AMOUNT_THRESHOLD:-1.0}
+      - TOOL_RESULT_OPTIMIZATION_ENABLED=${TOOL_RESULT_OPTIMIZATION_ENABLED:-true}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - VECTOR_DB_MODE=${VECTOR_DB_MODE:-qdrant_only}
