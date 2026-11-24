@@ -227,8 +227,7 @@ def test_authorized_ticket_reads_use_single_sql_visibility_snapshot(service, mon
     monkeypatch.setattr(service, "get", deny_out_of_band_get)
     assert len(service.messages(tid, actor_id="customer-1", role="customer")) == 1
     assert [
-        event["event"]
-        for event in service.events(tid, actor_id="customer-1", role="customer")
+        event["event"] for event in service.events(tid, actor_id="customer-1", role="customer")
     ] == ["created"]
     with pytest.raises(HandoffNotFound):
         service.events(tid, actor_id="customer-2", role="customer")
