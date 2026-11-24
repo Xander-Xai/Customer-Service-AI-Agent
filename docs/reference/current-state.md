@@ -42,6 +42,12 @@
 - 恢复结果依旧经过 executor 的审批副作用失败检查、执行栅栏和数据库 owner CAS；不授予新的工具权限，也不声称外部 ERP exactly-once。
 - 验收：`pytest -q tests/test_episode_checkpoint_ownership.py`，覆盖真实 InMemorySaver 的终态恢复与不重复节点执行、缺失标记、身份或任务不一致、未完成动作等。真实 PostgreSQL 进程崩溃窗口仍需独立故障注入验证；本机制不能恢复已被其他 Run 覆盖的同线程历史 checkpoint。
 
+## 多 Agent 部分失败与证据边界
+
+- Consultation 模式已随 #55 合入：辅助 Agent 的真实工具回执及待审批动作继续传递；辅助缺失、异常或超时显式标记降级。未确认业务动作不计作已完成。
+- Hierarchical 的独立增强见 #57，必须以实时 PR 合并状态及同 SHA CI 为准；MCP 外部验收探针见 #56。离线测试不构成真实 ERP/MCP 或生产验收。
+- 旧 Draft #50 由已合入 #51/#52 替代，不重复计算；剩余恢复验收见 Issue #49。
+
 ## 人工客服交接
 
 - [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
