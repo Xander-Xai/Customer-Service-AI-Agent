@@ -127,9 +127,7 @@ class SequentialMode(CollaborationMode):
             timeout_reply="抱歉，响应时间过长，请稍后重试或简化您的提问。",
         )
 
-    async def _execute_single(
-        self, agent, agent_name, state, *, mode, timeout, timeout_reply
-    ) -> dict[str, Any]:
+    async def _execute_single(self, agent, agent_name, state, *, mode, timeout, timeout_reply) -> dict[str, Any]:
         """Common single-agent execution boundary; mode selects policy, not another loop."""
         start = time.time()
         sender = f"{mode}_mode"
@@ -161,6 +159,7 @@ class SequentialMode(CollaborationMode):
             "pending_actions": list(result.get("pending_actions") or []),
             "tool_executions": list(result.get("tool_executions") or []),
         }
+
 
 class ParallelMode(CollaborationMode):
     """并行模式：多 Agent 同时处理 + 结果聚合（v3.4: Semaphore 限流，v3.6: 超时保护）"""
