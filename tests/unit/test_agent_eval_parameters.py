@@ -144,7 +144,9 @@ def test_tool_metric_exclusions_account_for_unreachable_and_fault_cases_once():
     from dataclasses import replace
 
     normal = parse_case(_payload(), 1)
-    fault = parse_case(_payload(case_id="fault", expect_fallback=True, notes="Injected fault before tool"), 2)
+    fault = parse_case(
+        _payload(case_id="fault", expect_fallback=True, notes="Injected fault before tool"), 2
+    )
     observations = [
         replace(_obs("c1", ()), observed_mode="sequential"),
         _obs("fault", ()),
