@@ -399,7 +399,11 @@ async def test_registry_policy_refuses_expired_claim_and_failed_remote_write(sto
 
     with pytest.raises(SideEffectReconciliationRequired):
         await execute_idempotent_operation(
-            **common, operation_key=op_key, arguments=arguments, operation=unexpected_write, store=store
+            **common,
+            operation_key=op_key,
+            arguments=arguments,
+            operation=unexpected_write,
+            store=store,
         )
     assert calls == []
     assert store.get("staging_refund", op_key)["status"] == "PENDING"
@@ -410,10 +414,18 @@ async def test_registry_policy_refuses_expired_claim_and_failed_remote_write(sto
         **common, operation_key=failed_key, fingerprint=request_fingerprint(arguments)
     )
     assert store.mark_failed(
-        "staging_refund", failed_key, error_type="timeout", error_message="unknown", owner=failed.owner
+        "staging_refund",
+        failed_key,
+        error_type="timeout",
+        error_message="unknown",
+        owner=failed.owner,
     )
     with pytest.raises(SideEffectReconciliationRequired):
         await execute_idempotent_operation(
-            **common, operation_key=failed_key, arguments=arguments, operation=unexpected_write, store=store
+            **common,
+            operation_key=failed_key,
+            arguments=arguments,
+            operation=unexpected_write,
+            store=store,
         )
     assert calls == []

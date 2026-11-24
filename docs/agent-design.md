@@ -277,7 +277,7 @@ ReAct 是按 complexity 门槛**按需**启用的。
 ```
 1. fast_path                         → sequential
 2. 投诉：单域                         → sequential（complaint_agent）
-   投诉：产品/订单等跨域               → hierarchical
+   投诉：产品/订单/技术等跨域               → hierarchical
 3. complexity ≥ 阈值 且 ≥2 领域线索   → react
 4. ≥2 领域线索                        → parallel（主责保留、去重）
 5. 命中 consult_map 且 complexity 高   → consultation

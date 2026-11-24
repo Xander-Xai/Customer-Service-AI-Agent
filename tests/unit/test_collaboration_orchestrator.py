@@ -81,6 +81,12 @@ class TestSelectMode:
         assert mode == "hierarchical"
         assert "billing_agent" in ctx["sub_tasks"]
 
+    def test_complaint_with_technical_keywords(self):
+        routing = _routing(query_type="complaint", agent_name="complaint_agent")
+        mode, ctx = self.orch.build_context(routing, _state("我要投诉！皮肤过敏了"))
+        assert mode == "hierarchical"
+        assert set(ctx["sub_tasks"]) == {"complaint_agent", "tech_agent"}
+
     def test_high_complexity_multi_domain_returns_react(self):
         """高复杂度(≥60) + 多领域关键词 → ReAct 模式"""
         routing = _routing(complexity=80, agent_name="general_agent")

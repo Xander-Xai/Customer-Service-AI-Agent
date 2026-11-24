@@ -163,6 +163,8 @@ class CollaborationOrchestrator:
                 sub_tasks["product_agent"] = f"[辅助] 检查产品相关信息：{query}"
             if _has_keywords(query, _BILLING_KEYWORDS):
                 sub_tasks["billing_agent"] = f"[辅助] 检查订单/退款信息：{query}"
+            if _has_keywords(query, _TECH_KEYWORDS):
+                sub_tasks["tech_agent"] = f"[辅助] 检查使用与技术安全问题：{query}"
             if len(sub_tasks) == 1:
                 return "sequential", {"primary_agent": "complaint_agent"}
             return "hierarchical", {"coordinator": "general_agent", "sub_tasks": sub_tasks}
