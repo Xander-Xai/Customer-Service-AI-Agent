@@ -51,6 +51,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -590,13 +591,33 @@ def load_mcp_server_configs(
         if transport not in _SUPPORTED_TRANSPORTS:
             logger.warning("MCP server %s transport 不支持: %s", name, transport)
             continue
+        # JSON arrays are mandatory; strings/dicts must not become tool names
+        # or individual command-line arguments through implicit iteration.
+        args = item.get("args", [])
+        allowed_tools = item.get("allowed_tools", [])
+        if (
+            not isinstance(args, list)
+            or any(not isinstance(arg, str) or "\x00" in arg for arg in args)
+            or not isinstance(allowed_tools, list)
+            or any(
+                not isinstance(tool, str) or not tool.strip() or "\x00" in tool
+                for tool in allowed_tools
+            )
+        ):
+            logger.warning("MCP server %s args / allowed_tools must be string arrays", name)
+            continue
+        raw_timeout = item.get("timeout_seconds", default_timeout)
+        raw_payload = item.get("max_payload_bytes", default_max_payload)
+        if isinstance(raw_timeout, bool) or isinstance(raw_payload, bool):
+            logger.warning("MCP server %s invalid boolean resource limit", name)
+            continue
         try:
-            timeout = float(item.get("timeout_seconds", default_timeout))
-            max_payload = int(item.get("max_payload_bytes", default_max_payload))
-        except (TypeError, ValueError):
+            timeout = float(raw_timeout)
+            max_payload = int(raw_payload)
+        except (TypeError, ValueError, OverflowError):
             logger.warning("MCP server %s 配置数值非法，跳过", name)
             continue
-        if timeout <= 0 or max_payload <= 0:
+        if not math.isfinite(timeout) or timeout <= 0 or max_payload <= 0:
             # 0 / 负值会让"每次调用都超时"或"任何 payload 都超限"，
             # 那是不可用的配置而不是可用的限制。跳过该 server。
             logger.warning(
@@ -610,8 +631,8 @@ def load_mcp_server_configs(
                 transport=transport,
                 url=str(item.get("url", "")),
                 command=str(item.get("command", "")),
-                args=tuple(str(a) for a in item.get("args", []) or []),
-                allowed_tools=tuple(str(t) for t in item.get("allowed_tools", []) or []),
+                args=tuple(args),
+                allowed_tools=tuple(allowed_tools),
                 timeout_seconds=timeout,
                 max_payload_bytes=max_payload,
                 enabled=enabled,
