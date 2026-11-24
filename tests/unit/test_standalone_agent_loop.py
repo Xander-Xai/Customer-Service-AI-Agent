@@ -28,7 +28,9 @@ def test_03_dependent_tools_use_previous_observation():
         if not history:
             return Decision("tool", "order", {"id": 7})
         if len(history) == 1:
-            return Decision("tool", "shipping", {"shipment_id": history[0]["result"]["shipment_id"]})
+            return Decision(
+                "tool", "shipping", {"shipment_id": history[0]["result"]["shipment_id"]}
+            )
         return Decision("finish", response=history[1]["result"])
 
     tools = {
