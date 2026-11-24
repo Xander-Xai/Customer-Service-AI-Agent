@@ -29,6 +29,11 @@ from erp.authorization import sanitize_resource_id
 
 logger = get_logger("erp.kingdee_real")
 
+
+class ERPReadUnavailable(RuntimeError):
+    """A real ERP read could not be verified; not an empty result."""
+
+
 # ---------------------------------------------------------------------------
 # 指数退避重试装饰器
 # ---------------------------------------------------------------------------
@@ -267,9 +272,13 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
                 body["Limit"] = min(self._PAGE_SIZE, remaining)
 
             result = await self._api_call(form_id, "BillQuery", body)
-            rows = result.get("Data", {})
+            if not isinstance(result, dict) or "Data" not in result:
+                raise ERPReadUnavailable("ERP returned an invalid read envelope")
+            rows = result["Data"]
             if isinstance(rows, dict):
-                rows = rows.get("Rows", [])
+                rows = rows.get("Rows")
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ERPReadUnavailable("ERP returned invalid read rows")
             if not rows:
                 break
 
@@ -373,9 +382,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             filter_str = f"FName like '%{safe_keyword}%'" if safe_keyword else ""
             rows = await self._paged_query("BD_MATERIAL", filter_str)
             return [self._map_product(row) for row in rows]
-        except Exception as e:
-            logger.warning(f"产品查询失败: {e}")
-            return []
+        except Exception as exc:
+            logger.warning("产品查询失败: %s", type(exc).__name__)
+            raise ERPReadUnavailable("ERP read unavailable") from None
 
     async def query_inventory(
         self, product_id: str = "", keyword: str = ""
@@ -392,9 +401,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
                 filter_str = ""
             rows = await self._paged_query("STK_INVENTORY", filter_str)
             return [self._map_inventory(row) for row in rows]
-        except Exception as e:
-            logger.warning(f"库存查询失败: {e}")
-            return []
+        except Exception as exc:
+            logger.warning("库存查询失败: %s", type(exc).__name__)
+            raise ERPReadUnavailable("ERP read unavailable") from None
 
     async def query_order(self, order_id: str = "", customer_id: str = "") -> list[dict[str, Any]]:
         """查询订单（映射到金蝶销售订单 SAL_ORDER）"""
@@ -412,9 +421,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
                 filter_str = f"FCUSTID.FNumber='{safe_cid}'"
             rows = await self._paged_query("SAL_ORDER", filter_str)
             return [self._map_order(row) for row in rows]
-        except Exception as e:
-            logger.warning(f"订单查询失败: {e}")
-            return []
+        except Exception as exc:
+            logger.warning("订单查询失败: %s", type(exc).__name__)
+            raise ERPReadUnavailable("ERP read unavailable") from None
 
     async def query_customer(self, customer_id: str) -> dict[str, Any] | None:
         """查询客户资料（映射到金蝶客户表 BD_CUSTOMER）"""
@@ -427,9 +436,9 @@ class KingdeeRealAdapter(KingdeeAdapterBase):
             if not rows:
                 return None
             return self._map_customer(rows[0])
-        except Exception as e:
-            logger.warning(f"客户查询失败: {e}")
-            return None
+        except Exception as exc:
+            logger.warning("客户查询失败: %s", type(exc).__name__)
+            raise ERPReadUnavailable("ERP read unavailable") from None
 
     async def resolve_customer_by_user(self, user_id: str | int | None) -> str | None:
         """P0-03 Remaining Risk #4: 权威 user_id → customer_id 解析。
