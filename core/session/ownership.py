@@ -28,7 +28,9 @@ def _key(sid: str) -> str:
 
 
 def _client():
-    return redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+    return redis.from_url(
+        REDIS_URL, decode_responses=True, socket_connect_timeout=2, socket_timeout=2
+    )
 
 
 async def create_owned_session(user_id: str) -> str:

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.utils import sanitize_input
+from core.industrial import industrial_enabled
 from core.logger import get_logger
 
 
@@ -42,6 +43,13 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
     if not session_id:
         return JSONResponse({"error": "session_id 不能为空"}, status_code=400)
 
+    if industrial_enabled():
+        from api.routes.sessions import require_industrial_session
+
+        await require_industrial_session(request, session_id)
+        if sm is None:
+            return JSONResponse({"error": "Session service unavailable"}, status_code=503)
+
     if sm:
         session = await sm.get_session(session_id)
         if not session or not session.get("messages"):
@@ -69,11 +77,15 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
             db.commit()
         except Exception as e:
             db.rollback()
-            logger.warning(f"反馈数据库写入失败: {e}")
+            logger.warning("Feedback persistence failed: %s", type(e).__name__)
+            if industrial_enabled():
+                return JSONResponse({"error": "Feedback persistence unavailable"}, status_code=503)
         finally:
             db.close()
     except Exception as e:
-        logger.debug(f"反馈数据库模块加载失败: {e}")
+        logger.debug("Feedback storage unavailable: %s", type(e).__name__)
+        if industrial_enabled():
+            return JSONResponse({"error": "Feedback persistence unavailable"}, status_code=503)
 
     if metrics:
         await metrics.record_feedback(resolved=bool(resolved))
@@ -115,7 +127,7 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
             logger.debug(f"Feedback Bus 事件发布失败: {e}")
 
     logger.info(
-        f"[Feedback] session={session_id} resolved={resolved} rating={rating} comment={comment[:50]}"
+        f"[Feedback] session={session_id} resolved={resolved} rating={rating}"
     )
     return {"status": "ok", "session_id": session_id, "resolved": resolved, "rating": rating}
 

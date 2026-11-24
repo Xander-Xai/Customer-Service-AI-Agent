@@ -377,6 +377,10 @@ def decode_token(token: str) -> dict[str, Any] | None:
 
     # v4.0: 检查 jti 是否在吊销黑名单中
     jti = payload.get("jti")
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled() and (not jti or not _denylist._use_redis):
+        return None
     if jti:
         # 本地 LRU 缓存快速拒绝
         if jti in _revoked_jtis:
@@ -390,7 +394,9 @@ def decode_token(token: str) -> dict[str, Any] | None:
                 if _denylist._redis.get(key):
                     return None
             except Exception:
-                pass  # Redis 查询失败时放行（降级行为）
+                if industrial_enabled():
+                    return None
+                # Non-industrial compatibility mode only.
         elif jti in _denylist._memory_set:
             return None
     # PyJWT 要求 sub 为字符串，但下游代码期望 int，这里转回
@@ -410,9 +416,18 @@ async def decode_token_async(token: str) -> dict[str, Any] | None:
         return None
 
     # 检查 jti 是否在吊销黑名单中
+    from core.industrial import industrial_enabled
+
     jti = payload.get("jti")
-    if jti and await _denylist.contains(jti):
+    if industrial_enabled() and (not jti or not _denylist._use_redis):
         return None
+    try:
+        if jti and await _denylist.contains(jti):
+            return None
+    except Exception:
+        if industrial_enabled():
+            return None
+        raise
     with contextlib.suppress(ValueError, TypeError, KeyError):
         payload["sub"] = int(payload["sub"])
     return payload

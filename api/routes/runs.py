@@ -93,6 +93,13 @@ def _check_ownership(request: Request, run: dict) -> bool:
     owner = run.get("user_id")
     if not owner:
         return False  # legacy anonymous records require operator reconciliation
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled():
+        from auth.router import get_current_user_from_request
+
+        actor = get_current_user_from_request(request)
+        return actor is not None and str(actor.id) == str(owner)
     actor = extract_user_id(request)
     return actor is not None and str(actor) == str(owner)
 
@@ -138,7 +145,9 @@ async def create_run(
         if scoped_key:
             existing = service.get_by_idempotency_key(scoped_key)
             if existing is not None:
-                verify_idempotent_request(existing, query=query, session_id=session.sid, user_id=session.user_id)
+                verify_idempotent_request(
+                    existing, query=query, session_id=session.sid, user_id=session.user_id
+                )
                 run_metrics.record_idempotency_hit()
                 return JSONResponse(_serialize(existing), status_code=202)
 
@@ -180,7 +189,11 @@ async def create_run(
             "status": run["status"],
             "thread_id": run["thread_id"],
             "session_id": run["session_id"],
-            "session_token": session.session_manager.generate_session_token(session.sid) if session.session_manager else "",
+            "session_token": (
+                session.session_manager.generate_session_token(session.sid)
+                if session.session_manager
+                else ""
+            ),
         },
         status_code=202,
     )
