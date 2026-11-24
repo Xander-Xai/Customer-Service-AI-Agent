@@ -421,16 +421,23 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             dict(state),
             dict(state.get("_upgrade_context") or {}),
         )
+        # Receipts and approval proposals do not depend on model prose.
+        # An empty response must not drop actions before the second HITL gate.
+        state["collaboration_mode"] = result.get("mode", mode_name)
+        state["agents_used"] = list(result.get("agents_used") or [])
+        state["tool_executions"] = list(result.get("tool_executions") or [])
+        state["pending_actions"] = list(result.get("pending_actions") or [])
+        if result.get("erp_read_status"):
+            state["erp_read_status"] = str(result["erp_read_status"])
+        if result.get("degraded_reason"):
+            state["degraded_reason"] = str(result["degraded_reason"])
         if result.get("response"):
             state["response"] = result["response"]
-            state["collaboration_mode"] = result.get("mode", mode_name)
-            state["agents_used"] = list(result.get("agents_used") or [])
-            state["tool_executions"] = list(result.get("tool_executions") or [])
-            if result.get("erp_read_status"):
-                state["erp_read_status"] = str(result["erp_read_status"])
-            if result.get("degraded_reason"):
-                state["degraded_reason"] = str(result["degraded_reason"])
-            state["pending_actions"] = list(result.get("pending_actions") or [])
+        else:
+            state["response"] = "暂未生成完整答复，请稍后重试。"
+            state["degraded_reason"] = (
+                state.get("degraded_reason") or "mode_upgrade_empty_response"
+            )
         return state
 
     def _select_quality_path(state: AgentState) -> str:

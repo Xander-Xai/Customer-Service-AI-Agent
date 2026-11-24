@@ -388,3 +388,8 @@ Parallel 的关键词命中仅表示辅助领域，不能替代路由主责 Agen
 ### Response cache 与任务事实的边界
 
 图入口的响应缓存不能短路 durable run、图片输入或明确人工接管请求；正常后处理仅在无工具回执、无审批、无转人工状态、无降级且满足既有 resolved 策略时写入。后处理异常的 fallback 不再写缓存。缓存存储层身份隔离保留；本改动不是对同用户多轮上下文、语义误命中或知识新鲜度的完整证明。仍需对单层精确缓存与语义/词面缓存按授权无状态 FAQ 做配对评测；缓存绝不是业务动作凭证。
+
+
+### Quality retry and cache compatibility boundary
+
+An upgraded collaboration may return tool receipts or pending approval proposals without response text. The graph propagates these independently of prose before revisiting HITL; an empty upgraded response is explicitly degraded, not a replay of the prior candidate. Response-cache payload version v3 invalidates legacy entries written before the graph-level eligibility guard. This is a cache compatibility change, not proof of context-independent or privacy-safe semantic reuse; paired cache/quality and real ERP acceptance remain pending.

@@ -85,7 +85,9 @@ _DEFAULT_PUBLIC_INTENTS = frozenset(
 # L2 points whose vectors were not real embeddings of the query. Bumping the
 # payload version makes those legacy points unreadable by the fail-closed
 # provider path even though the response_cache collection is reused.
-CACHE_PAYLOAD_VERSION = "v2"
+# v3: reject entries written before the graph-level business execution and
+# degraded-response cache boundary was introduced.
+CACHE_PAYLOAD_VERSION = "v3"
 
 # 内容版本：当知识库/提示词/产品目录发生大规模变更需要整体失效缓存时提升。
 _DEFAULT_CONTENT_VERSION = "1"
