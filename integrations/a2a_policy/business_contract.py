@@ -34,7 +34,13 @@ SHA = re.compile(r"[0-9a-f]{64}")
 def require_business_config() -> tuple[str, str, str]:
     if os.getenv("A2A_AFTERSALES_ENABLED", "").lower() != "true":
         raise A2AIntegrationDisabled("After-sales A2A is disabled")
-    if os.getenv("APP_ENV", "").lower() not in {"development", "local", "test", "testing", "staging"}:
+    if os.getenv("APP_ENV", "").lower() not in {
+        "development",
+        "local",
+        "test",
+        "testing",
+        "staging",
+    }:
         raise A2AIntegrationDisabled("After-sales peer requires explicit local/staging environment")
     token = os.getenv("A2A_AFTERSALES_TOKEN", "")
     digest = os.getenv("A2A_AFTERSALES_POLICY_SHA256", "")
@@ -53,7 +59,9 @@ def unique_object(pairs):
 
 
 def canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
 
 
 def validate_request(value: Any) -> dict:
@@ -175,10 +183,15 @@ class PolicyCatalog:
         }
         rule = self.rules.get((request["issue"], request["channel"], request["stage"]))
         today = datetime.now(timezone.utc).date()
-        if not rule or not parse_date(rule["valid_from"]) <= today <= parse_date(rule["valid_until"]):
+        if not rule or not parse_date(rule["valid_from"]) <= today <= parse_date(
+            rule["valid_until"]
+        ):
             return {**result, "status": "REVIEW_REQUIRED", "reason": "no_current_matching_rule"}
         return {
             **result,
             "status": "PROCEDURE_FOUND",
-            **{key: rule[key] for key in ("route", "procedure", "source_id", "revision", "valid_until")},
+            **{
+                key: rule[key]
+                for key in ("route", "procedure", "source_id", "revision", "valid_until")
+            },
         }
