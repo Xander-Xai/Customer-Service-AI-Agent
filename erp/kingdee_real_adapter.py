@@ -33,6 +33,7 @@ logger = get_logger("erp.kingdee_real")
 class ERPReadUnavailable(RuntimeError):
     """A real ERP read could not be verified; not an empty result."""
 
+
 # ---------------------------------------------------------------------------
 # 指数退避重试装饰器
 # ---------------------------------------------------------------------------
