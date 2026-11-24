@@ -103,7 +103,7 @@
 | `DATABASE_URL` | - | 数据库 URL（空 = SQLite，生产建议 PostgreSQL） |
 | `DB_DIR` | data | SQLite 数据库目录 |
 | **ERP** | | |
-| `ERP_MODE` | mock | ERP 模式（mock / real） |
+| `ERP_MODE` | mock | ERP 模式（mock / real）；real 配置缺失或初始化失败时拒绝启动适配器，不回退 mock；未知模式拒绝 |
 | `ERP_BASE_URL` | - | 金蝶 API 地址（real 模式必填） |
 | `ERP_APP_ID` | - | 金蝶应用 ID |
 | `ERP_APP_SECRET` | - | 金蝶应用密钥 |

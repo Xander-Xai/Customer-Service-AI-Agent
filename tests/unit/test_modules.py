@@ -2280,8 +2280,8 @@ class TestERPFactory:
             adapter = ef.create_erp_adapter()
             assert adapter.__class__.__name__ == "KingdeeMockAdapter"
 
-    def test_create_real_mode_missing_config_fallback(self):
-        """ERP_MODE=real 但缺少配置时自动降级到 mock"""
+    def test_create_real_mode_missing_config_rejected(self):
+        """ERP_MODE=real 但缺少配置时拒绝初始化"""
         import erp.factory as ef
 
         with (
@@ -2290,9 +2290,9 @@ class TestERPFactory:
             patch.object(ef, "ERP_APP_ID", ""),
             patch.object(ef, "ERP_APP_SECRET", ""),
             patch.object(ef, "ERP_DB_ID", ""),
+            pytest.raises(ef.ERPConfigurationError, match="Missing real ERP configuration"),
         ):
-            adapter = ef.create_erp_adapter()
-            assert adapter.__class__.__name__ == "KingdeeMockAdapter"
+            ef.create_erp_adapter()
 
     def test_create_real_mode_with_valid_config(self):
         """ERP_MODE=real 且配置完整时返回 KingdeeRealAdapter"""
@@ -2302,28 +2302,19 @@ class TestERPFactory:
 
         mock_adapter_cls = MagicMock()
         mock_instance = MagicMock()
-        mock_instance.__class__.__name__ = "KingdeeRealAdapter"
         mock_adapter_cls.return_value = mock_instance
-
         fake_module = types.ModuleType("erp.kingdee_real_adapter")
         fake_module.KingdeeRealAdapter = mock_adapter_cls
 
-        patched_fields = {
-            "ERP_BASE_URL": ("金蝶 Cloud API 地址", "https://kd.example.com"),
-            "ERP_APP_ID": ("应用 ID", "app123"),
-            "ERP_APP_SECRET": ("应用密钥", "secret456"),
-            "ERP_DB_ID": ("账套 ID", "db789"),
-        }
         with (
             patch.object(ef, "ERP_MODE", "real"),
-            patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields),
             patch.object(ef, "ERP_BASE_URL", "https://kd.example.com"),
             patch.object(ef, "ERP_APP_ID", "app123"),
             patch.object(ef, "ERP_APP_SECRET", "secret456"),
             patch.object(ef, "ERP_DB_ID", "db789"),
             patch.dict("sys.modules", {"erp.kingdee_real_adapter": fake_module}),
         ):
-            ef.create_erp_adapter()
+            assert ef.create_erp_adapter() is mock_instance
             mock_adapter_cls.assert_called_once_with(
                 base_url="https://kd.example.com",
                 app_id="app123",
@@ -2331,77 +2322,66 @@ class TestERPFactory:
                 db_id="db789",
             )
 
-    def test_create_real_mode_import_error_fallback(self):
-        """ERP_MODE=real 配置完整但 import 失败时降级到 mock"""
+    def test_create_real_mode_import_error_rejected(self):
+        """ERP_MODE=real 配置完整但 import 失败时拒绝初始化"""
         import erp.factory as ef
 
-        patched_fields = {
-            "ERP_BASE_URL": ("金蝶 Cloud API 地址", "https://kd.example.com"),
-            "ERP_APP_ID": ("应用 ID", "app123"),
-            "ERP_APP_SECRET": ("应用密钥", "secret456"),
-            "ERP_DB_ID": ("账套 ID", "db789"),
-        }
         with (
             patch.object(ef, "ERP_MODE", "real"),
-            patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields),
+            patch.object(ef, "ERP_BASE_URL", "https://kd.example.com"),
+            patch.object(ef, "ERP_APP_ID", "app123"),
+            patch.object(ef, "ERP_APP_SECRET", "secret456"),
+            patch.object(ef, "ERP_DB_ID", "db789"),
             patch.dict("sys.modules", {"erp.kingdee_real_adapter": None}),
+            pytest.raises(ef.ERPConfigurationError, match="initialization failed"),
         ):
-            adapter = ef.create_erp_adapter()
-            assert adapter.__class__.__name__ == "KingdeeMockAdapter"
+            ef.create_erp_adapter()
 
-    def test_unknown_mode_fallback_to_mock(self):
-        """未知 ERP_MODE 时降级到 mock 并输出警告"""
+    def test_unknown_mode_rejected(self):
+        """未知 ERP_MODE 时拒绝初始化"""
         import erp.factory as ef
 
-        with patch.object(ef, "ERP_MODE", "invalid_mode"):
-            adapter = ef.create_erp_adapter()
-            assert adapter.__class__.__name__ == "KingdeeMockAdapter"
+        with (
+            patch.object(ef, "ERP_MODE", "invalid_mode"),
+            pytest.raises(ef.ERPConfigurationError, match="Unsupported ERP_MODE"),
+        ):
+            ef.create_erp_adapter()
 
     def test_validate_real_config_returns_missing_fields(self):
         """_validate_real_config 返回缺失的配置项列表"""
         import erp.factory as ef
 
-        # 必须 patch _REAL_REQUIRED_FIELDS 本身，因为它在模块加载时已捕获值
-        patched_fields = {
-            "ERP_BASE_URL": ("金蝶 Cloud API 地址", ""),
-            "ERP_APP_ID": ("应用 ID", "app"),
-            "ERP_APP_SECRET": ("应用密钥", ""),
-            "ERP_DB_ID": ("账套 ID", "db"),
-        }
-        with patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields):
-            missing = ef._validate_real_config()
-            assert len(missing) == 2
-            assert any("ERP_BASE_URL" in m for m in missing)
-            assert any("ERP_APP_SECRET" in m for m in missing)
+        with (
+            patch.object(ef, "ERP_BASE_URL", ""),
+            patch.object(ef, "ERP_APP_ID", "app"),
+            patch.object(ef, "ERP_APP_SECRET", ""),
+            patch.object(ef, "ERP_DB_ID", "db"),
+        ):
+            assert ef._validate_real_config() == ["ERP_BASE_URL", "ERP_APP_SECRET"]
 
     def test_validate_real_config_all_present(self):
         """所有配置项都有值时返回空列表"""
         import erp.factory as ef
 
-        patched_fields = {
-            "ERP_BASE_URL": ("金蝶 Cloud API 地址", "https://kd.example.com"),
-            "ERP_APP_ID": ("应用 ID", "app"),
-            "ERP_APP_SECRET": ("应用密钥", "secret"),
-            "ERP_DB_ID": ("账套 ID", "db"),
-        }
-        with patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields):
-            missing = ef._validate_real_config()
-            assert missing == []
+        with (
+            patch.object(ef, "ERP_BASE_URL", "https://kd.example.com"),
+            patch.object(ef, "ERP_APP_ID", "app"),
+            patch.object(ef, "ERP_APP_SECRET", "secret"),
+            patch.object(ef, "ERP_DB_ID", "db"),
+        ):
+            assert ef._validate_real_config() == []
 
     def test_validate_real_config_whitespace_only(self):
         """配置项只有空白时视为缺失"""
         import erp.factory as ef
 
-        patched_fields = {
-            "ERP_BASE_URL": ("金蝶 Cloud API 地址", "   "),
-            "ERP_APP_ID": ("应用 ID", "app"),
-            "ERP_APP_SECRET": ("应用密钥", "secret"),
-            "ERP_DB_ID": ("账套 ID", "db"),
-        }
-        with patch.object(ef, "_REAL_REQUIRED_FIELDS", patched_fields):
-            missing = ef._validate_real_config()
-            assert len(missing) == 1
-            assert "ERP_BASE_URL" in missing[0]
+        with (
+            patch.object(ef, "ERP_BASE_URL", "   "),
+            patch.object(ef, "ERP_APP_ID", "app"),
+            patch.object(ef, "ERP_APP_SECRET", "secret"),
+            patch.object(ef, "ERP_DB_ID", "db"),
+        ):
+            assert ef._validate_real_config() == ["ERP_BASE_URL"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
