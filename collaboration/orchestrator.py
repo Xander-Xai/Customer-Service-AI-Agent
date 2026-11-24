@@ -181,7 +181,9 @@ class CollaborationOrchestrator:
             return "react", {"primary_agent": primary_agent}
 
         if len(multi_agent_hints) >= 2:
-            return "parallel", {"agent_list": multi_agent_hints}
+            # Keyword hints identify auxiliary domains; never drop the routed owner.
+            agent_list = list(dict.fromkeys([primary_agent, *multi_agent_hints]))
+            return "parallel", {"agent_list": agent_list}
 
         # 需要专业补充 → 咨询模式
         consult_map = {

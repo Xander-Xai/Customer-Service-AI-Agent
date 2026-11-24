@@ -27,6 +27,7 @@ from core.logger import get_logger, set_trace_id
 from core.state import AgentState
 from core.streaming_context import get_stream_callback
 from router.query_router import RoutingResult
+from runtime.context import get_current_run_id
 from tools.tool_registry import SideEffectExecutionError
 
 logger = get_logger("graph")
@@ -302,9 +303,12 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
             logger.error(f"[{mode_name}] error: {e}", exc_info=True)
-            if isinstance(e, SideEffectExecutionError):
-                # Never convert a failed durable write into a successful
-                # customer-response run. Let AgentRun classify/retry/DLQ it.
+            if isinstance(e, SideEffectExecutionError) or (
+                isinstance(e, TimeoutError) and get_current_run_id()
+            ):
+                # Durable mode deadlines and failed writes belong to AgentRun,
+                # not a successful customer-response fallback. The ledger guards
+                # replay of external writes; local timeout is not proof of nonexecution.
                 raise
             result = {
                 "response": "处理出错，请重试",

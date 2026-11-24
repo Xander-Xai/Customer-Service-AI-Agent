@@ -296,3 +296,29 @@ class TestReactModePropagatesPendingActions:
                 f"{cls.__name__}.execute 没有透传 pending_actions；"
                 "若该模式将来能触发工具调用，高风险动作会被静默丢弃"
             )
+
+
+async def test_durable_collaboration_deadline_reaches_run_owner(hitl_env, monkeypatch):
+    """The real compiled graph must not convert a worker deadline into success."""
+    from unittest.mock import AsyncMock
+
+    from core.container import ServiceContainer
+    from runtime.context import reset_run_context, set_run_context
+
+    container = ServiceContainer()
+    await container.initialize()
+    try:
+        _prepare(container, "staging_readonly_lookup", {"order_id": "HITL-DEADLINE"})
+        mode = container.orchestrator._modes["react"]
+        execute = AsyncMock(side_effect=TimeoutError("collaboration deadline"))
+        monkeypatch.setattr(mode, "execute", execute)
+        thread_id = "hitl-durable-deadline"
+        tokens = set_run_context("hitl-durable-deadline-run", thread_id)
+        try:
+            with pytest.raises(TimeoutError, match="collaboration deadline"):
+                await _drain_graph(container, thread_id=thread_id)
+        finally:
+            reset_run_context(tokens)
+        execute.assert_awaited_once()
+    finally:
+        await container.close()

@@ -352,3 +352,7 @@ Sequential 与 ReAct 共享同一个单 Agent 执行函数，保留原模式标�
 ### 未知外部副作用：禁止盲目接管
 
 真实 ToolRegistry 的副作用执行明确禁止接管已开始但租约过期的 PENDING 行和 FAILED 行；成功且指纹一致仍复用已存结果，尚未开始的 reservation 可首次执行，仍有效的租约返回 in_progress。拒绝接管使用不可重试的 reconciliation-required 异常，保留 ledger 原状态。PostgreSQL 行锁和本地 owner CAS 不能证明下游未执行。低层 claim 的显式接管能力仅为本地故障测试兼容，不是外部写路径的策略。没有下游确认、稳定业务操作标识和受控对账流程前，不得重新发起未知写。此修改仅封住同一 operation_key 的重试，不证明跨新 run、变参或不同逻辑操作键的端到端去重；真正 ERP 的恢复验收仍需授权接口。
+
+### 路由主责与耐久超时边界
+
+Parallel 的关键词命中仅表示辅助领域，不能替代路由主责 Agent；保留主责在首位并稳定去重。协作层的耐久任务 TimeoutError 透传给 AgentRun 分类、重试与对账，不在图层包装成成功回复；普通同步查询的既有降级不变。新增真实编译图超时透传及路由主责回归，均为离线契约，待同 SHA CI；不宣称供应商 exactly-once 或实际业务收益。
