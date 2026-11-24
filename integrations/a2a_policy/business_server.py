@@ -11,12 +11,27 @@ from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_updater import TaskUpdater
 from a2a.types import (
-    AgentCapabilities, AgentCard, AgentInterface, AgentSkill, HTTPAuthSecurityScheme,
-    Part, SecurityRequirement, SecurityScheme, StringList, Task, TaskState, TaskStatus,
+    AgentCapabilities,
+    AgentCard,
+    AgentInterface,
+    AgentSkill,
+    HTTPAuthSecurityScheme,
+    Part,
+    SecurityRequirement,
+    SecurityScheme,
+    StringList,
+    Task,
+    TaskState,
+    TaskStatus,
 )
 
 from integrations.a2a_policy.business_contract import (
-    CARD_NAME, SKILL_ID, PolicyCatalog, canonical, require_business_config, unique_object,
+    CARD_NAME,
+    SKILL_ID,
+    PolicyCatalog,
+    canonical,
+    require_business_config,
+    unique_object,
 )
 from integrations.a2a_policy.contracts import A2AContractError
 from integrations.a2a_policy.server import build_peer_app

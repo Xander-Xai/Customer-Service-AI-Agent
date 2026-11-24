@@ -7,8 +7,16 @@ import os
 from typing import Any
 
 from integrations.a2a_policy.business_contract import (
-    CARD_NAME, CHANNELS, ISSUES, SKILL_ID, STAGES, canonical, require_business_config,
-    unique_object, validate_request, validate_result,
+    CARD_NAME,
+    CHANNELS,
+    ISSUES,
+    SKILL_ID,
+    STAGES,
+    canonical,
+    require_business_config,
+    unique_object,
+    validate_request,
+    validate_result,
 )
 from integrations.a2a_policy.client import delegate_readonly_task
 from integrations.a2a_policy.contracts import A2AContractError
@@ -18,8 +26,13 @@ async def review_after_sales_procedure(request: dict, *, httpx_client: Any | Non
     base_url, token, digest = require_business_config()
     request = validate_request(request)
     response = await delegate_readonly_task(
-        canonical(request), base_url=base_url, token=token, card_name=CARD_NAME,
-        skill_id=SKILL_ID, max_chars=4000, httpx_client=httpx_client,
+        canonical(request),
+        base_url=base_url,
+        token=token,
+        card_name=CARD_NAME,
+        skill_id=SKILL_ID,
+        max_chars=4000,
+        httpx_client=httpx_client,
     )
     try:
         result = json.loads(response, object_pairs_hook=unique_object)

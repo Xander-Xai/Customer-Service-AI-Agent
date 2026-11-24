@@ -14,7 +14,11 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from integrations.a2a_policy.contracts import A2AContractError, A2AIntegrationDisabled, validate_loopback_base_url
+from integrations.a2a_policy.contracts import (
+    A2AContractError,
+    A2AIntegrationDisabled,
+    validate_loopback_base_url,
+)
 
 ISSUES = ("damaged", "wrong_item", "return_request", "delivery_delay", "invoice")
 CHANNELS = ("online", "store", "distributor", "unknown")
@@ -78,9 +82,12 @@ def validate_result(value: Any, request: dict, digest: str) -> dict:
     }
     if any(canonical(value.get(key)) != canonical(expected) for key, expected in common.items()):
         raise A2AContractError("Policy artifact identity or authorization mismatch")
-    if value.get("status") == "REVIEW_REQUIRED" and set(value) == set(common) | {"status", "reason"}:
-        if value["reason"] == "no_current_matching_rule":
-            return value
+    if (
+        value.get("status") == "REVIEW_REQUIRED"
+        and set(value) == set(common) | {"status", "reason"}
+        and value["reason"] == "no_current_matching_rule"
+    ):
+        return value
     if value.get("status") != "PROCEDURE_FOUND" or set(value) != set(common) | {
         "status", "route", "procedure", "source_id", "revision", "valid_until"
     }:
