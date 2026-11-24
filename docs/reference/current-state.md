@@ -1,5 +1,7 @@
 # 当前事实入口 (Current State)
 
+> **2026-11-25 核查增量**：#81 已合入 main，真实轨迹评测保留失败/不可达样本；#80 reviewed-gold 与 #82 provider attempt metering 尚未合并（核查快照，实时状态以 PR 为准）。新增 [工业运行时治理候选](../architecture/industrial-runtime-admission.md)；严格模式及回归用例须在候选合并与 CI 后才计入 main。
+
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
 > 带日期的历史审计报告（如 docs/reports/plans/**）只是当时的快照，不等于当前事实。
