@@ -189,6 +189,7 @@ class AgentRuntime:
         state: dict[str, Any] = {
             "session_id": thread_id,
             "episode_run_id": get_current_run_id(),
+            "episode_completed_run_id": None,
             "user_id": user_id,
             "current_agent": "",
             "customer_query": query,
