@@ -125,4 +125,3 @@ async def lookup_synthetic_faq(
             return await call(client)
     except (httpx.HTTPError, TimeoutError, OSError):
         raise A2AContractError("Synthetic A2A peer unavailable") from None
-

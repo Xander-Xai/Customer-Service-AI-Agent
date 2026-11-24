@@ -119,9 +119,7 @@ def build_app(base_url: str = "http://127.0.0.1:41243") -> FastAPI:
                 )
             )
         },
-        security_requirements=[
-            SecurityRequirement(schemes={"demo_bearer": StringList(list=[])})
-        ],
+        security_requirements=[SecurityRequirement(schemes={"demo_bearer": StringList(list=[])})],
     )
     handler = DefaultRequestHandler(
         agent_executor=SyntheticFAQExecutor(),
@@ -147,7 +145,7 @@ def build_app(base_url: str = "http://127.0.0.1:41243") -> FastAPI:
             return JSONResponse({"detail": "Not found"}, status_code=404)
         auth = request.headers.get("authorization", "")
         prefix = "Bearer "
-        if not auth.startswith(prefix) or not hmac.compare_digest(auth[len(prefix):], secret):
+        if not auth.startswith(prefix) or not hmac.compare_digest(auth[len(prefix) :], secret):
             return JSONResponse(
                 {"detail": "A2A peer authentication required"},
                 status_code=401,

@@ -3,6 +3,7 @@
 The dedicated .github/workflows/a2a-interop.yml MUST install the SDK and run
 these tests. The default repository suite may skip when optional SDK is absent.
 """
+
 import asyncio
 import os
 import socket
@@ -32,9 +33,7 @@ def app(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_card_discovery_and_bearer_protection(app):
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url=BASE
-    ) as peer:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE) as peer:
         card_response = await peer.get("/.well-known/agent-card.json")
         assert card_response.status_code == 200
         card = card_response.json()

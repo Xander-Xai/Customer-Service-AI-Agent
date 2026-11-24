@@ -38,7 +38,9 @@ def require_demo_enabled() -> None:
     if os.getenv("A2A_FAQ_EXPERIMENT_ENABLED", "").lower() != "true":
         raise A2AIntegrationDisabled("A2A experiment is disabled")
     if os.getenv("APP_ENV", "").lower() not in {"development", "local", "test", "testing"}:
-        raise A2AIntegrationDisabled("A2A experiment is allowed only in explicit local/test environments")
+        raise A2AIntegrationDisabled(
+            "A2A experiment is allowed only in explicit local/test environments"
+        )
 
 
 def require_token() -> str:
