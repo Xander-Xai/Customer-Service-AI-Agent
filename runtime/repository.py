@@ -243,6 +243,13 @@ class AgentRunRepository:
         finally:
             session.close()
 
+    def inspect_task_episode(self, run_id: str) -> dict[str, Any] | None:
+        """Read a bounded handoff projection from the existing durable tables."""
+        from .task_episode import read_task_episode
+
+        with self._session() as session:
+            return read_task_episode(session, run_id)
+
     def get_by_idempotency_key(self, key: str) -> dict[str, Any] | None:
         session = self._session()
         try:
