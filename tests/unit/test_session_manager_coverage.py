@@ -254,22 +254,21 @@ class TestSummaryGeneration:
         assert "摘要" in result
 
     @pytest.mark.asyncio
-    async def test_summary_failure_never_logs_customer_secret(self, caplog):
-        """日志只写异常类型，不向日志泄露供应商错误里的客户敏感信息。"""
+    async def test_summary_failure_never_logs_customer_secret(self):
+        """日志只记录异常类型，不转储客户敏感信息；不依赖自定义处理器的 caplog。"""
         sm = _make_sm()
         mock_llm = AsyncMock()
-        mock_llm.async_invoke = AsyncMock(
-            side_effect=RuntimeError("secret-customer-order-123")
-        )
+        mock_llm.async_invoke = AsyncMock(side_effect=RuntimeError("secret-customer-order-123"))
         sm.llm = mock_llm
 
-        with caplog.at_level("WARNING"):
-            result = await sm._generate_summary_async(
-                [{"role": "user", "content": "隐私订单"}], "existing"
-            )
+        with patch("core.session.session_manager.logger.warning") as warning:
+            result = await sm._generate_summary_async([{"role": "user", "content": "隐私订单"}], "existing")
         assert result == "existing"
-        assert "RuntimeError" in caplog.text
-        assert "secret-customer-order-123" not in caplog.text
+        warning.assert_called_once()
+        format_string, exception_type = warning.call_args.args
+        assert "异常类型" in format_string
+        assert exception_type == "RuntimeError"
+        assert "secret-customer-order-123" not in repr(warning.call_args)
 
     @pytest.mark.asyncio
     async def test_generate_summary_llm_error_returns_existing(self):
