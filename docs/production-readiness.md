@@ -33,7 +33,8 @@
 | 混合检索 RAG | `rag/` | Qdrant + BM25 → RRF → cross-encoder rerank，确定性 point ID |
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
 | Tool Result Context Engineering | `core/tool_result_*.py` | 预算/压缩/offload/recovery/scope-safe reuse |
-| Function Calling + MCP 适配器 | `tools/` | MCP 默认关闭，read-only-first，11 条 fail-closed 策略 |
+| Function Calling + MCP 适配器 | `tools/` | MCP 默认关闭，read-only-first，SKU 文档接入；授权目录与实际业务待验证 |
+| A2A 售后程序专家 | `integrations/a2a_policy/` | 默认关闭，独立只读规则服务，当前合并能力仅 loopback；生产网络和实际目录待验证 |
 | 分布式 Agent Runtime | `runtime/` | AgentRun 唯一真相源 · Postgres checkpoint · Redis 锁 · Celery worker · 三层幂等 · DLQ 重放 · run 事件流 |
 | Human-in-the-Loop 审批治理 | `core/hitl/` · `runtime/statuses.py` | 执行前拦截 · durable 审批 · 职责分离 · TTL 拒绝优先 · 审批幂等双防线 |
 | FastAPI 服务与安全 | `api/` · `auth/` | JWT + Argon2id + 4 级 RBAC · CSRF 双提交 · CSP nonce · 限流 · SSRF 防护 |
@@ -81,7 +82,8 @@
 | 生产 QPS / P95 / P99 / Token 成本 / FCR / 满意度 | `NOT_MEASURED` | 有 benchmark 脚本，但无 SLO 定义、无生产基线 |
 | 持久化、可查询的 trace 后端（Jaeger / Tempo / Langfuse） | `NOT_VERIFIED` | 被验证的 Collector 只有 `debug` exporter，无存储/UI |
 | Nginx 多副本横向扩容（upstream 分发） | `NOT_VERIFIED` | 多副本可渲染，未在真实部署验证 |
-| 真实第三方 MCP server（网络/鉴权/写工具） | `NOT_VERIFIED` | 只有 deterministic fake-server 契约测试 |
+| 真实第三方 MCP server（网络/鉴权/写工具） | `NOT_VERIFIED` | 有确定性协议及第一方 SKU 文档契约；真实第三方服务与真实授权目录尚未验收 |
+| 真实 A2A 售后业务 | `NOT_VERIFIED` | 有独立 SDK 和规则引擎契约；真实授权目录、生产网络与模型路由尚未验收 |
 | 生产 worker autoscaling / backpressure / admission control | `NOT_VERIFIED` | 无自动扩缩与准入控制 |
 | 审批主动通知（push / 邮件 / IM）、审批 SLA | `NOT_VERIFIED` / `NOT_MEASURED` | 只有轮询队列 |
 | Agent 行为回归评测（Agent Eval V1） | `LEVEL_2_APPLICATION_MEASURED` | 已实现评测框架与**真实图脚本化回放**（零出网、JSONL 用例集、显式分子/分母/证据边界）。测编排/治理/路由行为，**不测**模型能力；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
@@ -107,6 +109,8 @@
 [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md)。
 
 ### P0 — 上线前必须闭环（否则存在静默故障/安全边界缺口）
+
+上线按业务能力签署验收，而不是仅依据服务能启动：真实 ERP 路径须有授权、写入结果对账与未知结果拒绝重试；模拟 ERP 不得作为真实客户订单事实。生产会话须强制加密并验证旧明文迁移；响应缓存须证明授权、无状态和新鲜度边界，未完成配对评估时不宣称语义缓存安全。HITL 与人工坐席需要独立业务值班流程。任何未通过的真实业务能力不得开放给真实客户。
 
 1. ~~**监控序列化闭环**~~ **已完成**：`GET /metrics` 序列化真实 REGISTRY +
    `PROMETHEUS_MULTIPROC_DIR` 跨进程聚合 + `bearer_token_file` 抓取凭据；

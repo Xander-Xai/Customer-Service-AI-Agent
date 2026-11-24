@@ -28,7 +28,7 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
-**A2A 1.0 专项（2026-11-24 后续工程补强，默认关闭）**：新增独立启动的只读合成 FAQ 专家服务、官方 A2A SDK 的 Agent Card / JSON-RPC / Task 交互及 ReAct 工具适配，**不传真实客户、订单或退款资料**；这不是历史任职时已部署的 A2A 证据。见 [A2A 服务边界与验收](docs/architecture/a2a-remote-faq-boundary-20261124.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+**业务协议边界（后续工程补强，默认关闭）**：MCP 已接入可由产品文档责任方提供的、摘要锁定的 SKU 使用/存储/包装说明（#72）；A2A 已接入独立售后流程专家（#73），只处理枚举化问题/渠道/阶段，不授权退款、不查询 ERP；当前已合并的业务 A2A 仅支持 loopback。原合成 FAQ 仅作协议回归。真实授权目录、网络与业务验收仍未完成，不是历史任职时已部署的证据。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
 
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 
@@ -36,7 +36,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
-不是 demo：`make test` 默认**离线**可跑（无 API Key、不出公网）；CI 在 3 个 Python
+**可运行的工程参考实现，不等于生产上线认证**：`make test` 默认**离线**可跑（无 API Key、不出公网）；CI 在 3 个 Python
 版本上跑单测/集成，并在**真实** PostgreSQL + Redis 上跑分布式运行时验收
 （依赖缺失时硬 FAIL，不静默 skip）。
 
@@ -55,7 +55,7 @@
 > GHCR 镜像由 `build-and-push` 构建，`deploy` 另受 `DEPLOY_HOST` 配置门控。
 > 生产验收证据见 [Production Readiness](docs/production-readiness.md)。
 
-**当前实现**见 [当前事实入口](docs/reference/current-state.md)。转人工工单后端已合入，默认关闭。
+**当前实现**见 [当前事实入口](docs/reference/current-state.md)，上线验收按 [生产准备度](docs/production-readiness.md) 逐项执行；直接 ERP 领域只读调用使用授权适配器而非 ToolRegistry，详见 [工具边界](docs/design/tool-execution-boundaries.md)。转人工工单后端已合入，默认关闭。
 坐席 Web 工作台的交付状态以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。
 
 **实时状态** · [`main` 提交](https://github.com/Xander-Xai/Customer-Service-AI-Agent/commits/main/) · [Pull Requests](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pulls) · [Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) · [Actions](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions?query=branch%3Amain) · [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)。核对分支 HEAD、PR 合并状态和同一 SHA 的 Actions。
@@ -421,7 +421,7 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 
 ### 工具执行的统一边界
 
-所有工具（含 MCP）必须穿过 `ToolRegistry.execute_raw`，因此能统一做授权、超时、
+原生 Function Calling 工具与 MCP 注册工具经过 `ToolRegistry.execute_raw`，因此可统一做授权、超时、
 幂等、缓存、脱敏、埋点。**模型永远拿不到 tool store 的访问权**——只能用
 `recover_tool_result(reference_id)`，而这仍受 scope 精确校验
 （不同 `(user_id, session_id)` 拿不到别人的结果）。否则一次 prompt injection
