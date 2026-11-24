@@ -68,7 +68,9 @@ async def delegate_readonly_task(
 ) -> str:
     """Shared SDK transport; caller defines the trusted peer and result contract."""
     base_url = (
-        validate_private_https_base_url(base_url) if tls_ca_file else validate_loopback_base_url(base_url)
+        validate_private_https_base_url(base_url)
+        if tls_ca_file
+        else validate_loopback_base_url(base_url)
     )
     expected_rpc_url = base_url + "/a2a/jsonrpc"
 

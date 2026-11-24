@@ -103,9 +103,7 @@ async def test_peer_rejects_actual_oversized_chunked_rpc_before_sdk(catalog):
     ) as peer:
         response = await peer.post("/a2a/jsonrpc", content=chunks())
         assert response.status_code == 413
-        response = await peer.post(
-            "/a2a/jsonrpc", content=b"{}", headers={"Content-Length": "1"}
-        )
+        response = await peer.post("/a2a/jsonrpc", content=b"{}", headers={"Content-Length": "1"})
         assert response.status_code == 400
         response = await peer.post(
             "/a2a/jsonrpc",

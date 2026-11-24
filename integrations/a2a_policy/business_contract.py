@@ -42,13 +42,19 @@ def require_business_config() -> tuple[str, str, str]:
             raise A2AIntegrationDisabled("Private HTTPS peer requires staging or production")
         require_private_ca_file()
     elif environment not in {"development", "local", "test", "testing", "staging"}:
-        raise A2AIntegrationDisabled("Production peer requires explicit private HTTPS configuration")
+        raise A2AIntegrationDisabled(
+            "Production peer requires explicit private HTTPS configuration"
+        )
     token = os.getenv("A2A_AFTERSALES_TOKEN", "")
     digest = os.getenv("A2A_AFTERSALES_POLICY_SHA256", "")
     if not re.fullmatch(r"[A-Za-z0-9._~-]{32,256}", token) or not SHA.fullmatch(digest):
         raise A2AIntegrationDisabled("Explicit peer token and approved policy digest required")
     endpoint = os.getenv("A2A_AFTERSALES_ENDPOINT", "")
-    base_url = validate_private_https_base_url(endpoint) if remote else validate_loopback_base_url(endpoint)
+    base_url = (
+        validate_private_https_base_url(endpoint)
+        if remote
+        else validate_loopback_base_url(endpoint)
+    )
     return base_url, token, digest
 
 
