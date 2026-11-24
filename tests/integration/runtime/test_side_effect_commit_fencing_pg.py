@@ -692,7 +692,6 @@ def test_failure_record_is_never_lost_to_a_long_error_type(pg_engine, store, new
     nothing can clear. Every retry then hit ``CLAIM_IN_PROGRESS`` and burned the
     budget into DLQ, while the outcome of the external write was never recorded.
     """
-    tool, key = new_op()
 
     class ToolExecutionTimeout(Exception):
         """20 chars — longer than the column."""
@@ -704,6 +703,8 @@ def test_failure_record_is_never_lost_to_a_long_error_type(pg_engine, store, new
         ToolExecutionTimeout("ERP 未在超时内返回"),
         AVeryLongExceptionClassNameThatOverflowsTheColumn(),
     ):
+        # Each failure is a separate logical write; unknown writes must not replay.
+        tool, key = new_op()
         with pytest.raises(type(boom)) as excinfo:
             asyncio.run(
                 execute_idempotent_operation(
@@ -728,6 +729,24 @@ def test_failure_record_is_never_lost_to_a_long_error_type(pg_engine, store, new
         assert row["error_type"] is not None
         # 完整类名仍保留在 error_message（Text 列，不裁），信息不丢。
         assert type(boom).__name__ in row["error_message"], row
+
+        from runtime.errors import SideEffectReconciliationRequired
+
+        with pytest.raises(SideEffectReconciliationRequired):
+            asyncio.run(
+                execute_idempotent_operation(
+                    tool_name=tool,
+                    operation_key=key,
+                    run_id="run-a",
+                    thread_id="T-fence",
+                    arguments={"amount": 100},
+                    operation=lambda: pytest.fail("unknown external write must not replay"),
+                    store=store,
+                    claim_ttl_seconds=_FRESH_TTL,
+                    min_claim_ttl_seconds=1.0,
+                )
+            )
+        assert read_row(pg_engine, tool, key)["status"] == "FAILED"
 
 
 @requires_infra

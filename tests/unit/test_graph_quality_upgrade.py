@@ -133,3 +133,23 @@ async def test_graph_router_does_not_prefetch_knowledge_for_direct_task(monkeypa
         prefetch.assert_not_awaited()
     finally:
         await container.close()
+
+
+async def test_empty_upgraded_response_preserves_tool_receipt_and_disables_cache(monkeypatch):
+    monkeypatch.setattr("core.config.EVAL_RETRY_ENABLED", True)
+    monkeypatch.setattr("core.config.MODE_UPGRADE_ENABLED", True)
+    monkeypatch.setattr("core.config.EVAL_RETRY_THRESHOLD", 30)
+    first = _Mode("sequential", "这是初次回答，针对客户问题仍然缺乏必要细节说明。")
+    receipt = {"tool": "query_order", "ok": True}
+    upgraded = _Mode("consultation", "", tool_executions=[receipt])
+    container, cache = await _make_container(first, upgraded)
+    try:
+        observed = await _drain_graph(container, thread_id=f"empty-upgrade-{uuid4().hex}")
+        assert upgraded.calls == 1
+        assert observed["tool_executions"] == [receipt]
+        assert observed["collaboration_mode"] == "consultation"
+        assert observed["degraded_reason"] == "mode_upgrade_empty_response"
+        assert observed["response"] != first.response
+        assert cache.writes == []
+    finally:
+        await container.close()

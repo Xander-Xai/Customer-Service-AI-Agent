@@ -252,7 +252,7 @@ class TestConsultationMode:
         assert "product_agent" in result["agents_used"]
 
     @pytest.mark.asyncio
-    async def test_blackboard_data_injected(self):
+    async def test_prior_turn_blackboard_not_injected(self):
         bus, bb = _mock_bus(), _mock_bb()
         bb.read_prefix = AsyncMock(return_value={"erp.result": {"response": "ERP 补充信息"}})
         mode = ConsultationMode(bus=bus, bb=bb)
@@ -265,6 +265,9 @@ class TestConsultationMode:
         )
 
         assert result["response"] == "主回答"
+        passed_state = agents["product_agent"].process_with_retry.call_args.args[0]
+        assert passed_state["customer_query"] == "查订单"
+        bb.read_prefix.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_consultee_not_found_skipped(self):
@@ -365,7 +368,7 @@ class TestHierarchicalMode:
         assert result["degraded_reason"] == "hierarchical_subtask_timeout"
 
     @pytest.mark.asyncio
-    async def test_blackboard_subtask_data_merged(self):
+    async def test_prior_turn_blackboard_not_used_for_summary(self):
         bus, bb = _mock_bus(), _mock_bb()
         bb.read_prefix = AsyncMock(
             return_value={"hierarchical.subtask.extra_agent": {"response": "BB 数据"}}
@@ -380,6 +383,10 @@ class TestHierarchicalMode:
         )
 
         assert result["response"] == "汇总"
+        passed_state = agents["general_agent"].process_with_retry.call_args.args[0]
+        assert "BB 数据" not in passed_state["customer_query"]
+        assert "extra_agent" not in passed_state["customer_query"]
+        bb.read_prefix.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_empty_sub_tasks(self):
@@ -660,3 +667,178 @@ async def test_parallel_caller_cancellation_drains_all_children():
         with pytest.raises(asyncio.CancelledError):
             await task
     assert all(event.is_set() for event in drained)
+
+
+@pytest.mark.asyncio
+async def test_parallel_duplicate_role_executes_once():
+    primary = _mock_agent("一次")
+    result = await ParallelMode().execute(
+        {"product_agent": primary},
+        _state(),
+        {"agent_list": ["product_agent", "product_agent"]},
+    )
+    assert result["agents_used"] == ["product_agent"]
+    primary.process_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_consultation_excludes_self_and_duplicate_auxiliary():
+    primary = _mock_agent("主答")
+    auxiliary = _mock_agent("本轮证据")
+    result = await ConsultationMode().execute(
+        {"product_agent": primary, "tech_agent": auxiliary},
+        _state(),
+        {
+            "primary_agent": "product_agent",
+            "consult_agents": ["product_agent", "tech_agent", "tech_agent"],
+        },
+    )
+    primary.process_with_retry.assert_awaited_once()
+    auxiliary.process_with_retry.assert_awaited_once()
+    assert result["agents_used"] == ["product_agent", "tech_agent"]
+    assert "本轮证据" in primary.process_with_retry.call_args.args[0]["customer_query"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_mode", ["consultation", "hierarchical"])
+async def test_supervisor_profiles_share_partial_result_contract(legacy_mode):
+    from collaboration.modes import SupervisorWorkersMode
+
+    receipt = {"tool": "read_order", "status": "success"}
+    approval = {"tool": "refund", "arguments": {"order_id": "synthetic"}}
+    good = _mock_agent()
+    good.process_with_retry.return_value = {
+        "response": "current evidence",
+        "tool_executions": [receipt],
+        "pending_actions": [approval],
+    }
+    cancelled = asyncio.Event()
+
+    async def slow(_state):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    manager = _mock_agent("summary")
+    agents = {"general_agent": manager, "good": good, "slow": _mock_agent(side_effect=slow)}
+    if legacy_mode == "consultation":
+        mode = ConsultationMode(consult_timeout=0.05)
+        context = {"consult_agents": ["good", "slow"]}
+    else:
+        mode = HierarchicalMode()
+        mode._HIERARCHICAL_TIMEOUT = 0.05
+        context = {"sub_tasks": {"good": "read", "slow": "read"}}
+    assert isinstance(mode, SupervisorWorkersMode)
+    result = await mode.execute(agents, _state(), context)
+    assert result["agents_used"] == ["general_agent", "good"]
+    assert result["tool_executions"] == [receipt]
+    assert result["pending_actions"] == [approval]
+    assert result["degraded_reason"].endswith("timeout")
+    assert cancelled.is_set()
+    manager.process_with_retry.assert_awaited_once()
+    assert "current evidence" in manager.process_with_retry.call_args.args[0]["customer_query"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_cannot_execute_itself_as_worker():
+    manager = _mock_agent("summary")
+    result = await HierarchicalMode().execute(
+        {"general_agent": manager},
+        _state(),
+        {"sub_tasks": {"general_agent": "duplicate"}},
+    )
+    manager.process_with_retry.assert_awaited_once()
+    assert result["agents_used"] == ["general_agent"]
+    assert result["degraded_reason"] == "hierarchical_subtask_missing_or_empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "intent", "primary", "complexity", "selected", "gold", "expected_calls"),
+    [
+        (
+            "我要投诉",
+            "complaint",
+            "complaint_agent",
+            70,
+            "sequential",
+            {"complaint_agent"},
+            1,
+        ),
+        (
+            "产品和退款问题",
+            "product_info",
+            "product_agent",
+            30,
+            "parallel",
+            {"product_agent", "billing_agent"},
+            2,
+        ),
+        (
+            "我要投诉！皮肤过敏了",
+            "complaint",
+            "complaint_agent",
+            70,
+            "hierarchical",
+            {"complaint_agent", "tech_agent"},
+            3,
+        ),
+    ],
+)
+async def test_paired_routing_architecture_contract(
+    query, intent, primary, complexity, selected, gold, expected_calls
+):
+    """Matched synthetic task: actual executors, fixed role facts, no provider calls.
+
+    The fixture tests role coverage and execution counts, not real answer quality.
+    Each arm has fresh agents and the same input, with an independent role oracle.
+    """
+    from collaboration import CollaborationOrchestrator, RoutingMode
+    from router.query_router import RoutingResult
+
+    def make_agents():
+        agents = {}
+        for role in ("complaint_agent", "tech_agent", "product_agent", "billing_agent"):
+            agent = _mock_agent(role)
+            agent.process_with_retry.return_value = {
+                "response": role,
+                "tool_executions": [{"role": role}],
+            }
+            agents[role] = agent
+
+        async def synthesize(state):
+            return {"response": state["customer_query"]}
+
+        agents["general_agent"] = _mock_agent(side_effect=synthesize)
+        return agents
+
+    def coverage(result):
+        return {record["role"] for record in result["tool_executions"]}
+
+    def calls(agents):
+        return sum(agent.process_with_retry.await_count for agent in agents.values())
+
+    routing = RoutingResult(
+        query_type=intent,
+        agent_name=primary,
+        complexity=complexity,
+        fast_path=False,
+    )
+    orchestrator = CollaborationOrchestrator(_mock_bus(), _mock_bb())
+    state = _state(query)
+    mode, context = orchestrator.build_context(routing, state)
+    assert mode == selected
+
+    baseline_agents = make_agents()
+    baseline = await RoutingMode().execute(baseline_agents, state, {"primary_agent": primary})
+    selected_agents = make_agents()
+    result = await orchestrator._modes[mode].execute(selected_agents, state, context)
+
+    assert calls(baseline_agents) == 1
+    assert coverage(baseline) == {primary}
+    assert calls(selected_agents) == expected_calls
+    assert coverage(result) == gold
+    assert all(role in result["response"] for role in gold)
+    assert not result.get("degraded_reason")
+    assert state["customer_query"] == query

@@ -7,6 +7,7 @@ No customer messages, memory, PII, order IDs or ERP results are ever forwarded.
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlsplit
 
 ALLOWED_TOPICS = frozenset({"returns_demo", "shipping_demo", "invoice_demo"})
@@ -72,6 +73,35 @@ def validate_loopback_base_url(base_url: str) -> str:
     ):
         raise A2AContractError("A2A demo endpoint must be an explicit loopback HTTP host:port")
     return f"http://{parsed.hostname}:{parsed.port}"
+
+
+def validate_private_https_base_url(base_url: str) -> str:
+    """Operator-pinned DNS identity, never a model-supplied URL."""
+    if not isinstance(base_url, str) or len(base_url) > 180:
+        raise A2AContractError("Invalid configured private peer endpoint")
+    try:
+        parsed = urlsplit(base_url)
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        raise A2AContractError("Invalid configured private peer endpoint") from None
+    labels = host.split(".")
+    if (
+        parsed.scheme != "https"
+        or len(labels) < 2
+        or all(label.isdigit() for label in labels)
+        or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+        or host.endswith(".localhost")
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+        or parsed.netloc != (f"{host}:{port}" if port is not None else host)
+        or port == 0
+    ):
+        raise A2AContractError("Private A2A endpoint requires an exact HTTPS DNS name")
+    return f"https://{parsed.netloc}"
 
 
 def synthetic_policy_answer(topic: str) -> str:

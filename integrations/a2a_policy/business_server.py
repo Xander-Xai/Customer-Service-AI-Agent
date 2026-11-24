@@ -113,6 +113,7 @@ def build_business_app(catalog_path: Path):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
+    parser.add_argument("--listen-port", type=int, default=41243)
     parser.add_argument("--authorized-customer-disclosure", action="store_true", required=True)
     args = parser.parse_args()
     app = build_business_app(args.catalog)
@@ -121,7 +122,12 @@ def main() -> None:
     import uvicorn
 
     base_url, _, _ = require_business_config()
-    uvicorn.run(app, host="127.0.0.1", port=urlsplit(base_url).port)
+    # Private HTTPS is terminated by the operator-managed reverse proxy.
+    # Never bind this plaintext service to a public interface.
+    port = args.listen_port if base_url.startswith("https://") else urlsplit(base_url).port
+    if port is None or not 1 <= port <= 65535:
+        parser.error("invalid peer listen port")
+    uvicorn.run(app, host="127.0.0.1", port=port, proxy_headers=False)
 
 
 if __name__ == "__main__":

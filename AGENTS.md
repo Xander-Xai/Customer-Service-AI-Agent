@@ -19,3 +19,5 @@
 
 ## Architecture change gate
 - Follow [architecture decision freeze](docs/architecture.md#architecture-decision-freeze--2026-11-25). No new autonomous role, framework or remote boundary without a concrete business need, simpler baseline, failure contract and regression evidence. ResponseAgent is a deterministic postprocessor; never claim ERP exactly-once from local CAS/ledger. Separate architecture simplification from capability-gap work.
+
+- Response text cache must not short-circuit durable work or replace tool/approval receipts. Keep response cache eligibility shared by the actual graph read and normal finalization write; fallback finalization must not cache. Do not claim semantic matching safety without independent evaluation.

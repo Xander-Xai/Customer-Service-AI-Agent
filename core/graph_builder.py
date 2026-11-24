@@ -22,11 +22,13 @@ import time
 
 from langgraph.graph import StateGraph
 
+from cache.cache_policy import graph_response_cache_allowed
 from core.container import ServiceContainer
 from core.logger import get_logger, set_trace_id
 from core.state import AgentState
 from core.streaming_context import get_stream_callback
 from router.query_router import RoutingResult
+from runtime.context import get_current_run_id
 from tools.tool_registry import SideEffectExecutionError
 
 logger = get_logger("graph")
@@ -244,7 +246,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
-        if c.cache is not None:
+        if c.cache is not None and graph_response_cache_allowed(
+            state, durable_run=bool(get_current_run_id())
+        ):
             # P0-02: 读取端携带可信 user_id，缓存按 read_scope_keys 探测
             # SHARED + 调用方作用域。读取发生在路由分类前，intent 未知，故不传 intent_type。
             cache_metadata = {
@@ -315,9 +319,12 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             result = await mode.execute(c.agents_dict, dict(state), ctx)
         except Exception as e:
             logger.error(f"[{mode_name}] error: {e}", exc_info=True)
-            if isinstance(e, SideEffectExecutionError):
-                # Never convert a failed durable write into a successful
-                # customer-response run. Let AgentRun classify/retry/DLQ it.
+            if isinstance(e, SideEffectExecutionError) or (
+                isinstance(e, TimeoutError) and get_current_run_id()
+            ):
+                # Durable mode deadlines and failed writes belong to AgentRun,
+                # not a successful customer-response fallback. The ledger guards
+                # replay of external writes; local timeout is not proof of nonexecution.
                 raise
             result = {
                 "response": "处理出错，请重试",
@@ -427,16 +434,21 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             dict(state),
             dict(state.get("_upgrade_context") or {}),
         )
+        # Receipts and approval proposals do not depend on model prose.
+        # An empty response must not drop actions before the second HITL gate.
+        state["collaboration_mode"] = result.get("mode", mode_name)
+        state["agents_used"] = list(result.get("agents_used") or [])
+        state["tool_executions"] = list(result.get("tool_executions") or [])
+        state["pending_actions"] = list(result.get("pending_actions") or [])
+        if result.get("erp_read_status"):
+            state["erp_read_status"] = str(result["erp_read_status"])
+        if result.get("degraded_reason"):
+            state["degraded_reason"] = str(result["degraded_reason"])
         if result.get("response"):
             state["response"] = result["response"]
-            state["collaboration_mode"] = result.get("mode", mode_name)
-            state["agents_used"] = list(result.get("agents_used") or [])
-            state["tool_executions"] = list(result.get("tool_executions") or [])
-            if result.get("erp_read_status"):
-                state["erp_read_status"] = str(result["erp_read_status"])
-            if result.get("degraded_reason"):
-                state["degraded_reason"] = str(result["degraded_reason"])
-            state["pending_actions"] = list(result.get("pending_actions") or [])
+        else:
+            state["response"] = "暂未生成完整答复，请稍后重试。"
+            state["degraded_reason"] = state.get("degraded_reason") or "mode_upgrade_empty_response"
         return state
 
     def _select_quality_path(state: AgentState) -> str:
@@ -526,16 +538,10 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         return state
 
     def _fallback_post_process(state: AgentState):
-        """降级后处理：仅做缓存写入"""
-        if state.get("response") and not state.get("cached", False) and c.cache:
-            # v6.1: 写入缓存时携带完整 metadata
-            # P0-02: 携带可信 user_id，个性化回答进入用户作用域
-            cache_meta = {
-                "intent_type": state.get("query_type", "default"),
-                "user_id": state.get("user_id"),
-                "product_id": state.get("extracted_entities", {}).get("product_id"),
-            }
-            c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
+        """Do not cache an answer that bypassed the normal finalization checks."""
+        state["degraded_reason"] = (
+            state.get("degraded_reason") or "response_postprocess_unavailable"
+        )
 
     def _select_collaboration_mode(state: AgentState) -> str:
         """LangGraph Conditional Edge：委托 orchestrator 统一选择"""

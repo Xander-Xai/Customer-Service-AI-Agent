@@ -258,48 +258,87 @@ class TestHitlGateOnRealGraph:
 
 
 class TestReactModePropagatesPendingActions:
-    """纯单元层：锁住「模式返回值必须带 pending_actions」这条契约。
+    """Verify actual receipt propagation through the shared single-Agent boundary."""
 
-    为什么要有这个「看起来很笨」的断言：真实图那条测试要拉起整个容器、
-    跑完整图，慢且重；而这次的 bug 恰恰是一个**返回值漏字段**。这条断言 5 毫秒
-    就跑完，且能在 CI 的 unit lane 里挡住同类回归。
-    """
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode_name", ["SequentialMode", "ReActMode"])
+    async def test_single_agent_modes_return_pending_actions(self, mode_name):
+        from collaboration import modes
 
-    def test_react_mode_returns_pending_actions_key(self):
-        import inspect
+        pending = [{"tool": "staging_refund", "args": {"amount": 10}}]
+        receipts = [{"tool": "lookup_order", "status": "success"}]
 
-        from collaboration.modes import ReActMode
+        class Expert:
+            async def process_with_retry(self, state):
+                state["pending_actions"] = pending
+                state["tool_executions"] = receipts
+                return {"response": "approval required", **state}
 
-        source = inspect.getsource(ReActMode.execute)
-        assert '"pending_actions"' in source, (
-            "ReActMode.execute 的返回值里没有 pending_actions —— "
-            "HIGH 风险动作会停在 Agent 内部，既不执行也不审批（静默丢弃）"
+        cls = getattr(modes, mode_name)
+        expert = Expert()
+        result = await cls().execute(
+            {"general_agent": expert, "react_agent": expert},
+            {},
+            {"primary_agent": "general_agent"},
         )
+        assert result["pending_actions"] == pending
+        assert result["tool_executions"] == receipts
 
-    def test_all_collaboration_modes_are_accounted_for(self):
-        """每个协作模式的正常返回路径都必须透传 pending_actions。
-
-        目前只有 ``react`` 模式持有 tool_registry，因此只有它能摘出动作；
-        但这是**当前**的实现事实，不是契约。把「每个模式都要透传」写成断言，
-        将来新增带工具的模式时不会重蹈覆辙。
-        """
-        import inspect
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode_name", ["parallel", "consultation", "hierarchical"])
+    async def test_other_collaboration_modes_propagate_real_receipts(self, mode_name):
+        """Check behavior, not duplicated strings inside legacy adapters."""
+        from unittest.mock import AsyncMock
 
         from collaboration import modes
 
-        mode_classes = [
-            getattr(modes, name)
-            for name in (
-                "SequentialMode",
-                "ParallelMode",
-                "ConsultationMode",
-                "HierarchicalMode",
-                "ReActMode",
-            )
-        ]
-        for cls in mode_classes:
-            source = inspect.getsource(cls.execute)
-            assert '"pending_actions"' in source, (
-                f"{cls.__name__}.execute 没有透传 pending_actions；"
-                "若该模式将来能触发工具调用，高风险动作会被静默丢弃"
-            )
+        approval = {"tool": "staging_refund", "args": {"amount": 10}}
+        receipt = {"tool": "lookup_order", "status": "success"}
+        worker = AsyncMock()
+        worker.process_with_retry.return_value = {
+            "response": "worker",
+            "pending_actions": [approval],
+            "tool_executions": [receipt],
+        }
+        manager = AsyncMock()
+        manager.process_with_retry.return_value = {"response": "manager"}
+        agents = {"general_agent": manager, "worker": worker}
+        if mode_name == "parallel":
+            mode = modes.ParallelMode()
+            context = {"agent_list": ["worker"]}
+        elif mode_name == "consultation":
+            mode = modes.ConsultationMode()
+            context = {"consult_agents": ["worker"]}
+        else:
+            mode = modes.HierarchicalMode()
+            context = {"sub_tasks": {"worker": "read"}}
+        result = await mode.execute(agents, {"customer_query": "test"}, context)
+        assert result["pending_actions"] == [approval]
+        assert result["tool_executions"] == [receipt]
+        worker.process_with_retry.assert_awaited_once()
+
+
+async def test_durable_collaboration_deadline_reaches_run_owner(hitl_env, monkeypatch):
+    """The real compiled graph must not convert a worker deadline into success."""
+    from unittest.mock import AsyncMock
+
+    from core.container import ServiceContainer
+    from runtime.context import reset_run_context, set_run_context
+
+    container = ServiceContainer()
+    await container.initialize()
+    try:
+        _prepare(container, "staging_readonly_lookup", {"order_id": "HITL-DEADLINE"})
+        mode = container.orchestrator._modes["react"]
+        execute = AsyncMock(side_effect=TimeoutError("collaboration deadline"))
+        monkeypatch.setattr(mode, "execute", execute)
+        thread_id = "hitl-durable-deadline"
+        tokens = set_run_context("hitl-durable-deadline-run", thread_id)
+        try:
+            with pytest.raises(TimeoutError, match="collaboration deadline"):
+                await _drain_graph(container, thread_id=thread_id)
+        finally:
+            reset_run_context(tokens)
+        execute.assert_awaited_once()
+    finally:
+        await container.close()
