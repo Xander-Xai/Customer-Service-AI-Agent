@@ -293,3 +293,22 @@ def test_existing_evidence_is_not_overwritten(tmp_path, monkeypatch):
     target.write_text("original")
     assert cli.main(["--out", str(target)]) == 2
     assert target.read_text() == "original"
+
+
+def test_authorized_cli_requires_explicit_unmetered_permission(tmp_path, monkeypatch):
+    import scripts.evaluate_agent_real as cli
+
+    monkeypatch.setenv(AUTHORIZATION_ENV, "1")
+    monkeypatch.setenv("AGENT_EVAL_REAL_PROVIDER_API_KEY", "synthetic-test-key")
+    monkeypatch.setattr(cli, "validate_runtime_plan", lambda plan, config: None)
+
+    async def forbidden(*args):
+        pytest.fail("provider must not be called without unmetered permission")
+
+    monkeypatch.setattr(cli, "_run_authorized", forbidden)
+    target = tmp_path / "report.json"
+    rc = cli.main(["--i-authorize-external-calls", "--out", str(target)])
+    assert rc == 2
+    report = json.loads(target.read_text())
+    assert report["status"] == "NOT_MEASURED"
+    assert report["provenance"]["real_provider"]["network_calls_made"] == 0
