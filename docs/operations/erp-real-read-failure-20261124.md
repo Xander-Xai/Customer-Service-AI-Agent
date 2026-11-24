@@ -20,3 +20,5 @@ No staging endpoint or external ERP write was contacted.
 ```bash
 python -m pytest -q tests/integration/test_erp_integration.py tests/unit/test_erp_read_contract.py
 ```
+
+An additional HTTPX MockTransport regression exercises token acquisition, HTTP request headers, JSON decoding, a valid empty page and an invalid HTTP-200 envelope without replacing the adapter API call. This is local transport-contract evidence, not vendor staging.

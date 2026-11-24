@@ -8,6 +8,7 @@ redirecting peer credentials to an advertised arbitrary destination.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Any
@@ -16,9 +17,12 @@ from integrations.a2a_policy.contracts import (
     A2AContractError,
     require_demo_enabled,
     require_token,
+    synthetic_policy_answer,
     validate_loopback_base_url,
     validate_topic,
 )
+
+A2A_DEADLINE_SECONDS = 3.0
 
 
 async def lookup_synthetic_faq(
@@ -105,23 +109,30 @@ async def lookup_synthetic_faq(
             # single-result read. Never substitute fallback hallucinated text.
             if not finished or len(observed) != 1 or not 0 < len(observed[0]) <= 800:
                 raise A2AContractError("Remote A2A task result contract failed")
-            if not observed[0].startswith("SYNTHETIC EXAMPLE ONLY:"):
-                raise A2AContractError("Remote A2A result lacks synthetic provenance")
+            # A label alone is not evidence of the requested topic. This
+            # local fictional service has a frozen independent answer contract.
+            if observed[0] != synthetic_policy_answer(topic):
+                raise A2AContractError("Remote A2A result does not match the synthetic topic")
             return {"topic": topic, "source": "synthetic:a2a:faq-v1", "answer": observed[0]}
         finally:
             await peer.close()
 
-    if httpx_client is not None:
-        return await call(httpx_client)
-    # Do not follow redirects, proxy environment or remote DNS records. Peer
-    # location is a locally configured literal loopback host:port.
-    try:
+    async def exchange() -> dict[str, str]:
+        if httpx_client is not None:
+            return await call(httpx_client)
+        # Do not follow redirects or proxy environment. Peer location is
+        # constrained by the local loopback endpoint contract.
         async with httpx.AsyncClient(
-            timeout=httpx.Timeout(3.0),
+            timeout=httpx.Timeout(A2A_DEADLINE_SECONDS),
             headers={"Authorization": f"Bearer {token}"},
             trust_env=False,
             follow_redirects=False,
         ) as client:
             return await call(client)
-    except (httpx.HTTPError, TimeoutError, OSError):
+
+    # HTTP timeouts alone apply per operation, not to the complete delegation.
+    # This is a cooperative deadline, including discovery and SDK cleanup.
+    try:
+        return await asyncio.wait_for(exchange(), timeout=A2A_DEADLINE_SECONDS)
+    except (httpx.HTTPError, asyncio.TimeoutError, OSError):
         raise A2AContractError("Synthetic A2A peer unavailable") from None

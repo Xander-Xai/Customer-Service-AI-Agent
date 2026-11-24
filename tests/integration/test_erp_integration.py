@@ -714,3 +714,25 @@ async def test_real_empty_result_remains_successful(real_adapter):
     real_adapter._api_call = AsyncMock(return_value={"Data": {"Rows": []}})
     assert await real_adapter.query_product("demo") == []
     assert await real_adapter.query_customer("C001") is None
+
+
+@pytest.mark.asyncio
+async def test_real_httpx_transport_distinguishes_empty_and_invalid_envelope(real_adapter):
+    """Exercise HTTPX request/response decoding, not an AsyncMock of _api_call."""
+    requests = []
+    envelopes = iter([{"Token": "synthetic-token"}, {"Data": {"Rows": []}}, {"Error": "demo"}])
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json=next(envelopes))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        real_adapter._client = client
+        assert await real_adapter.query_product("demo") == []
+        with pytest.raises(ERPReadUnavailable, match="ERP read unavailable"):
+            await real_adapter.query_product("demo")
+    assert len(requests) == 3
+    assert requests[0].url.path == "/k3cloud/Logon.aspx"
+    assert all(request.method == "POST" for request in requests)
+    assert all(request.url.path.endswith("/BillQuery") for request in requests[1:])
+    assert all(request.headers["Authorization"] == "Bearer synthetic-token" for request in requests[1:])
