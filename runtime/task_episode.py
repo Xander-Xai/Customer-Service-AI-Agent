@@ -18,7 +18,9 @@ _TERMINAL = {status.value for status in TERMINAL_STATUSES}
 def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
-    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -86,7 +88,8 @@ def read_task_episode(
             identity_mismatch = True
             continue
         expires = _utc(row.expires_at)
-        status = row.status if row.status in {"PENDING", "APPROVED", "REJECTED", "EXPIRED"} else "UNKNOWN"
+        known_statuses = {"PENDING", "APPROVED", "REJECTED", "EXPIRED"}
+        status = row.status if row.status in known_statuses else "UNKNOWN"
         if status == "PENDING" and expires is not None and expires <= observed:
             status = "EXPIRED_PENDING_RECONCILIATION"
         approvals.append(
@@ -103,9 +106,7 @@ def read_task_episode(
             identity_mismatch = True
             continue
         status = row.status if row.status in {"PENDING", "SUCCEEDED", "FAILED"} else "UNKNOWN"
-        receipts.append(
-            {"receipt_id": row.id, "status": status, "updated_at": _iso(row.updated_at)}
-        )
+        receipts.append({"receipt_id": row.id, "status": status, "updated_at": _iso(row.updated_at)})
 
     if truncated or identity_mismatch:
         next_action = "inspect_complete_ledger"
