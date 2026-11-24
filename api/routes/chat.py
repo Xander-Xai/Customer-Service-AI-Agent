@@ -103,6 +103,37 @@ async def get_authenticated_session(
     state = request.app.state
     session_manager = state.session_manager
 
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled():
+        from auth.router import get_current_user_from_request
+        from core.session.ownership import (
+            SessionOwnerDenied,
+            SessionOwnerUnavailable,
+            create_owned_session,
+            require_session_owner,
+        )
+
+        actor = await asyncio.to_thread(get_current_user_from_request, request)
+        if actor is None:
+            raise _SessionValidationError(401, "Authenticated user required")
+        user_id = str(actor.id)
+        if session_manager is None:
+            raise _SessionValidationError(503, "Session service unavailable")
+        try:
+            if session_id:
+                if not session_manager.validate_session_token(session_id, session_token):
+                    raise SessionOwnerDenied("Invalid session token")
+                await require_session_owner(session_id, user_id)
+                sid = session_id
+            else:
+                sid = await create_owned_session(user_id)
+        except SessionOwnerDenied as exc:
+            raise _SessionValidationError(403, "Session ownership not verified") from exc
+        except SessionOwnerUnavailable as exc:
+            raise _SessionValidationError(503, "Session ownership unavailable") from exc
+        return AuthenticatedSession(sid, session_manager, bool(session_id), request, user_id)
+
     sid = validate_session_id(session_id)
     client_provided_sid = bool(session_id)
 
@@ -275,8 +306,7 @@ async def rest_chat(data: ChatRequest, request: Request):
         return JSONResponse({"error": ERR_QUERY_EMPTY}, status_code=400)
 
     try:
-        user_id = extract_user_id(request)
-        result = await run_graph(session.sid, query, user_id=user_id)
+        result = await run_graph(session.sid, query, user_id=session.user_id)
         # 统一字段映射（对齐 WS/SSE 端点）
         mapped = {
             "response": result.get("response", ""),

@@ -194,6 +194,16 @@ async def _run_graph(
         #   ainvoke(state, cfg) -> 从 START 重新执行并用入参覆盖 channel 值
         # 因此传 state 会把"续传"退化成"从头重跑"。已完成的历史快照（next 为空）
         # 走正常分支，多轮对话语义不变。
+        from core.industrial import industrial_enabled
+
+        if industrial_enabled():
+            from core.session.ownership import require_session_owner
+
+            await require_session_owner(session_id, user_id)
+            if _session_manager is None:
+                raise RuntimeError("Session service unavailable")
+            await _session_manager.create_session(session_id)
+            _session_manager.set_user_id(session_id, user_id)
         pending = await _pending_steps(_graph_app, graph_config)
         if pending:
             logger.info("从 checkpoint 续跑 session=%s pending=%s", session_id, pending)

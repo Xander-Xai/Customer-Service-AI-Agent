@@ -421,7 +421,7 @@ async def decode_token_async(token: str) -> dict[str, Any] | None:
 def get_current_user(token: str) -> User | None:
     """从 JWT token 获取当前用户"""
     payload = decode_token(token)
-    if not payload:
+    if not payload or payload.get("type") not in (None, "access"):
         return None
     db = get_db_session()
     try:
