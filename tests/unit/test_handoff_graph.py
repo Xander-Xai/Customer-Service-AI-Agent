@@ -143,3 +143,48 @@ async def test_hitl_approval_failure_does_not_create_customer_handoff(monkeypatc
     finally:
         await container.close()
         dispose(engine, path)
+
+
+
+async def test_durable_graph_bypasses_cached_text_and_never_writes_response_cache(monkeypatch):
+    """A cache hit must not replace a durable run or its tool/approval evidence."""
+    from core.container import ServiceContainer
+    from runtime.context import reset_run_context, set_run_context
+
+    class CountingCache:
+        def __init__(self):
+            self.reads = 0
+            self.writes = 0
+
+        def get(self, query, metadata=None):
+            self.reads += 1
+            return "stale cached answer"
+
+        def put(self, query, response, metadata=None):
+            self.writes += 1
+
+    monkeypatch.setattr("core.config.HUMAN_HANDOFF_ENABLED", False)
+    monkeypatch.setattr("core.config.EVAL_RETRY_ENABLED", False)
+    container = ServiceContainer()
+    await container.initialize()
+    mode = _Mode("当前任务已完成查询，请核对业务结果。")
+    container.orchestrator._modes["sequential"] = mode
+    container.orchestrator.select_mode_name = lambda *args: "sequential"
+    container.orchestrator.build_context = lambda *args: (
+        "sequential",
+        {"primary_agent": "general_agent"},
+    )
+    cache = CountingCache()
+    container.cache = cache
+    container.response_agent.cache = cache
+    thread = f"cache-durable-{uuid4().hex}"
+    tokens = set_run_context(f"run-{uuid4().hex}", thread)
+    try:
+        result = await _drain_graph(container, thread_id=thread)
+        assert mode.calls == 1
+        assert not result["cached"]
+        assert result["response"] != "stale cached answer"
+        assert cache.reads == cache.writes == 0
+    finally:
+        reset_run_context(tokens)
+        await container.close()
