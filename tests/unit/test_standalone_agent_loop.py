@@ -1,4 +1,4 @@
-"""Eight acceptance paths for the framework-free Agent Loop learning baseline."""
+"""Acceptance paths for the framework-free Agent Loop learning baseline."""
 
 from core.standalone_agent_loop import Decision, Limits, Tool, run_agent_loop
 
@@ -28,9 +28,7 @@ def test_03_dependent_tools_use_previous_observation():
         if not history:
             return Decision("tool", "order", {"id": 7})
         if len(history) == 1:
-            return Decision(
-                "tool", "shipping", {"shipment_id": history[0]["result"]["shipment_id"]}
-            )
+            return Decision("tool", "shipping", {"shipment_id": history[0]["result"]["shipment_id"]})
         return Decision("finish", response=history[1]["result"])
 
     tools = {
@@ -93,6 +91,7 @@ def test_05_read_retry_but_no_blind_write_retry():
 def test_06_loop_and_token_budgets_stop():
     def repeating(_task, _history):
         return Decision("tool", "read", {}, tokens=1)
+
     tools = {"read": Tool("read", {}, lambda _args: "same")}
     step = run_agent_loop("loop", repeating, tools, limits=Limits(model_steps=3, tool_calls=5))
     token = run_agent_loop(
@@ -119,8 +118,11 @@ def test_07_cancellation_stops_next_step():
 def test_08_high_risk_write_requires_server_approval():
     was_called = []
     spec = Tool(
-        "refund", {"id": int}, lambda _args: was_called.append(True),
-        side_effect=True, high_risk=True,
+        "refund",
+        {"id": int},
+        lambda _args: was_called.append(True),
+        side_effect=True,
+        high_risk=True,
     )
     result = run_agent_loop(
         "refund", scripted(Decision("tool", "refund", {"id": 7})), {"refund": spec}
@@ -203,3 +205,46 @@ def test_13_high_risk_tool_cannot_hide_behind_read_only_risk_flag():
         assert "side_effect" in str(exc)
     else:
         raise AssertionError("Conflicting tool risk metadata must be rejected")
+
+
+def test_duplicate_write_after_verified_success_is_blocked():
+    writes = []
+    choice = Decision("tool", "refund", {"id": 7})
+    result = run_agent_loop(
+        "refund",
+        scripted(choice, choice),
+        {"refund": Tool("refund", {"id": int}, lambda args: writes.append(args), side_effect=True)},
+        authorize_write=lambda _tool, _args: True,
+    )
+    assert (result.status, result.reason) == ("blocked", "duplicate_write_attempt")
+    assert writes == [{"id": 7}]
+
+
+def test_unknown_write_exception_cannot_be_reclassified_as_success_by_model():
+    writes = []
+
+    def write(args):
+        writes.append(args)
+        raise RuntimeError("unknown downstream commit status")
+
+    result = run_agent_loop(
+        "refund",
+        scripted(Decision("tool", "refund", {}), Decision("finish", response="success")),
+        {"refund": Tool("refund", {}, write, side_effect=True)},
+        authorize_write=lambda _tool, _args: True,
+    )
+    assert (result.status, result.reason) == ("write_uncertain", "reconcile_external_state")
+    assert writes == [{}]
+    assert not result.response
+
+
+def test_truthy_non_boolean_authorization_does_not_grant_write():
+    writes = []
+    result = run_agent_loop(
+        "refund",
+        scripted(Decision("tool", "refund", {})),
+        {"refund": Tool("refund", {}, lambda args: writes.append(args), side_effect=True)},
+        authorize_write=lambda _tool, _args: "approved",
+    )
+    assert (result.status, result.reason) == ("blocked", "server_policy_denied")
+    assert writes == []
