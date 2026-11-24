@@ -485,6 +485,14 @@ class HierarchicalMode(CollaborationMode):
             },
         )
 
+        # Keep execution-produced receipts even if a later sibling times out.
+        completed_subtasks: list[tuple[str, str, dict[str, Any]]] = []
+        subtask_failure_reason = (
+            "hierarchical_subtask_missing_or_empty"
+            if any(n not in agents or not q.strip() for n, q in sub_tasks.items())
+            else ""
+        )
+
         # 并行执行子任务
         async def run_subtask(name: str, sub_query: str):
             agent = agents.get(name)
@@ -501,6 +509,7 @@ class HierarchicalMode(CollaborationMode):
             sub_state["customer_query"] = sub_query
             result = await agent.process_with_retry(sub_state)
             response = result.get("response", "")
+            completed_subtasks.append((name, response, result))
 
             await self._safe_bb_write(
                 f"hierarchical.subtask.{name}", {"response": response, "sub_query": sub_query}
@@ -522,7 +531,8 @@ class HierarchicalMode(CollaborationMode):
             if _durable_run():
                 raise
             logger.warning(f"Hierarchical 子任务执行超时 ({self._HIERARCHICAL_TIMEOUT}s)")
-            results = []
+            subtask_failure_reason = "hierarchical_subtask_timeout"
+            results = completed_subtasks
 
         _raise_write_failures(results)
         sub_responses = []
@@ -531,7 +541,8 @@ class HierarchicalMode(CollaborationMode):
         collected_tool_executions: list[dict] = []
         read_path_results: list[dict] = []
         for r in results:
-            if isinstance(r, Exception):
+            if isinstance(r, BaseException):
+                subtask_failure_reason = subtask_failure_reason or "hierarchical_subtask_failed"
                 continue
             name, resp, agent_result = r
             sub_responses.append(f"[{name}] {resp}")
@@ -555,13 +566,16 @@ class HierarchicalMode(CollaborationMode):
         final = await coordinator.process_with_retry(summary_state)
         elapsed = time.time() - start
 
+        read_signal = _read_path_signal(final, *read_path_results)
+        if subtask_failure_reason:
+            read_signal.setdefault("degraded_reason", subtask_failure_reason)
         logger.info(f"Hierarchical sub_tasks={list(sub_tasks.keys())} {elapsed:.1f}s")
         return {
             "response": final.get("response", ""),
             "mode": "hierarchical",
             "agents_used": [coordinator_name] + agents_used,
             "elapsed": elapsed,
-            **_read_path_signal(final, *read_path_results),
+            **read_signal,
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
