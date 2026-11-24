@@ -183,9 +183,7 @@ def main(argv=None) -> int:
     operations.add_argument("--confirm", nargs="+", default=None, metavar="CASE_ID")
     operations.add_argument("--revoke", nargs="+", default=None, metavar="CASE_ID")
     operations.add_argument("--label", nargs="+", default=None, metavar="CASE_ID=ROUTE")
-    parser.add_argument(
-        "--reviewer", default=None, help="人工审核者标识（--confirm/--label 必填）"
-    )
+    parser.add_argument("--reviewer", default=None, help="人工审核者标识（--confirm/--label 必填）")
     args = parser.parse_args(argv)
 
     if args.list:
