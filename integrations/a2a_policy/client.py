@@ -134,5 +134,5 @@ async def lookup_synthetic_faq(
     # This is a cooperative deadline, including discovery and SDK cleanup.
     try:
         return await asyncio.wait_for(exchange(), timeout=A2A_DEADLINE_SECONDS)
-    except (httpx.HTTPError, TimeoutError, OSError):
+    except (httpx.HTTPError, asyncio.TimeoutError, OSError):
         raise A2AContractError("Synthetic A2A peer unavailable") from None
