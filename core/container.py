@@ -649,6 +649,11 @@ class ServiceContainer:
         if register_synthetic_a2a_tool(self.tool_registry):
             logger.info("Local synthetic A2A FAQ tool registered (no ERP access)")
 
+        from integrations.a2a_policy.business_client import register_business_a2a_tool
+
+        if register_business_a2a_tool(self.tool_registry):
+            logger.info("Approved after-sales A2A specialist registered (advisory only)")
+
         # MCP 工具叠加进**同一个** registry（native 工具不受影响，默认关闭）。
         await self._init_mcp_tools()
 

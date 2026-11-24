@@ -39,6 +39,32 @@ async def lookup_synthetic_faq(
     token = require_token()
     topic = validate_topic(topic)
     base_url = validate_loopback_base_url(os.getenv("A2A_FAQ_ENDPOINT", ""))
+    answer = await delegate_readonly_task(
+        topic,
+        base_url=base_url,
+        token=token,
+        card_name="Synthetic Customer FAQ Specialist",
+        skill_id="synthetic_faq_readonly",
+        max_chars=800,
+        httpx_client=httpx_client,
+    )
+    if answer != synthetic_policy_answer(topic):
+        raise A2AContractError("Remote A2A result does not match the synthetic topic")
+    return {"topic": topic, "source": "synthetic:a2a:faq-v1", "answer": answer}
+
+
+async def delegate_readonly_task(
+    payload: str,
+    *,
+    base_url: str,
+    token: str,
+    card_name: str,
+    skill_id: str,
+    max_chars: int,
+    httpx_client: Any | None = None,
+) -> str:
+    """Shared SDK transport; caller defines the trusted peer and result contract."""
+    base_url = validate_loopback_base_url(base_url)
     expected_rpc_url = base_url + "/a2a/jsonrpc"
 
     import httpx
@@ -46,17 +72,17 @@ async def lookup_synthetic_faq(
     from a2a.helpers import get_artifact_text
     from a2a.types import Message, Part, Role, SendMessageRequest, TaskState
 
-    async def call(peer_http: httpx.AsyncClient) -> dict[str, str]:
+    async def call(peer_http: httpx.AsyncClient) -> str:
         resolver = A2ACardResolver(peer_http, base_url)
         card = await resolver.get_agent_card()
         if (
-            card.name != "Synthetic Customer FAQ Specialist"
+            card.name != card_name
             or len(card.supported_interfaces) != 1
             or card.supported_interfaces[0].protocol_binding != "JSONRPC"
             or card.supported_interfaces[0].protocol_version != "1.0"
             or card.supported_interfaces[0].url != expected_rpc_url
             or len(card.skills) != 1
-            or card.skills[0].id != "synthetic_faq_readonly"
+            or card.skills[0].id != skill_id
         ):
             raise A2AContractError("Remote A2A Agent Card is not the allowlisted peer")
         peer = await create_client(
@@ -74,7 +100,7 @@ async def lookup_synthetic_faq(
                     role=Role.ROLE_USER,
                     message_id=str(uuid.uuid4()),
                     context_id=str(uuid.uuid4()),
-                    parts=[Part(text=topic)],
+                    parts=[Part(text=payload)],
                 )
             )
             finished = False
@@ -107,17 +133,13 @@ async def lookup_synthetic_faq(
                     raise A2AContractError("Unexpected A2A response event")
             # A completed task with zero or multiple answers is not a verified
             # single-result read. Never substitute fallback hallucinated text.
-            if not finished or len(observed) != 1 or not 0 < len(observed[0]) <= 800:
+            if not finished or len(observed) != 1 or not 0 < len(observed[0]) <= max_chars:
                 raise A2AContractError("Remote A2A task result contract failed")
-            # A label alone is not evidence of the requested topic. This
-            # local fictional service has a frozen independent answer contract.
-            if observed[0] != synthetic_policy_answer(topic):
-                raise A2AContractError("Remote A2A result does not match the synthetic topic")
-            return {"topic": topic, "source": "synthetic:a2a:faq-v1", "answer": observed[0]}
+            return observed[0]
         finally:
             await peer.close()
 
-    async def exchange() -> dict[str, str]:
+    async def exchange() -> str:
         if httpx_client is not None:
             return await call(httpx_client)
         # Do not follow redirects or proxy environment. Peer location is
@@ -135,4 +157,4 @@ async def lookup_synthetic_faq(
     try:
         return await asyncio.wait_for(exchange(), timeout=A2A_DEADLINE_SECONDS)
     except (httpx.HTTPError, asyncio.TimeoutError, OSError):
-        raise A2AContractError("Synthetic A2A peer unavailable") from None
+        raise A2AContractError("A2A peer unavailable") from None
