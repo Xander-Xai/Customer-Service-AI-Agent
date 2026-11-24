@@ -2,6 +2,8 @@
 
 ## 当前事实入口
 
+- GitHub 状态核查顺序见 [AGENTS.md](AGENTS.md)。
+
 - Runtime version: `6.3` (`core/config.py`); no `v6.4` release is declared.
 - Current entry point: [docs/reference/current-state.md](docs/reference/current-state.md)（当前事实 + 验证命令；不硬编码 HEAD，`git rev-parse HEAD` 获取）。
 - 带日期的对齐/审计报告（`docs/reports/plans/**`）是 HISTORICAL AUDIT SNAPSHOT，只在审计执行时点有效，不是永久 Current Truth。
