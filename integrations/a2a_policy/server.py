@@ -9,10 +9,6 @@ from __future__ import annotations
 import argparse
 import hmac
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from starlette.requests import Request
-
 from a2a.server.agent_execution.agent_executor import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
@@ -34,6 +30,9 @@ from a2a.types import (
     TaskState,
     TaskStatus,
 )
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
 from integrations.a2a_policy.contracts import (
     A2AContractError,
