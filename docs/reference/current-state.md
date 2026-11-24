@@ -34,6 +34,14 @@
 - 投影是只读诊断，不是原子授权快照；`execution_authorized` 始终为 false。真实故障恢复仍以 checkpoint、持久化账本和执行栅栏为准。
 - 验收入口：`pytest -q tests/unit/test_task_episode.py`（真实 SQLite 表；不调用外部模型或 ERP）。生产 PostgreSQL 崩溃/恢复与外部副作用一致性需单独验证。
 
+## 同任务终态 checkpoint 恢复
+
+- 新 Run 与同步请求显式清空 `episode_completed_run_id`；真实图的 `final_response` 节点在后处理返回前写入与服务端 Run ID 一致的终态标记。
+- 异步 Worker 在现有 thread lock 下读取一次 checkpoint；同 Run、无 pending node/task/interrupt、无未完成审批动作、请求身份和原始任务一致且存在有效终态标记时，直接恢复已持久化的图输出，不重新调用图。
+- 同 Run 的旧版或不一致终态 checkpoint 拒绝自动重放，需运维对账。不同 Run 的已完成历史仍走正常新任务入口。
+- 恢复结果依旧经过 executor 的审批副作用失败检查、执行栅栏和数据库 owner CAS；不授予新的工具权限，也不声称外部 ERP exactly-once。
+- 验收：`pytest -q tests/test_episode_checkpoint_ownership.py`，覆盖真实 InMemorySaver 的终态恢复与不重复节点执行、缺失标记、身份或任务不一致、未完成动作等。真实 PostgreSQL 进程崩溃窗口仍需独立故障注入验证；本机制不能恢复已被其他 Run 覆盖的同线程历史 checkpoint。
+
 ## 人工客服交接
 
 - [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
