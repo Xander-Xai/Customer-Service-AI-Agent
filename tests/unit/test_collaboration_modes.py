@@ -252,7 +252,7 @@ class TestConsultationMode:
         assert "product_agent" in result["agents_used"]
 
     @pytest.mark.asyncio
-    async def test_blackboard_data_injected(self):
+    async def test_prior_turn_blackboard_not_injected(self):
         bus, bb = _mock_bus(), _mock_bb()
         bb.read_prefix = AsyncMock(return_value={"erp.result": {"response": "ERP 补充信息"}})
         mode = ConsultationMode(bus=bus, bb=bb)
@@ -265,6 +265,9 @@ class TestConsultationMode:
         )
 
         assert result["response"] == "主回答"
+        passed_state = agents["product_agent"].process_with_retry.call_args.args[0]
+        assert passed_state["customer_query"] == "查订单"
+        bb.read_prefix.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_consultee_not_found_skipped(self):
@@ -365,7 +368,7 @@ class TestHierarchicalMode:
         assert result["degraded_reason"] == "hierarchical_subtask_timeout"
 
     @pytest.mark.asyncio
-    async def test_blackboard_subtask_data_merged(self):
+    async def test_prior_turn_blackboard_not_used_for_summary(self):
         bus, bb = _mock_bus(), _mock_bb()
         bb.read_prefix = AsyncMock(
             return_value={"hierarchical.subtask.extra_agent": {"response": "BB 数据"}}
@@ -380,6 +383,10 @@ class TestHierarchicalMode:
         )
 
         assert result["response"] == "汇总"
+        passed_state = agents["general_agent"].process_with_retry.call_args.args[0]
+        assert "BB 数据" not in passed_state["customer_query"]
+        assert "extra_agent" not in passed_state["customer_query"]
+        bb.read_prefix.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_empty_sub_tasks(self):
@@ -660,3 +667,33 @@ async def test_parallel_caller_cancellation_drains_all_children():
         with pytest.raises(asyncio.CancelledError):
             await task
     assert all(event.is_set() for event in drained)
+
+
+@pytest.mark.asyncio
+async def test_parallel_duplicate_role_executes_once():
+    primary = _mock_agent("一次")
+    result = await ParallelMode().execute(
+        {"product_agent": primary},
+        _state(),
+        {"agent_list": ["product_agent", "product_agent"]},
+    )
+    assert result["agents_used"] == ["product_agent"]
+    primary.process_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_consultation_excludes_self_and_duplicate_auxiliary():
+    primary = _mock_agent("主答")
+    auxiliary = _mock_agent("本轮证据")
+    result = await ConsultationMode().execute(
+        {"product_agent": primary, "tech_agent": auxiliary},
+        _state(),
+        {
+            "primary_agent": "product_agent",
+            "consult_agents": ["product_agent", "tech_agent", "tech_agent"],
+        },
+    )
+    primary.process_with_retry.assert_awaited_once()
+    auxiliary.process_with_retry.assert_awaited_once()
+    assert result["agents_used"] == ["product_agent", "tech_agent"]
+    assert "本轮证据" in primary.process_with_retry.call_args.args[0]["customer_query"]

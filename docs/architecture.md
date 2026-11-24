@@ -34,6 +34,23 @@
 - #77 的未知外部副作用拒绝重放已纳入 #76 统一架构验收。Redis lease / owner CAS 不等于存储端 fencing，不保证已经发出的外部请求被撤销。
 - #73 已独立合并，#72 仍为独立业务能力接入；两者不作为本轮架构裁剪通过的依据。此节记录本分支设计和验收契约，实际交付以合并后的代码及同 SHA CI 为准。
 
+### 编排模式术语裁决（#75）
+
+业界没有强制统一的五种模式。参照 [Anthropic Building effective agents](https://www.anthropic.com/research/building-effective-agents)、[OpenAI multi-agent orchestration](https://openai.github.io/openai-agents-python/multi_agent/) 和 [Microsoft Agent orchestration patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns)，按实际控制流归类而非按类名计数。
+
+| 现有兼容标识 | 准确工程术语 | 裁决 |
+|---|---|---|
+| sequential | Routing → single specialist（直接路由） | 保留快路径；不是多 Agent 串行链 |
+| parallel | Static fan-out/fan-in（并行分发与确定性拼接） | 保留独立领域查询；同一角色只执行一次 |
+| consultation | Fixed specialist fan-out → primary synthesis（固定主从咨询） | 辅助专家先返回，再由主专家汇总；不是动态 agents-as-tools 或 handoff |
+| hierarchical | Fixed subtask fan-out → coordinator synthesis（固定任务主从汇总） | 子任务由代码确定，不是 LLM 动态规划的 Orchestrator–Workers；与 consultation 归为同一模式族 |
+| react | Bounded single-agent tool loop | 单 Agent 内部执行策略，不计为多 Agent 协作模式 |
+| quality_gate / mode_upgrade_retry | Rule-based evaluation + at most one safe retry | 不是双 LLM Evaluator–Optimizer；不重放已有工具/审批的任务 |
+
+主架构为 Routing；多 Agent 仅保留并行分发与固定主从汇总两个模式族，ReAct 属于内部执行策略。兼容节点名、SSE/监控标识及 checkpoint 不改名。不存在 Group Chat/Swarm 的业务需求，不为凑模式新增；人工转接与 AI peer handoff 也必须区分。
+
+**状态归属整改**：consultation/hierarchical 的合成输入仅使用本次调用返回的结果，不再读取 session Blackboard 的历史前缀。Blackboard/Bus 可继续用于诊断与现有兼容接口，非当前任务事实来源；结构化工具回执/审批与自然语言分离。Parallel 去重、consultation 禁止主专家自我咨询及重复辅助。以回归测试验证旧黑板内容不进入汇总、同一角色不重复执行。咨询与层级的业务收益及关键词选择阈值仍需配对任务评测；不凭命名或 fixture 通过宣称质量提升，不贸然删掉已存在的兼容路径。
+
 ## 1. 一句话架构
 
 > 一个**同步快路径 + 异步耐久路径**并存的企业客服 Agent 服务：

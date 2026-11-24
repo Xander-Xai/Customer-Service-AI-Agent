@@ -102,7 +102,7 @@ class CollaborationMode(ABC):
 
 
 class SequentialMode(CollaborationMode):
-    """顺序模式：单个 Agent 处理（v6.3: 添加 SLA 超时保护，防止无限挂起）"""
+    """Direct routed single specialist; legacy sequential node identifier."""
 
     _SEQUENTIAL_TIMEOUT = SLA_SEQUENTIAL_MAX
 
@@ -187,7 +187,7 @@ class ParallelMode(CollaborationMode):
     async def execute(
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
-        agent_names = context.get("agent_list", [])
+        agent_names = list(dict.fromkeys(context.get("agent_list", [])))
         start = time.time()
         sem = self._get_semaphore()  # v3.4: 获取信号量
 
@@ -299,7 +299,7 @@ class ParallelMode(CollaborationMode):
 
 
 class ConsultationMode(CollaborationMode):
-    """咨询模式：主 Agent 处理 + 向辅助 Agent 请求补充信息"""
+    """Fixed specialist fan-out followed by primary synthesis (manager-style)."""
 
     def __init__(
         self,
@@ -314,7 +314,9 @@ class ConsultationMode(CollaborationMode):
         self, agents: dict[str, Any], state: dict[str, Any], context: dict[str, Any]
     ) -> dict[str, Any]:
         primary = context.get("primary_agent", "general_agent")
-        consultees = context.get("consult_agents", [])
+        consultees = [
+            name for name in dict.fromkeys(context.get("consult_agents", [])) if name != primary
+        ]
         start = time.time()
 
         primary_agent = agents.get(primary)
@@ -413,17 +415,8 @@ class ConsultationMode(CollaborationMode):
                 f"{state.get('customer_query', '')}\n\n[辅助信息]\n{consult_text}"
             )
 
-        # v6.3: 黑板前缀读取并行化
-        erp_data, tech_data = await asyncio.gather(
-            self._safe_bb_read_prefix("erp."),
-            self._safe_bb_read_prefix("tech."),
-        )
-        bb_context = []
-        for key, val in {**erp_data, **tech_data}.items():
-            if isinstance(val, dict) and val.get("response"):
-                bb_context.append(f"[{key}] {val['response'][:300]}")
-        if bb_context:
-            enriched_state["customer_query"] += "\n\n[Blackboard 参考]\n" + "\n".join(bb_context)
+        # Only current invocation results are synthesis input. Session blackboard
+        # entries have no turn receipt and can survive earlier or concurrent turns.
 
         await self._safe_publish(
             "consultation.primary.start",
@@ -475,7 +468,7 @@ class ConsultationMode(CollaborationMode):
 
 
 class HierarchicalMode(CollaborationMode):
-    """层次模式：协调者分配子任务给多个 Agent，汇总后输出（v3.6: 超时保护）"""
+    """Fixed subtask fan-out and coordinator synthesis; not dynamic LLM planning."""
 
     _HIERARCHICAL_TIMEOUT = SLA_HIERARCHICAL_MAX  # v4.3: 使用配置化超时
 
@@ -570,12 +563,8 @@ class HierarchicalMode(CollaborationMode):
             collected_tool_executions.extend(agent_result.get("tool_executions") or [])
             read_path_results.append(agent_result)
 
-        # 从 Blackboard 读取所有子任务结果作为汇总补充
-        bb_subtask_data = await self._safe_bb_read_prefix("hierarchical.subtask.")
-        for key, data in bb_subtask_data.items():
-            agent_tag = key.replace("hierarchical.subtask.", "")
-            if agent_tag not in agents_used and isinstance(data, dict) and data.get("response"):
-                sub_responses.append(f"[{agent_tag}(BB)] {data['response'][:300]}")
+        # Do not recover missing subtask text from session-level diagnostics.
+        # Only completed results from this invocation may contribute evidence.
 
         # 协调者汇总
         summary_state = dict(state)
