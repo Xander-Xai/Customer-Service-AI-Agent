@@ -98,7 +98,9 @@ def run_agent_loop(
     steps = calls = tokens = 0
 
     def finish(
-        status: Literal["completed", "cancelled", "approval_required", "write_uncertain", "blocked"],
+        status: Literal[
+            "completed", "cancelled", "approval_required", "write_uncertain", "blocked"
+        ],
         reason: str,
         response: str = "",
     ) -> Result:
@@ -114,7 +116,7 @@ def run_agent_loop(
         steps += 1
         if not isinstance(choice, Decision):
             return finish("blocked", "invalid_model_response")
-        if not isinstance(choice.tokens, int) or isinstance(choice.tokens, bool) or choice.tokens < 0:
+        if type(choice.tokens) is not int or choice.tokens < 0:
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
         if tokens > limits.tokens:
@@ -135,16 +137,16 @@ def run_agent_loop(
             trace.append("tool_unknown")
             history.append({"tool": choice.name, "error": "unknown_tool"})
             continue
-        if (
-            set(choice.arguments) != set(spec.schema)
-            or any(type(choice.arguments[key]) is not expected for key, expected in spec.schema.items())
+        if set(choice.arguments) != set(spec.schema) or any(
+            type(choice.arguments[key]) is not expected for key, expected in spec.schema.items()
         ):
             trace.append("invalid_args")
             history.append({"tool": spec.name, "error": "schema_validation_failed"})
             continue
         if spec.side_effect:
             try:
-                write_key = (spec.name, json.dumps(choice.arguments, sort_keys=True, allow_nan=False))
+                encoded_args = json.dumps(choice.arguments, sort_keys=True, allow_nan=False)
+                write_key = (spec.name, encoded_args)
             except (ValueError, TypeError):
                 return finish("blocked", "invalid_write_identity")
             if write_key in attempted_writes:
@@ -156,7 +158,9 @@ def run_agent_loop(
                 authorized = False
             if not authorized:
                 trace.append("write_rejected" if not spec.high_risk else "approval_pending")
-                return finish("approval_required" if spec.high_risk else "blocked", "server_policy_denied")
+                return finish(
+                    "approval_required" if spec.high_risk else "blocked", "server_policy_denied"
+                )
         if cancelled():
             return finish("cancelled", "cancel_before_tool")
         if spec.side_effect:
