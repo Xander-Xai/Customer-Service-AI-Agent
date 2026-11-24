@@ -145,7 +145,6 @@ async def test_hitl_approval_failure_does_not_create_customer_handoff(monkeypatc
         dispose(engine, path)
 
 
-
 async def test_durable_graph_bypasses_cached_text_and_never_writes_response_cache(monkeypatch):
     """A cache hit must not replace a durable run or its tool/approval evidence."""
     from core.container import ServiceContainer

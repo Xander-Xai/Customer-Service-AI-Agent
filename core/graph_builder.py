@@ -521,7 +521,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
     def _fallback_post_process(state: AgentState):
         """Do not cache an answer that bypassed the normal finalization checks."""
-        state["degraded_reason"] = state.get("degraded_reason") or "response_postprocess_unavailable"
+        state["degraded_reason"] = (
+            state.get("degraded_reason") or "response_postprocess_unavailable"
+        )
 
     def _select_collaboration_mode(state: AgentState) -> str:
         """LangGraph Conditional Edge：委托 orchestrator 统一选择"""

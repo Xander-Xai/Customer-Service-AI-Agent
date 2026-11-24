@@ -207,7 +207,6 @@ class TestReadScopeKeys:
         assert "t:" + hash_identity("t1") in keys
 
 
-
 def test_graph_response_cache_does_not_replace_business_execution():
     from cache.cache_policy import graph_response_cache_allowed
 

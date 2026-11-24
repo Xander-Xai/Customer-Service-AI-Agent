@@ -269,7 +269,6 @@ def read_scope_keys(
     return keys
 
 
-
 def graph_response_cache_allowed(state: dict, *, durable_run: bool) -> bool:
     """Response text is never a receipt or an authorization to skip business work.
 

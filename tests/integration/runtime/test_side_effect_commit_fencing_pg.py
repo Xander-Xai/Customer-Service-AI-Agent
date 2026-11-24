@@ -692,6 +692,7 @@ def test_failure_record_is_never_lost_to_a_long_error_type(pg_engine, store, new
     nothing can clear. Every retry then hit ``CLAIM_IN_PROGRESS`` and burned the
     budget into DLQ, while the outcome of the external write was never recorded.
     """
+
     class ToolExecutionTimeout(Exception):
         """20 chars — longer than the column."""
 
