@@ -18,9 +18,7 @@ CONFIG = {"configurable": {"thread_id": "shared-thread"}}
 
 def _graph(owner, pending=("human_approval_gate",)):
     return SimpleNamespace(
-        aget_state=AsyncMock(
-            return_value=SimpleNamespace(next=pending, values={"episode_run_id": owner})
-        ),
+        aget_state=AsyncMock(return_value=SimpleNamespace(next=pending, values={"episode_run_id": owner})),
         ainvoke=AsyncMock(return_value={"response": "test"}),
     )
 
@@ -34,7 +32,9 @@ async def test_worker_refuses_foreign_or_legacy_pending_checkpoint(owner, approv
     try:
         with pytest.raises(CheckpointEpisodeMismatch):
             await invoke_graph_with_resume(
-                graph, {"episode_run_id": "new-run"}, CONFIG,
+                graph,
+                {"episode_run_id": "new-run"},
+                CONFIG,
                 resume_command=object() if approval else None,
             )
         graph.ainvoke.assert_not_awaited()
