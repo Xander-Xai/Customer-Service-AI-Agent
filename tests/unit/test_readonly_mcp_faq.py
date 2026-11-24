@@ -22,4 +22,5 @@ def test_faq_server_requires_handshake_and_rejects_unknown_actions():
         {"topic": "unknown"},
         {"topic": "demo_shipping", "x": 1},
     ):
-        assert rpc("tools/call", {"name": "lookup_demo_faq", "arguments": args})["result"]["isError"]
+        rejected = rpc("tools/call", {"name": "lookup_demo_faq", "arguments": args})
+        assert rejected["result"]["isError"]
