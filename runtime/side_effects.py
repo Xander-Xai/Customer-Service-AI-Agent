@@ -1041,7 +1041,12 @@ async def execute_idempotent_operation(
     ``asyncio.wait_for`` 取消后仍在飞行的情况都要求租约有**下界**。低于下界时
     fail-closed（``PermanentError``），不创建 ledger 行、不执行副作用。
     """
-    from .errors import PermanentError, SideEffectReconciliationRequired, TransientError, classify_exception
+    from .errors import (
+        PermanentError,
+        SideEffectReconciliationRequired,
+        TransientError,
+        classify_exception,
+    )
 
     if min_claim_ttl_seconds is not None and claim_ttl_seconds < min_claim_ttl_seconds:
         raise PermanentError(

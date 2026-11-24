@@ -68,7 +68,6 @@ async def test_realtime_side_effect_refusal_is_not_a_graph_crash(monkeypatch):
         await container.close()
 
 
-
 def test_reconciliation_remains_nonretryable_after_tool_error_wrapping():
     from runtime.errors import SideEffectReconciliationRequired, classify_exception, is_retryable
 
