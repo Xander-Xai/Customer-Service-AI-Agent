@@ -27,8 +27,8 @@
 
 | 能力 | 源码锚点 | 说明 |
 |---|---|---|
-| 四层状态机（缓存 → 路由 → 协作 → 后处理） | `core/graph_builder.py` · `core/state.py` | 单一定义点，9 个图节点 |
-| 9 个 Agent 角色 / 5 种协作模式 | `agents/` · `collaboration/modes.py` | Sequential / Parallel / Consultation / Hierarchical / ReAct |
+| 四层状态机（缓存 → 路由 → 协作 → 后处理） | `core/graph_builder.py` · `core/state.py` | 单一定义点，11 个显式注册图节点（不含 START/END） |
+| 7 个领域角色 + ReAct + 确定性后处理 / 5 种协作模式 | `agents/` · `collaboration/modes.py` | Sequential / ReAct 共用单专家执行边界；Parallel / Consultation / Hierarchical 保留独立聚合语义 |
 | Agent 工具循环（含 ReAct） | `agents/base_agent.py` · `agents/react_agent.py` | 工具、缓存、风险分流、幂等、上下文工程统一边界 |
 | 混合检索 RAG | `rag/` | Qdrant + BM25 → RRF → cross-encoder rerank，确定性 point ID |
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
@@ -56,7 +56,7 @@
 | 分布式 Runtime 验收（真实 PG + Redis + 多进程 Celery） | `make runtime-e2e` · CI `runtime-e2e` lane | Verified (CI) |
 | worker SIGKILL 崩溃恢复 + 副作用只发生一次 | `make runtime-chaos` → `artifacts/runtime/chaos-*.json` | Verified (CI) |
 | Runtime 证据报告 | `make runtime-verify` → `artifacts/distributed-runtime/<ts>/report.json`（schema `distributed-runtime-evidence/v2`，带 `tested_code_sha`） | Verified (Local+CI) |
-| DLQ 人工重放闭环 | `scripts/replay_dead_run.py`（复用原 `run_id`） | Verified (Local) |
+| DLQ 人工重放闭环（不授权未知外部写重试） | `scripts/replay_dead_run.py`（复用原 `run_id`） | Verified (Local) |
 | Prometheus 指标暴露 + DLQ 告警表达式 | `make metrics-exposure-verify` → `artifacts/observability/metrics-exposure-*/report.json`（`VERIFIED_LOCAL`，真实 `prom/prometheus:v2.51.0` 上告警实际 FIRING）+ `make alert-rules-test`（官方 `promtool test rules`） | Verified (Local) |
 | 指标暴露 / 告警引用契约（防复发） | `make metrics-exposure-check`（告警与 Grafana 引用的每个指标名都必须可达） | Verified (CI) |
 | OTel Collector 传输链路（traces only） | `make otel-collector-smoke` → `artifacts/observability/otel-collector-*/report.json`（`VERIFIED_LOCAL`） | Verified (Local) |
