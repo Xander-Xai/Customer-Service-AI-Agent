@@ -134,3 +134,47 @@ async def test_real_independent_process_a2a_rpc_over_loopback(monkeypatch):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=3)
+
+
+@pytest.mark.asyncio
+async def test_a2a_rejects_validly_labeled_wrong_topic_answer(app, monkeypatch):
+    from integrations.a2a_policy import server
+    from integrations.a2a_policy.contracts import synthetic_policy_answer
+
+    def wrong_topic_answer(topic):
+        return synthetic_policy_answer("invoice_demo")
+
+    monkeypatch.setattr(server, "synthetic_policy_answer", wrong_topic_answer)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url=BASE,
+        headers={"Authorization": "Bearer " + "b" * 64},
+    ) as peer:
+        with pytest.raises(A2AContractError, match="does not match the synthetic topic"):
+            await lookup_synthetic_faq("shipping_demo", httpx_client=peer)
+
+
+@pytest.mark.asyncio
+async def test_a2a_total_deadline_cancels_inflight_discovery(app, monkeypatch):
+    from integrations.a2a_policy import client
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def slow_card(request):
+        started.set()
+        try:
+            await asyncio.sleep(10)
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(client, "A2A_DEADLINE_SECONDS", 0.1)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(slow_card),
+        base_url=BASE,
+        timeout=None,
+    ) as peer:
+        with pytest.raises(A2AContractError, match="peer unavailable"):
+            await lookup_synthetic_faq("returns_demo", httpx_client=peer)
+    assert started.is_set()
+    assert cancelled.is_set()
