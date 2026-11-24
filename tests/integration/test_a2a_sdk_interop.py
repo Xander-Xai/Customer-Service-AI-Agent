@@ -6,11 +6,8 @@ these tests. The default repository suite may skip when optional SDK is absent.
 import httpx
 import pytest
 
-pytest.importorskip("a2a", reason="optional A2A 1.x SDK not installed")
-
-from integrations.a2a_policy.server import build_app
+from integrations.a2a_policy.client import lookup_synthetic_faq
 from integrations.a2a_policy.contracts import A2AContractError
-from tools.a2a_policy_client import lookup_synthetic_faq
 
 BASE = "http://127.0.0.1:41243"
 
@@ -21,6 +18,9 @@ def app(monkeypatch):
     monkeypatch.setenv("A2A_FAQ_EXPERIMENT_ENABLED", "true")
     monkeypatch.setenv("A2A_FAQ_SHARED_TOKEN", "b" * 64)
     monkeypatch.setenv("A2A_FAQ_ENDPOINT", BASE)
+    pytest.importorskip("a2a", reason="optional A2A 1.x SDK not installed")
+    from integrations.a2a_policy.server import build_app
+
     return build_app(BASE)
 
 
@@ -70,5 +70,7 @@ async def test_a2a_bearer_rejects_wrong_peer(app):
         base_url=BASE,
         headers={"Authorization": "Bearer " + "c" * 64},
     ) as peer:
-        with pytest.raises(Exception):
+        from a2a.client.errors import A2AClientError
+
+        with pytest.raises((A2AClientError, httpx.HTTPError, A2AContractError)):
             await lookup_synthetic_faq("returns_demo", httpx_client=peer)
