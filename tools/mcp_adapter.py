@@ -915,6 +915,17 @@ class MCPToolAdapter:
             raise mapped from e
         else:
             normalized = self._normalize_result(result)
+            try:
+                self._validate_result_budget(normalized)
+            except MCPToolExecutionError as e:
+                status = "tool_error"
+                _inc(
+                    "mcp_tool_error_total",
+                    server=self.config.name,
+                    tool=mcp_name,
+                    reason=e.reason,
+                )
+                raise
             if isinstance(normalized, MCPToolExecutionError):
                 status = "tool_error"
                 _inc(
@@ -965,6 +976,25 @@ class MCPToolAdapter:
                 f"MCP 调用 payload 超过 {self.config.max_payload_bytes} 字节上限"
             )
         return args
+
+    @staticmethod
+    def _validate_result_budget(result: Any) -> None:
+        """Bound normalized data before it enters the tool registry or model context.
+
+        This is an application boundary, not a transport/frame allocation limit.
+        Error strings are subject to the same boundary as successful results.
+        """
+        payload = str(result) if isinstance(result, MCPToolExecutionError) else result
+        try:
+            size = len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+        except (TypeError, ValueError, UnicodeError, RecursionError) as e:
+            raise MCPToolExecutionError(
+                "MCP result is not valid JSON", reason="result_not_serializable"
+            ) from e
+        if size > 32768:
+            raise MCPToolExecutionError(
+                "MCP result exceeds 32768 normalized JSON bytes", reason="result_too_large"
+            )
 
     @staticmethod
     def _map_error(exc: Exception) -> MCPError:
