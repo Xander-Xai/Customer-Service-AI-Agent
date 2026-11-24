@@ -327,7 +327,13 @@ def test_trajectory_keeps_misroutes_errors_and_budget_stopped_cases_in_denominat
             expected_terminal_state="SUCCEEDED",
         )
 
-    cases = [case("correct"), case("misroute"), case("error"), case("missing"), case("candidate", False)]
+    cases = [
+        case("correct"),
+        case("misroute"),
+        case("error"),
+        case("missing"),
+        case("candidate", False),
+    ]
     results = [
         RealCaseResult(
             case_id="correct",
@@ -344,7 +350,9 @@ def test_trajectory_keeps_misroutes_errors_and_budget_stopped_cases_in_denominat
             ),
             terminal_state="SUCCEEDED",
         ),
-        RealCaseResult(case_id="misroute", status="OK", route="general", terminal_state="SUCCEEDED"),
+        RealCaseResult(
+            case_id="misroute", status="OK", route="general", terminal_state="SUCCEEDED"
+        ),
         RealCaseResult(case_id="error", status="ERROR"),
         RealCaseResult(case_id="candidate", status="OK", route="order_status"),
     ]
@@ -377,4 +385,6 @@ def test_trajectory_does_not_treat_bool_as_integer_or_unknown_schema_as_valid():
             {"name": "lookup", "arguments": {"id": 1}},
         ),
     )
-    assert summarize_trajectory([case], [result])["metrics"]["candidate_argument_match"]["value"] == 0
+    assert (
+        summarize_trajectory([case], [result])["metrics"]["candidate_argument_match"]["value"] == 0
+    )

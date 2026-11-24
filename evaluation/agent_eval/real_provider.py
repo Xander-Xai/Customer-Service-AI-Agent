@@ -307,7 +307,8 @@ def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]
     and terminal expectations are candidate-contract diagnostics, not gold
     business accuracy. The observations do not attest provider transport.
     """
-    planned_ids = [case.case_id for case in cases]
+    # Preserve the existing injected-runner contract for string case IDs.
+    planned_ids = [str(getattr(case, "case_id", None) or case) for case in cases]
     by_id = {result.case_id: result for result in results}
     if (
         len(set(planned_ids)) != len(planned_ids)
@@ -334,28 +335,27 @@ def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]
             outcome = "MATCH" if matched else "MISMATCH"
         checks[name].append({"case_id": case_id, "outcome": outcome})
 
-    for case in cases:
-        result = by_id.get(case.case_id)
+    for case, case_id in zip(cases, planned_ids, strict=True):
+        result = by_id.get(case_id)
         if getattr(case, "expect_fallback", False) or getattr(case, "scripted_failure", None):
             # Fault injection belongs to the scripted lane, not real-provider quality.
             continue
-        if (
-            getattr(case, "expected_route", None) is not None
-            and getattr(getattr(case, "annotation", None), "is_human_confirmed", False)
+        if getattr(case, "expected_route", None) is not None and getattr(
+            getattr(case, "annotation", None), "is_human_confirmed", False
         ):
             add(
                 "reviewed_route_agreement",
-                case.case_id,
+                case_id,
                 result,
-                None if result is None or result.route is None else (
-                    result.route == case.expected_route
-                ),
+                None
+                if result is None or result.route is None
+                else (result.route == case.expected_route),
             )
         expected = set(getattr(case, "expected_tools", ()))
         if expected:
             add(
                 "candidate_tool_set_match",
-                case.case_id,
+                case_id,
                 result,
                 None if result is None else set(result.tool_names) == expected,
             )
@@ -377,15 +377,15 @@ def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]
                 )
                 for name, arguments in parameters.items()
             )
-            add("candidate_argument_match", case.case_id, result, matched)
+            add("candidate_argument_match", case_id, result, matched)
         if getattr(case, "expected_terminal_state", None) is not None:
             add(
                 "candidate_governance_state_match",
-                case.case_id,
+                case_id,
                 result,
-                None if result is None or result.terminal_state is None else (
-                    result.terminal_state == case.expected_terminal_state
-                ),
+                None
+                if result is None or result.terminal_state is None
+                else (result.terminal_state == case.expected_terminal_state),
             )
 
     metrics = {}
@@ -395,10 +395,15 @@ def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]
             "numerator": hits,
             "denominator": len(items),
             "value": hits / len(items) if items else None,
-            "status": "OBSERVED_AGREEMENT" if items and all(
+            "status": "OBSERVED_AGREEMENT"
+            if items
+            and all(
                 item["outcome"] not in {"NOT_ATTEMPTED", "EXECUTION_ERROR", "MISSING_OBSERVATION"}
                 for item in items
-            ) else "INCOMPLETE" if items else "NOT_MEASURED",
+            )
+            else "INCOMPLETE"
+            if items
+            else "NOT_MEASURED",
             "cases": items,
         }
     return {
@@ -406,7 +411,8 @@ def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]
         "attempted": len(results),
         "not_attempted": [case_id for case_id in planned_ids if case_id not in by_id],
         "fault_fixture_excluded": [
-            case.case_id for case in cases
+            case_id
+            for case, case_id in zip(cases, planned_ids, strict=True)
             if getattr(case, "expect_fallback", False) or getattr(case, "scripted_failure", None)
         ],
         "metrics": metrics,
