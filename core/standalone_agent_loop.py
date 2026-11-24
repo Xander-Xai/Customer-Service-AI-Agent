@@ -30,7 +30,7 @@ class Tool:
         if self.high_risk and not self.side_effect:
             raise ValueError("A high-risk tool must declare side_effect=True")
         if not isinstance(self.schema, Mapping) or any(
-            not isinstance(k, str) or type(v) is not type for k, v in self.schema.items()
+            not isinstance(k, str) or not isinstance(v, type) for k, v in self.schema.items()
         ):
             raise ValueError("Invalid static tool schema")
 
@@ -54,7 +54,7 @@ class Limits:
 
     def __post_init__(self) -> None:
         if any(
-            type(x) is not int or x <= 0
+            not isinstance(x, int) or isinstance(x, bool) or x <= 0
             for x in (self.model_steps, self.tool_calls, self.tokens, self.read_attempts)
         ):
             raise ValueError("Limits must be positive integers")
