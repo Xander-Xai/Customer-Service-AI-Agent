@@ -6,7 +6,8 @@ def test_faq_server_requires_handshake_and_rejects_unknown_actions():
     server = FAQServer()
 
     def rpc(method, params=None):
-        return server.dispatch({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
+        request = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
+        return server.dispatch(request)
 
     assert "error" in rpc("tools/list")
     assert "result" in rpc("initialize", {"protocolVersion": "2025-06-18"})
@@ -15,8 +16,10 @@ def test_faq_server_requires_handshake_and_rejects_unknown_actions():
     assert [tool["name"] for tool in tools] == ["lookup_demo_faq"]
     assert normalize_input_schema(tools[0]["inputSchema"]) == tools[0]["inputSchema"]
     assert "error" in rpc("tools/call", {"name": "refund", "arguments": {}})
-    result = rpc("tools/call", {"name": "lookup_demo_faq", "arguments": {"topic": "demo_shipping"}})
-    assert result["result"]["content"][0]["text"] == "Fictional example: shipping takes 3 demo days."
+    arguments = {"topic": "demo_shipping"}
+    result = rpc("tools/call", {"name": "lookup_demo_faq", "arguments": arguments})
+    expected = "Fictional example: shipping takes 3 demo days."
+    assert result["result"]["content"][0]["text"] == expected
     for args in (
         {"topic": ["demo_shipping"]},
         {"topic": "unknown"},
