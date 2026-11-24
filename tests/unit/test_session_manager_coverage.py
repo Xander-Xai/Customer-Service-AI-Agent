@@ -262,7 +262,9 @@ class TestSummaryGeneration:
         sm.llm = mock_llm
 
         with patch("core.session.session_manager.logger.warning") as warning:
-            result = await sm._generate_summary_async([{"role": "user", "content": "隐私订单"}], "existing")
+            result = await sm._generate_summary_async(
+                [{"role": "user", "content": "隐私订单"}], "existing"
+            )
         assert result == "existing"
         warning.assert_called_once()
         format_string, exception_type = warning.call_args.args
