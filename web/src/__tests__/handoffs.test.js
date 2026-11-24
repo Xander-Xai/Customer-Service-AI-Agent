@@ -4,7 +4,7 @@ const { fetchWithAuth } = vi.hoisted(() => ({ fetchWithAuth: vi.fn() }));
 vi.mock('../auth/index.js', () => ({ fetchWithAuth }));
 vi.mock('../api/rest.js', () => ({ getUserMe: vi.fn() }));
 
-import { handoffRequest, renderMessages } from '../handoffs.js';
+import { handoffRequest, renderMessages, selectTicketFromList } from '../handoffs.js';
 
 describe('human handoff API transport', () => {
   beforeEach(() => {
@@ -76,5 +76,54 @@ describe('message rendering safety', () => {
     expect(list?.querySelector('img')).toBeNull();
     expect(list?.textContent).toContain('<img src=x onerror=alert(1)>');
     document.body.replaceChildren();
+  });
+});
+
+describe('ticket selection isolation', () => {
+  it('serializes selection and clears drafts only when changing tickets', async () => {
+    document.body.innerHTML = `
+      <ul id="ticketList"></ul><h2 id="ticketTitle"></h2><p id="ticketStatus"></p>
+      <p id="ticketReason"></p><p id="ticketResolution"></p><ul id="messageList"></ul>
+      <button id="claimTicketBtn"></button><button id="closeTicketBtn"></button>
+      <button id="reopenTicketBtn"></button><form id="messageForm"></form>
+      <textarea id="messageBody"></textarea><textarea id="resolutionText"></textarea>
+      <section id="resolutionPanel"></section><p id="operationStatus"></p>
+    `;
+    const reply = (id) => ({
+      ok: true,
+      json: async () => ({ ticket_id: id, status: 'CLAIMED' }),
+    });
+    const messages = { ok: true, json: async () => ({ messages: [] }) };
+    fetchWithAuth.mockReset();
+    let release;
+    fetchWithAuth.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    fetchWithAuth.mockResolvedValueOnce(messages);
+    try {
+      const first = selectTicketFromList('A');
+      await selectTicketFromList('B');
+      expect(fetchWithAuth).toHaveBeenCalledTimes(1);
+      release(reply('A'));
+      await first;
+      expect(document.getElementById('ticketTitle').textContent).toContain('A');
+
+      document.getElementById('messageBody').value = 'only for A';
+      document.getElementById('resolutionText').value = 'resolution for A';
+      fetchWithAuth.mockResolvedValueOnce(reply('A')).mockResolvedValueOnce(messages);
+      await selectTicketFromList('A');
+      expect(document.getElementById('messageBody').value).toBe('only for A');
+
+      fetchWithAuth.mockResolvedValueOnce(reply('B')).mockResolvedValueOnce(messages);
+      await selectTicketFromList('B');
+      expect(document.getElementById('ticketTitle').textContent).toContain('B');
+      expect(document.getElementById('messageBody').value).toBe('');
+      expect(document.getElementById('resolutionText').value).toBe('');
+    } finally {
+      document.body.replaceChildren();
+    }
   });
 });
