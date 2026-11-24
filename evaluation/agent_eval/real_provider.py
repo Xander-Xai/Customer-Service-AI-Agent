@@ -190,9 +190,9 @@ def validate_runtime_plan(plan: RealProviderPlan, config: Any) -> None:
     ):
         raise RealProviderNotAuthorized("unsafe provider URL")
     if (
-        config.OPENAI_MODEL != plan.model
+        plan.model != config.OPENAI_MODEL
         or config.OPENAI_BASE_URL.rstrip("/") != plan.base_url.rstrip("/")
-        or config.OPENAI_API_KEY != plan.api_key
+        or plan.api_key != config.OPENAI_API_KEY
         or not config.evaluate_llm_api_key(config.OPENAI_API_KEY).usable
     ):
         raise RealProviderNotAuthorized("evaluation plan does not match runtime LLM configuration")
@@ -203,7 +203,9 @@ def validate_runtime_plan(plan: RealProviderPlan, config: Any) -> None:
         or config.EMBEDDING_PROVIDER != "local"
         or config.RERANKER_PROVIDER != "local"
     ):
-        raise RealProviderNotAuthorized("evaluation requires isolated mock ERP and local retrieval providers")
+        raise RealProviderNotAuthorized(
+            "evaluation requires isolated mock ERP and local retrieval providers"
+        )
     # This graph does not expose complete provider usage to the lane. Refuse
     # a promised token/cost budget that cannot be enforced even for the first case.
     if plan.max_total_tokens is not None or plan.max_cost_usd is not None:
