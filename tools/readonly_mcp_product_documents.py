@@ -20,7 +20,9 @@ from typing import Any
 if __package__:
     from tools.readonly_mcp_faq import FAQServer
 else:
-    from readonly_mcp_faq import FAQServer
+    # Resolve the installed first-party package, never the caller's cwd.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from tools.readonly_mcp_faq import FAQServer
 
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
 MAX_RECORDS = 5000

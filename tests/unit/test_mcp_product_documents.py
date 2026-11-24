@@ -30,9 +30,7 @@ def _catalog(tmp_path, records):
 
 
 def test_private_catalog_loads_pinned_source_and_expiry(tmp_path):
-    path, digest = _catalog(
-        tmp_path, [_record(), _record(sku="EXPIRED", valid_until="2021-01-01")]
-    )
+    path, digest = _catalog(tmp_path, [_record(), _record(sku="EXPIRED", valid_until="2021-01-01")])
     catalog = ProductCatalog(path, digest)
     assert catalog.lookup("SKU-001", "storage")["catalog_sha256"] == digest
     assert catalog.lookup("EXPIRED", "storage")["status"] == "NOT_AVAILABLE"
@@ -53,9 +51,7 @@ def test_server_never_exposes_demo_or_write_tools(tmp_path):
     server = ProductDocumentServer(ProductCatalog(path, digest))
 
     def rpc(method, params=None):
-        return server.dispatch(
-            {"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}
-        )
+        return server.dispatch({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
 
     assert "error" in rpc("tools/list")
     rpc("initialize", {"protocolVersion": "2025-06-18"})
