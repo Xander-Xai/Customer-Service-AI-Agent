@@ -13,7 +13,6 @@ from integrations.a2a_policy.contracts import (
 )
 
 
-
 def test_a2a_disabled_default(monkeypatch):
     monkeypatch.delenv("A2A_FAQ_EXPERIMENT_ENABLED", raising=False)
     with pytest.raises(A2AIntegrationDisabled):
@@ -59,7 +58,6 @@ def test_only_synthetic_topic_enum_is_allowed(topic):
 def test_no_arbitrary_remote_endpoint_or_redirects(url):
     with pytest.raises(A2AContractError):
         validate_loopback_base_url(url)
-
 
 
 def test_only_fictional_policy_data_can_be_resolved():
