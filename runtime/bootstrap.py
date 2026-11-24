@@ -23,9 +23,7 @@ class CheckpointEpisodeMismatch(PermanentError):
     """An unfinished checkpoint belongs to a different or unidentified run."""
 
 
-async def _read_episode_checkpoint(
-    graph: Any, config: dict[str, Any], run_id: str | None
-) -> Any:
+async def _read_episode_checkpoint(graph: Any, config: dict[str, Any], run_id: str | None) -> Any:
     aget_state = getattr(graph, "aget_state", None)
     if aget_state is None:
         if run_id is not None:
@@ -148,9 +146,7 @@ async def invoke_graph_with_resume(
                 run_metrics.record_checkpoint_recovery(True)
                 logger.info("Recovering completed checkpoint without replay")
                 return completed, True
-        pending = _validate_checkpoint_owner(
-            snapshot, run_id, approval_resume=resume_command is not None
-        )
+        pending = _validate_checkpoint_owner(snapshot, run_id, approval_resume=resume_command is not None)
     else:
         pending = await pending_steps(graph, config)
 
