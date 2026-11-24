@@ -45,7 +45,7 @@
 | Runtime version | `6.3` | `core/config.py::VERSION` |
 | LLM（默认） | `siliconflow` / `Qwen/Qwen3-8B` | `core/config.py` |
 | Embedding / Rerank | `BAAI/bge-large-zh-v1.5` / `BAAI/bge-reranker-v2-m3` | `core/config.py` |
-| Agent 角色 / 协作模式 | 9 / 5 | `agents/`、`collaboration/modes.py` |
+| 运行时角色 / 兼容执行标识 | 9 / 5（3 类编排） | `agents/`、`collaboration/modes.py` |
 | OpenAPI 路径数 | 以 [API 参考](docs/reference/api-reference.md#当前接口总览) 的生成快照为准 | `make facts` / `make openapi-check` |
 | RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
 | 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
@@ -290,7 +290,7 @@ flowchart TB
 
 | 层 | 节点 | 做什么 | 关键设计 |
 |---|---|---|---|
-| **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 命中直接短路到 Layer 3；embedding 不可用时 **fail closed** |
+| **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 仅符合响应缓存边界的请求可短路到 Layer 3；durable run、图片、明确人工接管请求绕过缓存；embedding 不可用时 **fail closed** |
 | **Layer 1** | `classify_query` | LLM 分类器 ∥ 规则分类器 | `asyncio.gather` 并行；高置信规则匹配（≥ 0.75）**跳过 LLM 调用** |
 | **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 路由、复杂度及关键词规则选择五个兼容执行标识 |
 | **审批闸** | `human_approval_gate` | 逐个 `interrupt()` 等待人工决策 | **无 HIGH 风险动作时是纯 no-op**（普通流量零开销） |

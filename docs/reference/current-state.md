@@ -218,7 +218,7 @@ make runtime-delivery
   五个兼容标识（Sequential / Parallel / Consultation / Hierarchical / ReAct）分别对应直接单专家、并行分发、固定咨询汇总、固定子任务汇总、单 Agent 工具循环。
   Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 不是多 Agent 协作；规则质量门控最多一次安全重试。参见 [架构术语裁决](../architecture.md)。
   入口：`core/graph_builder.py::build_graph`。
-- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）:
+- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）: 图层 `graph_response_cache_allowed` 阻止耐久任务和多模态/人工接管请求使用文本缓存；正常后处理拒绝缓存工具回执、审批、降级及转人工结果，异常 fallback 不写入。语义误命中与多轮上下文隔离仍需专项配对验证。
   L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退；scope/version/ttl 由
   CachePolicy 统一决定。
 - **Tool Result Context Engineering**（`core/tool_result_*.py`）是独立机制：
