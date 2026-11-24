@@ -145,3 +145,22 @@ def test_worker_projection_failure_does_not_change_execution():
     trace = MagicMock()
     _record_episode_inspection(service, "run-a", trace)
     trace.set_attribute.assert_not_called()
+
+
+def test_episode_watermark_tracks_receipt_and_effective_expiry(sessions):
+    with sessions() as session:
+        add_approval(session, expires=NOW + timedelta(seconds=10))
+        add_receipt(session)
+        session.commit()
+        first = read_task_episode(session, "run-a", now=NOW)
+        unchanged = read_task_episode(session, "run-a", now=NOW + timedelta(seconds=1))
+        assert unchanged["watermark"] == first["watermark"]
+        expired = read_task_episode(session, "run-a", now=NOW + timedelta(seconds=11))
+        assert expired["watermark"] != first["watermark"]
+        receipt = session.query(ToolSideEffect).one()
+        receipt.status = "SUCCEEDED"
+        session.commit()
+        updated = read_task_episode(session, "run-a", now=NOW + timedelta(seconds=11))
+        assert updated["watermark"] != expired["watermark"]
+        assert updated["receipts"][0]["status"] == "SUCCEEDED"
+        assert updated["execution_authorized"] is False
