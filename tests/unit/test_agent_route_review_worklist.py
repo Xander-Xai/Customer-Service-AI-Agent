@@ -20,12 +20,9 @@ pytestmark = pytest.mark.unit
 
 def _case(name: str, route: str, *, reviewed: bool = False) -> AgentCase:
     annotation = (
-        Annotation(
-            provenance="human_confirmed",
-            method="human_reviewed",
-            confirmed_by="reviewer",
-        )
-        if reviewed else Annotation()
+        Annotation(provenance="human_confirmed", method="human_reviewed", confirmed_by="reviewer")
+        if reviewed
+        else Annotation()
     )
     return AgentCase(
         case_id=name,
@@ -56,9 +53,7 @@ def test_balanced_selection_is_deterministic_and_excludes_human_confirmed():
 @pytest.mark.parametrize("per_route,limit", [(0, 2), (2, 0), (-1, 1)])
 def test_invalid_sampling_budget_refused(per_route, limit):
     with pytest.raises(ValueError, match="must be positive"):
-        select_candidates(
-            (_case("a1", "product_info"),), per_route=per_route, limit=limit
-        )
+        select_candidates((_case("a1", "product_info"),), per_route=per_route, limit=limit)
 
 
 def test_generated_worklist_does_not_self_approve_gold_labels(tmp_path):
