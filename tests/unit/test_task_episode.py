@@ -200,3 +200,14 @@ def test_valid_pending_approval_remains_waiting(sessions):
         episode = read_task_episode(session, "run-a", now=NOW)
     assert episode["next_safe_inspection"] == "wait_for_approval"
     assert episode["execution_authorized"] is False
+
+def test_unknown_run_status_requires_manual_inspection(sessions):
+    with sessions() as session:
+        run = session.get(AgentRun, "run-a")
+        run.status = "UNRECOGNIZED"
+        add_approval(session)
+        session.commit()
+        episode = read_task_episode(session, "run-a", now=NOW)
+    assert episode["run_status"] == "UNRECOGNIZED"
+    assert episode["next_safe_inspection"] == "inspect_run_status"
+    assert episode["execution_authorized"] is False

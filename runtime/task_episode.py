@@ -15,6 +15,7 @@ from .statuses import TERMINAL_STATUSES, RunStatus
 
 MAX_RECEIPTS = 50
 _TERMINAL = {status.value for status in TERMINAL_STATUSES}
+_KNOWN_RUN_STATUSES = {status.value for status in RunStatus}
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -114,6 +115,8 @@ def read_task_episode(
 
     if truncated or identity_mismatch:
         next_action = "inspect_complete_ledger"
+    elif run.status not in _KNOWN_RUN_STATUSES:
+        next_action = "inspect_run_status"
     elif any(row["status"] != "SUCCEEDED" for row in receipts):
         next_action = "reconcile_write_receipts"
     elif any(
