@@ -309,6 +309,9 @@ class ConsultationMode(CollaborationMode):
         # 先让辅助 Agent 提供信息
         consult_results = []
         consult_read_results: list[dict] = []
+        consult_failure_reason = (
+            "consultation_agent_missing" if any(n not in agents for n in consultees) else ""
+        )
         if consultees:
 
             async def consult(name: str):
@@ -374,10 +377,13 @@ class ConsultationMode(CollaborationMode):
                 if _durable_run():
                     raise
                 logger.warning(f"Consultation 辅助 Agent 超时 ({self.consult_timeout}s)")
+                consult_failure_reason = "consultation_timeout"
                 done = []
             _raise_write_failures(done)
             for r in done:
-                if not isinstance(r, Exception):
+                if isinstance(r, BaseException):
+                    consult_failure_reason = consult_failure_reason or "consultation_agent_failed"
+                else:
                     consult_results.append(r)
 
         # 将辅助信息注入主 Agent 上下文
@@ -416,21 +422,36 @@ class ConsultationMode(CollaborationMode):
         )
 
         logger.info(f"Consultation primary={primary} {elapsed:.1f}s")
+        # Preserve only execution-produced structured records, not inferred facts
+        # from the auxiliary response or Blackboard text.
+        pending_actions = [
+            action
+            for item in consult_read_results
+            for action in (item.get("pending_actions") or [])
+        ]
+        tool_executions = [
+            record
+            for item in consult_read_results
+            for record in (item.get("tool_executions") or [])
+        ]
+        read_signal = _read_path_signal(result, *consult_read_results)
+        if consult_failure_reason:
+            read_signal.setdefault("degraded_reason", consult_failure_reason)
         return {
             "response": result.get("response", ""),
             "mode": "consultation",
             "agents_used": [primary] + [n for n, _ in consult_results],
             "elapsed": elapsed,
-            **_read_path_signal(result, *consult_read_results),
+            **read_signal,
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
             # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
             # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
-            "pending_actions": list(result.get("pending_actions") or []),
+            "pending_actions": pending_actions + list(result.get("pending_actions") or []),
             # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
             # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
-            "tool_executions": list(result.get("tool_executions") or []),
+            "tool_executions": tool_executions + list(result.get("tool_executions") or []),
         }
 
 
