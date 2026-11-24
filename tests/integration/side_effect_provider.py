@@ -51,6 +51,7 @@ BLOCK_SECONDS = float(os.getenv("SIDE_EFFECT_BLOCK_SECONDS", "25"))
 
 
 class _State(TypedDict, total=False):
+    episode_run_id: str | None
     customer_query: str
     response: str
     stage: str
@@ -163,10 +164,16 @@ class _SideEffectRuntime:
         multimodal_content: list | None = None,
     ) -> dict[str, Any]:
         from runtime.bootstrap import invoke_graph_with_resume
+        from runtime.context import get_current_run_id
 
         graph = _build_graph(thread_id, self._registry, self._checkpointer)
         config = {"configurable": {"thread_id": thread_id}}
-        state: dict[str, Any] = {"customer_query": query, "response": "", "stage": ""}
+        state: dict[str, Any] = {
+            "episode_run_id": get_current_run_id(),
+            "customer_query": query,
+            "response": "",
+            "stage": "",
+        }
         result, _resumed = await invoke_graph_with_resume(graph, state, config)
         return {
             "response": result.get("response", ""),
