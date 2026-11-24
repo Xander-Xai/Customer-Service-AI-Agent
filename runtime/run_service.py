@@ -159,6 +159,10 @@ class RunService:
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get(run_id)
 
+    def inspect_task_episode(self, run_id: str) -> dict[str, Any] | None:
+        """Internal diagnostic view; never grant execution or approval authority."""
+        return self.repo.inspect_task_episode(run_id)
+
     def get_by_idempotency_key(self, key: str) -> dict[str, Any] | None:
         return self.repo.get_by_idempotency_key(key)
 
