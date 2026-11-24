@@ -258,46 +258,39 @@ class TestHitlGateOnRealGraph:
 
 
 class TestReactModePropagatesPendingActions:
-    """纯单元层：锁住「模式返回值必须带 pending_actions」这条契约。
+    """Verify actual receipt propagation through the shared single-Agent boundary."""
 
-    为什么要有这个「看起来很笨」的断言：真实图那条测试要拉起整个容器、
-    跑完整图，慢且重；而这次的 bug 恰恰是一个**返回值漏字段**。这条断言 5 毫秒
-    就跑完，且能在 CI 的 unit lane 里挡住同类回归。
-    """
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode_name", ["SequentialMode", "ReActMode"])
+    async def test_single_agent_modes_return_pending_actions(self, mode_name):
+        from collaboration import modes
 
-    def test_react_mode_returns_pending_actions_key(self):
-        import inspect
+        pending = [{"tool": "staging_refund", "args": {"amount": 10}}]
+        receipts = [{"tool": "lookup_order", "status": "success"}]
 
-        from collaboration.modes import ReActMode
+        class Expert:
+            async def process_with_retry(self, state):
+                state["pending_actions"] = pending
+                state["tool_executions"] = receipts
+                return {"response": "approval required", **state}
 
-        source = inspect.getsource(ReActMode.execute)
-        assert '"pending_actions"' in source, (
-            "ReActMode.execute 的返回值里没有 pending_actions —— "
-            "HIGH 风险动作会停在 Agent 内部，既不执行也不审批（静默丢弃）"
+        cls = getattr(modes, mode_name)
+        expert = Expert()
+        result = await cls().execute(
+            {"general_agent": expert, "react_agent": expert},
+            {},
+            {"primary_agent": "general_agent"},
         )
+        assert result["pending_actions"] == pending
+        assert result["tool_executions"] == receipts
 
-    def test_all_collaboration_modes_are_accounted_for(self):
-        """每个协作模式的正常返回路径都必须透传 pending_actions。
-
-        目前只有 ``react`` 模式持有 tool_registry，因此只有它能摘出动作；
-        但这是**当前**的实现事实，不是契约。把「每个模式都要透传」写成断言，
-        将来新增带工具的模式时不会重蹈覆辙。
-        """
+    def test_other_collaboration_modes_are_accounted_for(self):
+        """Retain the existing guard for non-shared collaboration implementations."""
         import inspect
 
         from collaboration import modes
 
-        mode_classes = [
-            getattr(modes, name)
-            for name in (
-                "SequentialMode",
-                "ParallelMode",
-                "ConsultationMode",
-                "HierarchicalMode",
-                "ReActMode",
-            )
-        ]
-        for cls in mode_classes:
+        for cls in (modes.ParallelMode, modes.ConsultationMode, modes.HierarchicalMode):
             source = inspect.getsource(cls.execute)
             assert '"pending_actions"' in source, (
                 f"{cls.__name__}.execute 没有透传 pending_actions；"
