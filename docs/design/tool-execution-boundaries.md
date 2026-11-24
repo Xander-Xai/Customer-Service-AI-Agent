@@ -28,7 +28,13 @@ runtime stack.
   introduce side effects. Riskier ERP mutations should be registered in
   ToolRegistry, with stable operation keys and authorization checks.
 - MCP is for cross-process tool integration, not a mandatory wrapper for
-  every in-process Python function.
+  every in-process Python function. The approved SKU document lookup is a
+  first-party read-only integration; the A2A after-sales specialist is an
+  independently started read-only service, not a payment authority.
+- The registry explicitly refuses automatic reclaim of unresolved external
+  side-effect claims. Confirmed receipts may be reused; an expired claim
+  or failed external call does not prove that the downstream write did not
+  happen. Reconcile with the downstream system before authorizing any retry.
 
 ## Explicit limits
 

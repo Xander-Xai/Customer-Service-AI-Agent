@@ -254,7 +254,7 @@ def compute_metrics(
     unreachable = [
         c.case_id
         for c, o in pairs
-        if c.scores_tools() and not _tool_eligible(c, o) and o.observed_mode == TOOL_REACHABLE_MODE
+        if c.scores_tools() and not c.expect_fallback and o.observed_mode != TOOL_REACHABLE_MODE
     ]
     fault_excluded = [c.case_id for c, _o in pairs if c.scores_tools() and c.expect_fallback]
     if not eligible:

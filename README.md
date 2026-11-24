@@ -28,7 +28,7 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
-**A2A 1.0 专项（2026-11-24 后续工程补强，默认关闭）**：新增独立启动的只读合成 FAQ 专家服务、官方 A2A SDK 的 Agent Card / JSON-RPC / Task 交互及 ReAct 工具适配，**不传真实客户、订单或退款资料**；这不是历史任职时已部署的 A2A 证据。见 [A2A 服务边界与验收](docs/architecture/a2a-remote-faq-boundary-20261124.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+**业务协议边界（后续工程补强，默认关闭）**：MCP 已接入可由产品文档责任方提供的、摘要锁定的 SKU 使用/存储/包装说明（#72）；A2A 已接入独立售后流程专家（#73），只处理枚举化问题/渠道/阶段，不授权退款、不查询 ERP；服务端仅监听 loopback；#78 已合入受批准的私有 HTTPS 客户端路径（固定 DNS/CA，不跟随重定向），真实 TLS 入口待验收。原合成 FAQ 仅作协议回归。真实授权目录、网络与业务验收仍未完成，不是历史任职时已部署的证据。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
 
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 
@@ -36,7 +36,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
-不是 demo：`make test` 默认**离线**可跑（无 API Key、不出公网）；CI 在 3 个 Python
+**可运行的工程参考实现，不等于生产上线认证**：`make test` 默认**离线**可跑（无 API Key、不出公网）；CI 在 3 个 Python
 版本上跑单测/集成，并在**真实** PostgreSQL + Redis 上跑分布式运行时验收
 （依赖缺失时硬 FAIL，不静默 skip）。
 
@@ -45,7 +45,7 @@
 | Runtime version | `6.3` | `core/config.py::VERSION` |
 | LLM（默认） | `siliconflow` / `Qwen/Qwen3-8B` | `core/config.py` |
 | Embedding / Rerank | `BAAI/bge-large-zh-v1.5` / `BAAI/bge-reranker-v2-m3` | `core/config.py` |
-| Agent 角色 / 协作模式 | 9 / 5 | `agents/`、`collaboration/modes.py` |
+| 运行时角色 / 兼容执行标识 | 9 / 5（3 类编排） | `agents/`、`collaboration/modes.py` |
 | OpenAPI 路径数 | 以 [API 参考](docs/reference/api-reference.md#当前接口总览) 的生成快照为准 | `make facts` / `make openapi-check` |
 | RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
 | 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
@@ -55,7 +55,7 @@
 > GHCR 镜像由 `build-and-push` 构建，`deploy` 另受 `DEPLOY_HOST` 配置门控。
 > 生产验收证据见 [Production Readiness](docs/production-readiness.md)。
 
-**当前实现**见 [当前事实入口](docs/reference/current-state.md)。转人工工单后端已合入，默认关闭。
+**当前实现**见 [当前事实入口](docs/reference/current-state.md)，上线验收按 [生产准备度](docs/production-readiness.md) 逐项执行；直接 ERP 领域只读调用使用授权适配器而非 ToolRegistry，详见 [工具边界](docs/design/tool-execution-boundaries.md)。转人工工单后端已合入，默认关闭。
 坐席 Web 工作台的交付状态以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。
 
 **实时状态** · [`main` 提交](https://github.com/Xander-Xai/Customer-Service-AI-Agent/commits/main/) · [Pull Requests](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pulls) · [Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) · [Actions](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions?query=branch%3Amain) · [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)。核对分支 HEAD、PR 合并状态和同一 SHA 的 Actions。
@@ -290,9 +290,9 @@ flowchart TB
 
 | 层 | 节点 | 做什么 | 关键设计 |
 |---|---|---|---|
-| **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 命中直接短路到 Layer 3；embedding 不可用时 **fail closed** |
+| **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 仅符合响应缓存边界的请求可短路到 Layer 3；durable run、图片、明确人工接管请求绕过缓存；embedding 不可用时 **fail closed** |
 | **Layer 1** | `classify_query` | LLM 分类器 ∥ 规则分类器 | `asyncio.gather` 并行；高置信规则匹配（≥ 0.75）**跳过 LLM 调用** |
-| **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 模式由路由结果 + 查询复杂度决定，不是硬编码分支 |
+| **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 路由、复杂度及关键词规则选择五个兼容执行标识 |
 | **审批闸** | `human_approval_gate` | 逐个 `interrupt()` 等待人工决策 | **无 HIGH 风险动作时是纯 no-op**（普通流量零开销） |
 | **Layer 3** | `quality_gate` / `mode_upgrade_retry` / `final_response` | 安全条件下最多一次升级 → 最终评估、缓存、事件 | 工具或审批活动禁止质量驱动重放；缓存命中直接最终处理 |
 
@@ -344,22 +344,23 @@ Agent 角色内部循环、工具边界与幂等记账的细节图见
 [docs/agent-design.md §2.0](docs/agent-design.md)；异步路径与崩溃恢复见
 [docs/architecture.md §2.1](docs/architecture.md)。
 
-### 五种协作模式
+### 主流编排模式与兼容执行标识
 
 | 模式 | 何时选 | 结构 |
 |---|---|---|
-| `Sequential` | 单意图、单一领域（**默认**） | 一个 Agent 串行执行 |
+| `Sequential` | 单意图、单一领域（**默认**） | Routing → 单专家直接执行；非多 Agent 串行链 |
 | `Parallel` | 多领域可切分（成分 + 库存 + 价格） | 并发执行 → 聚合 |
-| `Consultation` | 需要专家意见但由主 Agent 交付 | 主 Agent + 顾问 Agent |
-| `Hierarchical` | 投诉、复杂任务需分解 | 协调者拆解 → 子任务 → 汇总 |
-| `ReAct` | 需检索 + 工具调用的多步推理 | RAG → Function Calling → 观察 → 迭代 |
+| `Consultation` | 需要专家意见但由主 Agent 交付 | 固定辅助专家 → 主专家汇总 |
+| `Hierarchical` | 投诉、复杂任务需分解 | 代码预定义子任务 → 并行执行 → 协调者汇总；非动态 LLM 规划 |
+| `ReAct` | 需检索 + 工具调用的多步推理 | 单 Agent 有界工具循环；非多 Agent 协作 |
 
-投诉固定走 `Hierarchical` 不是因为"复杂度高"，而是**结构需求**：
-投诉需要**一个统一对外口径**，多个 Agent 各说各话会互相矛盾。
+单域投诉由投诉 Agent 直接处理；确有产品或订单等其他领域子任务时才走 `Hierarchical`。这保留跨域汇总口径，同时避免仅有一个子任务时再调用通用协调者。Sequential 与 ReAct 共享单 Agent 执行、超时、事件和工具回执边界；ReAct 的差异在所选 Agent 及工具策略，不是另一套调度实现。
+
+架构术语以 [权威架构文档](docs/architecture.md) 为准：Routing 是主架构，并行分发和固定主从汇总是两个多 Agent 模式族。Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 属于单 Agent 内部策略；五个旧标识保留用于节点、SSE 和监控兼容。规则质量门控加一次安全重试不是双模型 Evaluator–Optimizer。本轮协作仅使用当前调用结果，不从会话黑板恢复旧子任务。
 
 ### 为什么不是一条裸 Chain
 
-裸 `if/elif` + LLM 在四个地方会断：分支组合爆炸（9 Agent × 5 模式 = 45 种）、
+裸 `if/elif` + LLM 在四个地方会断：路由与分支管理复杂（并非所有角色和模式可组合）、
 没有"暂停等人"的原语、进程死了状态就没了、多 Agent 中间结果没有统一载体。
 LangGraph 恰好提供了这四个原语（`StateGraph` / `interrupt()` / Checkpointer /
 `AgentState`）——详见 [docs/agent-design.md](docs/agent-design.md)。
@@ -420,7 +421,7 @@ LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)）�
 
 ### 工具执行的统一边界
 
-所有工具（含 MCP）必须穿过 `ToolRegistry.execute_raw`，因此能统一做授权、超时、
+原生 Function Calling 工具与 MCP 注册工具经过 `ToolRegistry.execute_raw`，因此可统一做授权、超时、
 幂等、缓存、脱敏、埋点。**模型永远拿不到 tool store 的访问权**——只能用
 `recover_tool_result(reference_id)`，而这仍受 scope 精确校验
 （不同 `(user_id, session_id)` 拿不到别人的结果）。否则一次 prompt injection
@@ -737,7 +738,7 @@ customer-service-ai-agent/
 ├── api/            # FastAPI 服务层（路由 / SSE / WebSocket / 中间件）
 ├── auth/           # JWT + Argon2id + Redis 黑名单 + 4 级 RBAC
 ├── router/         # 双层查询路由（LLM ∥ 规则 + 熔断器降级）
-├── collaboration/  # 5 种协作模式 + 升级重试
+├── collaboration/  # 5 个兼容执行标识 + 安全重试
 ├── rag/            # Qdrant + BM25 + RRF + 重排 + 查询改写
 ├── cache/          # 三层响应缓存（与 Tool Result Cache / Store 分离）
 ├── db/             # SQLAlchemy 模型 + Alembic 迁移
@@ -768,7 +769,7 @@ customer-service-ai-agent/
 | 投诉与差评处理 | `ComplaintAgent` | RAG + 会话记忆 + 情绪路由 + Hierarchical 编排 |
 | 售前推荐 | `SalesAgent` | RAG + 场景过滤 |
 | 售后退换 | `AftersalesAgent` | 高风险 → HITL 审批（治理机制已实现，真实 ERP 写操作 `NOT_VERIFIED`） |
-| 复杂订单问题 | `GeneralAgent` + 协作模式 | Hierarchical 任务分解 |
+| 复杂订单问题 | `GeneralAgent` + 协作模式 | 固定子任务分发与主从汇总 |
 
 ---
 
@@ -812,3 +813,8 @@ customer-service-ai-agent/
 - **验证边界**：CI/runtime tests are not a production SLA; real ERP writes, live traffic and the published RAG relevance metrics remain unverified in the stated scope.
 - **公开交叉索引**：[Beauty RAG](https://github.com/Xander-Xai/Beauty-Industry-RAG-QA-System) owns a different domain-focused retrieval reference; an ecosystem link is not a shared production deployment.
 - 代码、测试、指标及发布的唯一技术权威在本仓；任何外部商业研究、PR、演示、内容制作或私人计划均不能替本仓证明生产安全、真实客户验收或收入。
+
+
+### 最新交付证据（2026-11-25）
+
+#76 已合并统一架构（Routing / Parallel / fixed Supervisor–Workers、未知外部写拒绝重放、缓存门控）；#78 已合并私有 HTTPS A2A 客户端，#79 已合并[会话格式盘点](docs/operations/session-record-inventory.md)，#81 已合并真实模型轨迹与计划分母诊断。#79 只读取显式授权离线导出并输出聚合统计，不证明历史明文来源，不执行迁移。#81 不是实际模型/ERP 质量证明。#80 的检索评测完整性加固以实际 merge 和 exact-head CI 为准。禁止将实验、历史指标或未部署能力当成生产交付。

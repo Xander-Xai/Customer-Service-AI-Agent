@@ -18,6 +18,7 @@ from integrations.a2a_policy.contracts import (
     A2AContractError,
     A2AIntegrationDisabled,
     validate_loopback_base_url,
+    validate_private_https_base_url,
 )
 
 ISSUES = ("damaged", "wrong_item", "return_request", "delivery_delay", "invoice")
@@ -34,19 +35,38 @@ SHA = re.compile(r"[0-9a-f]{64}")
 def require_business_config() -> tuple[str, str, str]:
     if os.getenv("A2A_AFTERSALES_ENABLED", "").lower() != "true":
         raise A2AIntegrationDisabled("After-sales A2A is disabled")
-    if os.getenv("APP_ENV", "").lower() not in {
-        "development",
-        "local",
-        "test",
-        "testing",
-        "staging",
-    }:
-        raise A2AIntegrationDisabled("After-sales peer requires explicit local/staging environment")
+    environment = os.getenv("APP_ENV", "").lower()
+    remote = os.getenv("A2A_AFTERSALES_PRIVATE_HTTPS", "").lower() == "true"
+    if remote:
+        if environment not in {"staging", "production"}:
+            raise A2AIntegrationDisabled("Private HTTPS peer requires staging or production")
+        require_private_ca_file()
+    elif environment not in {"development", "local", "test", "testing", "staging"}:
+        raise A2AIntegrationDisabled(
+            "Production peer requires explicit private HTTPS configuration"
+        )
     token = os.getenv("A2A_AFTERSALES_TOKEN", "")
     digest = os.getenv("A2A_AFTERSALES_POLICY_SHA256", "")
-    if not 32 <= len(token) <= 256 or not token.isascii() or not SHA.fullmatch(digest):
+    if not re.fullmatch(r"[A-Za-z0-9._~-]{32,256}", token) or not SHA.fullmatch(digest):
         raise A2AIntegrationDisabled("Explicit peer token and approved policy digest required")
-    return validate_loopback_base_url(os.getenv("A2A_AFTERSALES_ENDPOINT", "")), token, digest
+    endpoint = os.getenv("A2A_AFTERSALES_ENDPOINT", "")
+    base_url = (
+        validate_private_https_base_url(endpoint)
+        if remote
+        else validate_loopback_base_url(endpoint)
+    )
+    return base_url, token, digest
+
+
+def require_private_ca_file() -> str:
+    """The operator supplies the reviewed trust anchor, not a user or tool argument."""
+    value = os.getenv("A2A_AFTERSALES_CA_FILE", "")
+    if not value:
+        raise A2AIntegrationDisabled("Explicit private CA file required")
+    path = Path(value)
+    if not path.is_absolute() or not path.is_file():
+        raise A2AIntegrationDisabled("Explicit private CA file required")
+    return str(path)
 
 
 def unique_object(pairs):

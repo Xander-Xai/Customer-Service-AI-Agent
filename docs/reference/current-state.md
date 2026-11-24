@@ -214,10 +214,11 @@ make runtime-delivery
 
 ## 稳定的架构事实
 
-- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 协作模式（Sequential /
-  Parallel / Consultation / Hierarchical / ReAct）→ 响应后处理。
+- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 执行分支 → 响应后处理。
+  五个兼容标识（Sequential / Parallel / Consultation / Hierarchical / ReAct）分别对应直接单专家、并行分发、固定咨询汇总、固定子任务汇总、单 Agent 工具循环。
+  Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 不是多 Agent 协作；规则质量门控最多一次安全重试。参见 [架构术语裁决](../architecture.md)。
   入口：`core/graph_builder.py::build_graph`。
-- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）:
+- **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）: 图层 `graph_response_cache_allowed` 阻止耐久任务和多模态/人工接管请求使用文本缓存；正常后处理拒绝缓存工具回执、审批、降级及转人工结果，异常 fallback 不写入。语义误命中与多轮上下文隔离仍需专项配对验证。
   L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退；scope/version/ttl 由
   CachePolicy 统一决定。
 - **Tool Result Context Engineering**（`core/tool_result_*.py`）是独立机制：
@@ -237,6 +238,7 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
+- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，服务端仅 loopback；#78 已合入受批准的私有 HTTPS 客户端，实际 TLS 入口仍待验收；不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
 - **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，
@@ -662,3 +664,10 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
 - Snapshot SHA != Current HEAD（用 `git rev-parse HEAD` 获取当前 HEAD）。
 - ADR 的历史决策正文不修改；当决策被取代时只更新 Status 行（例如 ADR-003 被
   [ADR-007](../decisions/007-current-default-llm.md) 取代）。
+
+
+## 交付治理增量（2026-11-25）
+
+- #76 已合入；#77 重叠方案已由同一工具拒绝重放、错误分类和 PostgreSQL 回归覆盖，关闭不独立合并。
+- #79 [会话格式盘点](../operations/session-record-inventory.md) 已合入，仅离线聚合、无原文、无解密、无自动迁移；实际 store 覆盖及来源证明仍 OPEN。
+- #81 真实轨迹诊断及 planned denominator 已合入；路由/参数/终态标签不等于独立业务 gold。#80 评测完整性加固随其实际合并状态核对。

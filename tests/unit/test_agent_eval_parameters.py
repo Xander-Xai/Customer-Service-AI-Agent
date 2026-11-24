@@ -138,3 +138,21 @@ class TestExpectedParameterMatchRate:
         assert metric.value is None
         assert metric.status == "NOT_MEASURED"
         assert metric.excluded == 1
+
+
+def test_tool_metric_exclusions_account_for_unreachable_and_fault_cases_once():
+    from dataclasses import replace
+
+    normal = parse_case(_payload(), 1)
+    fault = parse_case(
+        _payload(case_id="fault", expect_fallback=True, notes="Injected fault before tool"), 2
+    )
+    observations = [
+        replace(_obs("c1", ()), observed_mode="sequential"),
+        _obs("fault", ()),
+    ]
+    metric = compute_metrics([normal, fault], observations)["tool_selection_accuracy"]
+    assert metric.denominator == 0
+    assert metric.excluded == 2
+    assert metric.detail["unreachable_cases"] == ["c1"]
+    assert metric.detail["fault_injection_excluded"] == ["fault"]

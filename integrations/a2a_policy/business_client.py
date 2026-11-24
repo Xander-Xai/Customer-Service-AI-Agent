@@ -14,6 +14,7 @@ from integrations.a2a_policy.business_contract import (
     STAGES,
     canonical,
     require_business_config,
+    require_private_ca_file,
     unique_object,
     validate_request,
     validate_result,
@@ -33,6 +34,7 @@ async def review_after_sales_procedure(request: dict, *, httpx_client: Any | Non
         skill_id=SKILL_ID,
         max_chars=4000,
         httpx_client=httpx_client,
+        tls_ca_file=require_private_ca_file() if base_url.startswith("https://") else None,
     )
     try:
         result = json.loads(response, object_pairs_hook=unique_object)

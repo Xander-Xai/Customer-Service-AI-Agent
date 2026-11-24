@@ -312,3 +312,79 @@ def test_authorized_cli_requires_explicit_unmetered_permission(tmp_path, monkeyp
     report = json.loads(target.read_text())
     assert report["status"] == "NOT_MEASURED"
     assert report["provenance"]["real_provider"]["network_calls_made"] == 0
+
+
+def test_trajectory_keeps_misroutes_errors_and_budget_stopped_cases_in_denominator():
+    from evaluation.agent_eval.real_provider import RealCaseResult, summarize_trajectory
+
+    def case(case_id, reviewed=True):
+        return SimpleNamespace(
+            case_id=case_id,
+            annotation=SimpleNamespace(is_human_confirmed=reviewed),
+            expected_route="order_status",
+            expected_tools=("lookup",),
+            expected_parameters={"lookup": {"id": 1}},
+            expected_terminal_state="SUCCEEDED",
+        )
+
+    cases = [
+        case("correct"),
+        case("misroute"),
+        case("error"),
+        case("missing"),
+        case("candidate", False),
+    ]
+    results = [
+        RealCaseResult(
+            case_id="correct",
+            status="OK",
+            route="order_status",
+            tool_names=("lookup",),
+            tool_calls=(
+                {
+                    "name": "lookup",
+                    "arguments": {"id": 1},
+                    "schema_errors": [],
+                    "unknown_tool": False,
+                },
+            ),
+            terminal_state="SUCCEEDED",
+        ),
+        RealCaseResult(
+            case_id="misroute", status="OK", route="general", terminal_state="SUCCEEDED"
+        ),
+        RealCaseResult(case_id="error", status="ERROR"),
+        RealCaseResult(case_id="candidate", status="OK", route="order_status"),
+    ]
+    report = summarize_trajectory(cases, results)
+    route = report["metrics"]["reviewed_route_agreement"]
+    assert (route["numerator"], route["denominator"], route["status"]) == (1, 4, "INCOMPLETE")
+    assert report["metrics"]["candidate_tool_set_match"]["denominator"] == 5
+    assert report["metrics"]["candidate_argument_match"]["numerator"] == 1
+    assert report["not_attempted"] == ["missing"]
+    assert report["business_completion_verified"] is False
+    assert report["provider_transport_verified"] is False
+    with pytest.raises(ValueError, match="identity"):
+        summarize_trajectory(cases, results + [results[0]])
+
+
+def test_trajectory_does_not_treat_bool_as_integer_or_unknown_schema_as_valid():
+    from evaluation.agent_eval.real_provider import RealCaseResult, summarize_trajectory
+
+    case = SimpleNamespace(case_id="case", expected_parameters={"lookup": {"id": 1}})
+    result = RealCaseResult(
+        case_id="case",
+        status="OK",
+        tool_calls=(
+            {
+                "name": "lookup",
+                "arguments": {"id": True},
+                "schema_errors": [],
+                "unknown_tool": False,
+            },
+            {"name": "lookup", "arguments": {"id": 1}},
+        ),
+    )
+    assert (
+        summarize_trajectory([case], [result])["metrics"]["candidate_argument_match"]["value"] == 0
+    )

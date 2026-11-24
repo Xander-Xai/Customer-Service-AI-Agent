@@ -258,3 +258,18 @@ make agent-eval-contract          # 契约守卫
 make agent-eval-annotation-status # 人工确认进度（当前应为 0%，这是正确状态）
 python3 scripts/evaluate_agent.py --print-contract   # 完整证据边界
 ```
+
+
+## 2026-11-25 真实轨迹与架构权衡验收（#33 / #46 / #75）
+
+真实 provider lane 增加 `trajectory`，不替代原 scripted 指标或实际业务人工评分。分母为所选计划样本，错误路由、未调用预期工具、预算中止和执行错误不得从计划样本中消失。独立审核目前只覆盖路由标签；工具集合、参数子集（含 schema/unknown-tool 检查）及终态为候选契约诊断，不是人审真实任务准确率。缓存命中、规则捷径及 LLM 仲裁应按实际 route_source 区分；缺少真实调用证据不能证明 provider 执行。预期故障夹具单独记账。正确暂停审批不等于完成退款，非空回答不等于业务成功。
+
+### 配对实验协议（待执行，不宣称收益）
+
+- 固定代码 SHA、数据/人工标注摘要、模型实际版本、工具合同、租户/会话上下文、环境、负载及预热序列；保留计划分母、失败和逐样本证据。
+- 单专家 Routing vs Parallel / 固定 Supervisor–Workers：同任务比较人工业务正确性、工具回执、审批/权限、模型调用数及总耗时；仅在独立子任务或统一汇总有增益时升级。保留兼容模式标识，不把角色数说成模型实例数。
+- 单独比较规则捷径开关（同一缓存设置）与缓存开关（同一路由设置）；分别冷/热/多轮/相近但不同意图/不同权限/变更数据版本场景。必须先验证结果与授权，再报告命中率、模型调用、provider usage、P95/TTFT。不能只比较成功样本。
+- 历史 `scripts/benchmark_ab_test.py` 混有模拟延迟、估算 token 与预置回答，不是可发布的真实业务 A/B。真实图的端到端 provider usage 和 SSE 首个文本事件计时仍未接通；不得将整轮耗时冒充 TTFT，或将价格估计冒充账单。P95 用相同分母、样本数和明确失败策略。
+- 真实 ERP 只在授权 staging 运行。测试执行前后状态、未知结果对账、重复提交、审批失效、Worker 崩溃和 lease fencing；本地 ledger 不是下游 exactly-once。
+
+执行入口：`make agent-eval`、`make runtime-e2e`、`python scripts/build_agent_eval_review_worklist.py --help`、`python scripts/evaluate_agent_real.py --help`。真实模型仍需专用限额凭证、明确授权与隔离配置；现有真实 lane 仅支持显式允许的 case-capped unmetered 探针，不能提供硬费用上限。未取得人审 gold、实际模型/用量、独立 ERP 和配对实验产物前，保持 #33/#46/#75 OPEN。
