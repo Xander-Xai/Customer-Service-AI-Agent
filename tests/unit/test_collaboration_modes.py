@@ -334,6 +334,7 @@ class TestHierarchicalMode:
         )
 
         assert result["response"] == "汇总"
+        assert result["degraded_reason"] == "hierarchical_subtask_missing_or_empty"
 
     @pytest.mark.asyncio
     async def test_timeout_proceeds_with_coordinator(self):
@@ -361,6 +362,7 @@ class TestHierarchicalMode:
         )
 
         assert result["response"] == "协调汇总"
+        assert result["degraded_reason"] == "hierarchical_subtask_timeout"
 
     @pytest.mark.asyncio
     async def test_blackboard_subtask_data_merged(self):
@@ -390,6 +392,44 @@ class TestHierarchicalMode:
         )
 
         assert result["response"] == "直接汇总"
+
+    @pytest.mark.asyncio
+    async def test_failed_sibling_preserves_completed_receipt_and_marks_degraded(self):
+        mode = HierarchicalMode()
+        receipt = {"tool": "read_order", "status": "success"}
+        good = _mock_agent()
+        good.process_with_retry.return_value = {"response": "read", "tool_executions": [receipt]}
+        bad = _mock_agent(side_effect=RuntimeError("private upstream detail"))
+        result = await mode.execute(
+            {"general_agent": _mock_agent("summary"), "good": good, "bad": bad},
+            _state(),
+            {"sub_tasks": {"good": "read", "bad": "read"}},
+        )
+        assert result["tool_executions"] == [receipt]
+        assert result["agents_used"] == ["general_agent", "good"]
+        assert result["degraded_reason"] == "hierarchical_subtask_failed"
+        assert "private upstream detail" not in str(result)
+
+    @pytest.mark.asyncio
+    async def test_read_only_timeout_preserves_finished_sibling_receipt(self):
+        mode = HierarchicalMode()
+        mode._HIERARCHICAL_TIMEOUT = 0.05
+        receipt = {"tool": "read_order", "status": "success"}
+        good = _mock_agent()
+        good.process_with_retry.return_value = {"response": "read", "tool_executions": [receipt]}
+
+        async def slow(_state):
+            await asyncio.Event().wait()
+
+        bad = _mock_agent(side_effect=slow)
+        result = await mode.execute(
+            {"general_agent": _mock_agent("summary"), "good": good, "bad": bad},
+            _state(),
+            {"sub_tasks": {"good": "read", "bad": "read"}},
+        )
+        assert result["tool_executions"] == [receipt]
+        assert result["agents_used"] == ["general_agent", "good"]
+        assert result["degraded_reason"] == "hierarchical_subtask_timeout"
 
 
 # ── ReActMode ────────────────────────────────────────────────────
