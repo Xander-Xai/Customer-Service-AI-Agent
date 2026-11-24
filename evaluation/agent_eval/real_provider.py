@@ -30,6 +30,7 @@ provider, no network and no application container.
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -169,30 +170,28 @@ def resolve_plan(
 
 
 def estimate_request_volume(plan: RealProviderPlan, dataset_size: int) -> dict[str, Any]:
-    """Worst-case request / token estimate shown *before* any call is made.
+    """Report a bounded case count without inventing a provider-call upper bound.
 
-    The estimate is deliberately an upper bound (one request per query at the
-    per-request token cap). Real token use is usually lower; the point is that
-    the operator sees the ceiling they are authorizing.
+    The compiled Agent graph can make multiple model calls per case. The CLI's
+    max_tokens_per_request field is not currently wired to all provider calls,
+    so multiplying case count by that field is *not* a token or cost ceiling.
     """
     effective = min(max(0, dataset_size), plan.max_queries)
-    worst_tokens = effective * plan.max_tokens_per_request
-    estimate: dict[str, Any] = {
+    return {
         "dataset_size": dataset_size,
         "effective_queries": effective,
-        "summarization": (f"at most {effective} provider request(s) (one per query)"),
-        "worst_case_tokens": worst_tokens,
+        "summarization": f"at most {effective} agent cases; provider call count not bounded",
+        "provider_request_upper_bound": None,
+        "worst_case_tokens": None,
         "per_request_token_cap": plan.max_tokens_per_request,
+        "per_request_token_cap_enforced": False,
+        "worst_case_cost_usd": None,
+        "cost_note": (
+            "The real graph can call the provider multiple times per case; "
+            "per-request token cap and total usage are not wired end-to-end. "
+            "No defensible pre-run cost upper bound is available."
+        ),
     }
-    if plan.cost_per_1k_tokens is not None:
-        estimate["worst_case_cost_usd"] = round(worst_tokens / 1000.0 * plan.cost_per_1k_tokens, 6)
-    else:
-        estimate["worst_case_cost_usd"] = None
-        estimate["cost_note"] = (
-            "no cost_per_1k_tokens configured: the cost cap is NOT_MEASURED and "
-            "cannot be enforced, only the token budget can"
-        )
-    return estimate
 
 
 @dataclass
@@ -278,6 +277,9 @@ async def run_real_provider_lane(
     results: list[RealCaseResult] = []
     tokens_used = 0
     cost_used = 0.0
+    cost_observed = False
+    token_usage_complete = True
+    cost_usage_complete = True
     budget_reason: str | None = None
 
     for case in list(cases)[: plan.max_queries]:
@@ -293,34 +295,63 @@ async def run_real_provider_lane(
         try:
             outcome = await case_runner(case)
         except Exception as exc:  # noqa: BLE001 - a failing case is evidence, not a crash
+            token_usage_complete = False
+            cost_usage_complete = False
             results.append(
                 RealCaseResult(
                     case_id=case_id,
                     status=STATUS_ERROR,
                     latency_ms=round((clock() - started) * 1000, 3),
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=type(exc).__name__,
                 )
             )
+            # The failed provider call may still have consumed tokens/cost.
+            # With an active budget, unknown usage cannot authorize a retry.
+            if plan.max_total_tokens is not None or plan.max_cost_usd is not None:
+                budget_reason = "provider_usage_unknown_after_error"
+                break
             continue
 
         names, calls = _coerce_tools(outcome.get("tool_calls") or outcome.get("tool_names"))
         in_tok = outcome.get("input_tokens")
         out_tok = outcome.get("output_tokens")
         cost = outcome.get("cost_usd")
-        if isinstance(in_tok, int):
+        # A provider might return missing, negative, non-finite or bool values.
+        # None of those values is trustworthy metering evidence.
+        input_is_metered = isinstance(in_tok, int) and not isinstance(in_tok, bool) and in_tok >= 0
+        output_is_metered = (
+            isinstance(out_tok, int) and not isinstance(out_tok, bool) and out_tok >= 0
+        )
+        usage_is_metered = input_is_metered and output_is_metered
+        if input_is_metered:
             tokens_used += in_tok
-        if isinstance(out_tok, int):
+        if output_is_metered:
             tokens_used += out_tok
-        if isinstance(cost, int | float):
+        numeric_cost = isinstance(cost, int | float) and not isinstance(cost, bool)
+        cost_is_metered = numeric_cost and math.isfinite(cost) and cost >= 0
+        if cost_is_metered:
             cost_used += float(cost)
-        elif (
-            plan.cost_per_1k_tokens is not None
-            and isinstance(in_tok, int)
-            and isinstance(out_tok, int)
-        ):
+            cost_observed = True
+        elif plan.cost_per_1k_tokens is not None and usage_is_metered:
             derived = (in_tok + out_tok) / 1000.0 * plan.cost_per_1k_tokens
-            cost_used += derived
-            cost = round(derived, 6)
+            if math.isfinite(derived) and derived >= 0:
+                cost_used += derived
+                cost = round(derived, 6)
+                cost_is_metered = True
+                cost_observed = True
+
+        # A limit whose usage source is missing cannot be enforced. Stop the
+        # lane after this case rather than sending more unmetered requests.
+        # This is not a pre-call hard cap: one already-started request may exceed
+        # a budget. The real graph currently does not expose per-call usage.
+        if not usage_is_metered:
+            token_usage_complete = False
+        if not cost_is_metered:
+            cost_usage_complete = False
+        if plan.max_total_tokens is not None and not usage_is_metered:
+            budget_reason = "provider_token_usage_unavailable"
+        if plan.max_cost_usd is not None and not cost_is_metered:
+            budget_reason = "provider_cost_usage_unavailable"
 
         results.append(
             RealCaseResult(
@@ -332,11 +363,13 @@ async def run_real_provider_lane(
                 tool_calls=calls,
                 response_nonempty=bool(outcome.get("response_nonempty")),
                 latency_ms=round((clock() - started) * 1000, 3),
-                input_tokens=in_tok if isinstance(in_tok, int) else None,
-                output_tokens=out_tok if isinstance(out_tok, int) else None,
-                cost_usd=cost if isinstance(cost, int | float) else None,
+                input_tokens=in_tok if input_is_metered else None,
+                output_tokens=out_tok if output_is_metered else None,
+                cost_usd=cost if cost_is_metered else None,
             )
         )
+        if budget_reason is not None:
+            break
 
     ok = sum(1 for r in results if r.status == STATUS_OK)
     return {
@@ -346,8 +379,9 @@ async def run_real_provider_lane(
             "attempted": len(results),
             "ok": ok,
             "error": len(results) - ok,
-            "tokens_used": tokens_used,
-            "cost_used_usd": round(cost_used, 6) if plan.cost_per_1k_tokens else None,
+            "tokens_used": tokens_used if token_usage_complete and results else None,
+            "cost_used_usd": round(cost_used, 6) if cost_usage_complete and cost_observed else None,
+            "provider_request_count": None,
         },
         "budget_exceeded": budget_reason,
     }
