@@ -33,10 +33,9 @@ TOOL = {
     ),
     "inputSchema": {
         "type": "object",
-        "additionalProperties": False,
         "properties": {
             "sku": {"type": "string"},
-            "category": {"type": "string", "enum": list(CATEGORIES)},
+            "category": {"type": "string", "description": "One of usage, storage, packaging."},
         },
         "required": ["sku", "category"],
     },
@@ -149,7 +148,7 @@ class ProductDocumentServer(FAQServer):
             return {**response, "error": {"code": -32600, "message": "Invalid request"}}
         if method == "tools/list":
             return {**response, "result": {"tools": [TOOL]}}
-        params = request["params"]
+        params = request.get("params", {})
         if params.get("name") != TOOL_NAME:
             return {**response, "error": {"code": -32602, "message": "Unknown tool"}}
         arguments = params.get("arguments")

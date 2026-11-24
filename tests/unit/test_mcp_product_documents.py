@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from tools.readonly_mcp_product_documents import ProductCatalog, ProductDocumentServer, TOOL_NAME
+from tools.readonly_mcp_product_documents import TOOL_NAME, ProductCatalog, ProductDocumentServer
 
 
 def _record(**changes):
