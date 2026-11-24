@@ -87,9 +87,7 @@ def main(argv=None) -> int:
     dataset = load_dataset(args.dataset)
     report = build_worklist(dataset, per_route=args.per_route, limit=args.limit)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
+    args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"draft human-review worklist: {report['selected_count']} cases -> {args.out}")
     print(
         "No labels approved. Formal route accuracy remains NOT_MEASURED until independent review."
