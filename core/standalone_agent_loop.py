@@ -23,7 +23,7 @@ class Tool:
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
             raise ValueError("Tool name must be nonempty")
-        if type(self.side_effect) is not bool or type(self.high_risk) is not bool:
+        if not isinstance(self.side_effect, bool) or not isinstance(self.high_risk, bool):
             raise ValueError("Tool risk flags must be boolean")
         # This minimal reference only supports a sensitive write policy; an
         # inconsistent classification must never silently bypass its gate.
