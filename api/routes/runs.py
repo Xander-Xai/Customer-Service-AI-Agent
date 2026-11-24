@@ -27,7 +27,13 @@ from api.utils import extract_user_id, sanitize_input
 from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger, get_trace_id
 from runtime import metrics as run_metrics
-from runtime.run_service import RunNotFound, RunService, build_idempotency_scope
+from runtime.run_service import (
+    RunIdempotencyConflict,
+    RunNotFound,
+    RunService,
+    build_idempotency_scope,
+    verify_idempotent_request,
+)
 
 router = APIRouter()
 logger = get_logger("api.runs")
@@ -86,8 +92,9 @@ def _check_ownership(request: Request, run: dict) -> bool:
         return True
     owner = run.get("user_id")
     if not owner:
-        return True  # 匿名 run 向后兼容
-    return bool(extract_user_id(request) == owner)
+        return False  # legacy anonymous records require operator reconciliation
+    actor = extract_user_id(request)
+    return actor is not None and str(actor) == str(owner)
 
 
 @router.post("/api/runs")
@@ -103,11 +110,17 @@ async def create_run(
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
 
+    if not getattr(request.app.state, "dev_mode", False) and not session.user_id:
+        return JSONResponse({"error": "Authenticated user required"}, status_code=401)
+
     query = sanitize_input(data.query)[:MAX_QUERY_LENGTH]
     if not query:
         return JSONResponse({"error": "query 不能为空"}, status_code=400)
 
     service = _get_service(request)
+    if idempotency_key is not None and data.idempotency_key is not None:
+        if idempotency_key.strip() != data.idempotency_key.strip():
+            return JSONResponse({"error": "Conflicting idempotency keys"}, status_code=400)
     raw_key = (idempotency_key or data.idempotency_key or "").strip()
     if len(raw_key) > IDEMPOTENCY_KEY_INPUT_MAX:
         # header 与 body 走同一契约：超限直接 400，而不是等 DB 报 value too long。
@@ -121,20 +134,29 @@ async def create_run(
         else None
     )
 
-    # 幂等命中：同 user + endpoint + key 不重复创建/入队，返回原 run
-    if scoped_key:
-        existing = service.get_by_idempotency_key(scoped_key)
-        if existing is not None:
-            run_metrics.record_idempotency_hit()
-            return JSONResponse(_serialize(existing), status_code=202)
+    try:
+        if scoped_key:
+            existing = service.get_by_idempotency_key(scoped_key)
+            if existing is not None:
+                verify_idempotent_request(existing, query=query, session_id=session.sid, user_id=session.user_id)
+                run_metrics.record_idempotency_hit()
+                return JSONResponse(_serialize(existing), status_code=202)
 
-    run = service.create_run(
-        query=query,
-        session_id=session.sid,
-        user_id=session.user_id,
-        idempotency_key=scoped_key,
-        trace_id=get_trace_id(),
-    )
+        run = service.create_run(
+            query=query,
+            session_id=session.sid,
+            user_id=session.user_id,
+            idempotency_key=scoped_key,
+            trace_id=get_trace_id(),
+        )
+    except RunIdempotencyConflict:
+        return JSONResponse({"error": "IDEMPOTENCY_CONFLICT"}, status_code=409)
+
+    # The DB uniqueness winner alone publishes. The reconciler covers a crash
+    # after the winning insert but before broker publication.
+    if run.get("created_by_request") is False:
+        run_metrics.record_idempotency_hit()
+        return JSONResponse(_serialize(run), status_code=202)
 
     from runtime import dispatch
 

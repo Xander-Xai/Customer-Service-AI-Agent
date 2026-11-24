@@ -43,13 +43,10 @@ def extract_checkpoint_id(checkpoint: object) -> str | None:
 
 def _extract_user_id(request: Request) -> str | None:
     """从 JWT payload 或 API Key 认证结果中提取 user_id"""
-    state = request.app.state
-    payload = getattr(state, "_current_jwt_payload", None) or getattr(
-        request.state, "jwt_payload", None
-    )
-    if payload:
-        return str(payload.get("sub", ""))
-    return None
+    from api.utils import extract_user_id
+
+    actor = extract_user_id(request)
+    return str(actor) if actor is not None else None
 
 
 def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool) -> bool:
@@ -59,11 +56,7 @@ def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool)
     if not user_id:
         return False
     session_user = session.get("user_id")
-    if not session_user:
-        # 会话无归属用户 - 仅允许当前用户在非DEV_MODE下访问
-        # 避免未认证状态下创建的会话被任意已认证用户看到
-        return True  # 向后兼容：匿名会话对所有认证用户可见
-    return session_user == user_id
+    return bool(session_user and str(session_user) == str(user_id))
 
 
 @router.get("/api/sessions")
@@ -76,8 +69,8 @@ async def list_sessions(request: Request, offset: int = 0, limit: int = 20):
         limit = min(max(limit, 1), 100)
         result = await sm.list_sessions_brief(offset=offset, limit=limit)
         user_id = _extract_user_id(request)
-        if user_id and not dev_mode:
-            filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
+        if not dev_mode:
+            filtered = [s for s in result.get("sessions", []) if user_id and str(s.get("user_id") or "") == str(user_id)]
             result["sessions"] = filtered
             result["total"] = len(filtered)
         return result
@@ -255,8 +248,8 @@ async def list_history(request: Request, offset: int = 0, limit: int = 20):
     limit = min(max(limit, 1), 100)
     result = await sm.list_sessions_brief(offset=offset, limit=limit)
     user_id = _extract_user_id(request)
-    if user_id and not dev_mode:
-        filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
+    if not dev_mode:
+        filtered = [s for s in result.get("sessions", []) if user_id and str(s.get("user_id") or "") == str(user_id)]
         result["sessions"] = filtered
         result["total"] = len(filtered)
     return result

@@ -116,6 +116,19 @@ def build_idempotency_scope(user_id: str | None, endpoint: str, raw_key: str) ->
     return hashlib.sha256(scope.encode("utf-8")).hexdigest()
 
 
+class RunIdempotencyConflict(ValueError):
+    """The same scoped key cannot authorize a different request."""
+
+
+def verify_idempotent_request(run: dict, *, query: str, session_id: str, user_id: str | None) -> None:
+    if (
+        run.get("query") != query
+        or run.get("session_id") != session_id
+        or str(run.get("user_id") or "") != str(user_id or "")
+    ):
+        raise RunIdempotencyConflict("Idempotency key already belongs to a different request")
+
+
 class RunService:
     def __init__(self, repository: AgentRunRepository | None = None):
         self.repo = repository or AgentRunRepository()
@@ -143,9 +156,11 @@ class RunService:
         if idempotency_key:
             existing = self.repo.get_by_idempotency_key(idempotency_key)
             if existing is not None:
-                return existing
-        return self.repo.create(
-            run_id=str(uuid.uuid4()),
+                verify_idempotent_request(existing, query=query, session_id=session_id, user_id=user_id)
+                return {**existing, "created_by_request": False}
+        run_id = str(uuid.uuid4())
+        result = self.repo.create(
+            run_id=run_id,
             thread_id=thread_id or session_id,
             session_id=session_id,
             query=query,
@@ -155,6 +170,9 @@ class RunService:
             idempotency_key=idempotency_key,
             status=status,
         )
+        if idempotency_key:
+            verify_idempotent_request(result, query=query, session_id=session_id, user_id=user_id)
+        return {**result, "created_by_request": result["id"] == run_id}
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         return self.repo.get(run_id)
