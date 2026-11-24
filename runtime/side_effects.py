@@ -114,6 +114,7 @@ CLAIM_EXECUTE = "execute"
 CLAIM_SUCCEEDED = "succeeded"
 CLAIM_CONFLICT = "conflict"
 CLAIM_IN_PROGRESS = "in_progress"
+CLAIM_RECONCILIATION_REQUIRED = "reconciliation_required"
 
 #: ``tool_side_effects.error_type`` 的列宽（``db/models.py`` / alembic 004）。
 ERROR_TYPE_MAX_LEN = 16
@@ -453,6 +454,7 @@ class SideEffectStore:
         fingerprint: str,
         claim_ttl_seconds: float = DEFAULT_CLAIM_TTL_SECONDS,
         owner: str | None = None,
+        allow_reclaim: bool = True,
     ) -> SideEffectClaim:
         """原子地声明一次副作用执行（**互斥**）。
 
@@ -467,7 +469,10 @@ class SideEffectStore:
           2. ``SELECT ... FOR UPDATE``：把竞争者串行化（行锁）；
           3. 持锁重读后判定：SUCCEEDED 同指纹 -> 返回已存结果；SUCCEEDED 异指纹 ->
              冲突；PENDING 且租约未过期 -> ``in_progress``；PENDING 租约已过期 /
-             FAILED -> 改写 ``claim_owner`` 为自己并执行。
+             FAILED -> 仅在明确允许接管的低层实验路径重获执行权；真实工具入口禁止。
+
+        ``allow_reclaim=True`` 保留低层本地故障实验兼容性，不代表外部写安全。
+        ToolRegistry 明确传 False；租约失效或失败时必须先核对外部结果。
 
         ``owner`` 是本次认领的唯一 token（缺省自动生成）。只有持有当前 ``claim_owner``
         的执行者才能写入成功/失败结果，避免两个执行者互相覆盖。
@@ -602,7 +607,14 @@ class SideEffectStore:
             if row.status == STATUS_PENDING and not lease_expired:
                 return SideEffectClaim(CLAIM_IN_PROGRESS, owner=None)
 
-            # 接管（租约过期 = 原持有者已死；FAILED = 允许重试）只在**能提供行级
+            if row.request_fingerprint != fingerprint:
+                return SideEffectClaim(CLAIM_CONFLICT, owner=None)
+            # Local ownership expiry is not proof of remote non-execution.
+            # Do not mutate the existing row or issue another external call.
+            if not allow_reclaim:
+                return SideEffectClaim(CLAIM_RECONCILIATION_REQUIRED, owner=None)
+
+            # 低层实验接管只在**能提供行级
             # 互斥**的方言上安全：PostgreSQL 的 ``SELECT ... FOR UPDATE`` 把竞争者
             # 串行化，接管写入与判定在同一事务里提交。
             #
@@ -626,7 +638,7 @@ class SideEffectStore:
                 )
                 return SideEffectClaim(CLAIM_IN_PROGRESS, owner=None)
 
-            # 接管（租约过期 = 原持有者已死；FAILED = 允许重试）
+            # 显式允许的实验接管：仍不代表外部系统没有执行。
             row.run_id = run_id
             row.thread_id = thread_id
             row.status = STATUS_PENDING
@@ -1002,8 +1014,9 @@ async def execute_idempotent_operation(
     claim_ttl_seconds: float = DEFAULT_CLAIM_TTL_SECONDS,
     owner: str | None = None,
     min_claim_ttl_seconds: float | None = None,
+    allow_reclaim: bool = False,
 ) -> Any:
-    """通用写操作幂等包裹：同一 ``(tool_name, operation_key)`` 只真正执行一次。
+    """通用写操作幂等包裹：已确认成功的操作直接复用；未知结果默认禁止接管。
 
     at-least-once execution + application-level idempotency：Tool 执行成功但
     LangGraph 后续失败、整个 run 重试时，第二次调用直接返回已保存结果，
@@ -1013,7 +1026,7 @@ async def execute_idempotent_operation(
 
     1. **唯一索引 + ``claim`` 的原子语义**（行锁 + 归属校验）；
     2. **执行期间续租**（``_ClaimRenewer``）：认领租约在工具执行期间被周期性延长，
-       因此「租约过期 = 持有者已死」这个判定不会在工具**仍在执行**时成立。否则第
+       以降低执行期间租约过期的风险，但不能证明旧外部请求已停止。否则第
        二个执行者会在第一个还没写完时接管并重复发起同一笔写操作
        （真实复现见 ``tests/integration/runtime/test_side_effect_claim_lease_pg.py``）；
     3. **数据库原子的结果提交**（``_commit_terminal_state``）：终态写入是一条带
@@ -1028,7 +1041,7 @@ async def execute_idempotent_operation(
     ``asyncio.wait_for`` 取消后仍在飞行的情况都要求租约有**下界**。低于下界时
     fail-closed（``PermanentError``），不创建 ledger 行、不执行副作用。
     """
-    from .errors import PermanentError, TransientError, classify_exception
+    from .errors import PermanentError, SideEffectReconciliationRequired, TransientError, classify_exception
 
     if min_claim_ttl_seconds is not None and claim_ttl_seconds < min_claim_ttl_seconds:
         raise PermanentError(
@@ -1047,6 +1060,7 @@ async def execute_idempotent_operation(
         fingerprint=fingerprint,
         claim_ttl_seconds=claim_ttl_seconds,
         owner=owner,
+        allow_reclaim=allow_reclaim,
     )
     if claim.state == CLAIM_SUCCEEDED:
         from . import metrics
@@ -1055,6 +1069,10 @@ async def execute_idempotent_operation(
         return claim.result
     if claim.state == CLAIM_CONFLICT:
         raise PermanentError(f"tool {tool_name} operation_key {operation_key} 已以不同参数执行过")
+    if claim.state == CLAIM_RECONCILIATION_REQUIRED:
+        raise SideEffectReconciliationRequired(
+            f"tool {tool_name}: external result unknown; reconciliation required before any new write"
+        )
     if claim.state == CLAIM_IN_PROGRESS:
         raise TransientError(
             f"tool {tool_name} operation_key {operation_key} 正在被另一个执行者处理"

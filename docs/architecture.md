@@ -336,3 +336,8 @@ span 会丢关键排障信息。双层是"默认安全 + 显式放行"。
 | 架构决策记录 | [decisions/](decisions/) |
 | 当前事实与验证命令 | [reference/current-state.md](reference/current-state.md) |
 | 已知不宣称项 | [limitations.md](limitations.md) |
+
+
+### 未知外部副作用：禁止盲目接管
+
+真实 ToolRegistry 的副作用执行明确禁止接管已开始但租约过期的 PENDING 行和 FAILED 行；成功且指纹一致仍复用已存结果，尚未开始的 reservation 可首次执行，仍有效的租约返回 in_progress。拒绝接管使用不可重试的 reconciliation-required 异常，保留 ledger 原状态。PostgreSQL 行锁和本地 owner CAS 不能证明下游未执行。低层 claim 的显式接管能力仅为本地故障测试兼容，不是外部写路径的策略。没有下游确认、稳定业务操作标识和受控对账流程前，不得重新发起未知写。此修改仅封住同一 operation_key 的重试，不证明跨新 run、变参或不同逻辑操作键的端到端去重；真正 ERP 的恢复验收仍需授权接口。
