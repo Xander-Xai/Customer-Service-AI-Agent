@@ -7,6 +7,8 @@ class AgentState(TypedDict, total=False):
     session_id: str
     # Durable checkpoint owner; server-issued AgentRun ID, never user history.
     episode_run_id: str | None
+    # Written only at the final graph node, bound to the server-owned run.
+    episode_completed_run_id: str | None
     current_agent: str
     customer_query: str
     query_type: str

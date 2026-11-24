@@ -22,7 +22,7 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`71`**（`docs/openapi.json` 快照；
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`72`**（`docs/openapi.json` 快照；
   数字随 approval / metrics endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
@@ -33,6 +33,20 @@
 - Worker 在重试或审批恢复前通过 RunService 读取投影，仅记录核查建议、数量及异常标记到 trace；不把投影交给模型，不改变原有幂等、授权、审批和状态迁移规则。
 - 投影是只读诊断，不是原子授权快照；`execution_authorized` 始终为 false。真实故障恢复仍以 checkpoint、持久化账本和执行栅栏为准。
 - 验收入口：`pytest -q tests/unit/test_task_episode.py`（真实 SQLite 表；不调用外部模型或 ERP）。生产 PostgreSQL 崩溃/恢复与外部副作用一致性需单独验证。
+
+## 同任务终态 checkpoint 恢复
+
+- 新 Run 与同步请求显式清空 `episode_completed_run_id`；真实图的 `final_response` 节点在后处理返回前写入与服务端 Run ID 一致的终态标记。
+- 异步 Worker 在现有 thread lock 下读取一次 checkpoint；同 Run、无 pending node/task/interrupt、无未完成审批动作、请求身份和原始任务一致且存在有效终态标记时，直接恢复已持久化的图输出，不重新调用图。
+- 同 Run 的旧版或不一致终态 checkpoint 拒绝自动重放，需运维对账。不同 Run 的已完成历史仍走正常新任务入口。
+- 恢复结果依旧经过 executor 的审批副作用失败检查、执行栅栏和数据库 owner CAS；不授予新的工具权限，也不声称外部 ERP exactly-once。
+- 验收：`pytest -q tests/test_episode_checkpoint_ownership.py`，覆盖真实 InMemorySaver 的终态恢复与不重复节点执行、缺失标记、身份或任务不一致、未完成动作等。真实 PostgreSQL 进程崩溃窗口仍需独立故障注入验证；本机制不能恢复已被其他 Run 覆盖的同线程历史 checkpoint。
+
+## 多 Agent 部分失败与证据边界
+
+- Consultation 模式已随 #55 合入：辅助 Agent 的真实工具回执及待审批动作继续传递；辅助缺失、异常或超时显式标记降级。未确认业务动作不计作已完成。
+- Hierarchical 的独立增强见 #57，必须以实时 PR 合并状态及同 SHA CI 为准；MCP 外部验收探针见 #56。离线测试不构成真实 ERP/MCP 或生产验收。
+- 旧 Draft #50 由已合入 #51/#52 替代，不重复计算；剩余恢复验收见 Issue #49。
 
 ## 人工客服交接
 
