@@ -62,7 +62,7 @@ function renderTicketList() {
     btn.textContent = ticketText(ticket);
     btn.setAttribute('aria-label', `查看工单 ${ticket.ticket_id}`);
     if (ticket.ticket_id === state.selected?.ticket_id) btn.setAttribute('aria-current', 'true');
-    btn.addEventListener('click', () => selectTicket(ticket.ticket_id));
+    btn.addEventListener('click', () => selectTicketFromList(ticket.ticket_id));
     item.append(btn);
     list.append(item);
   }
@@ -92,6 +92,12 @@ export function renderMessages(messages) {
 }
 
 function renderSelection(ticket) {
+  const changed = state.selected?.ticket_id !== ticket?.ticket_id;
+  if (changed) {
+    $('messageBody').value = '';
+    $('resolutionText').value = '';
+    state.pendingSend = null;
+  }
   state.selected = ticket;
   $('ticketTitle').textContent = ticket ? `工单 ${ticket.ticket_id}` : '请选择一张工单';
   $('ticketStatus').textContent = ticket
@@ -108,14 +114,12 @@ function renderSelection(ticket) {
   $('reopenTicketBtn').hidden =
     !ticket || !closed || !(state.user?.role === 'customer' || isManager());
   $('messageForm').hidden = !ticket || closed || (isStaff() && !(own || isManager()));
-  $('resolutionPanel').hidden = true;
+  if (changed || $('closeTicketBtn').hidden) $('resolutionPanel').hidden = true;
   renderMessages([]);
 }
 
 async function selectTicket(id) {
   if (!id) return;
-  const previousId = state.selected?.ticket_id;
-  if (previousId !== id) state.pendingSend = null;
   try {
     const ticket = await handoffRequest('GET', `/api/handoffs/${encodeURIComponent(id)}`);
     renderSelection(ticket);
@@ -125,6 +129,17 @@ async function selectTicket(id) {
   } catch (error) {
     renderSelection(null);
     tell(error.message, true);
+  }
+}
+
+// Manual selection shares the same exclusion boundary as polling and writes.
+export async function selectTicketFromList(id) {
+  if (state.busy) return;
+  state.busy = true;
+  try {
+    await selectTicket(id);
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -190,6 +205,7 @@ async function runAction(task) {
 function installListeners() {
   $('refreshTicketsBtn').addEventListener('click', () => loadTickets());
   $('queueFilter').addEventListener('change', () => {
+    if (state.busy) return;
     renderSelection(null);
     loadTickets();
   });
@@ -207,7 +223,7 @@ function installListeners() {
         message: reason,
       });
       $('handoffReason').value = '';
-      state.selected = result;
+      renderSelection(result);
     }),
   );
   $('claimTicketBtn').addEventListener('click', () =>
@@ -219,6 +235,7 @@ function installListeners() {
     }),
   );
   $('closeTicketBtn').addEventListener('click', () => {
+    if (state.busy) return;
     $('resolutionPanel').hidden = false;
     $('resolutionText').focus();
   });
