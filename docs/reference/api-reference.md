@@ -13,13 +13,13 @@
 
 ## 当前接口总览
 
-<!-- openapi-surface: paths=72 operations=76 api_operations=68 -->
+<!-- openapi-surface: paths=73 operations=77 api_operations=69 -->
 
 | 类型 | 数量 | 来源 |
 |------|------|------|
-| HTTP 路径 | **72** | `app.openapi()["paths"]` |
-| HTTP 操作 | **76** | 同一路径可含多 method |
-| `/api/*` 业务操作 | **68** | 认证、对话、多模态、异步 Run、人工审批、人工客服工单、会话、监控、知识库、缓存、告警、Prompt 管理 |
+| HTTP 路径 | **73** | `app.openapi()["paths"]` |
+| HTTP 操作 | **77** | 同一路径可含多 method |
+| `/api/*` 业务操作 | **69** | 认证、对话、多模态、异步 Run、人工审批、人工客服工单、会话、监控、知识库、缓存、告警、Prompt 管理 |
 | 非 `/api/*` 路径 | 7 | `/`、`/login.html`、`/admin.html`、`/handoffs.html`、`/widget.html`、`/theme-comparison.html`、`/metrics/prometheus` |
 | WebSocket | 1 | `WS /ws/chat` 实时双向对话（OpenAPI 不含 WebSocket 路由，单独列出） |
 
@@ -31,7 +31,7 @@
 | `/api/chat` | 7 | `/api/admin` | 5 |
 | **`/api/runs`（异步 Run）** | **5** | `/api/sessions` | 4 |
 | **`/api/approvals`（人工审批）** | **4** | `/api/alerts` | 4 |
-| **`/api/handoffs`（人工客服交接）** | **10** | — | — |
+| **`/api/handoffs`（人工客服交接）** | **11** | — | — |
 | `/api/knowledge` | 4 | `/api/cache` | 2 |
 | `/api/feedback` | 2 |
 | `/api/history` | 2 | `/api/tts` | 2 |
@@ -150,6 +150,7 @@ ws.onmessage = (event) => {
 | `GET` | `/api/handoffs` | 坐席查看待领取队列 |
 | `GET` | `/api/handoffs/session/{session_id}` | 客户按会话查询自己的工单 |
 | `GET` | `/api/handoffs/{ticket_id}` | 有权限的用户查看工单 |
+| `GET` | `/api/handoffs/{ticket_id}/task-episode` | 已指派坐席或主管查看最近匹配任务的只读诊断 |
 | `POST` | `/api/handoffs/{ticket_id}/claim` | 坐席原子领取 |
 | `GET` | `/api/handoffs/{ticket_id}/messages` | 客户/坐席读取消息 |
 | `POST` | `/api/handoffs/{ticket_id}/messages` | 发送消息（client_message_id 幂等） |
