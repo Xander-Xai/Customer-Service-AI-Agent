@@ -146,7 +146,9 @@ async def invoke_graph_with_resume(
                 run_metrics.record_checkpoint_recovery(True)
                 logger.info("Recovering completed checkpoint without replay")
                 return completed, True
-        pending = _validate_checkpoint_owner(snapshot, run_id, approval_resume=resume_command is not None)
+        pending = _validate_checkpoint_owner(
+            snapshot, run_id, approval_resume=resume_command is not None
+        )
     else:
         pending = await pending_steps(graph, config)
 
