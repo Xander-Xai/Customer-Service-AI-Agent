@@ -48,6 +48,7 @@ _RECOVERED_KEY = _key("recovered")
 
 
 class _ResumeState(TypedDict, total=False):
+    episode_run_id: str | None
     customer_query: str
     response: str
     stage: str
@@ -88,6 +89,7 @@ class _CheckpointResumeRuntime:
         # 复用**生产代码**的续跑判定与调用方式（runtime.bootstrap），而不是在测试
         # 里重写一份 —— 否则测试验证的是测试自己的逻辑，测不到真实缺陷。
         from runtime.bootstrap import invoke_graph_with_resume
+        from runtime.context import get_current_run_id
 
         pending = await self._graph.aget_state(config)
         pending_steps = tuple(getattr(pending, "next", ()) or ())
@@ -101,6 +103,7 @@ class _CheckpointResumeRuntime:
                 pass
 
         state: dict[str, Any] = {
+            "episode_run_id": get_current_run_id(),
             "customer_query": query,
             "response": "",
             "stage": "",

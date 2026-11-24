@@ -1727,11 +1727,15 @@ class TestV31Improvements:
                 is_user=(i % 2 == 0),
             )
         context = await sm.get_conversation_context("token_test")
-        total_tokens = sum(_count_tokens(m.get("content", "")) for m in context)
-        # 摘要(~31 tokens) + 2条消息(~22 each) ≈ 75，远小于10条消息未裁剪的总量(~150)
-        assert total_tokens <= 85, f"Token 裁剪后总量 {total_tokens} 超过预期上限 85"
-        # 验证上下文消息数不超过 window_size + summary
-        assert len(context) <= sm.window_size + 1, f"上下文消息数 {len(context)} 超过 window_size+1"
+        # The recent-window budget excludes the separately labeled historical
+        # summary; its warning prefix must not be mistaken for a live message.
+        recent = [m for m in context if not m.get("is_summary")]
+        summaries = [m for m in context if m.get("is_summary")]
+        recent_tokens = sum(_count_tokens(m.get("content", "")) for m in recent)
+        assert recent_tokens <= 50
+        assert len(recent) <= sm.window_size
+        assert len(summaries) <= 1
+        assert all(m["role"] == "user" and not m["is_user"] for m in summaries)
 
 
 # ============================================================================
@@ -1765,7 +1769,7 @@ class TestContextLengthPressure:
 
         context = await sm.get_conversation_context("budget_test")
         # window=3 → max_messages=6，消息 token 应在 6 条消息范围内
-        msg_context = [m for m in context if m.get("role") != "system"]
+        msg_context = [m for m in context if not m.get("is_summary")]
         msg_tokens = sum(_count_tokens(m.get("content", "")) for m in msg_context)
         assert msg_tokens <= 500, f"30轮对话后消息token={msg_tokens} 超出窗口"
         # 消息数不超过 window_size*2
@@ -1786,7 +1790,7 @@ class TestContextLengthPressure:
 
         context = await sm.get_conversation_context("long_msg")
         # 无 LLM → 无摘要，context 应仅含消息
-        msg_context = [m for m in context if m.get("role") != "system"]
+        msg_context = [m for m in context if not m.get("is_summary")]
         assert len(msg_context) >= 1, "至少保留最短消息"
         assert len(msg_context) <= 3, f"消息数 {len(msg_context)} 超出预期"
 
@@ -1803,7 +1807,7 @@ class TestContextLengthPressure:
 
         context = await sm.get_conversation_context("window_boundary")
         # window=2 → max_messages=4
-        msg_count = sum(1 for m in context if m.get("role") in ("user", "assistant"))
+        msg_count = sum(1 for m in context if not m.get("is_summary"))
         assert msg_count <= 4, f"窗口裁剪后消息数 {msg_count} 超过预期 4"
 
     @pytest.mark.asyncio

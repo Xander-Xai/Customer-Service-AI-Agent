@@ -1,5 +1,7 @@
 # Customer Service AI Agent
 
+> **Memory 专项定位（2026-11-24）**：聚焦任务/会话状态、Checkpoint、人工审批、工具回执与可恢复性，历史摘要不代表系统指令或业务事实。后续治理不等于历史生产交付。见 [Memory 工程定位与验收](docs/reference/memory-engineering-positioning-20261124.md)。
+
 > **LangGraph-based Customer Service AI Agent** — multi-agent orchestration, hybrid RAG,
 > tool execution, durable runtime, HITL and observability.
 
@@ -23,6 +25,8 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
+**Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
+
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
@@ -37,18 +41,19 @@
 | LLM（默认） | `siliconflow` / `Qwen/Qwen3-8B` | `core/config.py` |
 | Embedding / Rerank | `BAAI/bge-large-zh-v1.5` / `BAAI/bge-reranker-v2-m3` | `core/config.py` |
 | Agent 角色 / 协作模式 | 9 / 5 | `agents/`、`collaboration/modes.py` |
-| OpenAPI 路径数 | 63 | `docs/openapi.json`（`make openapi-check` 校验） |
+| OpenAPI 路径数 | 以 [API 参考](docs/reference/api-reference.md#当前接口总览) 的生成快照为准 | `make facts` / `make openapi-check` |
 | RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
 | 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
-| 最新公开 Release | `v1.0.1`（2026-10-08，**仅文档变更**） | [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) |
+| 公开发布记录 | 按 Release/tag 查阅 | [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) |
 
-> **Release ≠ main**：最新公开 Release `v1.0.1` 早于当前 `main`，**不包含**分布式
-> Agent Runtime、HITL 治理与会话加密安全修复（PR #19、#21–#24）。本 README 描述的是
-> **`main` 分支状态**，不是任何已发布产物。CI 的 `build-and-push` 会向 GHCR 推送镜像，
-> 但 `deploy` job 需要仓库变量 `DEPLOY_HOST` 才触发（**当前未配置**，因此该 job 一直是
-> skipped）——本仓库没有生产部署证据。
+> **分支、发布和部署分别核对。** 本文描述 `main`。已发布内容以 Release 对应 tag 为准。
+> GHCR 镜像由 `build-and-push` 构建，`deploy` 另受 `DEPLOY_HOST` 配置门控。
+> 生产验收证据见 [Production Readiness](docs/production-readiness.md)。
 
-**入口文档**：[docs/reference/current-state.md](docs/reference/current-state.md)。
+**当前实现**见 [当前事实入口](docs/reference/current-state.md)。转人工工单后端已合入，默认关闭。
+坐席 Web 工作台的交付状态以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。
+
+**实时状态** · [`main` 提交](https://github.com/Xander-Xai/Customer-Service-AI-Agent/commits/main/) · [Pull Requests](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pulls) · [Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) · [Actions](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions?query=branch%3Amain) · [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)。核对分支 HEAD、PR 合并状态和同一 SHA 的 Actions。
 版本变更历史在 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)。
 
 > **关于证据**：本仓库区分「代码存在」与「证据支持」。正式 RAG 指标、生产 QPS/P95、
@@ -578,7 +583,7 @@ MCP 契约**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + 
 ## Limitations
 
 > **这一节是本 README 里最重要的一节。**
-> 每一条都是当前**没有**做到的事。收藏前请先读它。
+> 下文同时记录已修复的断链、当前实现范围和待验收项。
 
 > 本节整体状态：**`PRODUCTION NOT_VERIFIED`**。
 > Compose 扩容能力可配置 ≠ 多副本在生产跑过；
@@ -600,7 +605,7 @@ MCP 契约**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + 
 | # | 问题 | 状态 | 说明 |
 |---|---|---|---|
 | 1 | **DLQ 告警断链** | **已修复（暴露链 `VERIFIED_LOCAL`）/ 通知链 `NOT_VERIFIED`** | 断链有两半：① 注册表**从未被序列化**（唯一的 `/metrics/prometheus` 手工拼接 `csai_*`，全仓无 `generate_latest`）；② `agent_run_dead_letter_total` 由 **worker 容器**递增而 Prometheus 只抓 **app 容器**，进程内 REGISTRY 互不可见。现在有 `GET /metrics`（`generate_latest`）+ `PROMETHEUS_MULTIPROC_DIR` 多进程聚合 + `bearer_token_file` 抓取凭据。真实 `prom/prometheus:v2.51.0` 上 `AgentRunDeadLetterDetected` 实际进入 `firing`（`make metrics-exposure-verify`；`make alert-rules-test` 是官方 `promtool test rules`）。**仍未验证**：Alertmanager 实际投递、整套 compose 栈端到端、Grafana 真实渲染 |
-| 2 | **"转人工"不是已实现的功能** | `Partial`（**本轮未改代码，结论不变**） | escalation 只有两处：`agents/response_agent.py:280` 检查回复文本是否含"转人工"等词；`agents/complaint_agent.py:88` 设一个提示词 flag。**没有工单表、没有队列、没有坐席台、没有推送。** 系统能*说出* "建议转人工"，但没有东西接住这句话 —— 它是**会话级状态标记 + 响应策略提示**。（注意：这与"人工**审批**"是两件事，后者是 Implemented） |
+| 2 | **转人工坐席** | **持久化工单后端已实现，生产待验证** | 工单、坐席领取队列、消息与关闭/重开 API 已实现。启用需应用迁移 `007_durable_human_handoff` 和设置 `HUMAN_HANDOFF_ENABLED=true`。坐席 Web 工作台以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。通知与 SLA 见 [人工交接运维说明](docs/human-handoff-operations.md)。 |
 | 3 | **`HITL_ENABLED=true` 但没配 = 静默放行** | **已修复（fail-closed）** | ① **启动校验** `core.config.validate_hitl_settings`：`HITL_ENABLED=true` 而两条 HIGH 规则全空 → **拒绝启动**（此前是 LOW 全放行且无任何告警）。校验先于 `DEV_MODE` 早退，开发机同样受约束。② **执行期兜底**：治理开启时，`side_effect=True` 却没被任何规则认领风险等级的工具一律判 **HIGH**；只读工具不受影响 |
 
 ### 工具执行层的真实边界
@@ -761,6 +766,8 @@ customer-service-ai-agent/
 
 ---
 
+**工程验收范围：** 客服 Agent 编排、可靠性 Runtime、人工审批与运行时评测以 `docs/reference/current-state.md`、`docs/limitations.md` 和对应提交的 CI 证据为准。
+
 ## Docs
 
 | 我想知道… | 去哪 |
@@ -789,3 +796,13 @@ customer-service-ai-agent/
 [Apache 2.0](LICENSE).
 
 企业级实践参考实现；生产环境所需凭据与基础设施不在本仓库内。
+
+
+## 生态定位与公开工程证据边界（2026-10-30）
+
+这是公开工程参考仓库，不是任何私有经营系统的客户事实或生产应用替代品。
+
+- **唯一工程主责**：LangGraph customer-service workflow and distributed execution/HITL reference implementation。
+- **验证边界**：CI/runtime tests are not a production SLA; real ERP writes, live traffic and the published RAG relevance metrics remain unverified in the stated scope.
+- **公开交叉索引**：[Beauty RAG](https://github.com/Xander-Xai/Beauty-Industry-RAG-QA-System) owns a different domain-focused retrieval reference; an ecosystem link is not a shared production deployment.
+- 代码、测试、指标及发布的唯一技术权威在本仓；任何外部商业研究、PR、演示、内容制作或私人计划均不能替本仓证明生产安全、真实客户验收或收入。

@@ -51,6 +51,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import math
 import re
 import time
 from dataclasses import dataclass
@@ -590,13 +591,33 @@ def load_mcp_server_configs(
         if transport not in _SUPPORTED_TRANSPORTS:
             logger.warning("MCP server %s transport 不支持: %s", name, transport)
             continue
+        # JSON arrays are mandatory; strings/dicts must not become tool names
+        # or individual command-line arguments through implicit iteration.
+        args = item.get("args", [])
+        allowed_tools = item.get("allowed_tools", [])
+        if (
+            not isinstance(args, list)
+            or any(not isinstance(arg, str) or "\x00" in arg for arg in args)
+            or not isinstance(allowed_tools, list)
+            or any(
+                not isinstance(tool, str) or not tool.strip() or "\x00" in tool
+                for tool in allowed_tools
+            )
+        ):
+            logger.warning("MCP server %s args / allowed_tools must be string arrays", name)
+            continue
+        raw_timeout = item.get("timeout_seconds", default_timeout)
+        raw_payload = item.get("max_payload_bytes", default_max_payload)
+        if isinstance(raw_timeout, bool) or isinstance(raw_payload, bool):
+            logger.warning("MCP server %s invalid boolean resource limit", name)
+            continue
         try:
-            timeout = float(item.get("timeout_seconds", default_timeout))
-            max_payload = int(item.get("max_payload_bytes", default_max_payload))
-        except (TypeError, ValueError):
+            timeout = float(raw_timeout)
+            max_payload = int(raw_payload)
+        except (TypeError, ValueError, OverflowError):
             logger.warning("MCP server %s 配置数值非法，跳过", name)
             continue
-        if timeout <= 0 or max_payload <= 0:
+        if not math.isfinite(timeout) or timeout <= 0 or max_payload <= 0:
             # 0 / 负值会让"每次调用都超时"或"任何 payload 都超限"，
             # 那是不可用的配置而不是可用的限制。跳过该 server。
             logger.warning(
@@ -610,8 +631,8 @@ def load_mcp_server_configs(
                 transport=transport,
                 url=str(item.get("url", "")),
                 command=str(item.get("command", "")),
-                args=tuple(str(a) for a in item.get("args", []) or []),
-                allowed_tools=tuple(str(t) for t in item.get("allowed_tools", []) or []),
+                args=tuple(args),
+                allowed_tools=tuple(allowed_tools),
                 timeout_seconds=timeout,
                 max_payload_bytes=max_payload,
                 enabled=enabled,
@@ -914,7 +935,18 @@ class MCPToolAdapter:
             )
             raise mapped from e
         else:
-            normalized = self._normalize_result(result)
+            try:
+                normalized = self._normalize_result(result)
+                self._validate_result_budget(normalized)
+            except MCPToolExecutionError as e:
+                status = "tool_error"
+                _inc(
+                    "mcp_tool_error_total",
+                    server=self.config.name,
+                    tool=mcp_name,
+                    reason=e.reason,
+                )
+                raise
             if isinstance(normalized, MCPToolExecutionError):
                 status = "tool_error"
                 _inc(
@@ -967,6 +999,25 @@ class MCPToolAdapter:
         return args
 
     @staticmethod
+    def _validate_result_budget(result: Any) -> None:
+        """Bound normalized data before it enters the tool registry or model context.
+
+        This is an application boundary, not a transport/frame allocation limit.
+        Error strings are subject to the same boundary as successful results.
+        """
+        payload = str(result) if isinstance(result, MCPToolExecutionError) else result
+        try:
+            size = len(json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+        except (TypeError, ValueError, UnicodeError, RecursionError) as e:
+            raise MCPToolExecutionError(
+                "MCP result is not valid JSON", reason="result_not_serializable"
+            ) from e
+        if size > 32768:
+            raise MCPToolExecutionError(
+                "MCP result exceeds 32768 normalized JSON bytes", reason="result_too_large"
+            )
+
+    @staticmethod
     def _map_error(exc: Exception) -> MCPError:
         """把 SDK / transport 异常映射到本模块的错误分类。"""
         if isinstance(exc, MCPError):
@@ -1005,7 +1056,15 @@ class MCPToolAdapter:
                 "MCP 结果既无 isError 也无 is_error 字段，无法判定调用是否成功",
                 reason="unreadable_result",
             )
-        if bool(is_error):
+        if not isinstance(is_error, bool):
+            return MCPToolExecutionError(
+                "MCP result error flag must be boolean", reason="unreadable_result"
+            )
+        if content is not _MISSING and content is not None and not isinstance(content, list):
+            return MCPToolExecutionError(
+                "MCP result content must be a list", reason="unreadable_result"
+            )
+        if is_error:
             text = MCPToolAdapter._extract_text(content)
             return MCPToolExecutionError(text or "MCP tool 返回错误")
         structured = _read_field(result, "structured_content")

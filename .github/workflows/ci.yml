@@ -104,6 +104,12 @@ jobs:
           # requirements-dev.txt).
           pip install pytest==7.4.4 pytest-asyncio==0.21.1 pytest-cov==5.0.0 coverage==7.4.4
 
+      - name: Verify current documentation against runtime
+        if: matrix.python-version == '3.11'
+        run: |
+          python scripts/project_facts.py --check docs/reference/current-state.md
+          python scripts/audit_doc_consistency.py
+
       # ===== MCP end-to-end contract gate =====
       #
       # The official `mcp` SDK stays an OPTIONAL runtime dependency

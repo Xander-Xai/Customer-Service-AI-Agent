@@ -5,6 +5,8 @@ from typing import TypedDict
 
 class AgentState(TypedDict, total=False):
     session_id: str
+    # Durable checkpoint owner; server-issued AgentRun ID, never user history.
+    episode_run_id: str | None
     current_agent: str
     customer_query: str
     query_type: str
@@ -18,6 +20,8 @@ class AgentState(TypedDict, total=False):
     # v6.4: 业务结果契约（core.outcome.Outcome）——区分"交付"与"解决"。
     # degraded 为真表示 LLM/工具/检索发生降级，交付的可能是兜底文案。
     degraded: bool
+    erp_read_status: str  # ok | timeout | error; direct ERP read only
+    degraded_reason: str
     outcome: object  # core.outcome.Outcome（避免 core.state -> core.outcome 循环）
     # 真实执行过的工具调用（{"tool": str, "ok": bool}）。由
     # ``agents/base_agent.py::_record_tool_execution`` 在工具真的返回后追加；

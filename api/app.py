@@ -133,20 +133,10 @@ def _make_cached_static(
 
 
 async def _pending_steps(graph_app, graph_config: dict[str, Any]) -> tuple[str, ...]:
-    """返回该 thread 最新 checkpoint 的待执行节点；无待执行返回空 tuple。
+    """Inspect synchronous recovery without adopting a pending worker episode."""
+    from runtime.bootstrap import inspect_episode_checkpoint
 
-    探活失败一律按「无待执行」处理（正常执行），绝不让 checkpoint 查询异常阻断业务。
-    """
-    aget_state = getattr(graph_app, "aget_state", None)
-    if aget_state is None:
-        return ()
-    try:
-        snapshot = await aget_state(graph_config)
-    except Exception:
-        return ()
-    if snapshot is None:
-        return ()
-    return tuple(getattr(snapshot, "next", ()) or ())
+    return await inspect_episode_checkpoint(graph_app, graph_config, None)
 
 
 async def _run_graph(
@@ -165,6 +155,8 @@ async def _run_graph(
 
     state = {
         "session_id": session_id,
+        "episode_run_id": None,
+        "user_id": user_id,
         "current_agent": "",
         "customer_query": query,
         "query_type": "",

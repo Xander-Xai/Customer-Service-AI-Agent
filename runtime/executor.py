@@ -233,6 +233,22 @@ def _pending_approval_identity(result: Any) -> tuple[str | None, str | None]:
     return (str(approval_id) if approval_id else None, str(action) if action else None)
 
 
+def _record_episode_inspection(svc: RunService, run_id: str, trace_ctx: Any) -> None:
+    """Best-effort handoff diagnostics; never pass ledger data to the model."""
+    try:
+        episode = svc.inspect_task_episode(run_id)
+        if episode is None:
+            return
+        trace_ctx.set_attribute("csai.episode.inspection", episode["next_safe_inspection"])
+        trace_ctx.set_attribute("csai.episode.approval_count", len(episode["approvals"]))
+        trace_ctx.set_attribute("csai.episode.receipt_count", len(episode["receipts"]))
+        trace_ctx.set_attribute("csai.episode.truncated", episode["truncated"])
+        trace_ctx.set_attribute("csai.episode.identity_mismatch", episode["identity_mismatch"])
+    except Exception:
+        # Diagnostics cannot authorize execution or alter retry/approval state.
+        logger.debug("task episode inspection unavailable")
+
+
 def _config():
     from core import config
 
@@ -446,6 +462,8 @@ async def execute_run(
             trace_ctx = _span_cm.__enter__()
             fence_registry: Any = None
             try:
+                if resuming_approval or int(running.get("attempt") or 0) > 1:
+                    await asyncio.to_thread(_record_episode_inspection, svc, run_id, trace_ctx)
                 if runtime_provider is None:
                     from .bootstrap import get_default_runtime
 
