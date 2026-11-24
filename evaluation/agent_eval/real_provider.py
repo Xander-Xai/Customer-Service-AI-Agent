@@ -30,6 +30,7 @@ provider, no network and no application container.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import time
@@ -248,6 +249,9 @@ class RealCaseResult:
     tool_names: tuple[str, ...] = ()
     tool_calls: tuple[dict[str, Any], ...] = ()
     response_nonempty: bool = False
+    route_source: str | None = None
+    terminal_state: str | None = None
+    fallback_observed: bool | None = None
     latency_ms: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -263,6 +267,9 @@ class RealCaseResult:
             "tool_names": list(self.tool_names),
             "tool_calls": list(self.tool_calls),
             "response_nonempty": self.response_nonempty,
+            "route_source": self.route_source,
+            "terminal_state": self.terminal_state,
+            "fallback_observed": self.fallback_observed,
             "latency_ms": self.latency_ms,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -291,6 +298,122 @@ def _coerce_tools(raw: Any) -> tuple[tuple[str, ...], tuple[dict[str, Any], ...]
             names.append(item)
             calls.append({"name": item})
     return tuple(names), tuple(calls)
+
+
+def summarize_trajectory(cases: Sequence[Any], results: Sequence[RealCaseResult]) -> dict[str, Any]:
+    """Score planned cases, never just the successful subset.
+
+    Only route labels have an existing human-review workflow. Tool/argument
+    and terminal expectations are candidate-contract diagnostics, not gold
+    business accuracy. The observations do not attest provider transport.
+    """
+    planned_ids = [case.case_id for case in cases]
+    by_id = {result.case_id: result for result in results}
+    if (
+        len(set(planned_ids)) != len(planned_ids)
+        or len(by_id) != len(results)
+        or not set(by_id).issubset(planned_ids)
+    ):
+        raise ValueError("duplicate or unexpected trajectory case identity")
+
+    checks: dict[str, list[dict[str, Any]]] = {
+        "reviewed_route_agreement": [],
+        "candidate_tool_set_match": [],
+        "candidate_argument_match": [],
+        "candidate_governance_state_match": [],
+    }
+
+    def add(name, case_id, result, matched):
+        if result is None:
+            outcome = "NOT_ATTEMPTED"
+        elif result.status != STATUS_OK:
+            outcome = "EXECUTION_ERROR"
+        elif matched is None:
+            outcome = "MISSING_OBSERVATION"
+        else:
+            outcome = "MATCH" if matched else "MISMATCH"
+        checks[name].append({"case_id": case_id, "outcome": outcome})
+
+    for case in cases:
+        result = by_id.get(case.case_id)
+        if getattr(case, "expect_fallback", False) or getattr(case, "scripted_failure", None):
+            # Fault injection belongs to the scripted lane, not real-provider quality.
+            continue
+        if (
+            getattr(case, "expected_route", None) is not None
+            and getattr(getattr(case, "annotation", None), "is_human_confirmed", False)
+        ):
+            add(
+                "reviewed_route_agreement",
+                case.case_id,
+                result,
+                None if result is None or result.route is None else (
+                    result.route == case.expected_route
+                ),
+            )
+        expected = set(getattr(case, "expected_tools", ()))
+        if expected:
+            add(
+                "candidate_tool_set_match",
+                case.case_id,
+                result,
+                None if result is None else set(result.tool_names) == expected,
+            )
+        parameters = getattr(case, "expected_parameters", {})
+        if parameters:
+            matched = result is not None and all(
+                any(
+                    call.get("name") == name
+                    and isinstance(call.get("arguments"), dict)
+                    and all(
+                        key in call["arguments"]
+                        and json.dumps(call["arguments"][key], sort_keys=True)
+                        == json.dumps(value, sort_keys=True)
+                        for key, value in arguments.items()
+                    )
+                    and call.get("schema_errors") == []
+                    and call.get("unknown_tool") is False
+                    for call in result.tool_calls
+                )
+                for name, arguments in parameters.items()
+            )
+            add("candidate_argument_match", case.case_id, result, matched)
+        if getattr(case, "expected_terminal_state", None) is not None:
+            add(
+                "candidate_governance_state_match",
+                case.case_id,
+                result,
+                None if result is None or result.terminal_state is None else (
+                    result.terminal_state == case.expected_terminal_state
+                ),
+            )
+
+    metrics = {}
+    for name, items in checks.items():
+        hits = sum(item["outcome"] == "MATCH" for item in items)
+        metrics[name] = {
+            "numerator": hits,
+            "denominator": len(items),
+            "value": hits / len(items) if items else None,
+            "status": "OBSERVED_AGREEMENT" if items and all(
+                item["outcome"] not in {"NOT_ATTEMPTED", "EXECUTION_ERROR", "MISSING_OBSERVATION"}
+                for item in items
+            ) else "INCOMPLETE" if items else "NOT_MEASURED",
+            "cases": items,
+        }
+    return {
+        "planned": len(cases),
+        "attempted": len(results),
+        "not_attempted": [case_id for case_id in planned_ids if case_id not in by_id],
+        "fault_fixture_excluded": [
+            case.case_id for case in cases
+            if getattr(case, "expect_fallback", False) or getattr(case, "scripted_failure", None)
+        ],
+        "metrics": metrics,
+        "business_completion_verified": False,
+        "provider_transport_verified": False,
+        "tool_and_terminal_labels_independently_reviewed": False,
+    }
 
 
 async def run_real_provider_lane(
@@ -325,7 +448,8 @@ async def run_real_provider_lane(
     cost_usage_complete = True
     budget_reason: str | None = None
 
-    for case in list(cases)[: plan.max_queries]:
+    planned = list(cases)[: plan.max_queries]
+    for case in planned:
         if plan.max_total_tokens is not None and tokens_used >= plan.max_total_tokens:
             budget_reason = "max_total_tokens"
             break
@@ -405,6 +529,9 @@ async def run_real_provider_lane(
                 tool_names=names,
                 tool_calls=calls,
                 response_nonempty=bool(outcome.get("response_nonempty")),
+                route_source=outcome.get("route_source"),
+                terminal_state=outcome.get("terminal_state"),
+                fallback_observed=outcome.get("fallback_observed"),
                 latency_ms=round((clock() - started) * 1000, 3),
                 input_tokens=in_tok if input_is_metered else None,
                 output_tokens=out_tok if output_is_metered else None,
@@ -418,6 +545,7 @@ async def run_real_provider_lane(
     return {
         "plan": plan.redacted(),
         "results": [r.to_dict() for r in results],
+        "trajectory": summarize_trajectory(planned, results),
         "summary": {
             "attempted": len(results),
             "ok": ok,
