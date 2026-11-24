@@ -28,7 +28,8 @@ def test_03_dependent_tools_use_previous_observation():
         if not history:
             return Decision("tool", "order", {"id": 7})
         if len(history) == 1:
-            return Decision("tool", "shipping", {"shipment_id": history[0]["result"]["shipment_id"]})
+            shipment_id = history[0]["result"]["shipment_id"]
+            return Decision("tool", "shipping", {"shipment_id": shipment_id})
         return Decision("finish", response=history[1]["result"])
 
     tools = {
@@ -124,9 +125,7 @@ def test_08_high_risk_write_requires_server_approval():
         side_effect=True,
         high_risk=True,
     )
-    result = run_agent_loop(
-        "refund", scripted(Decision("tool", "refund", {"id": 7})), {"refund": spec}
-    )
+    result = run_agent_loop("refund", scripted(Decision("tool", "refund", {"id": 7})), {"refund": spec})
     assert (result.status, result.reason) == ("approval_required", "server_policy_denied")
     assert was_called == []
 
