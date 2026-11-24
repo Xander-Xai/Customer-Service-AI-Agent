@@ -41,7 +41,7 @@ jobs:
         run: ruff check .
 
       - name: Ruff format check (blocking)
-        run: ruff format --diff . # TEMP: capture formatting patch; remove before merge
+        run: ruff format --check .
 
   test:
     runs-on: ubuntu-latest
