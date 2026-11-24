@@ -79,12 +79,19 @@ def build_business_app(catalog_path: Path):
         capabilities=AgentCapabilities(streaming=False, push_notifications=False),
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        supported_interfaces=[AgentInterface(protocol_binding="JSONRPC", protocol_version="1.0", url=base_url + "/a2a/jsonrpc")],
-        skills=[AgentSkill(
-            id=SKILL_ID, name="After-sales procedure review",
-            description="Select an approved current procedure by issue, purchase channel and reported stage.",
-            tags=["after-sales", "read-only", "policy"],
-        )],
+        supported_interfaces=[
+            AgentInterface(
+                protocol_binding="JSONRPC", protocol_version="1.0", url=base_url + "/a2a/jsonrpc"
+            )
+        ],
+        skills=[
+            AgentSkill(
+                id=SKILL_ID,
+                name="After-sales procedure review",
+                description="Select an approved current procedure by issue, purchase channel and reported stage.",
+                tags=["after-sales", "read-only", "policy"],
+            )
+        ],
         security_schemes={
             "peer_bearer": SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer"))
         },

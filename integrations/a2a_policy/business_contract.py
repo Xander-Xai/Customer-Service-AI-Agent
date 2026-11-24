@@ -89,14 +89,22 @@ def validate_result(value: Any, request: dict, digest: str) -> dict:
     ):
         return value
     if value.get("status") != "PROCEDURE_FOUND" or set(value) != set(common) | {
-        "status", "route", "procedure", "source_id", "revision", "valid_until"
+        "status",
+        "route",
+        "procedure",
+        "source_id",
+        "revision",
+        "valid_until",
     }:
         raise A2AContractError("Invalid policy artifact fields")
     if (
         value["route"] not in ROUTES
         or not isinstance(value["procedure"], str)
         or not 1 <= len(value["procedure"].strip()) <= 1200
-        or any(not isinstance(value[key], str) or not ID.fullmatch(value[key]) for key in ("source_id", "revision"))
+        or any(
+            not isinstance(value[key], str) or not ID.fullmatch(value[key])
+            for key in ("source_id", "revision")
+        )
         or parse_date(value["valid_until"]) < datetime.now(timezone.utc).date()
     ):
         raise A2AContractError("Invalid policy artifact values")
@@ -115,13 +123,23 @@ class PolicyCatalog:
         if not isinstance(value, dict) or set(value) != {"schema", "rules"}:
             raise A2AContractError("Invalid policy envelope")
         rules = value["rules"]
-        if value["schema"] != "after-sales-procedures/v1" or not isinstance(rules, list) or not 1 <= len(rules) <= 500:
+        if (
+            value["schema"] != "after-sales-procedures/v1"
+            or not isinstance(rules, list)
+            or not 1 <= len(rules) <= 500
+        ):
             raise A2AContractError("Invalid rule population")
         self.digest = digest
         self.rules = {}
         for rule in rules:
             if not isinstance(rule, dict) or set(rule) != KEYS | {
-                "route", "procedure", "source_id", "revision", "valid_from", "valid_until", "audience"
+                "route",
+                "procedure",
+                "source_id",
+                "revision",
+                "valid_from",
+                "valid_until",
+                "audience",
             }:
                 raise A2AContractError("Invalid policy fields")
             validate_request({key: rule[key] for key in KEYS})
@@ -130,7 +148,10 @@ class PolicyCatalog:
                 or rule["route"] not in ROUTES
                 or not isinstance(rule["procedure"], str)
                 or not 1 <= len(rule["procedure"].strip()) <= 1200
-                or any(not isinstance(rule[key], str) or not ID.fullmatch(rule[key]) for key in ("source_id", "revision"))
+                or any(
+                    not isinstance(rule[key], str) or not ID.fullmatch(rule[key])
+                    for key in ("source_id", "revision")
+                )
                 or parse_date(rule["valid_from"]) > parse_date(rule["valid_until"])
             ):
                 raise A2AContractError("Invalid or non-public procedure")

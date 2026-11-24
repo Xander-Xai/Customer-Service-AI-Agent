@@ -16,19 +16,23 @@ REQUEST = {"issue": "damaged", "channel": "online", "stage": "received_unopened"
 
 @pytest.fixture
 def catalog(tmp_path, monkeypatch):
-    raw = json.dumps({
-        "schema": "after-sales-procedures/v1",
-        "rules": [{
-            **REQUEST,
-            "route": "collect_evidence",
-            "procedure": "CI fixture: collect packaging condition for staff review.",
-            "source_id": "ci-policy",
-            "revision": "r1",
-            "valid_from": "2020-01-01",
-            "valid_until": "2099-01-01",
-            "audience": "customer_public",
-        }],
-    }).encode()
+    raw = json.dumps(
+        {
+            "schema": "after-sales-procedures/v1",
+            "rules": [
+                {
+                    **REQUEST,
+                    "route": "collect_evidence",
+                    "procedure": "CI fixture: collect packaging condition for staff review.",
+                    "source_id": "ci-policy",
+                    "revision": "r1",
+                    "valid_from": "2020-01-01",
+                    "valid_until": "2099-01-01",
+                    "audience": "customer_public",
+                }
+            ],
+        }
+    ).encode()
     path = tmp_path / "policy.json"
     path.write_bytes(raw)
     digest = hashlib.sha256(raw).hexdigest()
@@ -70,9 +74,9 @@ async def test_actual_sdk_policy_review_roundtrip(catalog, monkeypatch):
         assert result["route"] == "collect_evidence"
         assert result["policy_sha256"] == digest
         assert result["execution_authorized"] is False
-        assert (await review_after_sales_procedure(
-            {**REQUEST, "channel": "unknown"}, httpx_client=client
-        ))["status"] == "REVIEW_REQUIRED"
+        assert (
+            await review_after_sales_procedure({**REQUEST, "channel": "unknown"}, httpx_client=client)
+        )["status"] == "REVIEW_REQUIRED"
         monkeypatch.setenv("A2A_AFTERSALES_POLICY_SHA256", "a" * 64)
         with pytest.raises(A2AContractError):
             await review_after_sales_procedure(REQUEST, httpx_client=client)
