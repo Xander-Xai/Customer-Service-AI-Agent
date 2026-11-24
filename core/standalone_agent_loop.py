@@ -7,6 +7,7 @@ provider cost caps, or real ERP refund guarantees.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -92,12 +93,12 @@ def run_agent_loop(
     """
     history: list[dict[str, Any]] = []
     trace: list[str] = []
+    # Per-run duplicate suppression only; durable business identity belongs to Runtime.
+    attempted_writes: set[tuple[str, str]] = set()
     steps = calls = tokens = 0
 
     def finish(
-        status: Literal[
-            "completed", "cancelled", "approval_required", "write_uncertain", "blocked"
-        ],
+        status: Literal["completed", "cancelled", "approval_required", "write_uncertain", "blocked"],
         reason: str,
         response: str = "",
     ) -> Result:
@@ -113,16 +114,14 @@ def run_agent_loop(
         steps += 1
         if not isinstance(choice, Decision):
             return finish("blocked", "invalid_model_response")
-        if (
-            not isinstance(choice.tokens, int)
-            or isinstance(choice.tokens, bool)
-            or choice.tokens < 0
-        ):
+        if not isinstance(choice.tokens, int) or isinstance(choice.tokens, bool) or choice.tokens < 0:
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
         if tokens > limits.tokens:
             return finish("blocked", "token_budget_exceeded")
         if choice.kind == "finish":
+            if not isinstance(choice.response, str):
+                return finish("blocked", "invalid_finish_response")
             trace.append("finish")
             return finish("completed", "model_finished", choice.response)
         if choice.kind != "tool":
@@ -138,21 +137,30 @@ def run_agent_loop(
             continue
         if (
             set(choice.arguments) != set(spec.schema)
-            or any(
-                type(choice.arguments[key]) is not expected
-                for key, expected in spec.schema.items()
-            )
+            or any(type(choice.arguments[key]) is not expected for key, expected in spec.schema.items())
         ):
             trace.append("invalid_args")
             history.append({"tool": spec.name, "error": "schema_validation_failed"})
             continue
-        if spec.side_effect and not authorize_write(spec, choice.arguments):
-            trace.append("write_rejected" if not spec.high_risk else "approval_pending")
-            return finish(
-                "approval_required" if spec.high_risk else "blocked", "server_policy_denied"
-            )
+        if spec.side_effect:
+            try:
+                write_key = (spec.name, json.dumps(choice.arguments, sort_keys=True, allow_nan=False))
+            except (ValueError, TypeError):
+                return finish("blocked", "invalid_write_identity")
+            if write_key in attempted_writes:
+                trace.append("duplicate_write_blocked:" + spec.name)
+                return finish("blocked", "duplicate_write_attempt")
+            try:
+                authorized = authorize_write(spec, dict(choice.arguments)) is True
+            except Exception:
+                authorized = False
+            if not authorized:
+                trace.append("write_rejected" if not spec.high_risk else "approval_pending")
+                return finish("approval_required" if spec.high_risk else "blocked", "server_policy_denied")
         if cancelled():
             return finish("cancelled", "cancel_before_tool")
+        if spec.side_effect:
+            attempted_writes.add(write_key)
         calls += 1
         attempts = 1 if spec.side_effect else limits.read_attempts
         for attempt in range(1, attempts + 1):
@@ -185,6 +193,9 @@ def run_agent_loop(
                     trace.append("read_retry:" + spec.name)
                     backoff(attempt)
             except Exception:
+                if spec.side_effect:
+                    trace.append("write_outcome_unknown:" + spec.name)
+                    return finish("write_uncertain", "reconcile_external_state")
                 trace.append("tool_failed:" + spec.name)
                 history.append({"tool": spec.name, "error": "tool_execution_failed"})
                 break
