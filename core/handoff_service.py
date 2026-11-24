@@ -247,7 +247,9 @@ class HandoffService:
             access = [HandoffTicket.id == ticket_id]
             if role not in MANAGER_ROLES:
                 access.extend([HandoffTicket.status == CLAIMED, HandoffTicket.assigned_to == actor])
-            ticket = db.execute(select(HandoffTicket.session_id, HandoffTicket.customer_id).where(*access)).one_or_none()
+            ticket = db.execute(
+                select(HandoffTicket.session_id, HandoffTicket.customer_id).where(*access)
+            ).one_or_none()
             if ticket is None:
                 raise HandoffNotFound("Ticket not found")
             run_id = db.scalar(
