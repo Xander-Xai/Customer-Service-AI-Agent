@@ -17,7 +17,11 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from erp.kingdee_adapter import KingdeeMockAdapter  # noqa: E402
-from erp.kingdee_real_adapter import KingdeeRealAdapter, _exponential_backoff  # noqa: E402
+from erp.kingdee_real_adapter import (  # noqa: E402
+    ERPReadUnavailable,
+    KingdeeRealAdapter,
+    _exponential_backoff,
+)
 
 # ============================================================================
 # Fixtures
@@ -566,15 +570,15 @@ class TestQueryProduct:
         assert products[0]["name"] == "玫瑰焕颜精华液"
 
     @pytest.mark.asyncio
-    async def test_returns_empty_on_error(self, real_adapter: KingdeeRealAdapter):
-        """查询失败时返回空列表（降级处理）"""
+    async def test_raises_unavailable_on_error(self, real_adapter: KingdeeRealAdapter):
+        """查询失败不能伪装成正常空结果。"""
         real_adapter._token = "valid_token"
         real_adapter._token_expires = time.time() + 3600
 
         real_adapter._client = _make_mock_client(post_side_effect=httpx.ConnectError("timeout"))
 
-        products = await real_adapter.query_product("test")
-        assert products == []
+        with pytest.raises(ERPReadUnavailable, match="ERP read unavailable"):
+            await real_adapter.query_product("test")
 
 
 # ============================================================================
@@ -677,3 +681,36 @@ class TestClose:
         mock_client.aclose.assert_called_once()
         assert real_adapter._token is None
         assert real_adapter._token_expires == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("envelope", [{}, {"Data": {}}, {"Data": {"Rows": "bad"}}, {"Data": [1]}])
+async def test_malformed_read_envelope_is_not_an_empty_result(real_adapter, envelope):
+    real_adapter._api_call = AsyncMock(return_value=envelope)
+    with pytest.raises(ERPReadUnavailable, match="ERP read unavailable"):
+        await real_adapter.query_product("demo")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "kwargs"),
+    [
+        ("query_product", {"keyword": "demo"}),
+        ("query_inventory", {"product_id": "P001"}),
+        ("query_order", {"order_id": "ORD001"}),
+        ("query_customer", {"customer_id": "C001"}),
+    ],
+)
+async def test_real_adapter_propagates_redacted_read_failure(real_adapter, method, kwargs):
+    real_adapter._api_call = AsyncMock(side_effect=RuntimeError("private backend detail"))
+    with pytest.raises(ERPReadUnavailable, match="ERP read unavailable") as error:
+        await getattr(real_adapter, method)(**kwargs)
+    assert "private backend detail" not in str(error.value)
+    assert error.value.__suppress_context__ is True
+
+
+@pytest.mark.asyncio
+async def test_real_empty_result_remains_successful(real_adapter):
+    real_adapter._api_call = AsyncMock(return_value={"Data": {"Rows": []}})
+    assert await real_adapter.query_product("demo") == []
+    assert await real_adapter.query_customer("C001") is None
