@@ -112,3 +112,24 @@ async def test_tool_activity_suppresses_quality_retry(monkeypatch):
         assert observed["collaboration_mode"] == "sequential"
     finally:
         await container.close()
+
+
+async def test_graph_router_does_not_prefetch_knowledge_for_direct_task(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    first = _Mode("sequential", "这是已完成的直接业务回答。")
+    upgraded = _Mode("consultation", "不应调用的协作回答。")
+    container, _ = await _make_container(first, upgraded)
+    try:
+        # No domain retrieval occurs in the scripted mode. The router must
+        # not spend a model/embedding call on unconditional prefetch.
+        assert container.knowledge_base is not None
+        prefetch = AsyncMock(return_value=None)
+        monkeypatch.setattr(container.knowledge_base, "prefetch_reusable", prefetch)
+        monkeypatch.setattr("core.config.EVAL_RETRY_ENABLED", False)
+        observed = await _drain_graph(container, thread_id=f"no-prefetch-{uuid4().hex}")
+        assert observed["response"] == first.response
+        assert first.calls == 1
+        prefetch.assert_not_awaited()
+    finally:
+        await container.close()

@@ -9,12 +9,30 @@
 
 ---
 
+## Architecture decision freeze — 2026-11-25
+
+**主架构：LangGraph 路由式领域工作流 + 受限 ReAct + 双执行路径。** 本仓承担客服业务编排、工具治理、人工审批和耐久运行时；不承担通用执行沙箱、跨任务用户画像或独立 RAG 算法实验。Beauty RAG 与本仓属同一早期任职阶段；Gaobao 为另一期任职。当前公开工程治理不是历史生产交付证明。
+
+| 设计 | 裁决 | 边界 / 验收 |
+|---|---|---|
+| 快路径 / 异步路径 | 保留 | 只读快路径；有副作用或待审批任务进入耐久路径；服务端权限而非模型自报 |
+| 领域 Agent | 保留接口，按收益裁剪 | 七个领域角色不是七个独立服务；仅在工具、权限、策略或协作收益不同时拆分；与单专家基线比较路由正确率、调用次数、时延及失败 |
+| ResponseAgent | 定性为确定性后处理节点 | process 做清洗、质量规则、缓存、事件；不额外算自主 LLM Agent；保留兼容类名，禁止无必要模型调用 |
+| ReAct / 协作模式 | 条件启用 | 简单查询直接工具/专家；仅复杂任务启用协作；限制循环、传播部分失败及未完成审批 |
+| MCP | 可选边界 | `tools/mcp_adapter.py` 已实现且默认关闭；外部工具通过统一注册表，固定 FAQ 仅协议实验 |
+| A2A | 可选边界 | 独立 Agent 服务通信；固定 FAQ 仅协议实验，新增业务接入须经合并及验收 |
+| Redis lease / PostgreSQL CAS | 保留，不夸大 | 锁、owner CAS、工具账本职责不同；旧 worker 的外部请求不能仅靠本地 CAS 撤销 |
+| ERP 写操作 | 安全优先 | 外部结果不明时禁止盲重试；需要外部幂等键、结果查询或人工对账；未确认写入不得报告成功 |
+| Cache / Memory | 保留独立责任 | Cache 可重建；Session 是上下文；Checkpoint 是图状态；AgentRun/ledger 是持久业务事实；缓存不能授权写操作 |
+
+**架构裁剪门禁**：先检查调用路径与兼容接口，再以同数据/任务对比单专家和协作模式；没有收益的角色合并为普通节点或规则函数。真实 ERP 未授权时只做 mock/故障契约，不当作生产通过。本次保持外部接口和安全配置；取消无条件路由预取，按需检索。具体删改必须有回归测试及同 SHA CI。先完成架构裁剪，再单独治理能力缺口。
+
 ## 1. 一句话架构
 
 > 一个**同步快路径 + 异步耐久路径**并存的企业客服 Agent 服务：
 > 前者用 LangGraph 实时编排多 Agent 回答请求，后者把长任务落库入队、
 > 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用
-> 加**恰好一次**的幂等记账。
+> 加持久化幂等记账、执行所有权及未知结果对账约束（不保证外部 ERP exactly-once）。
 
 ---
 
@@ -106,9 +124,9 @@ flowchart TD
 
 | 点 | 准确说法 |
 |---|---|
-| 交付语义 | **at-least-once**，不是 exactly-once。`acks_late` + `reject_on_worker_lost` + Redis `visibility_timeout` 只会让任务**至少**执行一次 |
-| "恰好一次"从哪来 | 靠 run 级（终态重复投递 no-op）+ thread 级（Redis 锁）+ **工具级（`tool_side_effects` ledger 原子 claim）** 三层幂等换来的，**不是框架给的** |
-| 崩溃恢复靠什么 | 不靠优雅关闭：靠**任务重投 + lease 过期接管 + 从 checkpoint `next` 续跑**。已成功的工具副作用由 ledger 挡住，不会重做 |
+| 交付语义 | **at-least-once**，不是 exactly-once。`acks_late` + `reject_on_worker_lost` + Redis `visibility_timeout` 允许任务被重投和重复执行，仍需正确的故障恢复条件 |
+| 幂等边界 | run 级终态 no-op、thread 锁、工具账本原子 claim 抑制重复；不能保证外部 ERP exactly-once，结果未知时需查询或对账 |
+| 崩溃恢复靠什么 | 不靠优雅关闭：靠**任务重投 + lease 过期接管 + 从 checkpoint `next` 续跑**。已持久确认成功的工具回执用于抑制重做；外部成功但未持久化的窗口需对账 |
 | 事件流不是真相源 | Redis Stream → SSE 是**观测通道**：best-effort 可续读，**非 exactly-once**。真相永远是 `agent_runs` 表 |
 
 > **Level 2 ≠ 生产验证。** 上述流程已用真实 PostgreSQL + Redis + 多进程 Celery
@@ -136,28 +154,30 @@ POST /api/chat  或  /api/chat/stream
          │            命中 → 直接产出（伪流式补齐）
          │            未命中 ↓
          │
-         ┌─[Layer 1]─ classify_query ─────────────► final_response
+         ┌─[Layer 1]─ classify_query
          │            LLM 分类器 ‖ 规则分类器（asyncio.gather）
          │            高置信规则（≥0.75）→ 短路，不调 LLM
-         │            并行启动 RAG 预取任务
+         │            不做全局 RAG 预取，领域 Agent 按需检索
          │            产出 query_type / complexity / domain hints
          │
          ├─[Layer 2]─ 条件边选协作模式
          │            sequential | parallel | consultation | hierarchical | react
          │            （5 个节点共享同一实现体，模式名只影响调度语义）
          │
-         ├─ human_approval_gate ──────────────────► final_response
+         ├─ human_approval_gate
          │     pending_actions 非空 → LangGraph interrupt()
          │     空 → 纯 no-op（普通流量零开销）
          │
+         ├─ quality_gate（仅无工具/审批活动的低分 sequential 可升级）
+         │     mode_upgrade_retry 最多一次 → human_approval_gate
+         │     否则 ↓
          └─[Layer 3]─ final_response
-                     质量评估（ResponseEvaluator，启发式）
-                     模式升级重试
+                     最终规则质量评估（不再次调度）
                      缓存写入（仅 resolved）
                      SLA 监控 / 事件广播
 ```
 
-节点与边的**逐行定义**在 `core/graph_builder.py:399-457`。本文只解释结构与理由。
+节点与边的**逐行定义**在 `core/graph_builder.py::build_graph`。本文只解释结构与理由。
 
 ---
 
@@ -189,10 +209,7 @@ POST /api/chat  或  /api/chat/stream
 **单一定义点**，全仓无第二份 schema。它承载 session/agent/query/response/
 collaboration_mode/cached/agents_used/resolution_status/trace_id/多模态/HITL 字段。
 
-> 已知漂移：运行时还会写入 `_rag_prefetch` / `_needs_upgrade` / `_retried` /
-> `_retried_failed` / `ab_variant` / `ab_experiment` / `extracted_entities`
-> 七个**未在 TypedDict 声明**的键。因为 `total=False` 且节点返回整份 state，
-> 它们能正常传播，但**对 mypy 与对读者都不可见**。
+> LangGraph 仅持久传递 schema 声明的 channel；`total=False` 仅意味着字段可缺省，不意味着任意键自动传递。`_needs_upgrade` / `_retried` 已声明。路由阶段原先写入的 `_rag_prefetch` 未声明，且不应为每个请求无条件检索，故已取消该预取；领域 Agent 的统一检索入口仍可按需工作。其他临时键必须逐一核查其生产者、消费者和生命周期，不能直接声称跨节点传播。
 
 ### 5.2 编译
 `core/graph_builder.py:453-457`：
@@ -241,7 +258,7 @@ app = workflow.compile(**compile_kwargs)
 同一笔逻辑写操作换键后会被执行两次。身份按**内容**而非**位置**派生，因此重放时调用
 序列重排也不会让同一笔写换键（Issue #12 Part A）。
 DLQ 重放**复用原 run_id**（`runtime/run_service.py:512-553`）——
-两个设计都指向同一个目的：**重试永远不会变成第二次副作用**。
+两个设计旨在抑制重试导致的重复副作用；外部成功但本地未确认的窗口仍需对账。
 
 ---
 

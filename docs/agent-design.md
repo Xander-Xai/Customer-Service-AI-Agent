@@ -39,7 +39,7 @@ def answer(query):
 | 暂停等人 | `interrupt()` / `Command(resume=...)` | `core/hitl/gate.py:205` 逐个审批 HIGH 风险动作 |
 | 崩溃恢复 | Checkpointer | Postgres `AsyncPostgresSaver`，从 `aget_state().next` 续跑 |
 | 中间状态统一载体 | `AgentState` TypedDict | `core/state.py:6`，单一定义点 |
-| 并行扇出 | 节点内 `asyncio.gather` | 路由双层并行、RAG 预取与分类并行 |
+| 并行扇出 | 节点内 `asyncio.gather` | 路由双层并行；知识检索由领域 Agent 按需触发 |
 | 跨进程共享 | Checkpointer 落在 Postgres | API 快路径与 Celery worker 共享同一份进度 |
 
 **关键点：LangGraph 在这里不是"框架炫技"，是恰好提供了裸 Chain 缺的四个原语。**
@@ -261,7 +261,7 @@ lease 信息**全部缺失时判定为"未过期"**（`:62-63`）——宁可重
 |---|---|---|
 | 7 个领域 Agent | 产品/成分、销售/价格、售后、物流、计费、投诉、技术 | 各自有专属 prompt 与 RAG scene 过滤 |
 | `ReActAgent` | 复杂多步推理 | **唯一走工具循环的角色**（`agents/react_agent.py:88`） |
-| `ResponseAgent` | 响应后处理 | 质量评估 / 模式升级重试 / 缓存写入 / SLA |
+| `ResponseAgent` | 确定性响应后处理（兼容类名） | 最终质量评估 / 缓存写入 / SLA；升级调度由图的 quality_gate 控制 |
 
 `BaseAgent` 是抽象基类，`ResponseEvaluator` 是评估器，**都不计入运行时角色**。
 

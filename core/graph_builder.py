@@ -88,7 +88,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
     async def _classify_query_node(state: AgentState) -> AgentState:
         """双层路由节点：LLM Router + Rule Classifier + 复杂度评分（v3.2: 熔断器降级）
         v4.1: 从 state 传播 trace_id 到 contextvars
-        v5.4: RAG 预取与路由并行执行
+        Knowledge retrieval is owned by the selected domain agent.
         """
         trace_id = state.get("trace_id", "")
         if trace_id:
@@ -108,9 +108,6 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         context = await c.session_mgr.get_conversation_context(session_id)
         context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""
-
-        # v5.4: RAG 预取 — 与路由并行执行，提前检索知识库
-        rag_prefetch_task = asyncio.create_task(_rag_prefetch(query))
 
         # v3.2: 熔断器检查 — OPEN 状态时跳过 LLM，仅用规则分类
         if not await c.circuit_breaker.should_allow():
@@ -150,11 +147,6 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                     rule_override=True,
                 )
 
-        # 等待 RAG 预取结果
-        rag_context = await rag_prefetch_task
-        if rag_context:
-            state["_rag_prefetch"] = rag_context
-
         state["query_type"] = result.query_type
         state["current_agent"] = result.agent_name
         state["complexity"] = result.complexity
@@ -183,23 +175,6 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         )
 
         return state
-
-    async def _rag_prefetch(query: str) -> dict | None:
-        """RAG 预取：用原始查询提前检索知识库，与路由并行执行
-
-        返回检索到的上下文文本，供 Agent 直接使用（跳过 Agent 内部的 RAG 检索）。
-        失败时返回 None，Agent 会回退到自己的 RAG 检索。
-        """
-        if not c.knowledge_base:
-            return None
-        try:
-            return await asyncio.wait_for(
-                c.knowledge_base.prefetch_reusable(query, c.llm),
-                timeout=2.0,
-            )
-        except Exception as e:
-            logger.debug(f"[RAG预取] 失败（Agent 将自行检索）: {e}")
-        return None
 
     async def _check_cache_node(state: AgentState) -> AgentState:
         """缓存检查节点（v6.0: SSE 状态流式 + 缓存伪流式）"""
