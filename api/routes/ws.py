@@ -97,7 +97,7 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
         from auth.service import decode_token
 
         payload = decode_token(ws_jwt)
-        if not payload:
+        if not payload or payload.get("type") not in (None, "access"):
             await ws.send_json({"type": "error", "message": "认证失败: 无效的 token"})
             await ws.close(code=4001, reason="Invalid token")
             raise ValueError("Invalid token")
@@ -122,6 +122,12 @@ async def _ws_authenticate(ws: WebSocket, ws_api_key: str) -> tuple:
 @router.websocket("/ws/chat")
 async def websocket_chat(ws: WebSocket):
     global _ws_conn_counter
+
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled():
+        await ws.close(code=1008, reason="Use authenticated SSE")
+        return
 
     ws_api_key = ws.query_params.get("api_key", "") or ws.headers.get("x-api-key", "")
     client_ip = ws.client.host if ws.client else "unknown"

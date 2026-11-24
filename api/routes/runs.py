@@ -179,6 +179,8 @@ async def create_run(
             "run_id": run["id"],
             "status": run["status"],
             "thread_id": run["thread_id"],
+            "session_id": run["session_id"],
+            "session_token": session.session_manager.generate_session_token(session.sid) if session.session_manager else "",
         },
         status_code=202,
     )

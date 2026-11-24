@@ -51,6 +51,7 @@ from core.config import (
     SESSION_SUMMARY_MAX_CHARS as _CFG_SUMMARY_MAX_CHARS,
 )
 from core.exceptions import SessionEncryptionError
+from core.industrial import industrial_enabled
 from core.logger import get_logger
 
 # Re-exports: symbols imported from split modules by external callers (agents, cache, orchestrator, tests)
@@ -554,6 +555,9 @@ class EnhancedSessionManager:
                 safe_url = url.split("@")[-1] if "@" in url else url
                 logger.info(f"Redis 连接成功: {safe_url}")
             except Exception as e:
+                if industrial_enabled():
+                    self._redis_client = None
+                    raise RuntimeError("Session Redis unavailable") from e
                 logger.warning(f"Redis 连接失败，回退到内存模式: {e}")
                 self._redis_client = None
                 self.storage_backend = "memory"
@@ -717,7 +721,9 @@ class EnhancedSessionManager:
                     logger.error("Redis 会话记录不可信，拒绝加载 session=%s", session_id)
                     raise
                 except Exception as e:
-                    # 普通读取失败（连接/超时等），既有降级语义。
+                    # In industrial mode an unavailable session is not an empty session.
+                    if industrial_enabled():
+                        raise RuntimeError("Session read unavailable") from e
                     logger.warning(f"Redis 读取失败: {e}")
 
         self.sessions[session_id] = {
@@ -859,7 +865,8 @@ class EnhancedSessionManager:
                     def _redis_save():
                         key = _get_encryption_key()
                         msgs_json = json.dumps(session["messages"], ensure_ascii=False)
-                        r.set(
+                        target = r.pipeline(transaction=True) if industrial_enabled() else r
+                        target.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:messages",
                             _seal(msgs_json, key),
                             ex=ttl,
@@ -872,11 +879,13 @@ class EnhancedSessionManager:
                             "drift_log": session.get("drift_log", []),
                             "topic_history": list(session.get("topic_history", [])),
                         }
-                        r.set(
+                        target.set(
                             f"{_CFG_REDIS_PREFIX}{session_id}:meta",
                             _seal(json.dumps(meta, ensure_ascii=False), key),
                             ex=ttl,
                         )
+                        if industrial_enabled():
+                            target.execute()
 
                     await asyncio.to_thread(_redis_save)
                 except SessionEncryptionError:
@@ -884,6 +893,8 @@ class EnhancedSessionManager:
                     logger.error("Redis 会话加密失败 session=%s", session_id)
                     raise
                 except Exception as e:
+                    if industrial_enabled():
+                        raise RuntimeError("Session write unavailable") from e
                     logger.warning(f"Redis 保存失败: {e}")
 
     async def get_conversation_context(
