@@ -166,7 +166,7 @@ jobs:
         run: python3 scripts/verify_mcp_contract.py
 
       - name: MCP staging CLI real wire smoke (local synthetic server)
-        run: python -m pytest -q -o addopts="" tests/integration/test_mcp_staging_cli.py
+        run: python -m pytest -q -o addopts="" tests/integration/test_mcp_staging_cli.py tests/integration/test_readonly_mcp_faq_stdio.py
 
       - name: Upload MCP contract evidence
         if: always()
