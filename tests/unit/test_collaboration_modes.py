@@ -751,3 +751,94 @@ async def test_supervisor_cannot_execute_itself_as_worker():
     manager.process_with_retry.assert_awaited_once()
     assert result["agents_used"] == ["general_agent"]
     assert result["degraded_reason"] == "hierarchical_subtask_missing_or_empty"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("query", "intent", "primary", "complexity", "selected", "gold", "expected_calls"),
+    [
+        (
+            "我要投诉",
+            "complaint",
+            "complaint_agent",
+            70,
+            "sequential",
+            {"complaint_agent"},
+            1,
+        ),
+        (
+            "产品和退款问题",
+            "product_info",
+            "product_agent",
+            30,
+            "parallel",
+            {"product_agent", "billing_agent"},
+            2,
+        ),
+        (
+            "我要投诉！皮肤过敏了",
+            "complaint",
+            "complaint_agent",
+            70,
+            "hierarchical",
+            {"complaint_agent", "tech_agent"},
+            3,
+        ),
+    ],
+)
+async def test_paired_routing_architecture_contract(
+    query, intent, primary, complexity, selected, gold, expected_calls
+):
+    """Matched synthetic task: actual executors, fixed role facts, no provider calls.
+
+    The fixture tests role coverage and execution counts, not real answer quality.
+    Each arm has fresh agents and the same input, with an independent role oracle.
+    """
+    from collaboration import CollaborationOrchestrator, RoutingMode
+    from router.query_router import RoutingResult
+
+    def make_agents():
+        agents = {}
+        for role in ("complaint_agent", "tech_agent", "product_agent", "billing_agent"):
+            agent = _mock_agent(role)
+            agent.process_with_retry.return_value = {
+                "response": role,
+                "tool_executions": [{"role": role}],
+            }
+            agents[role] = agent
+
+        async def synthesize(state):
+            return {"response": state["customer_query"]}
+
+        agents["general_agent"] = _mock_agent(side_effect=synthesize)
+        return agents
+
+    def coverage(result):
+        return {record["role"] for record in result["tool_executions"]}
+
+    def calls(agents):
+        return sum(agent.process_with_retry.await_count for agent in agents.values())
+
+    routing = RoutingResult(
+        query_type=intent,
+        agent_name=primary,
+        complexity=complexity,
+        fast_path=False,
+    )
+    orchestrator = CollaborationOrchestrator(_mock_bus(), _mock_bb())
+    state = _state(query)
+    mode, context = orchestrator.build_context(routing, state)
+    assert mode == selected
+
+    baseline_agents = make_agents()
+    baseline = await RoutingMode().execute(baseline_agents, state, {"primary_agent": primary})
+    selected_agents = make_agents()
+    result = await orchestrator._modes[mode].execute(selected_agents, state, context)
+
+    assert calls(baseline_agents) == 1
+    assert coverage(baseline) == {primary}
+    assert calls(selected_agents) == expected_calls
+    assert coverage(result) == gold
+    assert all(role in result["response"] for role in gold)
+    assert not result.get("degraded_reason")
+    assert state["customer_query"] == query
