@@ -125,7 +125,9 @@ def test_08_high_risk_write_requires_server_approval():
         side_effect=True,
         high_risk=True,
     )
-    result = run_agent_loop("refund", scripted(Decision("tool", "refund", {"id": 7})), {"refund": spec})
+    result = run_agent_loop(
+        "refund", scripted(Decision("tool", "refund", {"id": 7})), {"refund": spec}
+    )
     assert (result.status, result.reason) == ("approval_required", "server_policy_denied")
     assert was_called == []
 
