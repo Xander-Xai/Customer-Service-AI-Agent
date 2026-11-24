@@ -47,11 +47,13 @@ async def test_worker_refuses_foreign_or_legacy_pending_checkpoint(owner, approv
 @pytest.mark.asyncio
 async def test_same_episode_resumes_without_new_input():
     graph = _graph("same-run")
+    identity = _terminal_state()
+    graph.aget_state.return_value.values = dict(identity)
     tokens = set_run_context("same-run", "shared-thread")
     try:
         result, resumed = await invoke_graph_with_resume(
             graph,
-            {"episode_run_id": "same-run"},
+            identity,
             CONFIG,
         )
         assert resumed
@@ -121,17 +123,20 @@ async def test_real_memory_saver_preserves_episode_channel_and_rejects_other_run
     builder.add_edge("first", "second")
     builder.add_edge("second", END)
     graph = builder.compile(checkpointer=InMemorySaver(), interrupt_before=["second"])
-    await graph.ainvoke(
-        {"episode_run_id": "original-run", "customer_query": "synthetic"},
-        config=CONFIG,
-    )
+    identity = {
+        "episode_run_id": "original-run",
+        "customer_query": "synthetic",
+        "session_id": "shared-thread",
+        "user_id": None,
+    }
+    await graph.ainvoke(identity, config=CONFIG)
 
     assert await inspect_episode_checkpoint(graph, CONFIG, "original-run") == ("second",)
     with pytest.raises(CheckpointEpisodeMismatch):
         await inspect_episode_checkpoint(graph, CONFIG, "another-run")
     tokens = set_run_context("original-run", "shared-thread")
     try:
-        result, resumed = await invoke_graph_with_resume(graph, {}, CONFIG)
+        result, resumed = await invoke_graph_with_resume(graph, identity, CONFIG)
         assert resumed
         assert result["response"] == "finished"
         assert result["episode_run_id"] == "original-run"
@@ -292,5 +297,24 @@ async def test_pending_checkpoint_matching_full_identity_resumes():
         _, resumed = await invoke_graph_with_resume(graph, state, CONFIG)
         assert resumed
         graph.ainvoke.assert_awaited_once_with(None, config=CONFIG)
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approval_resume", [False, True])
+@pytest.mark.parametrize("field", ["session_id", "customer_query", "user_id"])
+async def test_pending_checkpoint_rejects_incomplete_trusted_input(field, approval_resume):
+    state = _terminal_state()
+    graph = _graph("same-run")
+    graph.aget_state.return_value.values = dict(state)
+    state.pop(field)
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        with pytest.raises(CheckpointEpisodeMismatch, match="identity requires reconciliation"):
+            await invoke_graph_with_resume(
+                graph, state, CONFIG, resume_command=object() if approval_resume else None
+            )
+        graph.ainvoke.assert_not_awaited()
     finally:
         reset_run_context(tokens)

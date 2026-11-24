@@ -152,13 +152,13 @@ async def invoke_graph_with_resume(
         pending = _validate_checkpoint_owner(
             snapshot, run_id, approval_resume=resume_command is not None
         )
-        if pending and state:
-            # A matching run ID is necessary, not sufficient. Compare the
-            # identity fields supplied by the trusted runtime; never resume a
-            # checkpoint containing a different objective or principal.
+        if pending:
+            # A matching run ID is necessary, not sufficient. Require the
+            # complete trusted runtime identity, including an explicit None
+            # for an anonymous principal; missing fields cannot authorize resume.
             values = snapshot.values
-            if any(
-                key in state and (key not in values or state[key] != values[key])
+            if not state or any(
+                key not in state or key not in values or state[key] != values[key]
                 for key in ("session_id", "customer_query", "user_id")
             ):
                 raise CheckpointEpisodeMismatch(
