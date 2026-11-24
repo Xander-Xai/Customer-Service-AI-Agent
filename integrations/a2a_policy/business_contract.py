@@ -59,7 +59,11 @@ def canonical(value: Any) -> str:
 def validate_request(value: Any) -> dict:
     if not isinstance(value, dict) or set(value) != KEYS:
         raise A2AContractError("Only issue/channel/stage descriptors are permitted")
-    if value["issue"] not in ISSUES or value["channel"] not in CHANNELS or value["stage"] not in STAGES:
+    if (
+        value["issue"] not in ISSUES
+        or value["channel"] not in CHANNELS
+        or value["stage"] not in STAGES
+    ):
         raise A2AContractError("Unrecognized issue descriptor")
     return value
 

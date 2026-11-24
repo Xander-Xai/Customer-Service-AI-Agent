@@ -75,7 +75,9 @@ async def test_actual_sdk_policy_review_roundtrip(catalog, monkeypatch):
         assert result["policy_sha256"] == digest
         assert result["execution_authorized"] is False
         assert (
-            await review_after_sales_procedure({**REQUEST, "channel": "unknown"}, httpx_client=client)
+            await review_after_sales_procedure(
+                {**REQUEST, "channel": "unknown"}, httpx_client=client
+            )
         )["status"] == "REVIEW_REQUIRED"
         monkeypatch.setenv("A2A_AFTERSALES_POLICY_SHA256", "a" * 64)
         with pytest.raises(A2AContractError):

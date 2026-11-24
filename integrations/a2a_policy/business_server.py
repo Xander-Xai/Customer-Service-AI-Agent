@@ -61,11 +61,15 @@ class AfterSalesExecutor(AgentExecutor):
         except (TypeError, ValueError):
             await updater.update_status(TaskState.TASK_STATE_REJECTED)
             return
-        await updater.add_artifact(parts=[Part(text=canonical(result))], name="policy-review", last_chunk=True)
+        await updater.add_artifact(
+            parts=[Part(text=canonical(result))], name="policy-review", last_chunk=True
+        )
         await updater.complete()
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
-        updater = TaskUpdater(event_queue=event_queue, task_id=context.task_id or "", context_id=context.context_id or "")
+        updater = TaskUpdater(
+            event_queue=event_queue, task_id=context.task_id or "", context_id=context.context_id or ""
+        )
         await updater.cancel()
 
 
@@ -88,12 +92,16 @@ def build_business_app(catalog_path: Path):
             AgentSkill(
                 id=SKILL_ID,
                 name="After-sales procedure review",
-                description="Select an approved current procedure by issue, purchase channel and reported stage.",
+                description=(
+                    "Select an approved current procedure by issue, purchase channel and reported stage."
+                ),
                 tags=["after-sales", "read-only", "policy"],
             )
         ],
         security_schemes={
-            "peer_bearer": SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer"))
+            "peer_bearer": SecurityScheme(
+                http_auth_security_scheme=HTTPAuthSecurityScheme(scheme="Bearer")
+            )
         },
         security_requirements=[SecurityRequirement(schemes={"peer_bearer": StringList(list=[])})],
     )
