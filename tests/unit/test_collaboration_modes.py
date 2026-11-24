@@ -551,3 +551,112 @@ class TestCollaborationModeHelpers:
 
         result = await mode._safe_bb_read_prefix("k")
         assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_parallel_timeout_retains_completed_evidence_and_cancels_slow_child():
+    from core.outcome import classify_outcome
+
+    receipt = {"tool": "lookup_order", "ok": True}
+    approval = {"tool": "refund", "arguments": {"order_id": "synthetic"}}
+    finished = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def fast(state):
+        finished.set()
+        return {
+            "response": "confirmed",
+            "tool_executions": [receipt],
+            "pending_actions": [approval],
+        }
+
+    async def slow(state):
+        await finished.wait()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    a, b = _mock_agent(), _mock_agent()
+    a.process_with_retry.side_effect = fast
+    b.process_with_retry.side_effect = slow
+    mode = ParallelMode()
+    mode._PARALLEL_TIMEOUT = 0.1
+    result = await mode.execute({"fast": a, "slow": b}, _state(), {"agent_list": ["fast", "slow"]})
+    assert result["agents_used"] == ["fast"]
+    assert result["tool_executions"] == [receipt]
+    assert result["pending_actions"] == [approval]
+    assert result["degraded_reason"] == "parallel_timeout"
+    assert classify_outcome(result).degraded
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_parallel_partial_failure_is_redacted_and_degraded():
+    from core.outcome import classify_outcome
+
+    agents = {
+        "good": _mock_agent("confirmed"),
+        "bad": _mock_agent(side_effect=RuntimeError("private backend details")),
+    }
+    result = await ParallelMode().execute(agents, _state(), {"agent_list": ["good", "bad"]})
+    assert result["agents_used"] == ["good"]
+    assert result["degraded_reason"] == "parallel_agent_failed"
+    assert classify_outcome(result).degraded
+    assert "private backend details" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_parallel_missing_child_is_explicitly_degraded():
+    result = await ParallelMode().execute(
+        {"good": _mock_agent()}, _state(), {"agent_list": ["good", "missing"]}
+    )
+    assert result["degraded_reason"] == "parallel_agent_missing"
+
+
+@pytest.mark.asyncio
+async def test_parallel_durable_deadline_remains_failure_not_partial_success():
+    from runtime.context import reset_run_context, set_run_context
+
+    async def slow(state):
+        await asyncio.Event().wait()
+
+    agent = _mock_agent()
+    agent.process_with_retry.side_effect = slow
+    mode = ParallelMode()
+    mode._PARALLEL_TIMEOUT = 0.01
+    tokens = set_run_context("synthetic-run", "synthetic-thread")
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await mode.execute({"slow": agent}, _state(), {"agent_list": ["slow"]})
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_parallel_caller_cancellation_drains_all_children():
+    started = [asyncio.Event(), asyncio.Event()]
+    drained = [asyncio.Event(), asyncio.Event()]
+
+    def child(index):
+        async def run(state):
+            started[index].set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                drained[index].set()
+
+        return run
+
+    agents = {"first": _mock_agent(), "second": _mock_agent()}
+    for index, agent in enumerate(agents.values()):
+        agent.process_with_retry.side_effect = child(index)
+    mode = ParallelMode()
+    task = asyncio.create_task(mode.execute(agents, _state(), {"agent_list": list(agents)}))
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started)), timeout=2)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert all(event.is_set() for event in drained)
