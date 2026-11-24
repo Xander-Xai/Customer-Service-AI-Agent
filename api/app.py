@@ -156,6 +156,7 @@ async def _run_graph(
     state = {
         "session_id": session_id,
         "episode_run_id": None,
+        "episode_completed_run_id": None,
         "user_id": user_id,
         "current_agent": "",
         "customer_query": query,
