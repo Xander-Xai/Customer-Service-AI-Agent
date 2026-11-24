@@ -23,25 +23,25 @@ class CheckpointEpisodeMismatch(PermanentError):
     """An unfinished checkpoint belongs to a different or unidentified run."""
 
 
-async def inspect_episode_checkpoint(
-    graph: Any, config: dict[str, Any], run_id: str | None, *, approval_resume: bool = False
-) -> tuple[str, ...]:
-    """Validate checkpoint ownership before resuming, never from conversation text.
-
-    Worker recovery must fail closed if inspection is unavailable. For the
-    synchronous read path, refuse to adopt an unfinished worker episode.
-    """
+async def _read_episode_checkpoint(
+    graph: Any, config: dict[str, Any], run_id: str | None
+) -> Any:
     aget_state = getattr(graph, "aget_state", None)
     if aget_state is None:
         if run_id is not None:
             raise TransientError("Cannot inspect worker checkpoint")
-        return ()
+        return None
     try:
-        snapshot = await aget_state(config)
+        return await aget_state(config)
     except Exception as exc:
         if run_id is not None:
             raise TransientError("Cannot inspect worker checkpoint") from exc
-        return ()
+        return None
+
+
+def _validate_checkpoint_owner(
+    snapshot: Any, run_id: str | None, *, approval_resume: bool = False
+) -> tuple[str, ...]:
     pending = tuple(getattr(snapshot, "next", ()) or ())
     if pending or approval_resume:
         values = getattr(snapshot, "values", None)
@@ -49,6 +49,44 @@ async def inspect_episode_checkpoint(
         if saved_run_id != run_id or (run_id is not None and not pending):
             raise CheckpointEpisodeMismatch("Checkpoint does not belong to this active episode")
     return pending
+
+
+async def inspect_episode_checkpoint(
+    graph: Any, config: dict[str, Any], run_id: str | None, *, approval_resume: bool = False
+) -> tuple[str, ...]:
+    """Validate checkpoint ownership before resuming, never from conversation text."""
+    snapshot = await _read_episode_checkpoint(graph, config, run_id)
+    return _validate_checkpoint_owner(snapshot, run_id, approval_resume=approval_resume)
+
+
+def _completed_episode_result(
+    snapshot: Any, run_id: str, state: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Recover a terminal result, not a merely empty next-node list.
+
+    The worker holds the thread lock and still must CAS the database run result.
+    Legacy or inconsistent same-run terminal states require reconciliation, not
+    a fresh graph execution that might repeat external writes.
+    """
+    values = getattr(snapshot, "values", None)
+    if not isinstance(values, dict) or values.get("episode_run_id") != run_id:
+        return None
+    if (
+        values.get("episode_completed_run_id") != run_id
+        or getattr(snapshot, "tasks", ())
+        or values.get("__interrupt__")
+        or values.get("pending_actions")
+        or not isinstance(values.get("response"), str)
+        or not state
+        or any(
+            key not in state or key not in values or state[key] != values[key]
+            for key in ("session_id", "customer_query", "user_id")
+        )
+    ):
+        raise CheckpointEpisodeMismatch("Same-run terminal checkpoint requires reconciliation")
+    # Return the same graph output shape; the executor retains its approval
+    # failure checks, ownership fencing and conditional result commit.
+    return dict(values)
 
 
 async def pending_steps(graph: Any, config: dict[str, Any]) -> tuple[str, ...]:
@@ -100,8 +138,18 @@ async def invoke_graph_with_resume(
     """
     run_id = get_current_run_id()
     if run_id is not None:
-        pending = await inspect_episode_checkpoint(
-            graph, config, run_id, approval_resume=resume_command is not None
+        snapshot = await _read_episode_checkpoint(graph, config, run_id)
+        pending = tuple(getattr(snapshot, "next", ()) or ())
+        if not pending:
+            completed = _completed_episode_result(snapshot, run_id, state)
+            if completed is not None:
+                from . import metrics as run_metrics
+
+                run_metrics.record_checkpoint_recovery(True)
+                logger.info("Recovering completed checkpoint without replay")
+                return completed, True
+        pending = _validate_checkpoint_owner(
+            snapshot, run_id, approval_resume=resume_command is not None
         )
     else:
         pending = await pending_steps(graph, config)
