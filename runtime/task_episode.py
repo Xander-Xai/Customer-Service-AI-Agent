@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -122,7 +124,7 @@ def read_task_episode(
         next_action = "inspect_approval_resume"
     else:
         next_action = "inspect_checkpoint"
-    return {
+    episode = {
         "schema_version": "task-episode/v1",
         "run_id": run.id,
         "thread_id": run.thread_id,
@@ -140,3 +142,12 @@ def read_task_episode(
         "next_safe_inspection": next_action,
         "execution_authorized": False,
     }
+
+    # The digest represents only the bounded observed rows, not omitted rows or
+    # a database snapshot. Exclude observation time so unchanged evidence has a
+    # stable fingerprint, but include effective expiry/receipt status.
+    fingerprint = {key: value for key, value in episode.items() if key != "observed_at"}
+    episode["watermark"] = hashlib.sha256(
+        json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return episode
