@@ -435,9 +435,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             state["response"] = result["response"]
         else:
             state["response"] = "暂未生成完整答复，请稍后重试。"
-            state["degraded_reason"] = (
-                state.get("degraded_reason") or "mode_upgrade_empty_response"
-            )
+            state["degraded_reason"] = state.get("degraded_reason") or "mode_upgrade_empty_response"
         return state
 
     def _select_quality_path(state: AgentState) -> str:
