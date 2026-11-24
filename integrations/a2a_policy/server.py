@@ -150,7 +150,9 @@ def build_peer_app(card: AgentCard, executor: AgentExecutor, secret: str) -> Fas
             return JSONResponse({"detail": "Not found"}, status_code=404)
         auth = request.headers.get("authorization", "")
         prefix = "Bearer "
-        if not auth.startswith(prefix) or not hmac.compare_digest(auth[len(prefix) :], secret):
+        if not auth.startswith(prefix) or not hmac.compare_digest(
+            auth[len(prefix) :].encode("utf-8"), secret.encode("ascii")
+        ):
             return JSONResponse(
                 {"detail": "A2A peer authentication required"},
                 status_code=401,

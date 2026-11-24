@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import ssl
 import uuid
 from typing import Any
 
@@ -19,6 +20,7 @@ from integrations.a2a_policy.contracts import (
     require_token,
     synthetic_policy_answer,
     validate_loopback_base_url,
+    validate_private_https_base_url,
     validate_topic,
 )
 
@@ -62,9 +64,12 @@ async def delegate_readonly_task(
     skill_id: str,
     max_chars: int,
     httpx_client: Any | None = None,
+    tls_ca_file: str | None = None,
 ) -> str:
     """Shared SDK transport; caller defines the trusted peer and result contract."""
-    base_url = validate_loopback_base_url(base_url)
+    base_url = (
+        validate_private_https_base_url(base_url) if tls_ca_file else validate_loopback_base_url(base_url)
+    )
     expected_rpc_url = base_url + "/a2a/jsonrpc"
 
     import httpx
@@ -142,9 +147,11 @@ async def delegate_readonly_task(
     async def exchange() -> str:
         if httpx_client is not None:
             return await call(httpx_client)
-        # Do not follow redirects or proxy environment. Peer location is
-        # constrained by the local loopback endpoint contract.
+        # Private HTTPS verifies the configured DNS name using only the supplied CA.
+        # Local protocol fixtures retain their existing loopback HTTP boundary.
+        verify = ssl.create_default_context(cafile=tls_ca_file) if tls_ca_file else True
         async with httpx.AsyncClient(
+            verify=verify,
             timeout=httpx.Timeout(A2A_DEADLINE_SECONDS),
             headers={"Authorization": f"Bearer {token}"},
             trust_env=False,
