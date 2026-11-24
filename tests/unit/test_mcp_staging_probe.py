@@ -47,7 +47,9 @@ def test_rejects_embedded_url_credentials():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("actual", "expected_status"), [({"stock": 3}, "PASS"), ({"stock": 4}, "FAIL")])
+@pytest.mark.parametrize(
+    ("actual", "expected_status"), [({"stock": 3}, "PASS"), ({"stock": 4}, "FAIL")]
+)
 async def test_probe_requires_independent_result_and_closes(monkeypatch, actual, expected_status):
     adapter = SimpleNamespace(
         invoke=AsyncMock(side_effect=MCPUnauthorizedToolError("blocked")),
@@ -81,6 +83,8 @@ async def test_probe_requires_independent_result_and_closes(monkeypatch, actual,
 
 def test_cli_requires_explicit_permission(tmp_path):
     with pytest.raises(SystemExit) as exc:
-        probe.main(["--manifest", str(tmp_path / "manifest.json"), "--out", str(tmp_path / "report.json")])
+        probe.main(
+            ["--manifest", str(tmp_path / "manifest.json"), "--out", str(tmp_path / "report.json")]
+        )
     assert exc.value.code == 2
     assert not (tmp_path / "report.json").exists()

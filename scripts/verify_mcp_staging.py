@@ -22,7 +22,9 @@ from tools.tool_registry import SOURCE_MCP, ToolRegistry
 
 
 def _canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
 
 
 def parse_manifest(manifest: Any):
@@ -88,7 +90,9 @@ async def run_probe(manifest: Any) -> dict[str, Any]:
             and registry.source_for(name) == SOURCE_MCP
             and not registry.is_side_effect(name)
             and registry.risk_level_for(name) == "low"
-            and any(item.get("function", {}).get("name") == name for item in registry.get_openai_tools())
+            and any(
+                item.get("function", {}).get("name") == name for item in registry.get_openai_tools()
+            )
         )
         if not report["discovery_and_registry"]:
             return report
@@ -101,9 +105,9 @@ async def run_probe(manifest: Any) -> dict[str, Any]:
             return report
         receipt = await registry.execute_raw(name, arguments, return_receipt=True)
         report["execution_receipt_ok"] = receipt.ok is True
-        report["independent_expected_result_matched"] = (
-            report["execution_receipt_ok"] and _canonical(receipt.value) == _canonical(expected)
-        )
+        report["independent_expected_result_matched"] = report[
+            "execution_receipt_ok"
+        ] and _canonical(receipt.value) == _canonical(expected)
     except Exception:
         # Do not put remote errors, endpoint, arguments, or tool result in the artifact.
         report["failure_reason"] = "probe_execution_failed"
@@ -136,7 +140,11 @@ def main(argv: list[str] | None = None) -> int:
         manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
         report = asyncio.run(run_probe(manifest))
     except Exception:
-        report = {"schema": "mcp-staging-readonly-v1", "overall_status": "FAIL", "failure_reason": "invalid_or_unavailable"}
+        report = {
+            "schema": "mcp-staging-readonly-v1",
+            "overall_status": "FAIL",
+            "failure_reason": "invalid_or_unavailable",
+        }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return 0 if report["overall_status"] == "PASS" else 1
