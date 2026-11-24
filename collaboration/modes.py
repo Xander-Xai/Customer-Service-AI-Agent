@@ -224,27 +224,49 @@ class ParallelMode(CollaborationMode):
 
                 return name, result.get("response", ""), result
 
-        tasks = [run_agent(n) for n in agent_names if n in agents]
+        failure_reason = (
+            "parallel_agent_missing" if any(n not in agents for n in agent_names) else ""
+        )
+        tasks = [asyncio.create_task(run_agent(n)) for n in agent_names if n in agents]
+        done: set[asyncio.Task] = set()
+        pending: set[asyncio.Task] = set()
         try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=self._PARALLEL_TIMEOUT,  # v3.6: 超时保护
-            )
-        except asyncio.TimeoutError:
-            if _durable_run():
-                raise
-            logger.warning(f"Parallel 执行超时 ({self._PARALLEL_TIMEOUT}s)")
-            results = []
+            if tasks:
+                done, pending = await asyncio.wait(tasks, timeout=self._PARALLEL_TIMEOUT)
+        finally:
+            # Drain all children on deadline or caller cancellation. Never adopt
+            # a late result from a child that had not completed by the deadline.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        results = []
+        for task in tasks:
+            if task in done:
+                if task.cancelled():
+                    results.append(asyncio.CancelledError())
+                elif task.exception() is not None:
+                    results.append(task.exception())
+                else:
+                    results.append(task.result())
 
         _raise_write_failures(results)
+        if pending:
+            if _durable_run():
+                raise asyncio.TimeoutError("parallel agent deadline exceeded")
+            logger.warning(f"Parallel 执行超时 ({self._PARALLEL_TIMEOUT}s)")
+            failure_reason = "parallel_timeout"
         responses = []
         agents_used = []
         collected_pending: list[dict] = []
         collected_tool_executions: list[dict] = []
         read_path_results: list[dict] = []
         for r in results:
-            if isinstance(r, Exception):
-                responses.append(f"[error] {r}")
+            if isinstance(r, BaseException):
+                failure_reason = failure_reason or "parallel_agent_failed"
+                responses.append("[error] 部分 Agent 暂时不可用")
             else:
                 name, resp, agent_result = r
                 responses.append(f"【{name}】\n{resp}")
@@ -261,12 +283,15 @@ class ParallelMode(CollaborationMode):
         )
 
         logger.info(f"Parallel agents={agents_used} {elapsed:.1f}s")
+        read_signal = _read_path_signal(*read_path_results)
+        if failure_reason:
+            read_signal.setdefault("degraded_reason", failure_reason)
         return {
             "response": aggregated,
             "mode": "parallel",
             "agents_used": agents_used,
             "elapsed": elapsed,
-            **_read_path_signal(*read_path_results),
+            **read_signal,
             # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
             # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
             # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
