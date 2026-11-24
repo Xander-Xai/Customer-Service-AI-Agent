@@ -74,7 +74,7 @@ def _declared_names(*files: Path) -> set[str]:
             line = line.split("#", 1)[0].strip()
             if not line or line.startswith("-"):
                 continue
-            for sep in ("==", ">=", "<=", "~=", ">", "<", "["):
+            for sep in ("[", "==", ">=", "<=", "~=", ">", "<"):
                 if sep in line:
                     names.add(line.split(sep)[0].strip().lower().replace("_", "-"))
                     break
@@ -186,6 +186,13 @@ def test_test_suite_imports_are_declared():
         "测试专用依赖请声明到 requirements-dev.txt（若运行时代码也用，则进 "
         "requirements.txt）；不要依赖开发机碰巧装了什么。"
     )
+
+
+@pytest.mark.unit
+def test_requirement_parser_strips_extras_before_version(tmp_path):
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("a2a-sdk[fastapi]==1.3.1\nhttpx>=0.27,<1.0\n", encoding="utf-8")
+    assert _declared_names(requirements) == {"a2a-sdk", "httpx"}
 
 
 @pytest.mark.unit
