@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from runtime.bootstrap import CheckpointEpisodeMismatch, inspect_episode_checkpoint, invoke_graph_with_resume
+from runtime.bootstrap import (
+    CheckpointEpisodeMismatch,
+    inspect_episode_checkpoint,
+    invoke_graph_with_resume,
+)
 from runtime.context import reset_run_context, set_run_context
 from runtime.errors import TransientError
 
