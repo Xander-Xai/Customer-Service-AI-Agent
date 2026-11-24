@@ -68,7 +68,9 @@ class AfterSalesExecutor(AgentExecutor):
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         updater = TaskUpdater(
-            event_queue=event_queue, task_id=context.task_id or "", context_id=context.context_id or ""
+            event_queue=event_queue,
+            task_id=context.task_id or "",
+            context_id=context.context_id or "",
         )
         await updater.cancel()
 
