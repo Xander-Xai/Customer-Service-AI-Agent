@@ -27,6 +27,16 @@ def _canonical(value: Any) -> str:
     )
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject ambiguous reviewer input rather than silently keeping the last value."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate manifest field")
+        result[key] = value
+    return result
+
+
 def parse_manifest(manifest: Any):
     """Accept one explicitly approved read-only tool and independent expected result."""
     if not isinstance(manifest, dict) or set(manifest) != {
@@ -139,7 +149,9 @@ def main(argv: list[str] | None = None) -> int:
     # Keep the published report free of application/SDK log content.
     logging.disable(logging.CRITICAL)
     try:
-        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        manifest = json.loads(
+            args.manifest.read_text(encoding="utf-8"), object_pairs_hook=_unique_json_object
+        )
         report = asyncio.run(run_probe(manifest))
     except Exception:
         report = {

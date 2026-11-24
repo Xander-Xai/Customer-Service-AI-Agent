@@ -12,7 +12,10 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(sys.platform != "linux", reason="GNU timeout process isolation requires Linux"),
+]
 
 ROOT = Path(__file__).resolve().parents[2]
 FAKE_SERVER = Path(__file__).with_name("fake_mcp_server.py")
