@@ -200,6 +200,9 @@ async def _run_authorized(plan, cases) -> dict:
                 "mode": obs.observed_mode,
                 "tool_calls": [c.to_dict() for c in obs.tool_calls],
                 "response_nonempty": bool(obs.response.strip()),
+                "route_source": obs.route_source,
+                "terminal_state": obs.terminal_state,
+                "fallback_observed": bool(obs.fallback_markers),
                 # Token/cost are NOT_MEASURED unless the provider response
                 # surfaces them through the app's client (it currently does not
                 # persist per-call usage). Never estimated.
@@ -323,6 +326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         "results": run["results"],
         "summary": run["summary"],
+        "trajectory": run["trajectory"],
         "budget_exceeded": run["budget_exceeded"],
     }
     out.parent.mkdir(parents=True, exist_ok=True)
