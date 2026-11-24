@@ -35,3 +35,26 @@ No credential is required for these injected-runner tests. The production-like r
 - Actual provider usage is not currently surfaced by `scripts/evaluate_agent_real.py::_runner`; cost/Token usage may remain unavailable.
 - A valid task-completion score requires independently reviewed business outcomes and a frozen, appropriate dataset.
 - This module does not validate production ERP write operations, network SLA, or customer satisfaction.
+
+
+## Scoped chat transport accounting (candidate)
+
+The actual `OpenAICompatibleClient` now records attempts immediately before
+the HTTP call across ordinary, raw and streaming paths, including retries.
+A context-local collector surrounds the compiled graph case, not an unused
+helper. Parallel async tasks inherit the same case scope. Startup/teardown
+health-check requests are accounted separately; aggregate case totals do not
+include that lifecycle overhead. The collector accepts nonnegative integer
+prompt/completion counts and rejects inconsistent total counts. Missing
+usage, failed HTTP calls and interrupted streams remain unknown unless
+provider usage was actually observed; no assumed zero for failed attempts.
+A zero-attempt case is distinct from a provider-driven case. No prompts,
+responses or keys are kept by the collector. Reports contain counts only.
+
+This covers the instrumented chat HTTP client, not independent billing,
+embedding, reranker, tool transports or detached background work. Streaming
+providers may not return usage; the implementation does not change their
+request protocol. Existing case-capped/unmetered authorization remains in
+force until full spending admission control and all external paths are
+verified. TTFT is not measured here. No real external calls are executed
+by the regression tests.

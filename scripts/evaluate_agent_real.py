@@ -188,29 +188,37 @@ async def _run_authorized(plan, cases) -> dict:
     injected, so a real-model run can never be silently replaced by a mock.
     """
     from evaluation.agent_eval.harness import AgentEvalHarness
+    from llm.client import OpenAICompatibleClient
+    from llm.usage_scope import collect_usage
 
-    async with AgentEvalHarness(hitl_enabled=True, inject_scripted_llm=False) as harness:
+    # Startup may issue a paid health-check request; account separately.
+    with collect_usage() as lifecycle:
+        async with AgentEvalHarness(hitl_enabled=True, inject_scripted_llm=False) as harness:
 
-        async def _runner(case):
-            obs = await harness.run_case(case)
-            if obs.error:
-                raise RuntimeError(obs.error)
-            return {
-                "route": obs.observed_route,
-                "mode": obs.observed_mode,
-                "tool_calls": [c.to_dict() for c in obs.tool_calls],
-                "response_nonempty": bool(obs.response.strip()),
-                "route_source": obs.route_source,
-                "terminal_state": obs.terminal_state,
-                "fallback_observed": bool(obs.fallback_markers),
-                # Token/cost are NOT_MEASURED unless the provider response
-                # surfaces them through the app's client (it currently does not
-                # persist per-call usage). Never estimated.
-                "input_tokens": None,
-                "output_tokens": None,
-            }
+            if not isinstance(harness.container.llm, OpenAICompatibleClient):
+                raise RealProviderNotAuthorized("runtime did not initialize the expected chat client")
 
-        return await run_real_provider_lane(plan=plan, cases=cases, case_runner=_runner)
+            async def _runner(case):
+                with collect_usage() as meter:
+                    obs = await harness.run_case(case)
+                usage = meter.snapshot()
+                return {
+                    "route": obs.observed_route,
+                    "mode": obs.observed_mode,
+                    "tool_calls": [c.to_dict() for c in obs.tool_calls],
+                    "response_nonempty": bool(obs.response.strip()),
+                    "route_source": obs.route_source,
+                    "terminal_state": obs.terminal_state,
+                    "fallback_observed": bool(obs.fallback_markers),
+                    "input_tokens": usage["input_tokens"],
+                    "output_tokens": usage["output_tokens"],
+                    "chat_http_metering": usage,
+                    "execution_error": bool(obs.error),
+                }
+
+            run = await run_real_provider_lane(plan=plan, cases=cases, case_runner=_runner)
+    run["lifecycle_chat_http_metering"] = lifecycle.snapshot()
+    return run
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -327,6 +335,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "results": run["results"],
         "summary": run["summary"],
         "trajectory": run["trajectory"],
+        "lifecycle_chat_http_metering": run.get("lifecycle_chat_http_metering"),
         "budget_exceeded": run["budget_exceeded"],
     }
     out.parent.mkdir(parents=True, exist_ok=True)
