@@ -319,7 +319,9 @@ async def run_real_provider_lane(
         # A provider might return missing, negative, non-finite or bool values.
         # None of those values is trustworthy metering evidence.
         input_is_metered = isinstance(in_tok, int) and not isinstance(in_tok, bool) and in_tok >= 0
-        output_is_metered = isinstance(out_tok, int) and not isinstance(out_tok, bool) and out_tok >= 0
+        output_is_metered = (
+            isinstance(out_tok, int) and not isinstance(out_tok, bool) and out_tok >= 0
+        )
         usage_is_metered = input_is_metered and output_is_metered
         if input_is_metered:
             tokens_used += in_tok
@@ -378,9 +380,7 @@ async def run_real_provider_lane(
             "ok": ok,
             "error": len(results) - ok,
             "tokens_used": tokens_used if token_usage_complete and results else None,
-            "cost_used_usd": (
-                round(cost_used, 6) if cost_usage_complete and cost_observed else None
-            ),
+            "cost_used_usd": round(cost_used, 6) if cost_usage_complete and cost_observed else None,
             "provider_request_count": None,
         },
         "budget_exceeded": budget_reason,
