@@ -1035,7 +1035,7 @@ class MCPToolAdapter:
                 "MCP 结果既无 isError 也无 is_error 字段，无法判定调用是否成功",
                 reason="unreadable_result",
             )
-        if type(is_error) is not bool:
+        if not isinstance(is_error, bool):
             return MCPToolExecutionError(
                 "MCP result error flag must be boolean", reason="unreadable_result"
             )
