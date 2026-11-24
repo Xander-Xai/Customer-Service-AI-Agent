@@ -214,8 +214,9 @@ make runtime-delivery
 
 ## 稳定的架构事实
 
-- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 协作模式（Sequential /
-  Parallel / Consultation / Hierarchical / ReAct）→ 响应后处理。
+- 四层状态机：缓存检查 → 意图路由（LLM ∥ 规则并行）→ 执行分支 → 响应后处理。
+  五个兼容标识（Sequential / Parallel / Consultation / Hierarchical / ReAct）分别对应直接单专家、并行分发、固定咨询汇总、固定子任务汇总、单 Agent 工具循环。
+  Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 不是多 Agent 协作；规则质量门控最多一次安全重试。参见 [架构术语裁决](../architecture.md)。
   入口：`core/graph_builder.py::build_graph`。
 - **Response Cache**（`cache/response_cache.py` + `cache/cache_policy.py`）:
   L1 Redis 精确 → L2 Qdrant 语义 → L3 Jaccard 回退；scope/version/ttl 由

@@ -28,7 +28,7 @@
 | 能力 | 源码锚点 | 说明 |
 |---|---|---|
 | 四层状态机（缓存 → 路由 → 协作 → 后处理） | `core/graph_builder.py` · `core/state.py` | 单一定义点，11 个显式注册图节点（不含 START/END） |
-| 7 个领域角色 + ReAct + 确定性后处理 / 5 种协作模式 | `agents/` · `collaboration/modes.py` | Sequential / ReAct 共用单专家执行边界；Parallel / Consultation / Hierarchical 保留独立聚合语义 |
+| 7 个领域角色 + ReAct + 确定性后处理 / 5 个兼容执行标识 | `agents/` · `collaboration/modes.py` | Sequential / ReAct 共用单专家边界；Parallel 为并行；Consultation / Hierarchical 为固定主从模式族 |
 | Agent 工具循环（含 ReAct） | `agents/base_agent.py` · `agents/react_agent.py` | 工具、缓存、风险分流、幂等、上下文工程统一边界 |
 | 混合检索 RAG | `rag/` | Qdrant + BM25 → RRF → cross-encoder rerank，确定性 point ID |
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
