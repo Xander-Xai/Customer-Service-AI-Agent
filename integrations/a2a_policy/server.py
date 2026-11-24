@@ -121,8 +121,13 @@ def build_app(base_url: str = "http://127.0.0.1:41243") -> FastAPI:
         },
         security_requirements=[SecurityRequirement(schemes={"demo_bearer": StringList(list=[])})],
     )
+    return build_peer_app(card, SyntheticFAQExecutor(), secret)
+
+
+def build_peer_app(card: AgentCard, executor: AgentExecutor, secret: str) -> FastAPI:
+    """Common authenticated local peer transport, independent of domain policy."""
     handler = DefaultRequestHandler(
-        agent_executor=SyntheticFAQExecutor(),
+        agent_executor=executor,
         task_store=InMemoryTaskStore(),
         agent_card=card,
     )

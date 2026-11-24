@@ -99,6 +99,7 @@ def test_registry_omits_floor_when_timeout_disabled(monkeypatch, run_context):
         )
     )
     assert captured["min_claim_ttl_seconds"] is None, "关闭 per-call 超时 = 无可证明上界"
+    assert captured["allow_reclaim"] is False
 
 
 def test_ledger_fails_closed_when_floor_exceeds_default_claim_ttl(monkeypatch, run_context):

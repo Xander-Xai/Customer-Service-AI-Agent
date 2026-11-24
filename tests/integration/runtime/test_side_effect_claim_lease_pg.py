@@ -375,3 +375,45 @@ async def test_timing_is_real(store, op_key):
     )
     await asyncio.sleep(0.5)
     assert time.perf_counter() - start >= 0.45
+
+
+@requires_infra
+async def test_registry_policy_refuses_expired_claim_and_failed_remote_write(store, op_key, keys):
+    from runtime.errors import SideEffectReconciliationRequired
+    from runtime.side_effects import request_fingerprint
+
+    arguments = {"order_id": "ORD-UNKNOWN"}
+    common = dict(tool_name="staging_refund", run_id="run-unknown", thread_id="t")
+    old = store.claim(
+        **common,
+        operation_key=op_key,
+        fingerprint=request_fingerprint(arguments),
+        claim_ttl_seconds=-1.0,
+    )
+    assert old.state == "execute"
+    calls = []
+
+    async def unexpected_write():
+        calls.append("external write")
+        return "ok"
+
+    with pytest.raises(SideEffectReconciliationRequired):
+        await execute_idempotent_operation(
+            **common, operation_key=op_key, arguments=arguments, operation=unexpected_write, store=store
+        )
+    assert calls == []
+    assert store.get("staging_refund", op_key)["status"] == "PENDING"
+
+    failed_key = op_key + "-failed"
+    keys.append(failed_key)
+    failed = store.claim(
+        **common, operation_key=failed_key, fingerprint=request_fingerprint(arguments)
+    )
+    assert store.mark_failed(
+        "staging_refund", failed_key, error_type="timeout", error_message="unknown", owner=failed.owner
+    )
+    with pytest.raises(SideEffectReconciliationRequired):
+        await execute_idempotent_operation(
+            **common, operation_key=failed_key, arguments=arguments, operation=unexpected_write, store=store
+        )
+    assert calls == []
