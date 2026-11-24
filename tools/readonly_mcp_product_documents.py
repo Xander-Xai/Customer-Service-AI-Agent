@@ -17,7 +17,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from tools.readonly_mcp_faq import FAQServer
+if __package__:
+    from tools.readonly_mcp_faq import FAQServer
+else:
+    from readonly_mcp_faq import FAQServer
 
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
 MAX_RECORDS = 5000
@@ -83,7 +86,14 @@ class ProductCatalog:
         self.records = {}
         for record in records:
             if not isinstance(record, dict) or set(record) != {
-                "sku", "category", "source_id", "revision", "valid_from", "valid_until", "audience", "text"
+                "sku",
+                "category",
+                "source_id",
+                "revision",
+                "valid_from",
+                "valid_until",
+                "audience",
+                "text",
             }:
                 raise ValueError("Invalid document fields")
             if (
@@ -159,7 +169,10 @@ class ProductDocumentServer(FAQServer):
         except (TypeError, ValueError):
             return {
                 **response,
-                "result": {"content": [{"type": "text", "text": "Invalid document request"}], "isError": True},
+                "result": {
+                    "content": [{"type": "text", "text": "Invalid document request"}],
+                    "isError": True,
+                },
             }
         return {
             **response,
@@ -191,7 +204,11 @@ def main() -> int:
         try:
             request = json.loads(line)
         except (ValueError, UnicodeError):
-            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Invalid JSON"}}
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Invalid JSON"},
+            }
         else:
             response = server.dispatch(request)
         if response is not None:

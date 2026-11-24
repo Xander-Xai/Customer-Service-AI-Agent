@@ -25,7 +25,7 @@ an actual approved catalog; never commit the catalog or confidential text):
 ```dotenv
 MCP_ENABLED=true
 MCP_FAIL_CLOSED=true
-MCP_SERVERS=[{"name":"productdocs","transport":"stdio","command":"python3","args":["-m","tools.readonly_mcp_product_documents","--catalog","/private/product-docs.json","--sha256","<64-hex-digest>","--authorized-customer-disclosure"],"allowed_tools":["lookup_product_support_document"],"risk_level":"low","timeout_seconds":5}]
+MCP_SERVERS=[{"name":"productdocs","transport":"stdio","command":"python3","args":["/absolute/repository/tools/readonly_mcp_product_documents.py","--catalog","/private/product-docs.json","--sha256","<64-hex-digest>","--authorized-customer-disclosure"],"allowed_tools":["lookup_product_support_document"],"risk_level":"low","timeout_seconds":5}]
 ```
 
 Existing bootstrap registers mcp__productdocs__lookup_product_support_document
@@ -34,3 +34,5 @@ Use scripts.verify_mcp_staging with an independently reviewed expected document
 as a deployment gate. CI fixture proves the SDK/registry/subprocess path, not
 actual product accuracy, remote authentication, model routing or historical
 employer deployment.
+
+The stdio executable uses an absolute installed script path and does not depend on the caller's current working directory. Keep its trusted sibling protocol module in the same installed directory.

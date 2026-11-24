@@ -3,6 +3,7 @@
 import hashlib
 import json
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -12,7 +13,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_business_product_document_through_registry(tmp_path):
+async def test_business_product_document_through_registry(tmp_path, monkeypatch):
     pytest.importorskip("mcp")
     raw = json.dumps(
         {
@@ -35,6 +36,8 @@ async def test_business_product_document_through_registry(tmp_path):
     catalog.write_bytes(raw)
     digest = hashlib.sha256(raw).hexdigest()
     tool = "lookup_product_support_document"
+    executable = Path(__file__).resolve().parents[2] / "tools" / "readonly_mcp_product_documents.py"
+    monkeypatch.chdir(tmp_path)
     report = await run_probe(
         {
             "server": {
@@ -42,8 +45,12 @@ async def test_business_product_document_through_registry(tmp_path):
                 "transport": "stdio",
                 "command": sys.executable,
                 "args": [
-                    "-m", "tools.readonly_mcp_product_documents",
-                    "--catalog", str(catalog), "--sha256", digest, "--authorized-customer-disclosure",
+                    str(executable),
+                    "--catalog",
+                    str(catalog),
+                    "--sha256",
+                    digest,
+                    "--authorized-customer-disclosure",
                 ],
                 "risk_level": "low",
                 "allowed_tools": [tool],
