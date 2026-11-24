@@ -551,12 +551,23 @@ def _apply_approvals(cases: list[dict], approvals: dict[str, dict]) -> None:
                 file=sys.stderr,
             )
             continue
+        candidate_route = payload.get("expected_route")
+        if "candidate_route" in record and record["candidate_route"] != candidate_route:
+            print(f"⚠️ {payload['case_id']} 的候选标签发生漂移，跳过旧审核", file=sys.stderr)
+            continue
+        reviewed_route = record.get("expected_route")
+        if not isinstance(reviewed_route, str) or not reviewed_route.strip():
+            print(f"⚠️ {payload['case_id']} 缺少有效人工路由标签，跳过", file=sys.stderr)
+            continue
+        # The human-approved route may differ from the model-created candidate.
+        # Keeping the case in the denominator prevents cherry-picking errors.
+        payload["expected_route"] = reviewed_route
         payload["annotation"] = {
             "provenance": "human_confirmed",
-            "method": record.get("method", "human_reviewed"),
+            "method": "human_reviewed",
             "confirmed_by": reviewer,
             "reviewed_at": record.get("reviewed_at"),
-            "notes": "经 scripts/approve_agent_eval_annotations.py 人工确认",
+            "notes": "人工审核标签；允许纠正机器候选意图",
         }
         applied += 1
     if approvals:
