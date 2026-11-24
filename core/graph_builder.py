@@ -147,6 +147,18 @@ def build_graph(container: ServiceContainer, checkpointer=None):
                     rule_override=True,
                 )
 
+        # Only the sanitized category is persisted, never raw model text.
+        raw_route = result.raw_llm_result
+        if raw_route == "rule_shortcut":
+            state["route_source"] = "rule_shortcut"
+        elif raw_route == "[circuit_breaker_open]":
+            state["route_source"] = "circuit_breaker_open"
+        elif raw_route in ("[error_fallback]", "llm_error", "no_llm"):
+            state["route_source"] = "error_fallback"
+        elif raw_route:
+            state["route_source"] = "llm_arbitrated"
+        else:
+            state["route_source"] = "unavailable"
         state["query_type"] = result.query_type
         state["current_agent"] = result.agent_name
         state["complexity"] = result.complexity
@@ -184,6 +196,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         # previous checkpointed turn. An interrupt resume restarts at the gate,
         # not at this entry node, so pending approvals remain durable on resume.
         state["episode_completed_run_id"] = None
+        state["route_source"] = "unavailable"
         state["tool_executions"] = []
         state["erp_read_status"] = ""
         state["degraded_reason"] = ""

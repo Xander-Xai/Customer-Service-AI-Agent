@@ -80,3 +80,12 @@ async def test_real_raw_client_usage_is_collected():
             await client.async_invoke_raw([{"role": "user", "content": "fixture"}])
     assert scope.snapshot()["input_tokens"] == 2
     assert scope.snapshot()["output_tokens"] == 3
+
+
+def test_route_source_never_guesses_rule_shortcut_from_missing_scripted_counter():
+    from evaluation.agent_eval.harness import _route_source
+
+    assert _route_source({"query_type": "general"}, 0) == "unavailable"
+    for source in ("rule_shortcut", "llm_arbitrated", "error_fallback", "circuit_breaker_open"):
+        assert _route_source({"query_type": "general", "route_source": source}, 0) == source
+    assert _route_source({"cached": True, "route_source": "llm_arbitrated"}, 0) == "cached"

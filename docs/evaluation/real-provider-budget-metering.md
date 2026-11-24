@@ -58,3 +58,12 @@ request protocol. Existing case-capped/unmetered authorization remains in
 force until full spending admission control and all external paths are
 verified. TTFT is not measured here. No real external calls are executed
 by the regression tests.
+
+
+Routing provenance is now persisted as a sanitized current-turn category
+in graph state. The case harness no longer guesses rule-shortcut execution
+from a zero scripted-router counter in real-provider mode. Arbitration
+indicates the chosen path, not successful model inference or provider usage.
+The actual transport counter remains separate. Reset provenance at the new
+turn entry to prevent checkpoint inheritance. This overlaps the architecture
+branch at the graph entry and must be reconciled after #76.

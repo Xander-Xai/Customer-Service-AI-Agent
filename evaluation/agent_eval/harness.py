@@ -394,9 +394,11 @@ def _route_source(observed: dict[str, Any], router_calls: int) -> str:
         return "circuit_breaker_open"
     if raw == "[error_fallback]":
         return "error_fallback"
+    if raw in ("llm_arbitrated", "circuit_breaker_open", "error_fallback", "unavailable"):
+        return raw
     if observed.get("query_type") in (None, "", "unavailable"):
         return "unavailable"
-    return "llm_arbitrated" if router_calls else "rule_shortcut"
+    return "llm_arbitrated" if router_calls else "unavailable"
 
 
 def _terminal_state(observed: dict[str, Any], pending_actions, interrupts) -> str:
