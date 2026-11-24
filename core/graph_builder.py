@@ -208,6 +208,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         # A new turn must not inherit evidence or approval proposals from the
         # previous checkpointed turn. An interrupt resume restarts at the gate,
         # not at this entry node, so pending approvals remain durable on resume.
+        state["episode_completed_run_id"] = None
         state["tool_executions"] = []
         state["erp_read_status"] = ""
         state["degraded_reason"] = ""
@@ -455,6 +456,7 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
     async def _final_response_node(state: AgentState) -> AgentState:
         """Finalize once, after quality retry and the approval gate are finished."""
+        episode_owner = state.get("episode_run_id")
         if not c.agents_dict:
             await c._init_agents()
 
@@ -524,6 +526,15 @@ def build_graph(container: ServiceContainer, checkpointer=None):
             logger.warning("[ResponseAgent] 未初始化，使用基础后处理")
             _fallback_post_process(state)
 
+        # The marker is persisted by LangGraph together with this terminal node
+        # output, after post-processing. It is not a model-generated flag.
+        from runtime.context import get_current_run_id
+
+        active_run = get_current_run_id()
+        state["episode_run_id"] = episode_owner
+        state["episode_completed_run_id"] = (
+            active_run if active_run and active_run == episode_owner else None
+        )
         return state
 
     def _fallback_post_process(state: AgentState):
