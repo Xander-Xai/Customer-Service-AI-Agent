@@ -57,8 +57,9 @@ def test_standalone_faq_mcp_stdio(tmp_path):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, result.stderr[-1000:]
+    assert report.is_file(), result.stderr[-1000:]
     evidence = json.loads(report.read_text(encoding="utf-8"))
+    assert result.returncode == 0, evidence
     assert evidence["overall_status"] == "PASS"
     assert evidence["unlisted_tool_blocked"] is True
     assert evidence["production_auth_verified"] is False

@@ -22,9 +22,13 @@ _TOOL = {
     "description": "Look up one fictional FAQ topic. Not actual company policy.",
     "inputSchema": {
         "type": "object",
-        "properties": {"topic": {"type": "string", "enum": sorted(_FAQ)}},
+        "properties": {
+            "topic": {
+                "type": "string",
+                "description": "One of demo_shipping, demo_returns, demo_hours.",
+            }
+        },
         "required": ["topic"],
-        "additionalProperties": False,
     },
     "annotations": {
         "readOnlyHint": True,
