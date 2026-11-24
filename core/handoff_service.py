@@ -12,7 +12,7 @@ from uuid import uuid4
 from sqlalchemy import or_, select, true, update
 from sqlalchemy.exc import IntegrityError
 
-from db.models import HandoffEvent, HandoffMessage, HandoffTicket
+from db.models import AgentRun, HandoffEvent, HandoffMessage, HandoffTicket
 
 OPEN = "OPEN"
 CLAIMED = "CLAIMED"
@@ -235,6 +235,54 @@ class HandoffService:
             if row is None or not self._visible(row, actor, role):
                 raise HandoffNotFound("Ticket not found")
             return _ticket(row)
+
+    def latest_task_episode(self, ticket_id: str, *, actor_id: str, role: str) -> dict:
+        """Staff triage of the latest matching session run; never a resume authorization."""
+        from runtime.task_episode import read_task_episode
+
+        actor, role = self._actor(actor_id, role)
+        if role not in STAFF_ROLES:
+            raise HandoffForbidden("Only staff may inspect task recovery status")
+        with self._session_factory() as db:
+            access = [HandoffTicket.id == ticket_id]
+            if role not in MANAGER_ROLES:
+                access.extend([HandoffTicket.status == CLAIMED, HandoffTicket.assigned_to == actor])
+            ticket = db.execute(
+                select(HandoffTicket.session_id, HandoffTicket.customer_id).where(*access)
+            ).one_or_none()
+            if ticket is None:
+                raise HandoffNotFound("Ticket not found")
+            run_id = db.scalar(
+                select(AgentRun.id)
+                .join(
+                    HandoffTicket,
+                    (AgentRun.session_id == HandoffTicket.session_id)
+                    & (AgentRun.thread_id == HandoffTicket.session_id)
+                    & (AgentRun.user_id == HandoffTicket.customer_id),
+                )
+                .where(*access)
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .limit(1)
+            )
+            episode = read_task_episode(db, run_id) if run_id else None
+            if db.scalar(select(HandoffTicket.id).where(*access)) is None:
+                raise HandoffNotFound("Ticket not found")
+            if episode is None:
+                return {"status": "NO_MATCHING_RUN", "execution_authorized": False}
+            return {
+                "status": "LATEST_SESSION_RUN",
+                "run_id": episode["run_id"],
+                "run_status": episode["run_status"],
+                "attempt": episode["attempt"],
+                "max_attempts": episode["max_attempts"],
+                "approval_statuses": [row["status"] for row in episode["approvals"]],
+                "receipt_statuses": [row["status"] for row in episode["receipts"]],
+                "next_safe_inspection": episode["next_safe_inspection"],
+                "watermark": episode["watermark"],
+                "truncated": episode["truncated"],
+                "identity_mismatch": episode["identity_mismatch"],
+                "execution_authorized": False,
+            }
 
     def by_session(self, session_id: str, *, actor_id: str, role: str) -> dict | None:
         actor, role = self._actor(actor_id, role)
