@@ -90,9 +90,7 @@ def main(argv=None) -> int:
     args.out.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(
-        f"draft human-review worklist: {report['selected_count']} cases -> {args.out}"
-    )
+    print(f"draft human-review worklist: {report['selected_count']} cases -> {args.out}")
     print(
         "No labels approved. Formal route accuracy remains NOT_MEASURED until independent review."
     )
