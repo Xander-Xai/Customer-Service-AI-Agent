@@ -292,7 +292,7 @@ flowchart TB
 |---|---|---|---|
 | **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 命中直接短路到 Layer 3；embedding 不可用时 **fail closed** |
 | **Layer 1** | `classify_query` | LLM 分类器 ∥ 规则分类器 | `asyncio.gather` 并行；高置信规则匹配（≥ 0.75）**跳过 LLM 调用** |
-| **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 模式由路由结果 + 查询复杂度决定，不是硬编码分支 |
+| **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 路由、复杂度及关键词规则选择五个兼容执行标识 |
 | **审批闸** | `human_approval_gate` | 逐个 `interrupt()` 等待人工决策 | **无 HIGH 风险动作时是纯 no-op**（普通流量零开销） |
 | **Layer 3** | `quality_gate` / `mode_upgrade_retry` / `final_response` | 安全条件下最多一次升级 → 最终评估、缓存、事件 | 工具或审批活动禁止质量驱动重放；缓存命中直接最终处理 |
 
@@ -344,21 +344,23 @@ Agent 角色内部循环、工具边界与幂等记账的细节图见
 [docs/agent-design.md §2.0](docs/agent-design.md)；异步路径与崩溃恢复见
 [docs/architecture.md §2.1](docs/architecture.md)。
 
-### 五种协作模式
+### 主流编排模式与兼容执行标识
 
 | 模式 | 何时选 | 结构 |
 |---|---|---|
-| `Sequential` | 单意图、单一领域（**默认**） | 一个 Agent 串行执行 |
+| `Sequential` | 单意图、单一领域（**默认**） | Routing → 单专家直接执行；非多 Agent 串行链 |
 | `Parallel` | 多领域可切分（成分 + 库存 + 价格） | 并发执行 → 聚合 |
-| `Consultation` | 需要专家意见但由主 Agent 交付 | 主 Agent + 顾问 Agent |
-| `Hierarchical` | 投诉、复杂任务需分解 | 协调者拆解 → 子任务 → 汇总 |
-| `ReAct` | 需检索 + 工具调用的多步推理 | RAG → Function Calling → 观察 → 迭代 |
+| `Consultation` | 需要专家意见但由主 Agent 交付 | 固定辅助专家 → 主专家汇总 |
+| `Hierarchical` | 投诉、复杂任务需分解 | 代码预定义子任务 → 并行执行 → 协调者汇总；非动态 LLM 规划 |
+| `ReAct` | 需检索 + 工具调用的多步推理 | 单 Agent 有界工具循环；非多 Agent 协作 |
 
 单域投诉由投诉 Agent 直接处理；确有产品或订单等其他领域子任务时才走 `Hierarchical`。这保留跨域汇总口径，同时避免仅有一个子任务时再调用通用协调者。Sequential 与 ReAct 共享单 Agent 执行、超时、事件和工具回执边界；ReAct 的差异在所选 Agent 及工具策略，不是另一套调度实现。
 
+架构术语以 [权威架构文档](docs/architecture.md) 为准：Routing 是主架构，并行分发和固定主从汇总是两个多 Agent 模式族。Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 属于单 Agent 内部策略；五个旧标识保留用于节点、SSE 和监控兼容。规则质量门控加一次安全重试不是双模型 Evaluator–Optimizer。本轮协作仅使用当前调用结果，不从会话黑板恢复旧子任务。
+
 ### 为什么不是一条裸 Chain
 
-裸 `if/elif` + LLM 在四个地方会断：分支组合爆炸（9 Agent × 5 模式 = 45 种）、
+裸 `if/elif` + LLM 在四个地方会断：路由与分支管理复杂（并非所有角色和模式可组合）、
 没有"暂停等人"的原语、进程死了状态就没了、多 Agent 中间结果没有统一载体。
 LangGraph 恰好提供了这四个原语（`StateGraph` / `interrupt()` / Checkpointer /
 `AgentState`）——详见 [docs/agent-design.md](docs/agent-design.md)。
@@ -736,7 +738,7 @@ customer-service-ai-agent/
 ├── api/            # FastAPI 服务层（路由 / SSE / WebSocket / 中间件）
 ├── auth/           # JWT + Argon2id + Redis 黑名单 + 4 级 RBAC
 ├── router/         # 双层查询路由（LLM ∥ 规则 + 熔断器降级）
-├── collaboration/  # 5 种协作模式 + 升级重试
+├── collaboration/  # 5 个兼容执行标识 + 安全重试
 ├── rag/            # Qdrant + BM25 + RRF + 重排 + 查询改写
 ├── cache/          # 三层响应缓存（与 Tool Result Cache / Store 分离）
 ├── db/             # SQLAlchemy 模型 + Alembic 迁移
@@ -767,7 +769,7 @@ customer-service-ai-agent/
 | 投诉与差评处理 | `ComplaintAgent` | RAG + 会话记忆 + 情绪路由 + Hierarchical 编排 |
 | 售前推荐 | `SalesAgent` | RAG + 场景过滤 |
 | 售后退换 | `AftersalesAgent` | 高风险 → HITL 审批（治理机制已实现，真实 ERP 写操作 `NOT_VERIFIED`） |
-| 复杂订单问题 | `GeneralAgent` + 协作模式 | Hierarchical 任务分解 |
+| 复杂订单问题 | `GeneralAgent` + 协作模式 | 固定子任务分发与主从汇总 |
 
 ---
 
