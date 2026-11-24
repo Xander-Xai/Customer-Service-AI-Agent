@@ -137,7 +137,7 @@ LLM 说"我觉得该退款"不构成授权。
 > 一句话：**一个同步快路径 + 异步耐久路径并存的企业客服 Agent 服务。**
 > 快路径用 LangGraph 实时编排多 Agent 回答请求；长任务落库入队，
 > 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用加**去重记账**
-> （本仓 ledger 保证不重复执行；端到端 exactly-once 需要下游接受幂等键）。
+> （本仓 ledger 抑制已确认操作的重复执行；外部结果未知需要查询或对账）。
 
 针对上面六个问题：
 
@@ -294,9 +294,9 @@ flowchart TB
 | **Layer 1** | `classify_query` | LLM 分类器 ∥ 规则分类器 | `asyncio.gather` 并行；高置信规则匹配（≥ 0.75）**跳过 LLM 调用** |
 | **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 模式由路由结果 + 查询复杂度决定，不是硬编码分支 |
 | **审批闸** | `human_approval_gate` | 逐个 `interrupt()` 等待人工决策 | **无 HIGH 风险动作时是纯 no-op**（普通流量零开销） |
-| **Layer 3** | `final_response` | 质量评估 → 模式升级重试 → 缓存写入 → SLA 监控 → 事件广播 | 评估不达标则升级协作模式重跑，而不是原样返回 |
+| **Layer 3** | `quality_gate` / `mode_upgrade_retry` / `final_response` | 安全条件下最多一次升级 → 最终评估、缓存、事件 | 工具或审批活动禁止质量驱动重放；缓存命中直接最终处理 |
 
-图定义：`core/graph_builder.py:399-457`（唯一生产 `StateGraph`）。
+图定义：`core/graph_builder.py::build_graph`（唯一生产 `StateGraph`）。
 状态：`core/state.py:6`（`AgentState`，单一定义点）。
 节点逐行与边设计理由见 [docs/architecture.md](docs/architecture.md)。
 
@@ -333,7 +333,8 @@ sequenceDiagram
         end
         A-->>G: AgentState
         G->>G: human_approval_gate（HIGH 风险逐个 interrupt）
-        G->>G: Layer 3 质量评估 / 升级重试 / 写缓存
+        G->>G: quality_gate（安全条件下最多一次升级，重新检查审批）
+        G->>G: final_response（最终评估 / 缓存 / 事件）
         G-->>API: final_response
     end
     API-->>U: 响应 / SSE 流
