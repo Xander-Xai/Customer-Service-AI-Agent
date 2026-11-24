@@ -95,7 +95,9 @@ def run_agent_loop(
     steps = calls = tokens = 0
 
     def finish(
-        status: Literal["completed", "cancelled", "approval_required", "write_uncertain", "blocked"],
+        status: Literal[
+            "completed", "cancelled", "approval_required", "write_uncertain", "blocked"
+        ],
         reason: str,
         response: str = "",
     ) -> Result:
@@ -111,7 +113,11 @@ def run_agent_loop(
         steps += 1
         if not isinstance(choice, Decision):
             return finish("blocked", "invalid_model_response")
-        if not isinstance(choice.tokens, int) or isinstance(choice.tokens, bool) or choice.tokens < 0:
+        if (
+            not isinstance(choice.tokens, int)
+            or isinstance(choice.tokens, bool)
+            or choice.tokens < 0
+        ):
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
         if tokens > limits.tokens:
@@ -132,7 +138,10 @@ def run_agent_loop(
             continue
         if (
             set(choice.arguments) != set(spec.schema)
-            or any(type(choice.arguments[key]) is not expected for key, expected in spec.schema.items())
+            or any(
+                type(choice.arguments[key]) is not expected
+                for key, expected in spec.schema.items()
+            )
         ):
             trace.append("invalid_args")
             history.append({"tool": spec.name, "error": "schema_validation_failed"})
