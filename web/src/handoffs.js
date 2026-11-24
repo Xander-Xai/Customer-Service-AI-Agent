@@ -99,6 +99,11 @@ function renderSelection(ticket) {
     state.pendingSend = null;
   }
   state.selected = ticket;
+  const episode = $('taskEpisode');
+  if (episode) {
+    episode.hidden = true;
+    episode.textContent = '';
+  }
   $('ticketTitle').textContent = ticket ? `工单 ${ticket.ticket_id}` : '请选择一张工单';
   $('ticketStatus').textContent = ticket
     ? `状态：${ticket.status} · 坐席：${ticket.assigned_to || '尚未认领'}`
@@ -126,6 +131,28 @@ async function selectTicket(id) {
     renderTicketList();
     const data = await handoffRequest('GET', `/api/handoffs/${encodeURIComponent(id)}/messages`);
     if (state.selected?.ticket_id === id) renderMessages(data.messages || []);
+    const panel = $('taskEpisode');
+    const own = String(ticket.assigned_to || '') === String(state.user?.user_id || '');
+    if (panel && isStaff() && (isManager() || (own && ticket.status === 'CLAIMED'))) {
+      try {
+        const episode = await handoffRequest(
+          'GET',
+          `/api/handoffs/${encodeURIComponent(id)}/task-episode`,
+        );
+        if (state.selected?.ticket_id === id) {
+          panel.textContent =
+            episode.status === 'NO_MATCHING_RUN'
+              ? '当前会话暂无可核对的异步 Agent 任务。'
+              : `最近 Agent 任务：${episode.run_status}；建议检查：${episode.next_safe_inspection}（仅诊断，不授权执行）`;
+          panel.hidden = false;
+        }
+      } catch {
+        if (state.selected?.ticket_id === id) {
+          panel.textContent = 'Agent 任务诊断暂不可用，请人工核查。';
+          panel.hidden = false;
+        }
+      }
+    }
   } catch (error) {
     renderSelection(null);
     tell(error.message, true);

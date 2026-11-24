@@ -163,3 +163,17 @@ def test_end_to_end_handoff_customer_and_staff_roles(client):
 def test_api_off_by_default(client, monkeypatch):
     monkeypatch.setattr("core.config.HUMAN_HANDOFF_ENABLED", False)
     assert client.get("/api/handoffs", headers=_headers("agent-1", "agent")).status_code == 503
+
+
+def test_staff_task_episode_requires_claim_and_never_authorizes_execution(client):
+    tid = _create(client).json()["ticket_id"]
+    url = f"/api/handoffs/{tid}/task-episode"
+    assert client.get(url).status_code == 401
+    assert client.get(url, headers=_headers()).status_code == 403
+    staff = _headers("agent-1", "agent")
+    assert client.get(url, headers=staff).status_code == 404
+    assert client.post(f"/api/handoffs/{tid}/claim", headers=staff).status_code == 200
+    result = client.get(url, headers=staff)
+    assert result.status_code == 200
+    assert result.json() == {"status": "NO_MATCHING_RUN", "execution_authorized": False}
+    assert client.get(url, headers=_headers("agent-2", "agent")).status_code == 404

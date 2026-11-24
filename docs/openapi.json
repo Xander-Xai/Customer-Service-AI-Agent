@@ -2235,6 +2235,46 @@
         ]
       }
     },
+    "/api/handoffs/{ticket_id}/task-episode": {
+      "get": {
+        "tags": [
+          "human-handoff"
+        ],
+        "summary": "Get Task Episode",
+        "operationId": "get_task_episode_api_handoffs__ticket_id__task_episode_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ticket_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Id"
+            }
+          }
+        ]
+      }
+    },
     "/api/handoffs/{ticket_id}/claim": {
       "post": {
         "tags": [

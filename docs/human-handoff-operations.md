@@ -77,3 +77,16 @@ ticket is OPEN or CLAIMED. Chat REST/SSE exposes `handoff_ticket_id` and
   side-effect idempotency remain separate workflows.
 
 Tracked follow-ups: #31 (staff UI/push/SLA), #33 (business evidence).
+
+## 2026-11-25: staff task-episode triage
+
+The claimed-ticket staff UI reads `GET /api/handoffs/{ticket_id}/task-episode`.
+The backend derives the latest run from the ticket's session AND customer
+identity AND thread (never from a caller-supplied run ID). Only assigned staff
+on claimed tickets or supervisors/admins can inspect it; customers and
+unassigned agents cannot. The view shows bounded approval/side-effect statuses
+and the next safe inspection, not raw queries, tool payloads or secrets.
+This is the latest matching session run, not a guaranteed causal link to
+the escalation. It is a non-atomic diagnostic view and never grants
+execution authority. Human staff must still use the existing approval,
+reconciliation and checkpoint workflows. Real production validation remains open.

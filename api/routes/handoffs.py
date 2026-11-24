@@ -128,6 +128,15 @@ async def get_handoff(ticket_id: str, request: Request):
         _handle_error(exc)
 
 
+@router.get("/{ticket_id}/task-episode")
+async def get_task_episode(ticket_id: str, request: Request):
+    actor, role = _identity(request)
+    try:
+        return _service().latest_task_episode(ticket_id, actor_id=actor, role=role)
+    except Exception as exc:
+        _handle_error(exc)
+
+
 @router.post("/{ticket_id}/claim")
 async def claim_handoff(ticket_id: str, request: Request):
     actor, role = _identity(request)
