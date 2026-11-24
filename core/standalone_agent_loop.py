@@ -116,7 +116,11 @@ def run_agent_loop(
         steps += 1
         if not isinstance(choice, Decision):
             return finish("blocked", "invalid_model_response")
-        if type(choice.tokens) is not int or choice.tokens < 0:
+        if (
+            not isinstance(choice.tokens, int)
+            or isinstance(choice.tokens, bool)
+            or choice.tokens < 0
+        ):
             return finish("blocked", "provider_usage_unknown")
         tokens += choice.tokens
         if tokens > limits.tokens:
