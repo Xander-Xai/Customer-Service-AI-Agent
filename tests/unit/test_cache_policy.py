@@ -205,3 +205,27 @@ class TestReadScopeKeys:
     def test_tenant_only(self):
         keys = read_scope_keys(tenant_id="t1")
         assert "t:" + hash_identity("t1") in keys
+
+
+
+def test_graph_response_cache_does_not_replace_business_execution():
+    from cache.cache_policy import graph_response_cache_allowed
+
+    state = {"customer_query": "产品成分是什么"}
+    assert graph_response_cache_allowed(state, durable_run=False)
+    assert not graph_response_cache_allowed(state, durable_run=True)
+    for key, value in (
+        ("episode_run_id", "run-id"),
+        ("has_multimodal", True),
+        ("multimodal_content", [{"type": "image"}]),
+        ("pending_actions", [{"tool": "refund"}]),
+        ("approval_results", [{"status": "approved"}]),
+        ("tool_executions", [{"tool": "read_order"}]),
+        ("handoff_ticket_id", "ticket-id"),
+        ("handoff_status", "UNAVAILABLE"),
+        ("degraded", True),
+        ("degraded_reason", "timeout"),
+        ("erp_read_status", "timeout"),
+        ("customer_query", "我要转人工客服"),
+    ):
+        assert not graph_response_cache_allowed({**state, key: value}, durable_run=False), key

@@ -22,6 +22,7 @@ import time
 
 from langgraph.graph import StateGraph
 
+from cache.cache_policy import graph_response_cache_allowed
 from core.container import ServiceContainer
 from core.logger import get_logger, set_trace_id
 from core.state import AgentState
@@ -232,7 +233,9 @@ def build_graph(container: ServiceContainer, checkpointer=None):
 
         await _emit_status(state, "cache", "🔍 检查缓存中...")
 
-        if c.cache is not None:
+        if c.cache is not None and graph_response_cache_allowed(
+            state, durable_run=bool(get_current_run_id())
+        ):
             # P0-02: 读取端携带可信 user_id，缓存按 read_scope_keys 探测
             # SHARED + 调用方作用域。读取发生在路由分类前，intent 未知，故不传 intent_type。
             cache_metadata = {
@@ -517,16 +520,8 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         return state
 
     def _fallback_post_process(state: AgentState):
-        """降级后处理：仅做缓存写入"""
-        if state.get("response") and not state.get("cached", False) and c.cache:
-            # v6.1: 写入缓存时携带完整 metadata
-            # P0-02: 携带可信 user_id，个性化回答进入用户作用域
-            cache_meta = {
-                "intent_type": state.get("query_type", "default"),
-                "user_id": state.get("user_id"),
-                "product_id": state.get("extracted_entities", {}).get("product_id"),
-            }
-            c.cache.put(state["customer_query"], state["response"], metadata=cache_meta)
+        """Do not cache an answer that bypassed the normal finalization checks."""
+        state["degraded_reason"] = state.get("degraded_reason") or "response_postprocess_unavailable"
 
     def _select_collaboration_mode(state: AgentState) -> str:
         """LangGraph Conditional Edge：委托 orchestrator 统一选择"""

@@ -267,3 +267,36 @@ def read_scope_keys(
     if tenant_id:
         keys.append("t:" + hash_identity(tenant_id))
     return keys
+
+
+
+def graph_response_cache_allowed(state: dict, *, durable_run: bool) -> bool:
+    """Response text is never a receipt or an authorization to skip business work.
+
+    Scope/TTL alone cannot prove task completion. Restrict graph-level reuse
+    before lookup and before writes; storage-level scope remains independent.
+    This guard does not certify semantic matching or multi-turn correctness.
+    """
+    if durable_run or state.get("episode_run_id"):
+        return False
+    if any(
+        state.get(key)
+        for key in (
+            "has_multimodal",
+            "multimodal_content",
+            "pending_actions",
+            "approval_results",
+            "tool_executions",
+            "handoff_ticket_id",
+            "handoff_status",
+            "degraded",
+            "degraded_reason",
+        )
+    ):
+        return False
+    if state.get("erp_read_status") in {"error", "timeout"}:
+        return False
+    query = str(state.get("customer_query") or "")
+    return not any(
+        phrase in query for phrase in ("转人工", "人工客服", "真人客服", "人工坐席", "人工接管")
+    )
