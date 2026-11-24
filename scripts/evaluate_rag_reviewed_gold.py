@@ -159,6 +159,8 @@ def build_population(records: list[dict[str, Any]]) -> GoldPopulation:
     query_text: dict[str, str] = {}
     completeness_by_query: dict[str, list[bool]] = {}
     all_query_ids: set[str] = set()
+    unclosed_queries: set[str] = set()
+    seen_query_text: dict[str, str] = {}
     judged_label_count = 0
 
     for record in records:
@@ -168,7 +170,12 @@ def build_population(records: list[dict[str, Any]]) -> GoldPopulation:
         if not isinstance(query_id, str) or not query_id:
             continue
         all_query_ids.add(query_id)
+        text = str(record.get("query", ""))
+        if seen_query_text.setdefault(query_id, text) != text:
+            raise ValueError("query text differs for the same query ID")
         if status != LABEL_STATUS_JUDGED:
+            # A pending or excluded judgment cannot establish a closed gold set.
+            unclosed_queries.add(query_id)
             continue
         doc_id = record.get("doc_id")
         grade = record.get("relevance_grade")
@@ -191,7 +198,7 @@ def build_population(records: list[dict[str, Any]]) -> GoldPopulation:
         if not relevant:
             excluded[query_id] = EXCLUDE_NO_CONFIRMED_RELEVANT_DOC
             continue
-        closed = all(completeness_by_query.get(query_id, []))
+        closed = query_id not in unclosed_queries and all(completeness_by_query.get(query_id, []))
         judgments.append(
             QueryJudgment(
                 query_id=query_id,
@@ -235,6 +242,10 @@ def compute_reviewed_metrics(
     relevant = judgment.relevant_ids
     max_k = max(ks)
     top = list(retrieved_ids[:max_k])
+    if any(not isinstance(doc_id, str) or not doc_id.strip() for doc_id in top):
+        raise ValueError("retrieved document ID missing or invalid")
+    if len(top) != len(set(top)):
+        raise ValueError("duplicate retrieved document ID")
 
     first_rank = 0
     for rank, doc_id in enumerate(top, 1):
@@ -351,6 +362,8 @@ def _load_corpus(path: Path) -> tuple[set[str], dict[str, dict[str, Any]]]:
             doc_id = obj.get("id")
             if not isinstance(doc_id, str) or not doc_id:
                 raise ValueError(f"{path}:{lineno}: corpus row missing a string `id`")
+            if doc_id in ids:
+                raise ValueError("duplicate corpus document ID")
             ids.add(doc_id)
             by_id[doc_id] = obj
     return ids, by_id
@@ -373,6 +386,7 @@ async def _run_ablation(args, population: GoldPopulation, ks: tuple[int, ...]) -
     Reuses ``evaluate_rag``'s retrieval overrides so the production defaults are
     untouched. Only executed when the population is real (JUDGED labels exist).
     """
+    from eval_contract import required_channels
     from evaluate_rag import Override, _build_request, apply_override
 
     from rag.qdrant_knowledge_base import QdrantKnowledgeBase
@@ -394,36 +408,74 @@ async def _run_ablation(args, population: GoldPopulation, ks: tuple[int, ...]) -
         restore = apply_override(kb, override)
         rows: list[dict[str, Any]] = []
         failures: list[dict[str, Any]] = []
+        attempted = 0
+        rerank_applied = 0
         try:
             for judgment in population.judgments[: args.limit or None]:
+                attempted += 1
                 try:
                     result = await kb.retrieve(
                         _build_request(judgment.query, args.top_k, rerank_flag, args.timeout)
                     )
+                    trace = getattr(result, "trace", None)
+                    stages = trace.to_dict()["stages"] if trace is not None else []
+                    applied = _verify_required_stages(stages, required_channels(name))
                     retrieved = [d.get("id", "") for d in result]
+                    metrics = compute_reviewed_metrics(retrieved, judgment, ks)
+                    rerank_applied += int(applied)
                     rows.append(
                         {
                             "query_id": judgment.query_id,
-                            **compute_reviewed_metrics(retrieved, judgment, ks),
+                            **metrics,
                         }
                     )
                 except Exception as exc:  # noqa: BLE001 - record and continue
                     failures.append(
                         {
                             "query_id": judgment.query_id,
-                            "error": f"{type(exc).__name__}: {exc}"[:200],
+                            "error": type(exc).__name__,
                         }
                     )
         finally:
             restore()
+        complete = attempted > 0 and not failures and attempted == len(population.judgments)
+        if rerank_flag and not rerank_applied:
+            complete = False
         results[name] = {
-            "status": "MEASURED",
+            "status": "MEASURED" if complete else "INCOMPLETE",
+            "expected_query_count": len(population.judgments),
+            "attempted_query_count": attempted,
+            "rerank_applied_count": rerank_applied,
+            "metrics_scope": "successful_queries_only",
             "query_count": len(rows),
             "failure_count": len(failures),
             "metrics": summarize_reviewed_metrics(rows, ks),
             "failures": failures,
         }
     return results
+
+
+def _verify_required_stages(stages: list[dict[str, Any]], required: tuple[str, ...]) -> bool:
+    """Require observed stages, not requested flags; allow genuine no-op rerank."""
+    by_name = {stage["name"]: stage for stage in stages}
+    if len(by_name) != len(stages):
+        raise ValueError("duplicate retrieval trace stage")
+    rerank_applied = False
+    for channel in required:
+        name = {"vector": "VECTOR", "bm25": "BM25", "rerank": "RERANK"}[channel]
+        fact = by_name.get(name, {})
+        if fact.get("status") == "executed":
+            rerank_applied |= channel == "rerank"
+            continue
+        if (
+            channel == "rerank"
+            and fact.get("status") == "skipped"
+            and type(fact.get("candidate_in")) is int
+            and 0 <= fact["candidate_in"] <= 1
+        ):
+            continue
+        raise ValueError("required retrieval stage not executed")
+    return rerank_applied
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +517,21 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     ks = tuple(int(k) for k in str(args.ks).split(",") if k.strip())
     args.experiments = [e for e in str(args.experiments).split(",") if e.strip()]
+    if not args.summary_only and args.no_corpus:
+        print("[FATAL] formal evaluation requires corpus identity", file=sys.stderr)
+        return 2
+    if (
+        not ks
+        or min(ks) < 1
+        or max(ks) > args.top_k
+        or len(set(ks)) != len(ks)
+        or not args.experiments
+        or len(set(args.experiments)) != len(args.experiments)
+        or any(name not in DEFAULT_EXPERIMENTS for name in args.experiments)
+        or (args.limit is not None and args.limit < 1)
+    ):
+        print("[FATAL] invalid metric cutoffs, experiments or limit", file=sys.stderr)
+        return 2
 
     gold_path = Path(args.gold_labels)
     if not gold_path.is_file():
@@ -527,8 +594,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     else:
-        corpus_ids, _ = _load_corpus(corpus_path)
-        corpus_hash = corpus_sha256(corpus_path)
+        try:
+            corpus_ids, _ = _load_corpus(corpus_path)
+            corpus_hash = corpus_sha256(corpus_path)
+        except (OSError, ValueError):
+            print("[FATAL] invalid or unavailable corpus", file=sys.stderr)
+            return 2
 
     errors = validate_records(records, corpus_ids=corpus_ids, expected_corpus_hash=corpus_hash)
     if errors:
@@ -540,7 +611,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {err}", file=sys.stderr)
         return 1
 
-    population = build_population(records)
+    try:
+        population = build_population(records)
+    except ValueError:
+        print("[FATAL] inconsistent query identity", file=sys.stderr)
+        return 1
     judged_query_count = len(population.judgments)
     reason = _not_measurable_reason(population, judged_query_count)
 
@@ -627,13 +702,26 @@ def main(argv: list[str] | None = None) -> int:
     import asyncio
 
     report["ablation_executed"] = True
-    report["experiments"] = asyncio.run(_run_ablation(args, population, ks))
+    try:
+        report["experiments"] = asyncio.run(_run_ablation(args, population, ks))
+    except Exception as exc:  # noqa: BLE001 - retain failed-run evidence
+        report["execution_error_type"] = type(exc).__name__
+    complete = (
+        set(report["experiments"]) == set(DEFAULT_EXPERIMENTS)
+        and args.limit is None
+        and all(arm["status"] == "MEASURED" for arm in report["experiments"].values())
+    )
+    report["status"] = "MEASURED" if complete else "INCOMPLETE"
+    report["suite_complete"] = complete
+    # The offline corpus hash alone is not proof of the live index's identity.
+    report["live_index_identity_verified"] = False
+    report["publication_eligible"] = False
     (out_dir / "report.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"status: MEASURED ({judged_query_count} judged queries)")
+    print(f"status: {report['status']} ({judged_query_count} judged queries)")
     print(f"  artifact: {out_dir / 'report.json'}")
-    return 0
+    return 0 if complete else 2
 
 
 if __name__ == "__main__":

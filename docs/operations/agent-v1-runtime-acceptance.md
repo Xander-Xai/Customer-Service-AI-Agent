@@ -48,3 +48,18 @@ children. Durable-run deadlines still raise for Runtime classification; this
 does not establish external write reconciliation or a hard deadline for a
 non-cooperative child. Regression entry: `pytest -q tests/unit/test_collaboration_modes.py`.
 Refs #46, #33. Real-model/ERP outcome measurement remains open.
+
+
+## Reviewed retrieval gold evidence integrity (#33)
+
+The reviewed-gold evaluator refuses schema-only formal execution, ambiguous
+query identities and duplicate corpus/ranked document IDs. Pending or excluded
+judgments prevent a closed recall/NDCG population. Required retrieval stages
+must be observed in the trace; a rerank skipped for zero or one candidate is
+a valid no-op, but a suite with no applied rerank is incomplete. Partial arms,
+subset runs and execution failures remain incomplete; diagnostic metric means
+cover successful queries only and must not be presented as full-population
+results. A local corpus hash and stage trace alone cannot establish live index
+identity, source authorization or human relevance review. Publication stays
+ineligible pending independent index correspondence and provenance evidence.
+The legacy 649-query dataset has not been relabeled by this change.
