@@ -49,7 +49,7 @@ def require_token() -> str:
 
 
 def validate_topic(topic: str) -> str:
-    if type(topic) is not str or topic not in ALLOWED_TOPICS:
+    if not isinstance(topic, str) or topic not in ALLOWED_TOPICS:
         raise A2AContractError("Only fixed synthetic topic identifiers are allowed")
     return topic
 
