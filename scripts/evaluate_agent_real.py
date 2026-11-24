@@ -22,10 +22,8 @@ Examples::
     # plan only / no credentials -> NOT_MEASURED, no network:
     python3 scripts/evaluate_agent_real.py
 
-    # authorized run (requires AGENT_EVAL_REAL_PROVIDER_API_KEY + env switch):
-    python3 scripts/evaluate_agent_real.py \
-        --i-authorize-external-calls --model Qwen/Qwen3-8B \
-        --max-queries 40 --max-total-tokens 200000
+    # budgeted real run is blocked until graph metering is wired end-to-end.
+    # See docs/reference/agent-evaluation.md for isolated runtime prerequisites.
 
     # an independently-reviewed business subset can be supplied via --dataset;
     # its provenance (human_confirmed) is reported, never fabricated.
@@ -97,6 +95,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-total-tokens", type=int, default=None)
     parser.add_argument("--max-cost-usd", type=float, default=None)
     parser.add_argument("--cost-per-1k-tokens", type=float, default=None)
+    parser.add_argument(
+        "--allow-unmetered-provider",
+        action="store_true",
+        help="explicitly allow a case-capped run without enforceable token/cost limits",
+    )
     parser.add_argument(
         "--i-authorize-external-calls",
         action="store_true",
@@ -262,6 +265,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         validate_runtime_plan(plan, runtime_config)
+        if not args.allow_unmetered_provider:
+            raise RealProviderNotAuthorized("explicit unmetered provider permission required")
     except RealProviderNotAuthorized as exc:
         _write_not_measured(out, plan=plan, estimate=estimate, dataset=dataset, reason=str(exc))
         return 2
