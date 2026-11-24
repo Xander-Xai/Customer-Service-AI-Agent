@@ -21,7 +21,9 @@ pytestmark = pytest.mark.unit
 def _case(name: str, route: str, *, reviewed: bool = False) -> AgentCase:
     annotation = (
         Annotation(
-            provenance="human_confirmed", method="human_reviewed", confirmed_by="reviewer"
+            provenance="human_confirmed",
+            method="human_reviewed",
+            confirmed_by="reviewer",
         )
         if reviewed else Annotation()
     )
