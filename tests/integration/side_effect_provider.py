@@ -52,6 +52,8 @@ BLOCK_SECONDS = float(os.getenv("SIDE_EFFECT_BLOCK_SECONDS", "25"))
 
 class _State(TypedDict, total=False):
     episode_run_id: str | None
+    session_id: str
+    user_id: str | None
     customer_query: str
     response: str
     stage: str
@@ -170,6 +172,8 @@ class _SideEffectRuntime:
         config = {"configurable": {"thread_id": thread_id}}
         state: dict[str, Any] = {
             "episode_run_id": get_current_run_id(),
+            "session_id": thread_id,
+            "user_id": user_id,
             "customer_query": query,
             "response": "",
             "stage": "",

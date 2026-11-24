@@ -49,6 +49,8 @@ _RECOVERED_KEY = _key("recovered")
 
 class _ResumeState(TypedDict, total=False):
     episode_run_id: str | None
+    session_id: str
+    user_id: str | None
     customer_query: str
     response: str
     stage: str
@@ -104,6 +106,8 @@ class _CheckpointResumeRuntime:
 
         state: dict[str, Any] = {
             "episode_run_id": get_current_run_id(),
+            "session_id": thread_id,
+            "user_id": user_id,
             "customer_query": query,
             "response": "",
             "stage": "",

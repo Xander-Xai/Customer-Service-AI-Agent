@@ -13,7 +13,7 @@ from typing import Any
 
 from core.logger import get_logger, get_trace_id, set_trace_id
 
-from .context import get_current_run_id
+from .context import get_current_run_id, get_current_thread_id
 from .errors import PermanentError, TransientError
 
 logger = get_logger("runtime.bootstrap")
@@ -136,6 +136,9 @@ async def invoke_graph_with_resume(
     """
     run_id = get_current_run_id()
     if run_id is not None:
+        thread_id = get_current_thread_id()
+        if thread_id is not None and config.get("configurable", {}).get("thread_id") != thread_id:
+            raise CheckpointEpisodeMismatch("Checkpoint thread does not match worker context")
         snapshot = await _read_episode_checkpoint(graph, config, run_id)
         pending = tuple(getattr(snapshot, "next", ()) or ())
         if not pending:
@@ -149,6 +152,18 @@ async def invoke_graph_with_resume(
         pending = _validate_checkpoint_owner(
             snapshot, run_id, approval_resume=resume_command is not None
         )
+        if pending:
+            # A matching run ID is necessary, not sufficient. Require the
+            # complete trusted runtime identity, including an explicit None
+            # for an anonymous principal; missing fields cannot authorize resume.
+            values = snapshot.values
+            if not state or any(
+                key not in state or key not in values or state[key] != values[key]
+                for key in ("session_id", "customer_query", "user_id")
+            ):
+                raise CheckpointEpisodeMismatch(
+                    "Pending checkpoint identity requires reconciliation"
+                )
     else:
         pending = await pending_steps(graph, config)
 
