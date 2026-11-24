@@ -59,3 +59,25 @@ effects and approvals must be replayed from the durable ledger.
 
 Pi: https://docs.pi.dev/latest/compaction
 OpenCode: https://opencode.ai/docs/compaction
+
+## Incremental implementation: episode ownership at the checkpoint boundary
+
+The worker stamps the server-issued AgentRun ID into the graph's
+`episode_run_id` channel. Recovery inspects the latest checkpoint before
+calling the graph: a pending checkpoint for another run (including an
+unbound legacy checkpoint) is rejected; the worker does not restart the
+graph when the checkpoint backend cannot be inspected. Explicit approval
+resume requires a pending checkpoint belonging to the same run. The API
+fast path refuses to adopt a pending worker episode. A completed foreign
+checkpoint may precede a new turn.
+
+This is the first TaskEpisode safety slice, not a persisted natural-language
+handoff or full receipt projection. Deployment needs a controlled drain or
+reconciliation of unfinished pre-upgrade checkpoints. A pending foreign
+episode requires operator reconciliation, not arbitrary checkpoint deletion.
+Tests: `pytest -q tests/test_episode_checkpoint_ownership.py` (mocked graph
+and a real in-memory LangGraph checkpointer; CI and real PostgreSQL recovery
+must be verified independently). Tool execution, approval decisions and
+side-effect truth remain in the existing durable ledgers. Full TaskEpisode
+receipt projection, approval/side-effect crash injection, completed-result
+reconciliation and production verification remain open in #49.
