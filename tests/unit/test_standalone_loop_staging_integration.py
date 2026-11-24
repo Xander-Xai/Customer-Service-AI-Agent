@@ -34,10 +34,7 @@ def test_staging_refund_response_lost_reconciles_without_duplicate_execution():
         authoritative_checks.append(arguments["order_id"])
         entries = staging_ledger()
         entry = entries.get(arguments["order_id"], {})
-        return (
-            entry.get("calls") == 1
-            and entry.get("last") == arguments
-        )
+        return entry.get("calls") == 1 and entry.get("last") == arguments
 
     requests = iter(
         [
