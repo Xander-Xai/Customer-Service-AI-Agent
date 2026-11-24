@@ -19,7 +19,7 @@ The runner now:
 5. Keeps each case in the evidence report, including errors, instead of switching to scripted completion.
 6. Reports aggregate Token/cost as unknown when any attempted case lacks the corresponding valid metering; an observed partial sum is not a total. `agent_cases_attempted` is distinct from provider network-call count, which is also unknown without graph-wide request instrumentation.
 
-This is **not a pre-call hard spending limit**: an already-started provider request may exceed the operator's quota. A strict bound requires provider-side per-request generation caps, actual usage propagation and explicit admission control at the complete graph request boundary. The previous estimate of **one provider request per case** was incorrect because a compiled Agent graph can make multiple model calls. The plan now marks provider-request count, worst-case Token usage and maximum cost as unavailable rather than inventing upper bounds.
+This is **not a pre-call hard spending limit**: an already-started provider request may exceed the operator's quota. A strict bound requires provider-side per-request generation caps, actual usage propagation and explicit admission control at the complete graph request boundary. The previous estimate of **one provider request per case** was incorrect because a compiled Agent graph can issue several model calls. The plan now marks provider-request count, worst-case Token usage and maximum cost as unavailable rather than inventing upper bounds.
 
 ## Verification
 
