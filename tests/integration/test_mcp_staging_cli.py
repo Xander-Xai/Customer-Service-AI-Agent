@@ -14,7 +14,9 @@ import pytest
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(sys.platform != "linux", reason="GNU timeout process isolation requires Linux"),
+    pytest.mark.skipif(
+        sys.platform != "linux", reason="GNU timeout process isolation requires Linux"
+    ),
 ]
 
 ROOT = Path(__file__).resolve().parents[2]

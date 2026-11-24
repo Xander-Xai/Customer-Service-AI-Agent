@@ -105,15 +105,18 @@ def test_duplicate_manifest_fields_fail_before_probe(tmp_path, monkeypatch, payl
     out = tmp_path / "report.json"
     run_probe = AsyncMock()
     monkeypatch.setattr(probe, "run_probe", run_probe)
-    assert probe.main(
-        [
-            "--manifest",
-            str(source),
-            "--out",
-            str(out),
-            "--permit-staging-mcp",
-        ]
-    ) == 1
+    assert (
+        probe.main(
+            [
+                "--manifest",
+                str(source),
+                "--out",
+                str(out),
+                "--permit-staging-mcp",
+            ]
+        )
+        == 1
+    )
     run_probe.assert_not_called()
     evidence = json.loads(out.read_text(encoding="utf-8"))
     assert evidence["overall_status"] == "FAIL"
