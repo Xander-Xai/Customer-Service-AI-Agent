@@ -13,7 +13,42 @@ from typing import Any
 
 from core.logger import get_logger, get_trace_id, set_trace_id
 
+from .context import get_current_run_id
+from .errors import PermanentError, TransientError
+
 logger = get_logger("runtime.bootstrap")
+
+
+class CheckpointEpisodeMismatch(PermanentError):
+    """An unfinished checkpoint belongs to a different or unidentified run."""
+
+
+async def inspect_episode_checkpoint(
+    graph: Any, config: dict[str, Any], run_id: str | None, *, approval_resume: bool = False
+) -> tuple[str, ...]:
+    """Validate checkpoint ownership before resuming, never from conversation text.
+
+    Worker recovery must fail closed if inspection is unavailable. For the
+    synchronous read path, refuse to adopt an unfinished worker episode.
+    """
+    aget_state = getattr(graph, "aget_state", None)
+    if aget_state is None:
+        if run_id is not None:
+            raise TransientError("Cannot inspect worker checkpoint")
+        return ()
+    try:
+        snapshot = await aget_state(config)
+    except Exception as exc:
+        if run_id is not None:
+            raise TransientError("Cannot inspect worker checkpoint") from exc
+        return ()
+    pending = tuple(getattr(snapshot, "next", ()) or ())
+    if pending or approval_resume:
+        values = getattr(snapshot, "values", None)
+        saved_run_id = values.get("episode_run_id") if isinstance(values, dict) else None
+        if saved_run_id != run_id or (run_id is not None and not pending):
+            raise CheckpointEpisodeMismatch("Checkpoint does not belong to this active episode")
+    return pending
 
 
 async def pending_steps(graph: Any, config: dict[str, Any]) -> tuple[str, ...]:
@@ -63,7 +98,13 @@ async def invoke_graph_with_resume(
 
     同时上报 ``agent_checkpoint_recovery_total``。
     """
-    pending = await pending_steps(graph, config)
+    run_id = get_current_run_id()
+    if run_id is not None:
+        pending = await inspect_episode_checkpoint(
+            graph, config, run_id, approval_resume=resume_command is not None
+        )
+    else:
+        pending = await pending_steps(graph, config)
 
     if resume_command is not None:
         # 审批恢复：pending_steps 为空也不代表正常——图可能正挂在 interrupt 上，
@@ -147,6 +188,8 @@ class AgentRuntime:
 
         state: dict[str, Any] = {
             "session_id": thread_id,
+            "episode_run_id": get_current_run_id(),
+            "user_id": user_id,
             "current_agent": "",
             "customer_query": query,
             "query_type": "",
