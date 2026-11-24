@@ -914,8 +914,8 @@ class MCPToolAdapter:
             )
             raise mapped from e
         else:
-            normalized = self._normalize_result(result)
             try:
+                normalized = self._normalize_result(result)
                 self._validate_result_budget(normalized)
             except MCPToolExecutionError as e:
                 status = "tool_error"
@@ -1035,7 +1035,15 @@ class MCPToolAdapter:
                 "MCP 结果既无 isError 也无 is_error 字段，无法判定调用是否成功",
                 reason="unreadable_result",
             )
-        if bool(is_error):
+        if type(is_error) is not bool:
+            return MCPToolExecutionError(
+                "MCP result error flag must be boolean", reason="unreadable_result"
+            )
+        if content is not _MISSING and content is not None and not isinstance(content, list):
+            return MCPToolExecutionError(
+                "MCP result content must be a list", reason="unreadable_result"
+            )
+        if is_error:
             text = MCPToolAdapter._extract_text(content)
             return MCPToolExecutionError(text or "MCP tool 返回错误")
         structured = _read_field(result, "structured_content")
