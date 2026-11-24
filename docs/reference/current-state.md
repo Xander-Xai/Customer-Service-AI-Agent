@@ -26,6 +26,14 @@
   数字随 approval / metrics endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
 
+## TaskEpisode 回执投影（Runtime / Memory）
+
+- `runtime/task_episode.py::read_task_episode` 从 AgentRun、HumanApproval、ToolSideEffect 三个持久化表读取同一 run 的状态与回执引用；不读取原始 query、工具参数、结果正文、审批提案或自然语言 summary。
+- 每类回执最多 50 条，超限或身份不一致时标记需要完整账本核查；未确认写入、过期待处理审批不被视为完成。审批通过也不等于副作用成功。
+- Worker 在重试或审批恢复前通过 RunService 读取投影，仅记录核查建议、数量及异常标记到 trace；不把投影交给模型，不改变原有幂等、授权、审批和状态迁移规则。
+- 投影是只读诊断，不是原子授权快照；`execution_authorized` 始终为 false。真实故障恢复仍以 checkpoint、持久化账本和执行栅栏为准。
+- 验收入口：`pytest -q tests/unit/test_task_episode.py`（真实 SQLite 表；不调用外部模型或 ERP）。生产 PostgreSQL 崩溃/恢复与外部副作用一致性需单独验证。
+
 ## 人工客服交接
 
 - [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
