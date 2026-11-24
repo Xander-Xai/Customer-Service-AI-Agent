@@ -63,6 +63,7 @@ def test_server_never_exposes_demo_or_write_tools(tmp_path):
     )
     assert result["result"]["structuredContent"]["source_id"] == "ci-doc-1"
     bad = rpc(
-        "tools/call", {"name": TOOL_NAME, "arguments": {"sku": "../private", "category": "storage"}}
+        "tools/call",
+        {"name": TOOL_NAME, "arguments": {"sku": "../private", "category": "storage"}},
     )
     assert bad["result"]["isError"] is True
