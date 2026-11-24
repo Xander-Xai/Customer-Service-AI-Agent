@@ -1,5 +1,8 @@
 # Customer Service AI Agent
 
+> **架构治理（2026-11-25）**：唯一主线是 LangGraph 领域路由 + 受限 ReAct + 同步只读/异步耐久运行时；ResponseAgent 是确定性后处理角色，MCP/A2A 为可选边界，本地幂等账本不保证外部 ERP exactly-once。见 [架构裁决与裁剪门禁](docs/architecture.md#architecture-decision-freeze--2026-11-25)。
+
+
 > **Memory 专项定位（2026-11-24）**：聚焦任务/会话状态、Checkpoint、人工审批、工具回执与可恢复性，历史摘要不代表系统指令或业务事实。后续治理不等于历史生产交付。见 [Memory 工程定位与验收](docs/reference/memory-engineering-positioning-20261124.md)。
 
 > **LangGraph-based Customer Service AI Agent** — multi-agent orchestration, hybrid RAG,

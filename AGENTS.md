@@ -16,3 +16,6 @@
 - On restart or checkpoint restoration: never infer that a side-effect tool has run or not run solely from summary text; inspect the run ledger and durable receipts, then retry only if the operation ID is idempotent and authorized.
 - Test user-authored prompt injections in older sessions, failed summary handling, session erasure, checkpoint restart, replay and duplicate side effects. Do not copy user preference stores or Pi/OpenCode branch summaries wholesale into customer-order state.
 - Read `docs/reference/memory-engineering-positioning-20261124.md` and existing `docs/reference/current-state.md` before modifying Runtime or Memory.
+
+## Architecture change gate
+- Follow [architecture decision freeze](docs/architecture.md#architecture-decision-freeze--2026-11-25). No new autonomous role, framework or remote boundary without a concrete business need, simpler baseline, failure contract and regression evidence. ResponseAgent is a deterministic postprocessor; never claim ERP exactly-once from local CAS/ledger. Separate architecture simplification from capability-gap work.

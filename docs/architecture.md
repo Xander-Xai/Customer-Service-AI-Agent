@@ -9,12 +9,29 @@
 
 ---
 
+## Architecture decision freeze — 2026-11-25
+
+**主架构：LangGraph 路由式领域工作流 + 受限 ReAct + 双执行路径。** 本仓承担客服业务编排、工具治理、人工审批和耐久运行时；不承担通用执行沙箱、跨任务用户画像或独立 RAG 算法实验。Beauty RAG 与本仓属同一早期任职阶段；Gaobao 为另一期任职。当前公开工程治理不是历史生产交付证明。
+
+| 设计 | 裁决 | 边界 / 验收 |
+|---|---|---|
+| 快路径 / 异步路径 | 保留 | 只读快路径；有副作用或待审批任务进入耐久路径；服务端权限而非模型自报 |
+| 领域 Agent | 保留接口，按收益裁剪 | 七个领域角色不是七个独立服务；仅在工具、权限、策略或协作收益不同时拆分；与单专家基线比较路由正确率、调用次数、时延及失败 |
+| ResponseAgent | 定性为确定性后处理节点 | process 做清洗、质量规则、缓存、事件；不额外算自主 LLM Agent；保留兼容类名，禁止无必要模型调用 |
+| ReAct / 协作模式 | 条件启用 | 简单查询直接工具/专家；仅复杂任务启用协作；限制循环、传播部分失败及未完成审批 |
+| MCP / A2A | 可选边界 | MCP 接外部工具；A2A 仅独立 Agent 服务；固定 FAQ 是协议实验，业务 PR 未合并不计入主链路 |
+| Redis lease / PostgreSQL CAS | 保留，不夸大 | 锁、owner CAS、工具账本职责不同；旧 worker 的外部请求不能仅靠本地 CAS 撤销 |
+| ERP 写操作 | 安全优先 | 外部结果不明时禁止盲重试；需要外部幂等键、结果查询或人工对账；未确认写入不得报告成功 |
+| Cache / Memory | 保留独立责任 | Cache 可重建；Session 是上下文；Checkpoint 是图状态；AgentRun/ledger 是持久业务事实；缓存不能授权写操作 |
+
+**架构裁剪门禁**：先检查调用路径与兼容接口，再以同数据/任务对比单专家和协作模式；没有收益的角色合并为普通节点或规则函数。真实 ERP 未授权时只做 mock/故障契约，不当作生产通过。本次不改变运行时默认值、接口或现有 PR；具体删改必须有回归测试及同 SHA CI。先完成架构裁剪，再单独治理能力缺口。
+
 ## 1. 一句话架构
 
 > 一个**同步快路径 + 异步耐久路径**并存的企业客服 Agent 服务：
 > 前者用 LangGraph 实时编排多 Agent 回答请求，后者把长任务落库入队、
 > 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用
-> 加**恰好一次**的幂等记账。
+> 加持久化幂等记账、执行所有权及未知结果对账约束（不保证外部 ERP exactly-once）。
 
 ---
 
@@ -106,9 +123,9 @@ flowchart TD
 
 | 点 | 准确说法 |
 |---|---|
-| 交付语义 | **at-least-once**，不是 exactly-once。`acks_late` + `reject_on_worker_lost` + Redis `visibility_timeout` 只会让任务**至少**执行一次 |
-| "恰好一次"从哪来 | 靠 run 级（终态重复投递 no-op）+ thread 级（Redis 锁）+ **工具级（`tool_side_effects` ledger 原子 claim）** 三层幂等换来的，**不是框架给的** |
-| 崩溃恢复靠什么 | 不靠优雅关闭：靠**任务重投 + lease 过期接管 + 从 checkpoint `next` 续跑**。已成功的工具副作用由 ledger 挡住，不会重做 |
+| 交付语义 | **at-least-once**，不是 exactly-once。`acks_late` + `reject_on_worker_lost` + Redis `visibility_timeout` 允许任务被重投和重复执行，仍需正确的故障恢复条件 |
+| 幂等边界 | run 级终态 no-op、thread 锁、工具账本原子 claim 抑制重复；不能保证外部 ERP exactly-once，结果未知时需查询或对账 |
+| 崩溃恢复靠什么 | 不靠优雅关闭：靠**任务重投 + lease 过期接管 + 从 checkpoint `next` 续跑**。已持久确认成功的工具回执用于抑制重做；外部成功但未持久化的窗口需对账 |
 | 事件流不是真相源 | Redis Stream → SSE 是**观测通道**：best-effort 可续读，**非 exactly-once**。真相永远是 `agent_runs` 表 |
 
 > **Level 2 ≠ 生产验证。** 上述流程已用真实 PostgreSQL + Redis + 多进程 Celery

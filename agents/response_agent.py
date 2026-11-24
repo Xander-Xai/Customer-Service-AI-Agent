@@ -140,10 +140,9 @@ def _sanitize_response(text: str) -> str:
 
 class ResponseAgent(BaseAgent):
     """
-    响应处理 Agent（v3.0）
-    负责协作模式产出结果的后处理：缓存写入、会话记录、SLA 监控、事件广播。
-    作为 LangGraph 工作流的最终节点 Agent，与 Router Agent、专家 Agent 共同构成
-    Router → Expert → Response 三层状态机架构。
+    确定性响应后处理节点（兼容历史 ResponseAgent 类名）。
+    负责清洗、规则质量评估、缓存、SLA 监控和事件广播；不独立规划或调用 LLM。
+    位于四层工作流的最终后处理层；不是独立自主智能体。
     """
 
     def __init__(
