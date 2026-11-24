@@ -55,7 +55,12 @@ def build_task_episode(
     session_factory: Callable[[], Any] = get_db_session,
     now: datetime | None = None,
 ) -> TaskEpisode | None:
-    """Rebuild on each resume; never infer a successful external write from text."""
+    """Rebuild on each resume; never infer a successful external write from text.
+
+    The watermark identifies the bounded observed projection only. Separate SQL
+    reads are not an atomic snapshot, and truncated projections cannot establish
+    freshness of omitted rows. Never use it as a fencing or authorization token.
+    """
     session = session_factory()
     try:
         run = session.execute(
@@ -72,13 +77,20 @@ def build_task_episode(
             .limit(_MAX_ROWS + 1)
         ).all()
         approvals = session.execute(
-            select(HumanApproval.approval_id, HumanApproval.status, HumanApproval.expires_at,
-                   HumanApproval.updated_at, HumanApproval.resumed_at)
+            select(
+                HumanApproval.approval_id,
+                HumanApproval.status,
+                HumanApproval.expires_at,
+                HumanApproval.updated_at,
+                HumanApproval.resumed_at,
+            )
             .where(HumanApproval.run_id == run_id, HumanApproval.thread_id == thread_id)
             .order_by(HumanApproval.approval_id)
             .limit(_MAX_ROWS + 1)
         ).all()
-        truncated = len(receipts) > _MAX_ROWS or len(approvals) > _MAX_ROWS or len(pending) > _MAX_ROWS
+        truncated = (
+            len(receipts) > _MAX_ROWS or len(approvals) > _MAX_ROWS or len(pending) > _MAX_ROWS
+        )
         receipts = receipts[:_MAX_ROWS]
         approvals = approvals[:_MAX_ROWS]
         current_time = now or datetime.now(timezone.utc)
