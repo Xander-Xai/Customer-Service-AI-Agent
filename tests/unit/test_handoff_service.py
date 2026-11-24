@@ -253,6 +253,4 @@ def test_empty_visible_ticket_has_empty_messages_not_false_404(service):
         customer_id="customer-1",
         reason="回访",
     )
-    assert service.messages(
-        ticket["ticket_id"], actor_id="customer-1", role="customer"
-    ) == []
+    assert service.messages(ticket["ticket_id"], actor_id="customer-1", role="customer") == []
