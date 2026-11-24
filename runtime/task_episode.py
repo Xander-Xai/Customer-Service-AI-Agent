@@ -94,7 +94,9 @@ def build_task_episode(
         receipts = receipts[:_MAX_ROWS]
         approvals = approvals[:_MAX_ROWS]
         current_time = now or datetime.now(timezone.utc)
-        states = tuple(_effective_approval(row.status, row.expires_at, current_time) for row in approvals)
+        states = tuple(
+            _effective_approval(row.status, row.expires_at, current_time) for row in approvals
+        )
         fingerprint = {
             "run": [run_id, thread_id, run.attempt, run.status],
             "mode": "approval" if approval_resume else "checkpoint",
