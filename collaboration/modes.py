@@ -118,56 +118,49 @@ class SequentialMode(CollaborationMode):
                 "agents_used": [],
             }
 
-        start = time.time()
-
-        await self._safe_publish(
-            "agent.start", "sequential_mode", {"agent": agent_name, "mode": "sequential"}
+        return await self._execute_single(
+            agent,
+            agent_name,
+            state,
+            mode="sequential",
+            timeout=self._SEQUENTIAL_TIMEOUT,
+            timeout_reply="抱歉，响应时间过长，请稍后重试或简化您的提问。",
         )
 
-        # v6.3: SLA 超时保护 — 防止 LLM 挂起导致无限等待
+    async def _execute_single(
+        self, agent, agent_name, state, *, mode, timeout, timeout_reply
+    ) -> dict[str, Any]:
+        """Common single-agent execution boundary; mode selects policy, not another loop."""
+        start = time.time()
+        sender = f"{mode}_mode"
+        await self._safe_publish("agent.start", sender, {"agent": agent_name, "mode": mode})
         try:
-            result = await asyncio.wait_for(
-                agent.process_with_retry(dict(state)),
-                timeout=self._SEQUENTIAL_TIMEOUT,
-            )
+            result = await asyncio.wait_for(agent.process_with_retry(dict(state)), timeout=timeout)
         except asyncio.TimeoutError:
             if _durable_run():
-                raise  # Unknown result; RunService must classify the timeout.
-            logger.warning(
-                f"Sequential {agent_name} 超时 ({self._SEQUENTIAL_TIMEOUT}s)，返回降级回复"
-            )
+                raise
+            logger.warning(f"{mode} {agent_name} 超时 ({timeout}s)，返回降级回复")
             return {
-                "response": "抱歉，响应时间过长，请稍后重试或简化您的提问。",
-                "mode": "sequential",
+                "response": timeout_reply,
+                "mode": mode,
                 "agents_used": [agent_name],
                 "elapsed": time.time() - start,
             }
         elapsed = time.time() - start
-
         await self._safe_publish(
-            "agent.complete",
-            "sequential_mode",
-            {"agent": agent_name, "mode": "sequential", "elapsed": elapsed},
+            "agent.complete", sender, {"agent": agent_name, "mode": mode, "elapsed": elapsed}
         )
-
-        logger.info(f"Sequential {agent_name} {elapsed:.1f}s")
+        logger.info(f"{mode} {agent_name} {elapsed:.1f}s")
         return {
             "response": result.get("response", ""),
-            "mode": "sequential",
+            "mode": mode,
             "agents_used": [agent_name],
             "elapsed": elapsed,
             **_read_path_signal(result),
-            # human-in-the-loop：透传 Agent 工具循环摘出的 HIGH 风险动作。
-            # 少了这一行，被摘出的退款/改单会停在 Agent 内部**静默丢弃** ——
-            # 既没执行、也没审批，而 run 照常报告成功。当前只有 react 模式持有
-            # tool_registry，因此只有它会真的摘出动作；其余模式一并透传是为了
-            # 让「模式返回值漏字段」这一整类 bug 不再有存活空间。
+            # Preserve actual receipts and proposed high-risk actions across copied state.
             "pending_actions": list(result.get("pending_actions") or []),
-            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
-            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
             "tool_executions": list(result.get("tool_executions") or []),
         }
-
 
 class ParallelMode(CollaborationMode):
     """并行模式：多 Agent 同时处理 + 结果聚合（v3.4: Semaphore 限流，v3.6: 超时保护）"""
@@ -634,52 +627,11 @@ class ReActMode(SequentialMode):
             agent_name = primary
             logger.warning(f"ReActAgent 未注册，回退到 {primary}")
 
-        start = time.time()
-        await self._safe_publish(
-            "agent.start", "react_mode", {"agent": agent_name, "mode": "react"}
+        return await self._execute_single(
+            agent,
+            agent_name,
+            state,
+            mode="react",
+            timeout=self._REACT_TIMEOUT,
+            timeout_reply="抱歉，推理过程耗时过长，请稍后重试或简化您的提问。",
         )
-        # v6.3: SLA 超时保护
-        try:
-            result = await asyncio.wait_for(
-                agent.process_with_retry(dict(state)),
-                timeout=self._REACT_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            if _durable_run():
-                raise
-            logger.warning(f"ReAct {agent_name} 超时 ({self._REACT_TIMEOUT}s)，返回降级回复")
-            return {
-                "response": "抱歉，推理过程耗时过长，请稍后重试或简化您的提问。",
-                "mode": "react",
-                "agents_used": [agent_name],
-                "elapsed": time.time() - start,
-            }
-        elapsed = time.time() - start
-        await self._safe_publish(
-            "agent.complete",
-            "react_mode",
-            {"agent": agent_name, "mode": "react", "elapsed": elapsed},
-        )
-        logger.info(f"ReAct {agent_name} {elapsed:.1f}s")
-        return {
-            "response": result.get("response", ""),
-            "mode": "react",
-            "agents_used": [agent_name],
-            "elapsed": elapsed,
-            **_read_path_signal(result),
-            # human-in-the-loop：把 Agent 工具循环摘出的 HIGH 风险动作透传出去。
-            #
-            # 少了这一行，``core/graph_builder.py`` 里的
-            # ``pending = result.get("pending_actions") or []`` 恒为 []，
-            # ``human_approval_gate`` 节点永远是 no-op，被摘出的退款/改单会被
-            # **静默丢弃** —— 既没执行、也没审批，而 run 照常报告成功。
-            #
-            # 之所以能漏这么久：Agent 写的是**自己那份** state 副本（``dict(state)``），
-            # 本地原地修改不会回传；同步返回只挑了 response/mode/agents_used/
-            # elapsed 四个字段。仓库里唯一验证 HITL 的集成测试是**自己搭的最小图**
-            # 直接驱动 gate 节点，因此完全覆盖不到真实图上的这条接缝。
-            "pending_actions": list(result.get("pending_actions") or []),
-            # 业务结果证据：透传**真实执行过**的工具调用，供 core.outcome 区分
-            # "交付了回答" 与 "业务动作确实执行了"。漏传会让证据在编排层消失。
-            "tool_executions": list(result.get("tool_executions") or []),
-        }

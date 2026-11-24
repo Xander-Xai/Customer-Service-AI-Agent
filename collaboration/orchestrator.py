@@ -8,7 +8,7 @@
 
 协作模式选择策略：
 - 简单查询 (fast_path=True) → Sequential（顺序执行，最快）
-- 投诉类 (complaint) → Hierarchical（层级协调，需要多方参与）
+- 投诉类 (complaint) → 单域 Sequential；存在其他领域子任务才进入 Hierarchical
 - 多领域/高复杂度 (>70) → ReAct（推理+行动，处理复杂问题）
 - 单一领域中等复杂度 → Parallel/Consultation（并行或咨询）
 
@@ -130,7 +130,7 @@ class CollaborationOrchestrator:
 
         决策流程：
         1. 快速通道判断 (< threshold) → Sequential
-        2. 投诉类查询 → Hierarchical（需要协调多方）
+        2. 投诉类查询 → 单域 Sequential；跨领域 Hierarchical
         3. 高复杂度多领域 → ReAct（推理+行动）
         4. 其他情况根据领域数量选择 Parallel/Consultation
 
@@ -163,6 +163,8 @@ class CollaborationOrchestrator:
                 sub_tasks["product_agent"] = f"[辅助] 检查产品相关信息：{query}"
             if _has_keywords(query, _BILLING_KEYWORDS):
                 sub_tasks["billing_agent"] = f"[辅助] 检查订单/退款信息：{query}"
+            if len(sub_tasks) == 1:
+                return "sequential", {"primary_agent": "complaint_agent"}
             return "hierarchical", {"coordinator": "general_agent", "sub_tasks": sub_tasks}
 
         # 涉及多领域 → 并行模式 或 ReAct 推理模式

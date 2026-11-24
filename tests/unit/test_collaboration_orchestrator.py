@@ -60,6 +60,13 @@ class TestSelectMode:
         assert ctx["coordinator"] == "general_agent"
         assert "complaint_agent" in ctx["sub_tasks"]
 
+    def test_single_domain_complaint_does_not_require_coordinator(self):
+        routing = _routing(query_type="complaint", complexity=90, agent_name="complaint_agent")
+        with patch("collaboration.orchestrator._has_keywords", return_value=False):
+            mode, ctx = self.orch._select_mode(routing, _state("我要投诉"))
+        assert mode == "sequential"
+        assert ctx == {"primary_agent": "complaint_agent"}
+
     def test_complaint_with_product_keywords(self):
         """投诉查询包含产品关键词时，product_agent 加入子任务"""
         routing = _routing(query_type="complaint")

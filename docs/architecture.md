@@ -336,3 +336,8 @@ span 会丢关键排障信息。双层是"默认安全 + 显式放行"。
 | 架构决策记录 | [decisions/](decisions/) |
 | 当前事实与验证命令 | [reference/current-state.md](reference/current-state.md) |
 | 已知不宣称项 | [limitations.md](limitations.md) |
+
+
+### 协作架构裁剪：单执行边界与单域投诉
+
+Sequential 与 ReAct 共享同一个单 Agent 执行函数，保留原模式标识、Agent 选择、独立超时及事件 sender、审批提案和执行回执传递。LangGraph 持久化节点名不变。单域投诉直接交由 complaint_agent；只有存在产品/账务等其他领域子任务才使用 Hierarchical。该规则减少无意义协调者调用，但不宣称质量或延迟收益已实测。Parallel/Consultation/Hierarchical 的独立聚合语义保留，待业务对照评测再决定是否裁剪。外部副作用的未知结果治理独立于本次重构。
