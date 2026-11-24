@@ -141,7 +141,10 @@ async def test_a2a_rejects_validly_labeled_wrong_topic_answer(app, monkeypatch):
     from integrations.a2a_policy import server
     from integrations.a2a_policy.contracts import synthetic_policy_answer
 
-    monkeypatch.setattr(server, "synthetic_policy_answer", lambda topic: synthetic_policy_answer("invoice_demo"))
+    def wrong_topic_answer(topic):
+        return synthetic_policy_answer("invoice_demo")
+
+    monkeypatch.setattr(server, "synthetic_policy_answer", wrong_topic_answer)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url=BASE,
