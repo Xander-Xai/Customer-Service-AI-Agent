@@ -7,6 +7,7 @@ Celery worker）的执行入口，两者共享同一图与同一 checkpoint 后�
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import os
 from typing import Any
@@ -64,6 +65,34 @@ async def invoke_graph_with_resume(
     同时上报 ``agent_checkpoint_recovery_total``。
     """
     pending = await pending_steps(graph, config)
+
+    # Optional recovery observability. No projection may authorize a tool or
+    # change the checkpoint/resume choice; unavailable evidence is not success.
+    if (pending or resume_command is not None) and os.getenv("CSAI_TASK_EPISODE_ENABLED") == "true":
+        from .context import get_current_run_id
+        from .task_episode import build_task_episode
+
+        run_id = get_current_run_id()
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if run_id and isinstance(thread_id, str) and thread_id:
+            try:
+                episode = await asyncio.to_thread(
+                    build_task_episode,
+                    run_id,
+                    thread_id,
+                    pending,
+                    approval_resume=resume_command is not None,
+                )
+                if episode is not None:
+                    logger.info(
+                        "task episode recovery mode=%s watermark=%s verified_receipts=%s uncertain=%s",
+                        episode.resume_kind,
+                        episode.watermark,
+                        len(episode.succeeded_receipt_ids),
+                        len(episode.uncertain_receipt_ids),
+                    )
+            except Exception as exc:
+                logger.debug("task episode projection unavailable: %s", type(exc).__name__)
 
     if resume_command is not None:
         # 审批恢复：pending_steps 为空也不代表正常——图可能正挂在 interrupt 上，
