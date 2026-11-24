@@ -393,7 +393,6 @@ class TestHierarchicalMode:
 
         assert result["response"] == "直接汇总"
 
-
     @pytest.mark.asyncio
     async def test_failed_sibling_preserves_completed_receipt_and_marks_degraded(self):
         mode = HierarchicalMode()
