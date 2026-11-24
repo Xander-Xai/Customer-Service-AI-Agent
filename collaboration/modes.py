@@ -425,10 +425,14 @@ class ConsultationMode(CollaborationMode):
         # Preserve only execution-produced structured records, not inferred facts
         # from the auxiliary response or Blackboard text.
         pending_actions = [
-            action for item in consult_read_results for action in (item.get("pending_actions") or [])
+            action
+            for item in consult_read_results
+            for action in (item.get("pending_actions") or [])
         ]
         tool_executions = [
-            record for item in consult_read_results for record in (item.get("tool_executions") or [])
+            record
+            for item in consult_read_results
+            for record in (item.get("tool_executions") or [])
         ]
         read_signal = _read_path_signal(result, *consult_read_results)
         if consult_failure_reason:
