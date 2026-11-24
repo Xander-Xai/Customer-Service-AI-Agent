@@ -735,4 +735,5 @@ async def test_real_httpx_transport_distinguishes_empty_and_invalid_envelope(rea
     assert requests[0].url.path == "/k3cloud/Logon.aspx"
     assert all(request.method == "POST" for request in requests)
     assert all(request.url.path.endswith("/BillQuery") for request in requests[1:])
-    assert all(request.headers["Authorization"] == "Bearer synthetic-token" for request in requests[1:])
+    auth_headers = [request.headers["Authorization"] for request in requests[1:]]
+    assert auth_headers == ["Bearer synthetic-token", "Bearer synthetic-token"]
