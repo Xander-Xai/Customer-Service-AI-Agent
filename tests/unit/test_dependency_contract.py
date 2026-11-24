@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REQ = ROOT / "requirements.txt"
 REQ_DEV = ROOT / "requirements-dev.txt"
 REQ_OPT = ROOT / "requirements-optional.txt"
+REQ_A2A = ROOT / "requirements-a2a.txt"
 
 #: 允许"被 import 但不直接声明"的模块及其理由。空集之外的新增必须显式登记。
 ALLOWED_UNDECLARED: dict[str, str] = {
@@ -73,7 +74,7 @@ def _declared_names(*files: Path) -> set[str]:
             line = line.split("#", 1)[0].strip()
             if not line or line.startswith("-"):
                 continue
-            for sep in ("==", ">=", "<=", "~=", ">", "<", "["):
+            for sep in ("[", "==", ">=", "<=", "~=", ">", "<"):
                 if sep in line:
                     names.add(line.split(sep)[0].strip().lower().replace("_", "-"))
                     break
@@ -148,7 +149,7 @@ def _is_declared(mod: str, declared: set[str]) -> bool:
 @pytest.mark.unit
 def test_runtime_imports_are_declared():
     """运行时 import 的第三方模块必须在 requirements*.txt 中声明。"""
-    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     undeclared = []
     for mod in sorted(_runtime_third_party_imports()):
         if _is_declared(mod, declared):
@@ -176,7 +177,7 @@ def test_test_suite_imports_are_declared():
 
     声明集合取 runtime + dev 的并集，因为 CI 的测试 job 会同时安装两者。
     """
-    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     undeclared = sorted(
         mod for mod in _test_third_party_imports() if not _is_declared(mod, declared)
     )
@@ -188,9 +189,22 @@ def test_test_suite_imports_are_declared():
 
 
 @pytest.mark.unit
+def test_requirement_parser_strips_extras_before_version(tmp_path):
+    requirements = tmp_path / "requirements.txt"
+    requirements.write_text("a2a-sdk[fastapi]==1.3.1\nhttpx>=0.27,<1.0\n", encoding="utf-8")
+    assert _declared_names(requirements) == {"a2a-sdk", "httpx"}
+
+
+@pytest.mark.unit
+def test_a2a_dependencies_are_explicitly_declared():
+    declared = _declared_names(REQ_A2A)
+    assert {"a2a-sdk", "uvicorn", "httpx"} <= declared
+
+
+@pytest.mark.unit
 def test_prometheus_client_is_declared():
     """回归锁定：prometheus_client 曾缺失导致所有指标静默变 no-op。"""
-    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     assert "prometheus-client" in declared, (
         "requirements.txt 必须显式声明 prometheus-client；"
         "它在 core/monitoring.py / cache/response_cache.py 是 try/except 的运行时 import，"
@@ -207,7 +221,7 @@ def test_cryptography_is_declared():
     fail-closed 语义，缺失时加密路径会抛 ``SessionEncryptionError`` 而不是写入明文；
     直接声明保证该安全功能真的可用，而不是依赖"某个传递依赖恰好提供"。
     """
-    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     assert "cryptography" in declared, (
         "requirements.txt 必须直接声明 cryptography：core/session/session_manager.py "
         "在 SESSION_ENCRYPTION_KEY 启用时用 Fernet（AES-128-CBC + HMAC-SHA256）加密；"
@@ -218,7 +232,7 @@ def test_cryptography_is_declared():
 @pytest.mark.unit
 def test_allowed_undeclared_entries_are_documented():
     """白名单里的每个模块都必须真的"没被声明"，否则该从白名单移除。"""
-    declared = _declared_names(REQ, REQ_DEV, REQ_OPT)
+    declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     for mod, reason in ALLOWED_UNDECLARED.items():
         assert reason.strip(), f"{mod} 的豁免必须写明理由"
         assert not _is_declared(
@@ -232,7 +246,7 @@ def test_runtime_requirements_contain_no_credentials():
     secretish = re.compile(
         r"(?i)(api[_-]?key|secret|password|token)\s*[=:]\s*[\"']?[A-Za-z0-9_\-]{16,}"
     )
-    for f in (REQ, REQ_DEV, REQ_OPT):
+    for f in (REQ, REQ_DEV, REQ_OPT, REQ_A2A):
         for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             assert not secretish.search(line), f"{f.name}:{i} 疑似真实凭据: {line.strip()}"
 

@@ -25,6 +25,8 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
+**A2A 1.0 专项（2026-11-24 后续工程补强，默认关闭）**：新增独立启动的只读合成 FAQ 专家服务、官方 A2A SDK 的 Agent Card / JSON-RPC / Task 交互及 ReAct 工具适配，**不传真实客户、订单或退款资料**；这不是历史任职时已部署的 A2A 证据。见 [A2A 服务边界与验收](docs/architecture/a2a-remote-faq-boundary-20261124.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 
 [![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
