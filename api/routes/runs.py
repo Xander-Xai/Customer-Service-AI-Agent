@@ -111,6 +111,14 @@ async def create_run(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     from api.routes.chat import _SessionValidationError, get_authenticated_session
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled() and (
+        not data.session_id or not (idempotency_key or data.idempotency_key or "").strip()
+    ):
+        return JSONResponse(
+            {"error": "Existing session and Idempotency-Key required"}, status_code=400
+        )
 
     try:
         session = await get_authenticated_session(request, data.session_id, data.session_token)
@@ -177,7 +185,7 @@ async def create_run(
             service.mark_dead_letter(
                 run["id"],
                 error_code="DISPATCH_FAILED",
-                error_message=str(e),
+                error_message="Broker publication failed",
                 error_type="transient",
             )
         return JSONResponse({"error": "任务调度失败，请稍后重试"}, status_code=503)

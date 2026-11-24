@@ -300,10 +300,10 @@ async def list_history(request: Request, offset: int = 0, limit: int = 20):
     user_id = _extract_user_id(request)
     if not dev_mode:
         filtered = [
-                s
-                for s in result.get("sessions", [])
-                if user_id and str(s.get("user_id") or "") == str(user_id)
-            ]
+            s
+            for s in result.get("sessions", [])
+            if user_id and str(s.get("user_id") or "") == str(user_id)
+        ]
         result["sessions"] = filtered
         result["total"] = len(filtered)
     return await _filter_industrial_sessions(request, result)

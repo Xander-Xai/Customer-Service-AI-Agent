@@ -5,7 +5,10 @@ from collections.abc import Mapping
 
 
 def industrial_enabled() -> bool:
-    return os.getenv("CSAI_RUNTIME_PROFILE", "") == "industrial"
+    profile = os.getenv("CSAI_RUNTIME_PROFILE", "").strip().lower()
+    if profile not in {"", "industrial"}:
+        raise ValueError("Invalid CSAI_RUNTIME_PROFILE")
+    return profile == "industrial"
 
 
 def validate_industrial_profile(settings: Mapping[str, object]) -> list[str]:
