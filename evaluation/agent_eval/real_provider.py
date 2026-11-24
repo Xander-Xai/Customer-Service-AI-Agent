@@ -36,6 +36,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 #: Master authorization switch. Must be truthy **and** the CLI must pass the
 #: explicit flag. Both are required so a stray env var cannot spend money.
@@ -104,11 +105,9 @@ class RealProviderPlan:
         """Serializable plan for printing / artifact embedding (no secret)."""
         host = ""
         try:
-            from urllib.parse import urlparse
-
-            host = urlparse(self.base_url).netloc
+            host = urlsplit(self.base_url).hostname or ""
         except Exception:  # pragma: no cover - defensive
-            host = self.base_url
+            host = ""
         return {
             "model": self.model,
             "base_url_host": host,
@@ -152,6 +151,12 @@ def resolve_plan(
     if max_total_tokens is not None and max_total_tokens <= 0:
         raise RealProviderBudgetExceeded("max_total_tokens must be positive when set")
 
+    for name, value in (("max_cost_usd", max_cost_usd), ("cost_per_1k_tokens", cost_per_1k_tokens)):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise RealProviderBudgetExceeded(f"{name} must be finite and positive")
+    if not math.isfinite(timeout_seconds):
+        raise RealProviderBudgetExceeded("timeout_seconds must be finite")
+
     env_authorized = _env_flag(env.get(AUTHORIZATION_ENV))
     return RealProviderPlan(
         model=(model or env.get(MODEL_ENV) or DEFAULT_MODEL).strip(),
@@ -167,6 +172,42 @@ def resolve_plan(
         # Both switches required.
         authorized=bool(authorized and env_authorized),
     )
+
+
+def validate_runtime_plan(plan: RealProviderPlan, config: Any) -> None:
+    """Fail closed before initializing a graph that could contact external services."""
+    url = urlsplit(plan.base_url)
+    if (
+        not url.hostname
+        or url.username is not None
+        or url.password is not None
+        or url.query
+        or url.fragment
+        or (
+            url.scheme != "https"
+            and not (url.scheme == "http" and url.hostname in {"localhost", "127.0.0.1", "::1"})
+        )
+    ):
+        raise RealProviderNotAuthorized("unsafe provider URL")
+    if (
+        config.OPENAI_MODEL != plan.model
+        or config.OPENAI_BASE_URL.rstrip("/") != plan.base_url.rstrip("/")
+        or config.OPENAI_API_KEY != plan.api_key
+        or not config.evaluate_llm_api_key(config.OPENAI_API_KEY).usable
+    ):
+        raise RealProviderNotAuthorized("evaluation plan does not match runtime LLM configuration")
+    if (
+        config.ERP_MODE != "mock"
+        or config.MCP_ENABLED
+        or config.MULTIMODAL_ENABLED
+        or config.EMBEDDING_PROVIDER != "local"
+        or config.RERANKER_PROVIDER != "local"
+    ):
+        raise RealProviderNotAuthorized("evaluation requires isolated mock ERP and local retrieval providers")
+    # This graph does not expose complete provider usage to the lane. Refuse
+    # a promised token/cost budget that cannot be enforced even for the first case.
+    if plan.max_total_tokens is not None or plan.max_cost_usd is not None:
+        raise RealProviderNotAuthorized("graph token/cost metering is not wired end-to-end")
 
 
 def estimate_request_volume(plan: RealProviderPlan, dataset_size: int) -> dict[str, Any]:
@@ -402,5 +443,6 @@ __all__ = [
     "RealProviderPlan",
     "estimate_request_volume",
     "resolve_plan",
+    "validate_runtime_plan",
     "run_real_provider_lane",
 ]

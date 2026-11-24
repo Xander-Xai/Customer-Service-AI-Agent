@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +20,7 @@ from evaluation.agent_eval.real_provider import (
     estimate_request_volume,
     resolve_plan,
     run_real_provider_lane,
+    validate_runtime_plan,
 )
 
 
@@ -228,3 +230,66 @@ class TestCliGuard:
         rc = cli.main(["--i-authorize-external-calls", "--out", str(out)])
         assert rc == 0
         assert json.loads(out.read_text())["status"] == "NOT_MEASURED"
+
+
+def _matching_runtime(plan):
+    return SimpleNamespace(
+        OPENAI_MODEL=plan.model,
+        OPENAI_BASE_URL=plan.base_url,
+        OPENAI_API_KEY=plan.api_key,
+        evaluate_llm_api_key=lambda key: SimpleNamespace(usable=True),
+        ERP_MODE="mock",
+        MCP_ENABLED=False,
+        MULTIMODAL_ENABLED=False,
+        EMBEDDING_PROVIDER="local",
+        RERANKER_PROVIDER="local",
+    )
+
+
+def test_runtime_preflight_accepts_only_matching_isolated_configuration():
+    plan = _authorized_plan()
+    validate_runtime_plan(plan, _matching_runtime(plan))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("OPENAI_MODEL", "wrong-model"),
+        ("OPENAI_BASE_URL", "https://other.invalid"),
+        ("OPENAI_API_KEY", "other-key"),
+        ("ERP_MODE", "real"),
+        ("MCP_ENABLED", True),
+        ("MULTIMODAL_ENABLED", True),
+        ("EMBEDDING_PROVIDER", "remote"),
+        ("RERANKER_PROVIDER", "remote"),
+    ],
+)
+def test_runtime_preflight_rejects_mismatch_or_nonisolated_services(field, value):
+    plan = _authorized_plan()
+    config = _matching_runtime(plan)
+    setattr(config, field, value)
+    with pytest.raises(RealProviderNotAuthorized):
+        validate_runtime_plan(plan, config)
+
+
+def test_runtime_preflight_rejects_unenforceable_budget():
+    plan = _authorized_plan(max_total_tokens=100)
+    with pytest.raises(RealProviderNotAuthorized, match="metering"):
+        validate_runtime_plan(plan, _matching_runtime(plan))
+
+
+def test_url_credentials_never_appear_in_redacted_plan():
+    plan = _authorized_plan(base_url="https://user:private-value@example.invalid/v1")
+    assert "private-value" not in json.dumps(plan.redacted())
+    with pytest.raises(RealProviderNotAuthorized, match="unsafe provider URL"):
+        validate_runtime_plan(plan, _matching_runtime(plan))
+
+
+def test_existing_evidence_is_not_overwritten(tmp_path, monkeypatch):
+    import scripts.evaluate_agent_real as cli
+
+    monkeypatch.delenv(AUTHORIZATION_ENV, raising=False)
+    target = tmp_path / "report.json"
+    target.write_text("original")
+    assert cli.main(["--out", str(target)]) == 2
+    assert target.read_text() == "original"

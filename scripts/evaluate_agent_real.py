@@ -53,6 +53,7 @@ from evaluation.agent_eval.real_provider import (  # noqa: E402
     estimate_request_volume,
     resolve_plan,
     run_real_provider_lane,
+    validate_runtime_plan,
 )
 
 REPORT_SCHEMA_VERSION = "agent-eval-real-provider/v1"
@@ -173,7 +174,8 @@ def _write_not_measured(out: Path, *, plan, estimate, dataset, reason: str) -> N
         "summary": {"attempted": 0, "ok": 0, "error": 0},
     }
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    with out.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 
 
 async def _run_authorized(plan, cases) -> dict:
@@ -241,6 +243,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         else (REPO_ROOT / "artifacts" / "agent-eval-real" / stamp / "report.json")
     )
 
+    if out.exists() or out.is_symlink():
+        print("Output must be a new evidence file", file=sys.stderr)
+        return 2
+
     _print_plan(plan, estimate, _authorized_reason(plan))
 
     if not (plan.authorized and plan.has_credential):
@@ -252,6 +258,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"  -> artifact: {_display(out)}")
         return 0
 
+    import core.config as runtime_config
+
+    try:
+        validate_runtime_plan(plan, runtime_config)
+    except RealProviderNotAuthorized as exc:
+        _write_not_measured(out, plan=plan, estimate=estimate, dataset=dataset, reason=str(exc))
+        return 2
+    if not cases:
+        _write_not_measured(out, plan=plan, estimate=estimate, dataset=dataset, reason="empty_selection")
+        return 2
+
     print("\nrunning the real graph against the real provider…")
     try:
         run = asyncio.run(_run_authorized(plan, cases))
@@ -262,10 +279,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"❌ budget: {exc}", file=sys.stderr)
         return 2
 
+    complete = (
+        run["summary"]["attempted"] == estimate["effective_queries"]
+        and run["summary"]["error"] == 0
+        and not run["budget_exceeded"]
+    )
+    status = "MEASURED" if complete else "INCOMPLETE"
     report = {
         "schema_version": REPORT_SCHEMA_VERSION,
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "status": "MEASURED",
+        "status": status,
         "git_sha": _git_sha(),
         "plan": plan.redacted(),
         "estimate": estimate,
@@ -278,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "separate_from_scripted_lane": True,
         "provenance": {
             "real_provider": {
-                "status": "MEASURED",
+                "status": status,
                 "model": plan.model,
                 "network_calls_made": None,
                 "agent_cases_attempted": run["summary"]["attempted"],
@@ -299,13 +322,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print()
     print(
-        f"status = MEASURED  attempted={run['summary']['attempted']} "
+        f"status = {status}  attempted={run['summary']['attempted']} "
         f"ok={run['summary']['ok']} error={run['summary']['error']}"
     )
     if run["budget_exceeded"]:
         print(f"  ⚠️ budget exceeded: {run['budget_exceeded']}")
     print(f"  -> artifact: {_display(out)}")
-    return 0
+    return 0 if complete else 1
 
 
 if __name__ == "__main__":
