@@ -137,3 +137,109 @@ async def test_real_memory_saver_preserves_episode_channel_and_rejects_other_run
         assert result["episode_run_id"] == "original-run"
     finally:
         reset_run_context(tokens)
+
+
+def _terminal_state():
+    return {
+        "episode_run_id": "same-run",
+        "episode_completed_run_id": "same-run",
+        "session_id": "shared-thread",
+        "customer_query": "synthetic question",
+        "user_id": "synthetic-owner",
+        "response": "completed result",
+        "pending_actions": [],
+        "approval_results": [],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approval_resume", [False, True])
+async def test_completed_episode_is_recovered_without_graph_replay(approval_resume):
+    values = _terminal_state()
+    graph = _graph("same-run", pending=())
+    graph.aget_state.return_value.values = values
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        result, resumed = await invoke_graph_with_resume(
+            graph, values, CONFIG, resume_command=object() if approval_resume else None
+        )
+        assert resumed and result == values
+        graph.ainvoke.assert_not_awaited()
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"episode_completed_run_id": None},
+        {"episode_completed_run_id": "foreign-run"},
+        {"customer_query": "different query"},
+        {"user_id": "different owner"},
+        {"session_id": "different thread"},
+        {"pending_actions": [{"tool": "refund"}]},
+        {"__interrupt__": ["unfinished"]},
+        {"response": None},
+    ],
+)
+async def test_ambiguous_terminal_checkpoint_never_reexecutes(patch):
+    state = _terminal_state()
+    graph = _graph("same-run", pending=())
+    graph.aget_state.return_value.values = {**state, **patch}
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        with pytest.raises(CheckpointEpisodeMismatch, match="requires reconciliation"):
+            await invoke_graph_with_resume(graph, state, CONFIG)
+        graph.ainvoke.assert_not_awaited()
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_terminal_checkpoint_with_unresolved_tasks_requires_reconciliation():
+    state = _terminal_state()
+    graph = _graph("same-run", pending=())
+    graph.aget_state.return_value.values = state
+    graph.aget_state.return_value.tasks = [object()]
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        with pytest.raises(CheckpointEpisodeMismatch, match="requires reconciliation"):
+            await invoke_graph_with_resume(graph, state, CONFIG)
+        graph.ainvoke.assert_not_awaited()
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_real_memory_saver_terminal_recovery_does_not_repeat_node():
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    from core.state import AgentState
+
+    executions = []
+
+    def finish(state):
+        executions.append(state["episode_run_id"])
+        return {
+            "response": "completed result",
+            "episode_completed_run_id": state["episode_run_id"],
+        }
+
+    builder = StateGraph(AgentState)
+    builder.add_node("finish", finish)
+    builder.add_edge(START, "finish")
+    builder.add_edge("finish", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    state = _terminal_state()
+    state["episode_completed_run_id"] = None
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        # Simulate loss of the process result after graph completion, before DB commit.
+        await graph.ainvoke(state, config=CONFIG)
+        result, resumed = await invoke_graph_with_resume(graph, state, CONFIG)
+        assert resumed and result["response"] == "completed result"
+        assert executions == ["same-run"]
+    finally:
+        reset_run_context(tokens)
