@@ -818,3 +818,5 @@ customer-service-ai-agent/
 ### 最新交付证据（2026-11-25）
 
 #76 已合并统一架构（Routing / Parallel / fixed Supervisor–Workers、未知外部写拒绝重放、缓存门控）；#78 已合并私有 HTTPS A2A 客户端，#79 已合并[会话格式盘点](docs/operations/session-record-inventory.md)，#81 已合并真实模型轨迹与计划分母诊断。#79 只读取显式授权离线导出并输出聚合统计，不证明历史明文来源，不执行迁移。#81 不是实际模型/ERP 质量证明。#80 的检索评测完整性加固以实际 merge 和 exact-head CI 为准。禁止将实验、历史指标或未部署能力当成生产交付。
+
+生产在线图生成式响应缓存禁用门禁随 #80 的最新代码治理验收，见 [生产准备度](docs/production-readiness.md)；开发保留缓存评测，不能据此宣称生产命中率或延迟收益。
