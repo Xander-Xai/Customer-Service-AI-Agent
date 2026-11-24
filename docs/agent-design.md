@@ -306,11 +306,11 @@ ReAct 是按 complexity 门槛**按需**启用的。
 | 介入的**时机** | 工具**执行之前** | 响应**生成之后** |
 | 目的 | **阻止**不该发生的事 | **承接**机器做不了的事 |
 | 风险 | 高危副作用（退款/改单） | 复杂情绪、异常诉求、超出能力边界 |
-| 状态 | `WAITING_APPROVAL` | 仅 `resolution_status="escalated"` 标签 |
-| 持久化 | `human_approvals` 表（Alembic `006`） | **无** |
-| API | `/api/approvals` 4 个端点 | **无** |
-| 送达 | 轮询待审批队列 | **无** |
-| 实现状态 | **Implemented**（默认 `HITL_ENABLED=false`） | **Partial：仅状态标记，无工单/队列/坐席台** |
+| 状态 | `WAITING_APPROVAL` | `resolution_status="escalated"`，开启交接时可关联持久化工单 |
+| 持久化 | `human_approvals` 表（Alembic `006`） | 工单、消息与审计表（Alembic `007`） |
+| API | `/api/approvals` 4 个端点 | `/api/handoffs` 下的认证工单接口 |
+| 送达 | 轮询待审批队列 | 轮询工单和消息 |
+| 实现状态 | **Implemented**（默认 `HITL_ENABLED=false`） | **工单后端已实现**（默认 `HUMAN_HANDOFF_ENABLED=false`），启用与运营验收见 [人工交接运维说明](human-handoff-operations.md) |
 
 ### 4.1 人工审批为什么必须在"执行之前"
 
@@ -356,20 +356,13 @@ API 层只是**第二道防线**。
 （`tools/tool_registry.py:192-215`），并要求审批人的身份必须可解析
 （`api/routes/approvals.py:92-113`，无法解析时 401 而不是用一个固定字符串兜底）。
 
-### 4.5 一个必须承认的边界
+### 4.5 启用审批与验证范围
 
-`HITL_ENABLED` 默认 `false`（`core/config.py:795`）。而且：
+`HITL_ENABLED` 默认关闭。启用时，高风险工具名单与金额阈值同时未配置会触发启动拒绝。
+运行时，开启治理后，未匹配风险规则且声明为副作用的工具按 HIGH 处理。见
+[HITL 配置与运行时治理](design/human-in-the-loop.md)。
 
-> 若只开 `HITL_ENABLED=true` 而不配 `HITL_HIGH_RISK_TOOLS` 与
-> `HITL_HIGH_AMOUNT_THRESHOLD`，风险优先级链全部落空 → 判定为 `LOW`
-> → **什么都不拦，且不报警**。
-
-这是与本仓库其余部分（checkpoint、MCP、分布式运行时都 fail-closed）
-**不一致的一处 fail-open**。修复方案见
-[PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-3。
-
-另外：**真实 ERP 退款/改单的正确性未验证**。`tools/hitl_staging_tools.py`
-验证的是**治理机制**，不是 ERP 集成正确性。
+`tools/hitl_staging_tools.py` 用于验证审批机制。真实 ERP 的退款与改单仍需要集成验收。
 
 ---
 

@@ -5,6 +5,8 @@
 > 带日期的历史审计报告（如 docs/reports/plans/**）只是当时的快照，不等于当前事实。
 >
 > 每个数字的获取方式都标注了命令；不要从旧文档复制这些数字。
+> 对外核查先查 [`main` 提交](https://github.com/Xander-Xai/Customer-Service-AI-Agent/commits/main/) · [Pull Requests](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pulls) · [Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) · [Actions](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions?query=branch%3Amain) · [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)，再以同一提交读取代码和证据。
+> 下文 RAG gold-label 的 #99、#105、#119 和 #128 来自公开前的历史台账。复核请使用证据文件和提交。
 
 ## Runtime facts (generated)
 
@@ -20,9 +22,14 @@
 - Agent roles (`core/container.py::_init_agents`): **9** 个运行时角色
   （7 领域 Agent + ReActAgent + ResponseAgent；BaseAgent 是抽象基类、
   ResponseEvaluator 是质量评估器，两者不计入运行时角色）
-- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`63`**（`docs/openapi.json` 快照；
+- OpenAPI HTTP paths (`app.openapi()["paths"]`): **`71`**（`docs/openapi.json` 快照；
   数字随 approval / metrics endpoints 等新增而变，以本命令输出为准）
 - RAG benchmark queries (`tests/eval/rag_benchmark.json` metadata): **`649`**
+
+## 人工客服交接
+
+- [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
+- [人工交接运维说明](../human-handoff-operations.md)记录启用条件和待验收项。Web 工作台进度见 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43)。
 
 ## RAG evaluation / evidence state
 
