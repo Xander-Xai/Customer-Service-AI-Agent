@@ -37,7 +37,7 @@ def read_task_episode(
     Separate SELECTs are a diagnostic view, not an atomic authorization snapshot.
     Truncation, ambiguous writes and inconsistent identities require reconciliation.
     """
-    if type(limit) is not int or not 1 <= limit <= MAX_RECEIPTS:
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_RECEIPTS:
         raise ValueError("Invalid episode receipt limit")
     observed = _utc(now) or datetime.now(timezone.utc)
     run = session.execute(
