@@ -564,7 +564,11 @@ async def test_parallel_timeout_retains_completed_evidence_and_cancels_slow_chil
 
     async def fast(state):
         finished.set()
-        return {"response": "confirmed", "tool_executions": [receipt], "pending_actions": [approval]}
+        return {
+            "response": "confirmed",
+            "tool_executions": [receipt],
+            "pending_actions": [approval],
+        }
 
     async def slow(state):
         await finished.wait()
@@ -627,3 +631,32 @@ async def test_parallel_durable_deadline_remains_failure_not_partial_success():
             await mode.execute({"slow": agent}, _state(), {"agent_list": ["slow"]})
     finally:
         reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_parallel_caller_cancellation_drains_all_children():
+    started = [asyncio.Event(), asyncio.Event()]
+    drained = [asyncio.Event(), asyncio.Event()]
+
+    def child(index):
+        async def run(state):
+            started[index].set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                drained[index].set()
+
+        return run
+
+    agents = {"first": _mock_agent(), "second": _mock_agent()}
+    for index, agent in enumerate(agents.values()):
+        agent.process_with_retry.side_effect = child(index)
+    mode = ParallelMode()
+    task = asyncio.create_task(mode.execute(agents, _state(), {"agent_list": list(agents)}))
+    try:
+        await asyncio.wait_for(asyncio.gather(*(event.wait() for event in started)), timeout=2)
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert all(event.is_set() for event in drained)
