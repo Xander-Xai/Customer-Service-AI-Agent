@@ -470,7 +470,8 @@ def _verify_required_stages(stages: list[dict[str, Any]], required: tuple[str, .
         if (
             channel == "rerank"
             and fact.get("status") == "skipped"
-            and type(fact.get("candidate_in")) is int
+            and isinstance(fact.get("candidate_in"), int)
+            and not isinstance(fact.get("candidate_in"), bool)
             and 0 <= fact["candidate_in"] <= 1
         ):
             continue

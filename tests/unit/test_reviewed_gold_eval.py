@@ -346,7 +346,9 @@ def test_duplicate_ranked_identity_cannot_inflate_recall():
 def test_pending_label_prevents_closed_recall_population():
     rows = [
         _rec(query_id="q", doc_id="a", grade=3),
-        _rec(query_id="q", doc_id="b", grade=None, status="DRAFT_UNVERIFIED", method="llm_suggested"),
+        _rec(
+            query_id="q", doc_id="b", grade=None, status="DRAFT_UNVERIFIED", method="llm_suggested"
+        ),
     ]
     population = build_population(rows)
     assert population.recall_eligible_ids == ()
@@ -364,7 +366,9 @@ def test_same_query_id_cannot_change_question():
 def test_formal_schema_only_is_rejected_before_execution(tmp_path):
     labels = tmp_path / "gold.jsonl"
     labels.write_text(json.dumps(_rec(query_id="q", doc_id="a", grade=3)) + "\n")
-    assert main(["--gold-labels", str(labels), "--no-corpus", "--output", str(tmp_path / "out")]) == 2
+    assert (
+        main(["--gold-labels", str(labels), "--no-corpus", "--output", str(tmp_path / "out")]) == 2
+    )
     assert not (tmp_path / "out").exists()
 
 
