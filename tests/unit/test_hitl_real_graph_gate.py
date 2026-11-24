@@ -284,18 +284,38 @@ class TestReactModePropagatesPendingActions:
         assert result["pending_actions"] == pending
         assert result["tool_executions"] == receipts
 
-    def test_other_collaboration_modes_are_accounted_for(self):
-        """Retain the existing guard for non-shared collaboration implementations."""
-        import inspect
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode_name", ["parallel", "consultation", "hierarchical"])
+    async def test_other_collaboration_modes_propagate_real_receipts(self, mode_name):
+        """Check behavior, not duplicated strings inside legacy adapters."""
+        from unittest.mock import AsyncMock
 
         from collaboration import modes
 
-        for cls in (modes.ParallelMode, modes.ConsultationMode, modes.HierarchicalMode):
-            source = inspect.getsource(cls.execute)
-            assert '"pending_actions"' in source, (
-                f"{cls.__name__}.execute 没有透传 pending_actions；"
-                "若该模式将来能触发工具调用，高风险动作会被静默丢弃"
-            )
+        approval = {"tool": "staging_refund", "args": {"amount": 10}}
+        receipt = {"tool": "lookup_order", "status": "success"}
+        worker = AsyncMock()
+        worker.process_with_retry.return_value = {
+            "response": "worker",
+            "pending_actions": [approval],
+            "tool_executions": [receipt],
+        }
+        manager = AsyncMock()
+        manager.process_with_retry.return_value = {"response": "manager"}
+        agents = {"general_agent": manager, "worker": worker}
+        if mode_name == "parallel":
+            mode = modes.ParallelMode()
+            context = {"agent_list": ["worker"]}
+        elif mode_name == "consultation":
+            mode = modes.ConsultationMode()
+            context = {"consult_agents": ["worker"]}
+        else:
+            mode = modes.HierarchicalMode()
+            context = {"sub_tasks": {"worker": "read"}}
+        result = await mode.execute(agents, {"customer_query": "test"}, context)
+        assert result["pending_actions"] == [approval]
+        assert result["tool_executions"] == [receipt]
+        worker.process_with_retry.assert_awaited_once()
 
 
 async def test_durable_collaboration_deadline_reaches_run_owner(hitl_env, monkeypatch):
