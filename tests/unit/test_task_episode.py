@@ -164,3 +164,39 @@ def test_episode_watermark_tracks_receipt_and_effective_expiry(sessions):
         assert updated["watermark"] != expired["watermark"]
         assert updated["receipts"][0]["status"] == "SUCCEEDED"
         assert updated["execution_authorized"] is False
+
+
+@pytest.mark.parametrize("status", ["SUCCEEDED", "FAILED", "CANCELLED", "DEAD_LETTER"])
+def test_terminal_run_with_pending_approval_requires_ledger_inspection(sessions, status):
+    with sessions() as session:
+        add_approval(session)
+        run = session.get(AgentRun, "run-a")
+        run.status = status
+        session.commit()
+        episode = read_task_episode(session, "run-a", now=NOW)
+    assert episode["run_status"] == status
+    assert episode["approvals"][0]["status"] == "PENDING"
+    assert episode["next_safe_inspection"] == "inspect_approval_ledger"
+    assert episode["execution_authorized"] is False
+
+
+def test_consumed_pending_approval_requires_reconciliation(sessions):
+    with sessions() as session:
+        add_approval(session)
+        session.flush()
+        approval = session.query(HumanApproval).one()
+        approval.resumed_at = NOW
+        session.commit()
+        episode = read_task_episode(session, "run-a", now=NOW)
+    assert episode["approvals"][0]["consumed"] is True
+    assert episode["next_safe_inspection"] == "inspect_approval_ledger"
+    assert episode["execution_authorized"] is False
+
+
+def test_valid_pending_approval_remains_waiting(sessions):
+    with sessions() as session:
+        add_approval(session)
+        session.commit()
+        episode = read_task_episode(session, "run-a", now=NOW)
+    assert episode["next_safe_inspection"] == "wait_for_approval"
+    assert episode["execution_authorized"] is False

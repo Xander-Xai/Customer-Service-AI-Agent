@@ -28,6 +28,8 @@
 
 ## TaskEpisode 回执投影（Runtime / Memory）
 
+- 终态 Run 若仍有待审批记录，或待审批记录已被标记消费，诊断投影返回 `inspect_approval_ledger`；不会据此恢复任务、批准操作或更改账本。未决写入仍优先对账。
+
 - `runtime/task_episode.py::read_task_episode` 从 AgentRun、HumanApproval、ToolSideEffect 三个持久化表读取同一 run 的状态与回执引用；不读取原始 query、工具参数、结果正文、审批提案或自然语言 summary。
 - 每类回执最多 50 条，超限或身份不一致时标记需要完整账本核查；未确认写入、过期待处理审批不被视为完成。审批通过也不等于副作用成功。
 - Worker 在重试或审批恢复前通过 RunService 读取投影，仅记录核查建议、数量及异常标记到 trace；不把投影交给模型，不改变原有幂等、授权、审批和状态迁移规则。

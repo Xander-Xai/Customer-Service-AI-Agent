@@ -116,7 +116,14 @@ def read_task_episode(
         next_action = "inspect_complete_ledger"
     elif any(row["status"] != "SUCCEEDED" for row in receipts):
         next_action = "reconcile_write_receipts"
-    elif any(row["status"] in {"UNKNOWN", "EXPIRED_PENDING_RECONCILIATION"} for row in approvals):
+    elif any(
+        row["status"] in {"UNKNOWN", "EXPIRED_PENDING_RECONCILIATION"}
+        or (row["status"] == "PENDING" and row["consumed"])
+        or (row["status"] == "PENDING" and run.status in _TERMINAL)
+        for row in approvals
+    ):
+        # A terminal run may leave a pending approval after cancellation.
+        # Neither that approval nor a consumed-but-pending row is resolved.
         next_action = "inspect_approval_ledger"
     elif run.status in _TERMINAL:
         next_action = "inspect_terminal_run"
