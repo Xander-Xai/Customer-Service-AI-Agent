@@ -18,7 +18,9 @@ CONFIG = {"configurable": {"thread_id": "shared-thread"}}
 
 def _graph(owner, pending=("human_approval_gate",)):
     return SimpleNamespace(
-        aget_state=AsyncMock(return_value=SimpleNamespace(next=pending, values={"episode_run_id": owner})),
+        aget_state=AsyncMock(
+            return_value=SimpleNamespace(next=pending, values={"episode_run_id": owner})
+        ),
         ainvoke=AsyncMock(return_value={"response": "test"}),
     )
 
@@ -47,7 +49,9 @@ async def test_same_episode_resumes_without_new_input():
     graph = _graph("same-run")
     tokens = set_run_context("same-run", "shared-thread")
     try:
-        result, resumed = await invoke_graph_with_resume(graph, {"episode_run_id": "same-run"}, CONFIG)
+        result, resumed = await invoke_graph_with_resume(
+            graph, {"episode_run_id": "same-run"}, CONFIG
+        )
         assert resumed
         assert result == {"response": "test"}
         graph.ainvoke.assert_awaited_once_with(None, config=CONFIG)
@@ -115,7 +119,9 @@ async def test_real_memory_saver_preserves_episode_channel_and_rejects_other_run
     builder.add_edge("first", "second")
     builder.add_edge("second", END)
     graph = builder.compile(checkpointer=InMemorySaver(), interrupt_before=["second"])
-    await graph.ainvoke({"episode_run_id": "original-run", "customer_query": "synthetic"}, config=CONFIG)
+    await graph.ainvoke(
+        {"episode_run_id": "original-run", "customer_query": "synthetic"}, config=CONFIG
+    )
 
     assert await inspect_episode_checkpoint(graph, CONFIG, "original-run") == ("second",)
     with pytest.raises(CheckpointEpisodeMismatch):
