@@ -197,8 +197,15 @@ class TestConversationContext:
         for i in range(10):
             await sm.add_message(sid, f"msg-{i}", is_user=(i % 2 == 0))
         ctx = await sm.get_conversation_context(sid)
-        summary_msgs = [m for m in ctx if "摘要" in m.get("content", "")]
-        assert len(summary_msgs) >= 1
+        summary_msgs = [m for m in ctx if m.get("is_summary")]
+        assert len(summary_msgs) == 1
+        summary = summary_msgs[0]
+        assert summary["role"] == "user"
+        assert summary["is_user"] is False
+        assert "未经核验" in summary["content"]
+        assert "权限证明" in summary["content"]
+        assert "用户询问订单状态" in summary["content"]
+        assert not any(m.get("role") == "system" for m in ctx)
 
     @pytest.mark.asyncio
     async def test_get_conversation_context_max_messages(self):
@@ -245,6 +252,25 @@ class TestSummaryGeneration:
 
         result = await sm._generate_summary_async([{"role": "user", "content": "我想查订单"}], "")
         assert "摘要" in result
+
+    @pytest.mark.asyncio
+    async def test_summary_failure_never_logs_customer_secret(self):
+        """日志只记录异常类型，不转储客户敏感信息；不依赖自定义处理器的 caplog。"""
+        sm = _make_sm()
+        mock_llm = AsyncMock()
+        mock_llm.async_invoke = AsyncMock(side_effect=RuntimeError("secret-customer-order-123"))
+        sm.llm = mock_llm
+
+        with patch("core.session.session_manager.logger.warning") as warning:
+            result = await sm._generate_summary_async(
+                [{"role": "user", "content": "隐私订单"}], "existing"
+            )
+        assert result == "existing"
+        warning.assert_called_once()
+        format_string, exception_type = warning.call_args.args
+        assert "异常类型" in format_string
+        assert exception_type == "RuntimeError"
+        assert "secret-customer-order-123" not in repr(warning.call_args)
 
     @pytest.mark.asyncio
     async def test_generate_summary_llm_error_returns_existing(self):

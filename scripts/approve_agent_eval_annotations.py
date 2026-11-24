@@ -24,10 +24,14 @@
     python3 scripts/approve_agent_eval_annotations.py \\
         --confirm case_0001 case_0002 --reviewer alice
 
-    # 3) 撤销（发现标错时）
+    # 3) 发现候选标签错误时，输入人工确认的正确路由，不能排除错误样本来抬高分数
+    python3 scripts/approve_agent_eval_annotations.py \\
+        --label case_0003=order_status --reviewer alice
+
+    # 4) 撤销（发现标错时）
     python3 scripts/approve_agent_eval_annotations.py --revoke case_0001
 
-    # 4) 重新生成数据集（确认结果落到 agent_cases.jsonl）
+    # 5) 重新生成数据集（确认结果落到 agent_cases.jsonl）
     python3 scripts/generate_agent_eval_cases.py --apply-approvals approvals.json
 
 确认记录单独保存在 ``tests/eval/agent_annotation_approvals.json``，
@@ -47,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from evaluation.agent_eval.cases import load_dataset  # noqa: E402
+from router.query_router import INTENT_CLASSES  # noqa: E402
 
 APPROVALS_PATH = REPO_ROOT / "tests" / "eval" / "agent_annotation_approvals.json"
 
@@ -60,7 +65,8 @@ def _load_approvals() -> dict:
 def _save_approvals(data: dict) -> None:
     APPROVALS_PATH.parent.mkdir(parents=True, exist_ok=True)
     APPROVALS_PATH.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
     )
 
 
@@ -96,41 +102,74 @@ def _list(args) -> int:
     return 0
 
 
-def _mutate(args, ids: list[str], grant: bool) -> int:
+def _mutate(
+    args, ids: list[str], grant: bool, route_overrides: dict[str, str] | None = None
+) -> int:
     dataset = load_dataset(args.dataset)
     known = {c.case_id for c in dataset.cases}
-    unknown = [c for c in ids if c not in known]
+    unknown = [case_id for case_id in ids if case_id not in known]
     if unknown:
         print(f"❌ 未知 case_id：{unknown}", file=sys.stderr)
         return 2
-    if not ids:
-        print("❌ 必须显式给出 --confirm/--revoke 的 case_id（不提供全选入口）", file=sys.stderr)
+    if not ids or len(ids) != len(set(ids)):
+        print("❌ 必须给出非重复的具体 case_id", file=sys.stderr)
         return 2
+    if grant and (not isinstance(args.reviewer, str) or not args.reviewer.strip()):
+        print("❌ 人工确认必须提供 --reviewer", file=sys.stderr)
+        return 2
+
+    route_overrides = route_overrides or {}
+    allowed = set(INTENT_CLASSES)
+    allowed.update(c.expected_route for c in dataset.cases if c.expected_route)
+    for case_id in ids:
+        case = dataset.by_id(case_id)
+        label = route_overrides.get(case_id, case.expected_route)
+        if grant and (case.expected_route is None or label not in allowed):
+            print(f"❌ 无效或不可评分路由标签：{case_id}={label}", file=sys.stderr)
+            return 2
 
     data = _load_approvals()
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     for case_id in ids:
         if grant:
-            if not args.reviewer:
-                print("❌ --confirm 必须同时给出 --reviewer（确认人不可为空）", file=sys.stderr)
-                return 2
+            case = dataset.by_id(case_id)
             data["approvals"][case_id] = {
-                "confirmed_by": args.reviewer,
+                "confirmed_by": args.reviewer.strip(),
                 "reviewed_at": now,
                 "method": "human_reviewed",
-                "expected_route": dataset.by_id(case_id).expected_route,
+                "candidate_route": case.expected_route,
+                "expected_route": route_overrides.get(case_id, case.expected_route),
             }
         else:
             data["approvals"].pop(case_id, None)
     _save_approvals(data)
     verb = "确认" if grant else "撤销"
     print(f"✅ 已{verb} {len(ids)} 条：{ids}")
-    print(f"   记录写入 {APPROVALS_PATH.relative_to(REPO_ROOT)}")
+    try:
+        approval_location = str(APPROVALS_PATH.relative_to(REPO_ROOT))
+    except ValueError:
+        approval_location = str(APPROVALS_PATH)
+    print(f"   记录写入 {approval_location}")
     print(
         "   下一步：python3 scripts/generate_agent_eval_cases.py --apply-approvals "
-        f"{APPROVALS_PATH.relative_to(REPO_ROOT)}"
+        f"{approval_location}"
     )
     return 0
+
+
+def _apply_reviewed_labels(args, assignments: list[str]) -> int:
+    """Require explicit CASE_ID=ROUTE pairs; never silently accept the candidate label."""
+    overrides: dict[str, str] = {}
+    for value in assignments:
+        if value.count("=") != 1:
+            print(f"❌ 格式必须为 CASE_ID=ROUTE：{value}", file=sys.stderr)
+            return 2
+        case_id, route = (part.strip() for part in value.split("=", 1))
+        if not case_id or not route or case_id in overrides:
+            print(f"❌ 重复或无效的人工标注：{value}", file=sys.stderr)
+            return 2
+        overrides[case_id] = route
+    return _mutate(args, list(overrides), grant=True, route_overrides=overrides)
 
 
 def main(argv=None) -> int:
@@ -140,15 +179,19 @@ def main(argv=None) -> int:
     parser.add_argument("--dataset", default=None)
     parser.add_argument("--list", action="store_true", help="导出待确认清单")
     parser.add_argument("--tag", action="append", default=[], help="按标签过滤")
-    parser.add_argument("--confirm", nargs="*", default=None, metavar="CASE_ID")
-    parser.add_argument("--revoke", nargs="*", default=None, metavar="CASE_ID")
-    parser.add_argument("--reviewer", default=None, help="确认人标识（--confirm 必填）")
+    operations = parser.add_mutually_exclusive_group()
+    operations.add_argument("--confirm", nargs="+", default=None, metavar="CASE_ID")
+    operations.add_argument("--revoke", nargs="+", default=None, metavar="CASE_ID")
+    operations.add_argument("--label", nargs="+", default=None, metavar="CASE_ID=ROUTE")
+    parser.add_argument("--reviewer", default=None, help="人工审核者标识（--confirm/--label 必填）")
     args = parser.parse_args(argv)
 
     if args.list:
         return _list(args)
     if args.confirm is not None:
         return _mutate(args, args.confirm, grant=True)
+    if args.label is not None:
+        return _apply_reviewed_labels(args, args.label)
     if args.revoke is not None:
         return _mutate(args, args.revoke, grant=False)
     parser.print_help()

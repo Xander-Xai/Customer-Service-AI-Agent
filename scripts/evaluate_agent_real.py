@@ -119,14 +119,14 @@ def _print_plan(plan, estimate, authorized_reason: str) -> None:
     print(f"  max_queries          : {red['max_queries']}")
     print(f"  concurrency          : {red['concurrency']}")
     print(f"  timeout_seconds      : {red['timeout_seconds']}")
-    print(f"  max_tokens/request   : {red['max_tokens_per_request']}")
+    print(f"  max_tokens/request   : {red['max_tokens_per_request']} (not enforced end-to-end)")
     print(f"  max_total_tokens     : {red['max_total_tokens']}")
     print(f"  max_cost_usd         : {red['max_cost_usd']}")
     print(f"  cost_per_1k_tokens   : {red['cost_per_1k_tokens']}")
-    print("--- estimated scale (upper bound) ---")
+    print("--- planned case volume (provider spend NOT bounded) ---")
     print(f"  dataset_size         : {estimate['dataset_size']}")
     print(f"  effective_queries    : {estimate['effective_queries']}")
-    print(f"  worst_case_tokens    : {estimate['worst_case_tokens']}")
+    print(f"  worst_case_tokens    : {estimate['worst_case_tokens']} (NOT_MEASURED)")
     print(f"  worst_case_cost_usd  : {estimate['worst_case_cost_usd']}")
     if estimate.get("cost_note"):
         print(f"  cost_note            : {estimate['cost_note']}")
@@ -280,12 +280,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             "real_provider": {
                 "status": "MEASURED",
                 "model": plan.model,
-                "network_calls_made": run["summary"]["attempted"],
+                "network_calls_made": None,
+                "agent_cases_attempted": run["summary"]["attempted"],
             },
             "scripted_lane_artifact": "artifacts/agent-eval/<ts>/report.json",
             "note": (
-                "Real-model results. Never blended with the scripted-LLM regression "
-                "lane; token/cost are NOT_MEASURED unless the provider surfaces usage."
+                "Real-model results, separate from scripted replay. A graph may "
+                "issue multiple provider calls per agent case; provider network-call "
+                "count is NOT_MEASURED. Token/cost totals are only reported when "
+                "the metering is complete for all attempted cases."
             ),
         },
         "results": run["results"],

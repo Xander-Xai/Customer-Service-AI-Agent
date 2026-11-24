@@ -1,5 +1,7 @@
 # Customer Service AI Agent
 
+> **Memory 专项定位（2026-11-24）**：聚焦任务/会话状态、Checkpoint、人工审批、工具回执与可恢复性，历史摘要不代表系统指令或业务事实。后续治理不等于历史生产交付。见 [Memory 工程定位与验收](docs/reference/memory-engineering-positioning-20261124.md)。
+
 > **LangGraph-based Customer Service AI Agent** — multi-agent orchestration, hybrid RAG,
 > tool execution, durable runtime, HITL and observability.
 
