@@ -326,7 +326,7 @@ async def run_real_provider_lane(
         if output_is_metered:
             tokens_used += out_tok
         cost_is_metered = (
-            isinstance(cost, (int, float))
+            isinstance(cost, int | float)
             and not isinstance(cost, bool)
             and math.isfinite(cost)
             and cost >= 0
