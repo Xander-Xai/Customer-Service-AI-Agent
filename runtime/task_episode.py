@@ -108,7 +108,9 @@ def read_task_episode(
             identity_mismatch = True
             continue
         status = row.status if row.status in {"PENDING", "SUCCEEDED", "FAILED"} else "UNKNOWN"
-        receipts.append({"receipt_id": row.id, "status": status, "updated_at": _iso(row.updated_at)})
+        receipts.append(
+            {"receipt_id": row.id, "status": status, "updated_at": _iso(row.updated_at)}
+        )
 
     if truncated or identity_mismatch:
         next_action = "inspect_complete_ledger"
