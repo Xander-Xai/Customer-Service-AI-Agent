@@ -243,3 +243,54 @@ async def test_real_memory_saver_terminal_recovery_does_not_repeat_node():
         assert executions == ["same-run"]
     finally:
         reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approval_resume", [False, True])
+@pytest.mark.parametrize("field", ["session_id", "customer_query", "user_id"])
+@pytest.mark.parametrize("missing", [False, True])
+async def test_pending_checkpoint_refuses_changed_or_missing_identity(field, missing, approval_resume):
+    state = _terminal_state()
+    values = dict(state)
+    if missing:
+        values.pop(field)
+    else:
+        values[field] = "different"
+    graph = _graph("same-run")
+    graph.aget_state.return_value.values = values
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        with pytest.raises(CheckpointEpisodeMismatch, match="identity requires reconciliation"):
+            await invoke_graph_with_resume(
+                graph, state, CONFIG, resume_command=object() if approval_resume else None
+            )
+        graph.ainvoke.assert_not_awaited()
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_worker_rejects_config_thread_mismatch_before_checkpoint_read():
+    graph = _graph("same-run")
+    tokens = set_run_context("same-run", "different-thread")
+    try:
+        with pytest.raises(CheckpointEpisodeMismatch, match="thread does not match"):
+            await invoke_graph_with_resume(graph, _terminal_state(), CONFIG)
+        graph.aget_state.assert_not_awaited()
+        graph.ainvoke.assert_not_awaited()
+    finally:
+        reset_run_context(tokens)
+
+
+@pytest.mark.asyncio
+async def test_pending_checkpoint_matching_full_identity_resumes():
+    state = _terminal_state()
+    graph = _graph("same-run")
+    graph.aget_state.return_value.values = dict(state)
+    tokens = set_run_context("same-run", "shared-thread")
+    try:
+        _, resumed = await invoke_graph_with_resume(graph, state, CONFIG)
+        assert resumed
+        graph.ainvoke.assert_awaited_once_with(None, config=CONFIG)
+    finally:
+        reset_run_context(tokens)

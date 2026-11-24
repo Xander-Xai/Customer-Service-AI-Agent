@@ -81,3 +81,13 @@ must be verified independently). Tool execution, approval decisions and
 side-effect truth remain in the existing durable ledgers. Full TaskEpisode
 receipt projection, approval/side-effect crash injection, completed-result
 reconciliation and production verification remain open in #49.
+
+## Pending-checkpoint identity negative controls
+
+The production worker additionally binds the requested checkpoint thread to its
+server-owned execution context. Before either ordinary recovery or approval
+resume, each identity field supplied by the trusted runtime (session, objective
+query, principal) must exist and match in a pending checkpoint. Missing or
+changed identity fails closed before graph invocation, not by deleting or
+restarting the graph. This is a recovery guard, not replacement authorization;
+real PostgreSQL and external write acceptance still require separate evidence.
