@@ -37,3 +37,14 @@ make metrics-exposure-verify
 ```
 
 Each report must identify the code commit, dataset revision, environment, denominator, failures and exceptions. Success on a scripted model or local staging ledger is not evidence of real payments, enterprise uptime, provider bills or complete production security. See `docs/limitations.md`, `docs/production-readiness.md`, and tracked issue #46.
+
+
+## Parallel collaboration — partial failure contract (2026-11-24)
+
+The online ParallelMode retains completed child results, actual tool receipts
+and pending approvals on a read-only deadline, marks missing/failed/timed-out
+children as degraded, redacts exception details and cancels/drains unfinished
+children. Durable-run deadlines still raise for Runtime classification; this
+does not establish external write reconciliation or a hard deadline for a
+non-cooperative child. Regression entry: `pytest -q tests/unit/test_collaboration_modes.py`.
+Refs #46, #33. Real-model/ERP outcome measurement remains open.
