@@ -103,3 +103,7 @@ HITL_ENABLED=true
 ### DLQ 重放统一准入（2026-11-25）
 
 工业 DEAD_LETTER -> QUEUED 在 repository.transition 的同一 PostgreSQL 事务取得新建任务使用的 advisory lock 并按原用户/thread 检查容量；拒绝时保留原状态、attempt 与不可变 DLQ 历史，不投递。无 owner 或 idempotency key 的历史死信需人工对账，不直接重放；CLI 准入拒绝/不可用退出码 4。重放复用原 run_id 和 side-effect ledger。真实 PG 回归覆盖饱和拒绝、释放容量后重放、重放与新建竞争。此约束只适用于工业 profile 的受控 repository 路径，不保证直接 SQL、旧进程、外部 ERP 已执行副作用或实际 broker/worker 容量；运维 CLI 必须使用同一工业环境配置。
+
+### SSE producer lifecycle（2026-11-25，独立候选）
+
+文字与图片 SSE 共用 ManagedSSE，队列最多 64 个事件，生产者 await put 提供本地事件级背压；空闲 15 秒发送 SSE comment，不冒充进度。响应发送失败、生成器关闭或断线取消时取消并等待图 task，清理使用 shield；尚未进入生成器也由响应对象收尾。工业图执行 AttributeError/TypeError 不再无 config 重跑，工业 checkpoint 检查显式 strict。仅提供协作式取消，不保证同步线程/已发 provider 请求中断，不保证 checkpoint rollback 或租约 fencing；空闲 heartbeat 不是业务超时。限制的是单流事件个数，不是每事件字节、全局 SSE 并发、broker 背压或模型成本。工业断线遗留 pending checkpoint 仍需对账，禁止自动接管；真实 ASGI 代理断线与慢客户端负载待验收。

@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-25 核查增量**：#81 已合入 main，真实轨迹评测保留失败/不可达样本；#80 reviewed-gold 已合并；#82 provider attempt metering 以实时 PR 与 CI 为准。新增 [工业运行时治理候选](../architecture/industrial-runtime-admission.md)；严格模式及回归用例须在候选合并与 CI 后才计入 main。
+> **2026-11-25 核查增量**：#80 reviewed-gold、#81 trace、#82 provider attempt metering、#83 工业身份/HTTP 限流/耐久任务及 DLQ 准入已合并。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)；SSE 有界队列与断线清理为独立候选，仍需最新提交 CI 与合并回执。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。

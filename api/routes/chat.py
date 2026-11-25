@@ -9,6 +9,7 @@ import os  # noqa: F401 — 保留给 test_tts_voices_list mock 路径: api.rout
 import time
 from dataclasses import dataclass
 
+import anyio
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -22,7 +23,8 @@ router = APIRouter()
 logger = get_logger("api.chat")
 
 # ===== SSE 流式常量 =====
-SSE_CHUNK_TIMEOUT = 60.0  # SSE 事件队列等待超时（秒）
+SSE_CHUNK_TIMEOUT = 15.0  # SSE idle heartbeat interval (seconds)
+SSE_QUEUE_MAX_EVENTS = 64  # bounded per-stream event count, not a byte budget
 CHAT_QUERY_MAX_LENGTH = 2000  # 聊天查询最大字符数
 
 # ===== 通用错误消息常量 =====
@@ -188,7 +190,7 @@ def _build_sse_stream_context(
     或 prompt 覆盖身份。
     """
     run_graph = request.app.state.run_graph
-    chunk_queue: asyncio.Queue = asyncio.Queue()
+    chunk_queue: asyncio.Queue = asyncio.Queue(maxsize=SSE_QUEUE_MAX_EVENTS)
 
     async def stream_callback(event: dict):
         await chunk_queue.put(event)
@@ -198,6 +200,31 @@ def _build_sse_stream_context(
         kwargs["multimodal_content"] = multimodal_content
     graph_task = asyncio.create_task(run_graph(sid, query, **kwargs))
     return graph_task, chunk_queue
+
+
+async def _stop_stream_graph(task: asyncio.Task) -> None:
+    # Starlette can cancel the streaming scope on a disconnect. Shield cleanup
+    # so the graph's finally clauses (including the thread lock) can finish.
+    with anyio.CancelScope(shield=True):
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+class ManagedSSE(StreamingResponse):
+    """Own the producer even if sending the first HTTP frame fails."""
+
+    def __init__(self, ctx: SSEStreamContext, **kwargs):
+        self.graph_task = ctx.graph_task
+        super().__init__(_sse_stream_generator(ctx), **kwargs)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await _stop_stream_graph(self.graph_task)
+                await self.body_iterator.aclose()
 
 
 async def _sse_stream_generator(ctx: SSEStreamContext):
@@ -214,8 +241,14 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                 queue_task = asyncio.create_task(ctx.chunk_queue.get())
                 try:
                     done, _ = await asyncio.wait(
-                        {queue_task, ctx.graph_task}, return_when=asyncio.FIRST_COMPLETED
+                        {queue_task, ctx.graph_task},
+                        timeout=SSE_CHUNK_TIMEOUT,
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
+                    if not done:
+                        # SSE comment; does not pretend that a business step completed.
+                        yield ": heartbeat\n\n"
+                        continue
                     if queue_task not in done:
                         # The graph finished; drain any already queued events.
                         continue
@@ -224,7 +257,8 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                     # Never await the still-running graph in the per-event loop.
                     if not queue_task.done():
                         queue_task.cancel()
-                        await asyncio.gather(queue_task, return_exceptions=True)
+                        with anyio.CancelScope(shield=True):
+                            await asyncio.gather(queue_task, return_exceptions=True)
 
             if event is None:
                 break
@@ -281,6 +315,8 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
     except Exception as e:
         logger.error(f"SSE 流式处理失败: {e}", exc_info=True)
         yield _sse_event({"type": "error", "content": ERR_INTERNAL})
+    finally:
+        await _stop_stream_graph(ctx.graph_task)
 
 
 # ── REST 聊天 ──
@@ -365,8 +401,8 @@ async def stream_chat(data: ChatStreamRequest, request: Request):
         progress_msg="正在识别意图...",
     )
 
-    return StreamingResponse(
-        _sse_stream_generator(ctx),
+    return ManagedSSE(
+        ctx,
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
