@@ -186,7 +186,9 @@ class TestSessionsRoutes:
 
         # 模拟 JWT payload
         self.app.state.dev_mode = False
-        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-aaa", "type": "access"}):
+        with patch(
+            "api.utils._decode_jwt_token", return_value={"sub": "user-aaa", "type": "access"}
+        ):
             resp = self.client.get("/api/sessions", headers={"Authorization": "Bearer fixture"})
         assert resp.status_code == 200
         data = resp.json()
@@ -254,8 +256,12 @@ class TestSessionsRoutes:
         self.app.state._current_jwt_payload = {"sub": "someone"}
         # 需要 validate_session_token 返回 True
         self.sm.validate_session_token = MagicMock(return_value=True)
-        with patch("api.utils._decode_jwt_token", return_value={"sub": "someone", "type": "access"}):
-            resp = self.client.get("/api/sessions/no_user", headers={"Authorization": "Bearer fixture"})
+        with patch(
+            "api.utils._decode_jwt_token", return_value={"sub": "someone", "type": "access"}
+        ):
+            resp = self.client.get(
+                "/api/sessions/no_user", headers={"Authorization": "Bearer fixture"}
+            )
         assert resp.status_code == 403
         self.app.state.dev_mode = True
         self.app.state._current_jwt_payload = None
@@ -1471,9 +1477,13 @@ class TestSessionsHelpers:
 
         request = MagicMock()
         request.headers = {"Authorization": "Bearer fixture"}
-        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "access"}):
+        with patch(
+            "api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "access"}
+        ):
             assert _extract_user_id(request) == "user-abc"
-        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "refresh"}):
+        with patch(
+            "api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "refresh"}
+        ):
             assert _extract_user_id(request) is None
 
     def test_extract_user_id_none(self):
