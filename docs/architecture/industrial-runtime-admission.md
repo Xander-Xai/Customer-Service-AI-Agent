@@ -98,4 +98,8 @@ HITL_ENABLED=true
 
 ### Durable run admission（2026-11-25）
 
-工业新 AgentRun 插入在 PostgreSQL READ COMMITTED 事务内获取统一 advisory xact lock（2 秒锁等待上限），查询非终态数量后才插入。默认全局 1000 / 用户 5 / thread 1，分别以 CSAI_MAX_OUTSTANDING_RUNS、CSAI_MAX_OUTSTANDING_RUNS_PER_USER、CSAI_MAX_OUTSTANDING_RUNS_PER_THREAD 配置；所有 API 副本须一致。PENDING、QUEUED、RUNNING、RETRYING、WAITING_APPROVAL 均占容量；终态自然释放。既有幂等键先返回旧 run 再由 service 校验原请求，饱和不阻止同请求复用。用户/thread 超限 429，全局或准入不可用 503。新增真实 PG 竞争测试，不代表真实负载容量。此边界限制新耐久任务，不限制 SSE 快路径、broker 重投、管理员 DLQ 重放、实际模型调用或 worker 并行度；历史超额状态不会被自动取消。真实配置、慢查询、连接池与锁争用、运营审批积压、重放准入仍须验收。
+工业新 AgentRun 插入在 PostgreSQL READ COMMITTED 事务内获取统一 advisory xact lock（2 秒锁等待上限），查询非终态数量后才插入。默认全局 1000 / 用户 5 / thread 1，分别以 CSAI_MAX_OUTSTANDING_RUNS、CSAI_MAX_OUTSTANDING_RUNS_PER_USER、CSAI_MAX_OUTSTANDING_RUNS_PER_THREAD 配置；所有 API 副本须一致。PENDING、QUEUED、RUNNING、RETRYING、WAITING_APPROVAL 均占容量；终态自然释放。既有幂等键先返回旧 run 再由 service 校验原请求，饱和不阻止同请求复用。用户/thread 超限 429，全局或准入不可用 503。新增真实 PG 竞争测试，不代表真实负载容量。此边界限制新耐久任务，不限制 SSE 快路径、broker 重投、实际模型调用或 worker 并行度；历史超额状态不会被自动取消。真实配置、慢查询、连接池与锁争用、运营审批积压仍须验收。
+
+### DLQ 重放统一准入（2026-11-25）
+
+工业 DEAD_LETTER -> QUEUED 在 repository.transition 的同一 PostgreSQL 事务取得新建任务使用的 advisory lock 并按原用户/thread 检查容量；拒绝时保留原状态、attempt 与不可变 DLQ 历史，不投递。无 owner 或 idempotency key 的历史死信需人工对账，不直接重放；CLI 准入拒绝/不可用退出码 4。重放复用原 run_id 和 side-effect ledger。真实 PG 回归覆盖饱和拒绝、释放容量后重放、重放与新建竞争。此约束只适用于工业 profile 的受控 repository 路径，不保证直接 SQL、旧进程、外部 ERP 已执行副作用或实际 broker/worker 容量；运维 CLI 必须使用同一工业环境配置。

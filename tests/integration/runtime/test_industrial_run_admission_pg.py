@@ -91,3 +91,65 @@ def test_industrial_global_capacity_counts_all_owners(
             query="other", session_id=unique(), user_id=unique(), idempotency_key=unique()
         )
     assert exc.value.scope == "global"
+
+
+def test_industrial_replay_uses_same_capacity_and_preserves_dead_letter(
+    run_service, cleanup_created_runs, unique, monkeypatch
+):
+    monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "industrial")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS", "100000")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_USER", "1")
+    owner = unique("quota-owner")
+    dead = run_service.create_run(
+        query="fixture", session_id=unique(), user_id=owner, idempotency_key=unique()
+    )
+    run_service.mark_dead_letter(
+        dead["id"], error_code="fixture", error_message="fixture", error_type="transient"
+    )
+    original = run_service.get_dead_letter(dead["id"])
+    active = run_service.create_run(
+        query="fixture", session_id=unique(), user_id=owner, idempotency_key=unique()
+    )
+    with pytest.raises(RunAdmissionRejected) as exc:
+        run_service.requeue_dead_letter(dead["id"])
+    assert exc.value.scope == "user"
+    assert run_service.get_run(dead["id"])["status"] == RunStatus.DEAD_LETTER.value
+    assert run_service.get_dead_letter(dead["id"]) == original
+    run_service.cancel_run(active["id"])
+    assert run_service.requeue_dead_letter(dead["id"])["status"] == RunStatus.QUEUED.value
+    assert run_service.get_dead_letter(dead["id"]) == original
+
+
+def test_industrial_replay_races_new_run_under_shared_capacity(
+    run_service, cleanup_created_runs, unique, monkeypatch
+):
+    from threading import Barrier
+
+    monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "industrial")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS", "100000")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_USER", "1")
+    owner = unique("quota-owner")
+    dead = run_service.create_run(
+        query="fixture", session_id=unique(), user_id=owner, idempotency_key=unique()
+    )
+    run_service.mark_dead_letter(
+        dead["id"], error_code="fixture", error_message="fixture", error_type="transient"
+    )
+    sid, key = unique(), unique()
+    barrier = Barrier(2, timeout=10)
+
+    def compete(replay):
+        barrier.wait()
+        try:
+            if replay:
+                run_service.requeue_dead_letter(dead["id"])
+            else:
+                run_service.create_run(
+                    query="fixture", session_id=sid, user_id=owner, idempotency_key=key
+                )
+            return "accepted"
+        except RunAdmissionRejected as exc:
+            return exc.scope
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(compete, [True, False])) == ["accepted", "user"]

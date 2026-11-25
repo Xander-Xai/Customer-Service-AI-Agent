@@ -325,6 +325,17 @@ class AgentRunRepository:
         values.update(fields)
         session = self._session()
         try:
+            from core.industrial import industrial_enabled
+
+            if (
+                industrial_enabled()
+                and RunStatus.DEAD_LETTER in from_statuses
+                and to_status not in TERMINAL_STATUSES
+            ):
+                from runtime.admission import admit_dead_letter_replay
+
+                if not admit_dead_letter_replay(session, run_id):
+                    return None
             result = session.execute(
                 update(AgentRun)
                 .where(AgentRun.id == run_id, AgentRun.status.in_(allowed))
