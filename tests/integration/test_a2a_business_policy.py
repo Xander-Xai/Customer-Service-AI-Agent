@@ -103,6 +103,19 @@ async def test_actual_sdk_policy_review_roundtrip(catalog, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_unavailable_peer_fails_readiness_closed(catalog, monkeypatch):
+    pytest.importorskip("a2a")
+    from integrations.a2a_policy.business_client import verify_business_a2a_peer
+
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+    monkeypatch.setenv("A2A_AFTERSALES_ENDPOINT", f"http://127.0.0.1:{port}")
+    with pytest.raises(A2AContractError, match="peer unavailable"):
+        await verify_business_a2a_peer()
+
+
+@pytest.mark.asyncio
 async def test_standard_internal_compose_peer_roundtrip(catalog, monkeypatch):
     pytest.importorskip("a2a")
     from integrations.a2a_policy.business_server import build_business_app
