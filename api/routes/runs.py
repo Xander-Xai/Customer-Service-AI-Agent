@@ -27,6 +27,7 @@ from api.utils import extract_user_id, sanitize_input
 from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger, get_trace_id
 from runtime import metrics as run_metrics
+from runtime.admission import RunAdmissionRejected, RunAdmissionUnavailable
 from runtime.run_service import (
     RunIdempotencyConflict,
     RunNotFound,
@@ -171,6 +172,14 @@ async def create_run(
         )
     except RunIdempotencyConflict:
         return JSONResponse({"error": "IDEMPOTENCY_CONFLICT"}, status_code=409)
+    except RunAdmissionRejected as exc:
+        return JSONResponse(
+            {"error": "RUN_CAPACITY_EXCEEDED", "scope": exc.scope},
+            status_code=503 if exc.scope == "global" else 429,
+            headers={"Retry-After": "10"},
+        )
+    except RunAdmissionUnavailable:
+        return JSONResponse({"error": "RUN_ADMISSION_UNAVAILABLE"}, status_code=503)
 
     # The DB uniqueness winner alone publishes. The reconciler covers a crash
     # after the winning insert but before broker publication.

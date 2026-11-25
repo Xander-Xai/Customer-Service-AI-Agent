@@ -95,3 +95,7 @@ HITL_ENABLED=true
 ### HTTP admission regression（2026-11-25）
 
 工业 HTTP 使用共享 Redis 时间、原子检查及记录，IP 键由一致的 JWT secret HMAC 派生，密钥轮换会重置窗口。每次请求创建有连接及读取超时的 Redis client；限流规则使用进程配置，所有副本须一致。普通 HTTP 默认 60/60s，登录 5/300s，注册 3/3600s；拒绝不插入成员或延长 TTL。仅以可信 ASGI client 地址为依据，不自行信任转发头；真实代理配置、连接池容量、租户与任务并发配额仍待验收。新增 HTTP 200/429/503/健康豁免、旧 ZCARD 及真实 Redis 并发回归，后者纳入既有 runtime-e2e 目录。不得将这项检查等同于生产容量测试或防 DDoS 认证。
+
+### Durable run admission（2026-11-25）
+
+工业新 AgentRun 插入在 PostgreSQL READ COMMITTED 事务内获取统一 advisory xact lock（2 秒锁等待上限），查询非终态数量后才插入。默认全局 1000 / 用户 5 / thread 1，分别以 CSAI_MAX_OUTSTANDING_RUNS、CSAI_MAX_OUTSTANDING_RUNS_PER_USER、CSAI_MAX_OUTSTANDING_RUNS_PER_THREAD 配置；所有 API 副本须一致。PENDING、QUEUED、RUNNING、RETRYING、WAITING_APPROVAL 均占容量；终态自然释放。既有幂等键先返回旧 run 再由 service 校验原请求，饱和不阻止同请求复用。用户/thread 超限 429，全局或准入不可用 503。新增真实 PG 竞争测试，不代表真实负载容量。此边界限制新耐久任务，不限制 SSE 快路径、broker 重投、管理员 DLQ 重放、实际模型调用或 worker 并行度；历史超额状态不会被自动取消。真实配置、慢查询、连接池与锁争用、运营审批积压、重放准入仍须验收。

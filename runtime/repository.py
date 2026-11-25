@@ -221,6 +221,16 @@ class AgentRunRepository:
         )
         session = self._session()
         try:
+            from core.industrial import industrial_enabled
+
+            if industrial_enabled():
+                from runtime.admission import admit_new_run
+
+                existing = admit_new_run(
+                    session, user_id=user_id, thread_id=thread_id, idempotency_key=idempotency_key
+                )
+                if existing is not None:
+                    return to_dict(existing)
             session.add(run)
             session.commit()
             session.refresh(run)
