@@ -245,20 +245,23 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
                         timeout=SSE_CHUNK_TIMEOUT,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if not done:
-                        # SSE comment; does not pretend that a business step completed.
-                        yield ": heartbeat\n\n"
-                        continue
-                    if queue_task not in done:
-                        # The graph finished; drain any already queued events.
-                        continue
-                    event = queue_task.result()
+                    if queue_task.done():
+                        event = queue_task.result()
+                    else:
+                        # Cancel the reader before yielding a heartbeat; otherwise it
+                        # could consume and lose an event while the client is stalled.
+                        queue_task.cancel()
+                        event = None
                 finally:
                     # Never await the still-running graph in the per-event loop.
                     if not queue_task.done():
                         queue_task.cancel()
                         with anyio.CancelScope(shield=True):
                             await asyncio.gather(queue_task, return_exceptions=True)
+                if not queue_task.done() or queue_task.cancelled():
+                    if not done:
+                        yield ": heartbeat\n\n"
+                    continue
 
             if event is None:
                 break
