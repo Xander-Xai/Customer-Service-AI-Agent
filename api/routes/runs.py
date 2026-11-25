@@ -133,9 +133,12 @@ async def create_run(
         return JSONResponse({"error": "query 不能为空"}, status_code=400)
 
     service = _get_service(request)
-    if idempotency_key is not None and data.idempotency_key is not None:
-        if idempotency_key.strip() != data.idempotency_key.strip():
-            return JSONResponse({"error": "Conflicting idempotency keys"}, status_code=400)
+    if (
+        idempotency_key is not None
+        and data.idempotency_key is not None
+        and idempotency_key.strip() != data.idempotency_key.strip()
+    ):
+        return JSONResponse({"error": "Conflicting idempotency keys"}, status_code=400)
     raw_key = (idempotency_key or data.idempotency_key or "").strip()
     if len(raw_key) > IDEMPOTENCY_KEY_INPUT_MAX:
         # header 与 body 走同一契约：超限直接 400，而不是等 DB 报 value too long。
