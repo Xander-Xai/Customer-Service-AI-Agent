@@ -12,6 +12,7 @@ class AgentState(TypedDict, total=False):
     current_agent: str
     customer_query: str
     query_type: str
+    route_source: str  # sanitized current-turn routing provenance
     response: str
     complexity: int
     fast_path: bool
