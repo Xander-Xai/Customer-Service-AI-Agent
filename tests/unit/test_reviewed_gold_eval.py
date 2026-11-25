@@ -334,3 +334,57 @@ def test_gold_population_is_frozen_dataclass():
     )
     with pytest.raises(FrozenInstanceError):
         population.judged_label_count = 5  # type: ignore[misc]
+
+
+def test_duplicate_ranked_identity_cannot_inflate_recall():
+    judgment = QueryJudgment(query_id="q", query="q", grades={"a": 3}, recall_eligible=True)
+    for ranking in (["a", "a"], ["a", ""]):
+        with pytest.raises(ValueError):
+            compute_reviewed_metrics(ranking, judgment, ks=(2,))
+
+
+def test_pending_label_prevents_closed_recall_population():
+    rows = [
+        _rec(query_id="q", doc_id="a", grade=3),
+        _rec(
+            query_id="q", doc_id="b", grade=None, status="DRAFT_UNVERIFIED", method="llm_suggested"
+        ),
+    ]
+    population = build_population(rows)
+    assert population.recall_eligible_ids == ()
+    assert population.judgments[0].recall_eligible is False
+
+
+def test_same_query_id_cannot_change_question():
+    a = _rec(query_id="q", doc_id="a", grade=3)
+    b = _rec(query_id="q", doc_id="b", grade=0)
+    b["query"] = "different question"
+    with pytest.raises(ValueError, match="query text differs"):
+        build_population([a, b])
+
+
+def test_formal_schema_only_is_rejected_before_execution(tmp_path):
+    labels = tmp_path / "gold.jsonl"
+    labels.write_text(json.dumps(_rec(query_id="q", doc_id="a", grade=3)) + "\n")
+    assert (
+        main(["--gold-labels", str(labels), "--no-corpus", "--output", str(tmp_path / "out")]) == 2
+    )
+    assert not (tmp_path / "out").exists()
+
+
+def test_required_stages_reject_fallback_and_allow_one_candidate_noop():
+    from scripts.evaluate_rag_reviewed_gold import _verify_required_stages
+
+    healthy = [
+        {"name": "VECTOR", "status": "executed"},
+        {"name": "BM25", "status": "executed"},
+    ]
+    assert not _verify_required_stages(healthy, ("vector", "bm25"))
+    with pytest.raises(ValueError, match="required retrieval stage"):
+        _verify_required_stages(healthy, ("vector", "bm25", "rerank"))
+    no_op = {"name": "RERANK", "status": "skipped", "candidate_in": 1}
+    assert not _verify_required_stages(healthy + [no_op], ("vector", "bm25", "rerank"))
+    applied = {"name": "RERANK", "status": "executed"}
+    assert _verify_required_stages(healthy + [applied], ("vector", "bm25", "rerank"))
+    with pytest.raises(ValueError, match="required retrieval stage"):
+        _verify_required_stages(healthy + [{**no_op, "candidate_in": 2}], ("rerank",))

@@ -34,7 +34,7 @@
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
 | Tool Result Context Engineering | `core/tool_result_*.py` | 预算/压缩/offload/recovery/scope-safe reuse |
 | Function Calling + MCP 适配器 | `tools/` | MCP 默认关闭，read-only-first，SKU 文档接入；授权目录与实际业务待验证 |
-| A2A 售后程序专家 | `integrations/a2a_policy/` | 默认关闭，独立只读规则服务，当前合并能力仅 loopback；生产网络和实际目录待验证 |
+| A2A 售后程序专家 | `integrations/a2a_policy/` | 默认关闭，独立只读规则服务，支持显式批准的私有 HTTPS 客户端，服务端仍 loopback；生产 TLS 入口和实际目录待验证 |
 | 分布式 Agent Runtime | `runtime/` | AgentRun 唯一真相源 · Postgres checkpoint · Redis 锁 · Celery worker · 三层幂等 · DLQ 重放 · run 事件流 |
 | Human-in-the-Loop 审批治理 | `core/hitl/` · `runtime/statuses.py` | 执行前拦截 · durable 审批 · 职责分离 · TTL 拒绝优先 · 审批幂等双防线 |
 | FastAPI 服务与安全 | `api/` · `auth/` | JWT + Argon2id + 4 级 RBAC · CSRF 双提交 · CSP nonce · 限流 · SSRF 防护 |
@@ -151,3 +151,11 @@ LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
 
 **代码能力范围 = Implemented；关键基础设施 = Verified (Local/CI)；生产上线能力 =
 `PRODUCTION NOT_VERIFIED`。** 对外评审或对外表述应停在这条线上，不得再往前一步。
+
+
+## 新增交付验收边界（2026-11-25）
+
+#79 已合入隐私保护的离线格式盘点，不代替授权迁移及 provenance；#81 已合入轨迹和计划分母治理，不代替真实业务 gold。实际 TLS、ERP 写结果查询、真实模型、数据授权、SLA 和运维值班仍须在授权环境验证。
+
+
+生产在线图生成式响应缓存采取 fail-closed 策略：`DEV_MODE=false` 时，无论意图标签或命中分数均不读写响应缓存；开发环境仍保留评测路径。此决策不改变知识检索缓存和独立工具回执/工具结果复用的合同。重新启用前须通过跨客户、同客户跨任务、上下文、权限与新鲜度的配对负控制，不以旧 benchmark 作为上线许可。

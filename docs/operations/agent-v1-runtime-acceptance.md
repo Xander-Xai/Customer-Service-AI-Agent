@@ -9,7 +9,7 @@
 | M01–M04 | Python/FastAPI, model/tool loop, server schema/authorization | `api/`, `agents/`, `tools/tool_registry.py`; standalone loop is a separate opt-in reference, not the online LangGraph path |
 | M05–M06, M12 | LangGraph, route selection, orchestration, HITL handoff | `core/graph_builder.py`, `collaboration/modes.py`; fixed Supervisor–Workers (not dynamic planning); paired task benefit still needs measured cases |
 | M09–M10 | AgentRun, leases, queue, checkpoints, side-effect ledger | `runtime/`, `tests/integration/runtime/`; PostgreSQL+Redis tests do not establish external ERP exactly-once |
-| M11 | Internal tool validation, optional MCP client | `tools/mcp_adapter.py`; SKU document MCP and loopback after-sales A2A code exist; no verified real catalog or production deployment |
+| M11 | Internal tool validation, optional MCP client | `tools/mcp_adapter.py`; SKU document MCP and after-sales A2A with explicitly configured private HTTPS client (#78) exist; server remains loopback behind private TLS ingress; no verified real catalog or deployment |
 | M13–M16 | Agent evaluation, telemetry, security, service packaging | `evaluation/agent_eval/`, `core/monitoring.py`, `deploy/`; real business success and production P95/cost remain unverified |
 
 The separate cosmetics RAG reference is responsible for complex document ingestion and retrieval ablations. The separate Gaobao reference owns its own read-only synthetic business Harness/Skills evaluations. This repository does not duplicate those pipelines.
@@ -48,3 +48,17 @@ children. Durable-run deadlines still raise for Runtime classification; this
 does not establish external write reconciliation or a hard deadline for a
 non-cooperative child. Regression entry: `pytest -q tests/unit/test_collaboration_modes.py`.
 Refs #46, #33. Real-model/ERP outcome measurement remains open.
+
+## Reviewed retrieval gold evidence integrity (#33)
+
+The reviewed-gold evaluator refuses schema-only formal execution, ambiguous
+query identities and duplicate corpus/ranked document IDs. Pending or excluded
+judgments prevent a closed recall/NDCG population. Required retrieval stages
+must be observed in the trace; a rerank skipped for zero or one candidate is
+a valid no-op, but a suite with no applied rerank is incomplete. Partial arms,
+subset runs and execution failures remain incomplete; diagnostic metric means
+cover successful queries only and must not be presented as full-population
+results. A local corpus hash and stage trace alone cannot establish live index
+identity, source authorization or human relevance review. Publication stays
+ineligible pending independent index correspondence and provenance evidence.
+The legacy 649-query dataset has not been relabeled by this change.
