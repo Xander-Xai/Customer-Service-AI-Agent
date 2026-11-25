@@ -2117,3 +2117,47 @@ class TestDependencies:
             importlib.reload(dep_mod)
             with pytest.raises(RuntimeError, match="TokenTracker 未初始化"):
                 dep_mod.get_token_tracker(mock_request)
+
+
+@pytest.mark.asyncio
+async def test_sse_forwards_live_events_without_waiting_for_graph_completion():
+    from api.routes.chat import SSEStreamContext, _sse_stream_generator
+
+    queue = asyncio.Queue()
+    release = asyncio.Event()
+
+    async def graph():
+        await queue.put({"type": "chunk", "content": "first"})
+        await queue.put({"type": "chunk", "content": "second"})
+        await release.wait()
+        return {"response": "finished"}
+
+    task = asyncio.create_task(graph())
+    ctx = SSEStreamContext(task, queue, "fixture", None, False, "status", "progress")
+    stream = _sse_stream_generator(ctx)
+    try:
+        await anext(stream)
+        await anext(stream)
+        assert "first" in await asyncio.wait_for(anext(stream), 1)
+        assert "second" in await asyncio.wait_for(anext(stream), 1)
+        assert not task.done()
+        release.set()
+        assert '"type": "done"' in await asyncio.wait_for(anext(stream), 1)
+    finally:
+        release.set()
+        await stream.aclose()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_sse_drains_buffered_events_after_graph_completion():
+    from api.routes.chat import SSEStreamContext, _sse_stream_generator
+
+    queue = asyncio.Queue()
+    await queue.put({"type": "chunk", "content": "buffered"})
+    task = asyncio.create_task(asyncio.sleep(0, result={"response": "finished"}))
+    await task
+    ctx = SSEStreamContext(task, queue, "fixture", None, False, "status", "progress")
+    events = [event async for event in _sse_stream_generator(ctx)]
+    assert "buffered" in events[-2]
+    assert '"type": "done"' in events[-1]
