@@ -20,9 +20,9 @@
   - 有可信 tenant_id（无 user_id）→ 写入租户作用域。
   - 无可信身份 → fail closed（不写、不读共享槽位）。
 
-allowlist 而非 blocklist 的关键意义：当路由误分类、LLM 返回未知意图、或
-intent_type 缺失时，个性化回答绝不会落入 SHARED 槽位被跨用户读取，而是退化到
-调用方用户作用域或彻底不缓存。
+allowlist 拒绝未知或缺失的意图进入共享槽，但不能阻止已知公开类别的错误路由，
+也不能证明生成内容不含历史会话信息。生产在线图禁用响应缓存；开发环境的策略
+仅供有界评测，不能作为跨用户安全证明。
 
 读取端在路由分类之前执行（此时 intent 未知），因此读取时同时探测 SHARED 与
 调用方身份对应的作用域：因为非公开数据永远不会落入 SHARED 槽位，所以 OR 探测
@@ -178,9 +178,9 @@ def resolve_cache_policy(
             + tenant_id（无 user_id）                → TENANT 作用域，可缓存
             + 无身份                                 → DISABLED，fail closed（不缓存）
 
-    该 allowlist 语义保证：路由误分类、LLM 返回未知意图、或 intent_type 缺失时，
-    个性化回答绝不会落入 SHARED 槽位被跨用户读取，而是退化到调用方用户作用域
-    （命中率略降但不泄漏）或在无身份时彻底不缓存。
+    该 allowlist 只约束分类标签，不证明公开标签准确或回答无个人数据。
+    未知/缺失标签不能写入 SHARED；已知公开标签误分类仍有泄漏风险。
+    生产在线图禁用生成式响应缓存。
 
     Args:
         intent_type: 路由分类的意图（order_status / knowledge_qa / ...）；None/空视为 default（非公开）
@@ -278,7 +278,12 @@ def graph_response_cache_allowed(state: dict, *, durable_run: bool) -> bool:
     before lookup and before writes; storage-level scope remains independent.
     This guard does not certify semantic matching or multi-turn correctness.
     """
-    if durable_run or state.get("episode_run_id"):
+    # Generated responses are not certified stateless or safe to share. Keep
+    # the entire online response-cache path disabled in production until an
+    # independent, context-aware safety evaluation supports re-enablement.
+    from core.config import DEV_MODE
+
+    if not DEV_MODE or durable_run or state.get("episode_run_id"):
         return False
     if any(
         state.get(key)
