@@ -7,9 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-@pytest.mark.parametrize(
-    ("decision", "status"), [(True, 200), (False, 429), (None, 503)]
-)
+@pytest.mark.parametrize(("decision", "status"), [(True, 200), (False, 429), (None, 503)])
 def test_industrial_http_admission_never_falls_back(monkeypatch, decision, status):
     import api.middleware as middleware
     from api.middleware import industrial_rate_limit

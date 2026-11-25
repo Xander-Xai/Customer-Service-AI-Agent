@@ -41,10 +41,9 @@ async def admit_http(client_ip: str, scope: str, maximum: int, window: int) -> b
         async with redis.from_url(
             REDIS_URL, decode_responses=True, socket_connect_timeout=2, socket_timeout=2
         ) as client:
-            result = await client.eval(
-                SLIDING_WINDOW, 1, key, maximum, window, secrets.token_hex(16)
-            )
-        if result not in (0, 1):
+            member = secrets.token_hex(16)
+            result = await client.eval(SLIDING_WINDOW, 1, key, maximum, window, member)
+        if not isinstance(result, int) or isinstance(result, bool) or result not in (0, 1):
             return None
         return result == 1
     except Exception:

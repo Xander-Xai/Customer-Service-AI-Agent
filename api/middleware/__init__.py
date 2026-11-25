@@ -126,10 +126,11 @@ def setup_middleware(app: FastAPI):
         ):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
-        from api.middleware.industrial_rate_limit import admit_http
         from core.industrial import industrial_enabled
 
         if industrial_enabled():
+            from api.middleware.industrial_rate_limit import admit_http
+
             if path_norm == "/api/auth/login":
                 scope, maximum, window = "login", 5, 300
             elif path_norm == "/api/auth/register":

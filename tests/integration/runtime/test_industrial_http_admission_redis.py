@@ -22,9 +22,8 @@ async def test_industrial_shared_http_admission(monkeypatch):
     login_key = admission_key(identity, "login", "fixture")
     async with redis.from_url(url, decode_responses=True) as client:
         try:
-            decisions = await asyncio.gather(
-                *(admit_http(identity, "http", 5, 60) for _ in range(20))
-            )
+            requests = [admit_http(identity, "http", 5, 60) for _ in range(20)]
+            decisions = await asyncio.gather(*requests)
             assert decisions.count(True) == 5
             assert decisions.count(False) == 15
             assert await client.zcard(key) == 5
