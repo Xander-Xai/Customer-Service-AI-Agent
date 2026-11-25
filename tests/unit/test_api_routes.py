@@ -186,8 +186,8 @@ class TestSessionsRoutes:
 
         # 模拟 JWT payload
         self.app.state.dev_mode = False
-        self.app.state._current_jwt_payload = {"sub": "user-aaa"}
-        resp = self.client.get("/api/sessions")
+        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-aaa", "type": "access"}):
+            resp = self.client.get("/api/sessions", headers={"Authorization": "Bearer fixture"})
         assert resp.status_code == 200
         data = resp.json()
         # 只有 u1 应被返回
@@ -246,16 +246,17 @@ class TestSessionsRoutes:
         self.app.state.dev_mode = True
         self.app.state._current_jwt_payload = None
 
-    def test_session_ownership_no_user_passes(self):
-        """会话无 user_id 时任何人都能访问"""
+    def test_session_ownership_no_user_denied(self):
+        """非开发环境未归属会话不能被认领。"""
         self.app.state.dev_mode = False
         asyncio.run(self.sm.create_session("no_user"))
         # sessions 内无 user_id
         self.app.state._current_jwt_payload = {"sub": "someone"}
         # 需要 validate_session_token 返回 True
         self.sm.validate_session_token = MagicMock(return_value=True)
-        resp = self.client.get("/api/sessions/no_user")
-        assert resp.status_code == 200
+        with patch("api.utils._decode_jwt_token", return_value={"sub": "someone", "type": "access"}):
+            resp = self.client.get("/api/sessions/no_user", headers={"Authorization": "Bearer fixture"})
+        assert resp.status_code == 403
         self.app.state.dev_mode = True
         self.app.state._current_jwt_payload = None
 
@@ -1444,11 +1445,11 @@ class TestSessionsHelpers:
         assert _check_session_ownership({}, None, dev_mode=False) is False
 
     def test_check_session_ownership_no_session_user(self):
-        """_check_session_ownership -- session 无 user_id 放行"""
+        """_check_session_ownership -- session 无 user_id 拒绝"""
         from api.routes.sessions import _check_session_ownership
 
         session = {"user_id": None}
-        assert _check_session_ownership(session, "user-1", dev_mode=False) is True
+        assert _check_session_ownership(session, "user-1", dev_mode=False) is False
 
     def test_check_session_ownership_match(self):
         """_check_session_ownership -- user_id 匹配放行"""
@@ -1469,9 +1470,11 @@ class TestSessionsHelpers:
         from api.routes.sessions import _extract_user_id
 
         request = MagicMock()
-        request.app.state._current_jwt_payload = {"sub": "user-abc"}
-        request.state.jwt_payload = None
-        assert _extract_user_id(request) == "user-abc"
+        request.headers = {"Authorization": "Bearer fixture"}
+        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "access"}):
+            assert _extract_user_id(request) == "user-abc"
+        with patch("api.utils._decode_jwt_token", return_value={"sub": "user-abc", "type": "refresh"}):
+            assert _extract_user_id(request) is None
 
     def test_extract_user_id_none(self):
         """_extract_user_id -- 无 JWT 返回 None"""
@@ -1482,14 +1485,15 @@ class TestSessionsHelpers:
         request.state.jwt_payload = None
         assert _extract_user_id(request) is None
 
-    def test_extract_user_id_from_request_state(self):
-        """_extract_user_id -- 从 request.state.jwt_payload 提取"""
+    def test_extract_user_id_rejects_unverified_state(self):
+        """Unverified request/global state cannot substitute for a decoded bearer."""
         from api.routes.sessions import _extract_user_id
 
         request = MagicMock()
         request.app.state._current_jwt_payload = None
         request.state.jwt_payload = {"sub": "user-xyz"}
-        assert _extract_user_id(request) == "user-xyz"
+        request.headers = {}
+        assert _extract_user_id(request) is None
 
 
 if __name__ == "__main__":
