@@ -65,13 +65,16 @@ async def delegate_readonly_task(
     max_chars: int,
     httpx_client: Any | None = None,
     tls_ca_file: str | None = None,
+    allow_internal_http: bool = False,
 ) -> str:
     """Shared SDK transport; caller defines the trusted peer and result contract."""
-    base_url = (
-        validate_private_https_base_url(base_url)
-        if tls_ca_file
-        else validate_loopback_base_url(base_url)
-    )
+    if tls_ca_file:
+        base_url = validate_private_https_base_url(base_url)
+    elif allow_internal_http:
+        if base_url != "http://a2a-peer:41243":
+            raise A2AContractError("Internal HTTP peer must use the isolated a2a-peer service")
+    else:
+        base_url = validate_loopback_base_url(base_url)
     expected_rpc_url = base_url + "/a2a/jsonrpc"
 
     import httpx

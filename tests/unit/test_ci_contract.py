@@ -270,9 +270,9 @@ class TestExitCodePropagation:
                 continue  # not a blocking test-execution step
             if re.search(r"continue-on-error\s*:\s*true", block):
                 offenders.append(name)
-        assert (
-            not offenders
-        ), f"Test-execution steps softened with continue-on-error: true: {offenders}"
+        assert not offenders, (
+            f"Test-execution steps softened with continue-on-error: true: {offenders}"
+        )
 
 
 class TestCoverageGate:
@@ -678,12 +678,11 @@ class TestRuffGate:
 
     def test_ruff_lint_is_a_blocking_step(self):
         run = _step_run_exact(self.LINT_STEP)
-        assert (
-            "ruff check ." in run
-        ), f"The '{self.LINT_STEP}' step no longer runs `ruff check .`:\n{run}"
+        assert "ruff check ." in run, (
+            f"The '{self.LINT_STEP}' step no longer runs `ruff check .`:\n{run}"
+        )
         assert "|| true" not in run, (
-            f"The '{self.LINT_STEP}' step fakes a green exit with `|| true`; Ruff "
-            "must be blocking."
+            f"The '{self.LINT_STEP}' step fakes a green exit with `|| true`; Ruff must be blocking."
         )
         assert "continue-on-error" not in _step_block_exact(self.LINT_STEP), (
             f"The '{self.LINT_STEP}' step is softened with continue-on-error; Ruff "
@@ -692,9 +691,9 @@ class TestRuffGate:
 
     def test_ruff_format_check_is_a_blocking_step(self):
         run = _step_run_exact(self.FORMAT_STEP)
-        assert (
-            "ruff format --check ." in run
-        ), f"The '{self.FORMAT_STEP}' step no longer runs `ruff format --check .`:\n{run}"
+        assert "ruff format --check ." in run, (
+            f"The '{self.FORMAT_STEP}' step no longer runs `ruff format --check .`:\n{run}"
+        )
         assert "|| true" not in run, (
             f"The '{self.FORMAT_STEP}' step fakes a green exit with `|| true`; Ruff "
             "format must be blocking."
@@ -777,25 +776,24 @@ class TestMcpContractWiring:
     job, not a silent skip.
 
     ``tests/integration/test_mcp_contract_e2e.py`` does
-    ``pytest.importorskip("mcp", …)``. The official SDK is an *optional*
-    runtime dependency (requirements-optional.txt, ``MCP_ENABLED`` off by
-    default), so the test is legitimately skippable for a local developer. But
+    ``pytest.importorskip("mcp", …)``. The official SDK is a standard runtime
+    dependency because the standard Compose deployment enables MCP/A2A, so the
+    test is legitimately skippable for a local developer. But
     the `test` job is a blocking lane: if the SDK is absent there, the suite
     skips and the lane reports PASS having verified nothing about MCP. These
     tests lock the three properties that prevent that false green:
 
     1. the blocking lane installs the official SDK;
     2. its absence is a hard FAIL (preflight import), not a skip;
-    3. the CI constraint matches the declared optional policy (no drift).
+    3. the CI constraint matches the standard runtime dependency (no drift).
 
-    They deliberately do NOT require `mcp` in requirements.txt: the app's
-    runtime dependency policy must stay unchanged and optional.
+    The SDK is now mandatory for standard business deployments; industrial
+    profile configuration remains fail-closed and separately approved.
     """
 
     CI_MCP_STEP = "Install MCP contract-test dependency (official SDK)"
     PREFLIGHT_STEP = "Verify MCP SDK importable (contract suite must not skip)"
     GATE_STEP = "MCP end-to-end contract evidence (no silent skip)"
-    REQ_OPT = REPO_ROOT / "requirements-optional.txt"
     REQ = REPO_ROOT / "requirements.txt"
 
     def _declared_mcp_spec(self, path: Path) -> str | None:
@@ -819,9 +817,9 @@ class TestMcpContractWiring:
             "this blocking lane goes green without verifying any MCP behaviour."
         )
 
-    def test_mcp_contract_wiring_matches_optional_policy(self):
+    def test_mcp_contract_wiring_matches_runtime_policy(self):
         """The constraint CI installs must equal the one declared in
-        requirements-optional.txt. Duplicated constraints drift silently, and
+        requirements.txt. Duplicated constraints drift silently, and
         the drift is invisible until the blocking lane starts failing (or,
         worse, starts skipping) on an unrelated change."""
         run = _step_run_exact(self.CI_MCP_STEP)
@@ -829,33 +827,22 @@ class TestMcpContractWiring:
             re.sub(r"\s+", " ", m.replace('"', "").replace("'", "").strip())
             for m in re.findall(r"[\"']mcp[^\"']*[\"']", run)
         }
-        assert (
-            ci_specs
-        ), f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
-        declared = self._declared_mcp_spec(self.REQ_OPT)
+        assert ci_specs, (
+            f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
+        )
+        declared = self._declared_mcp_spec(self.REQ)
         assert declared is not None, (
-            "requirements-optional.txt no longer declares the official mcp SDK. "
-            "It is an optional runtime dependency with a delayed import in "
-            "tools/mcp_adapter.py; removing the declaration would let the "
-            "dependency go undeclared and silently degrade."
+            "requirements.txt must declare the official mcp SDK because the standard "
+            "Compose deployment activates the business MCP tool."
         )
         drift = sorted(s for s in ci_specs if s.lower() != declared.lower())
         assert not drift, (
             f"The mcp constraint installed in CI {sorted(ci_specs)} has drifted "
-            f"from the declared optional policy '{declared}' in "
-            "requirements-optional.txt. They must be identical."
+            f"from the declared runtime policy '{declared}' in requirements.txt."
         )
 
-    def test_mcp_stays_an_optional_runtime_dependency(self):
-        """The CI fix must not promote `mcp` into the runtime requirements.
-        `MCP_ENABLED` is off by default and the adapter imports the SDK lazily,
-        so making it mandatory would change the app's dependency policy."""
-        assert self._declared_mcp_spec(self.REQ) is None, (
-            "requirements.txt now declares the official mcp SDK. The MCP tool "
-            "adapter is an off-by-default read-only capability whose SDK import "
-            "is delayed; requiring it at runtime would change the app dependency "
-            "policy. It belongs in requirements-optional.txt."
-        )
+    def test_mcp_is_mandatory_for_standard_business_deployment(self):
+        assert self._declared_mcp_spec(self.REQ) == "mcp>=2.0.0"
 
     def test_missing_sdk_fails_the_blocking_lane(self):
         """A preflight step must import the SDK and exit non-zero when it is

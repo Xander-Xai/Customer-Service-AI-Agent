@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-25 核查增量**：#80 reviewed-gold、#81 trace、#82 provider attempt metering、#83 工业身份/HTTP 限流/耐久任务及 DLQ 准入已合并。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)；SSE 有界队列与断线清理 #84 已合并；共享快路径执行配额为独立候选，仍需最新提交 CI 与合并回执。
+> **2026-11-25 核查增量**：#80 reviewed-gold、#81 trace、#82 provider attempt metering、#83 工业身份/HTTP 限流/耐久任务及 DLQ 准入、#84 SSE 生命周期与 #85 共享快路径执行配额均已合并。#86 标准 Compose 默认业务协议接入仍在独立验收中。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -240,8 +240,8 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
-- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，服务端仅 loopback；#78 已合入受批准的私有 HTTPS 客户端，实际 TLS 入口仍待验收；不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
-- **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
+- **业务协议接入（#86）**：标准 Compose profile 通过真实 MCP/A2A SDK 默认启用合成 SKU 文档工具与独立售后策略 peer；启动顺序由一次性私有配置初始化和 A2A healthcheck 约束，配置失效则服务不就绪。随机 bearer 和批准的合成 catalog digest 生成于未跟踪 Docker volume；工具仍只读，A2A 不接触订单/ERP。设置 `CSAI_PROTOCOL_MODE=external` 可禁用本地合成 peer，但外部目录/凭据缺失时 MCP/A2A fail closed；工业 profile 不接受 synthetic mode，要求 approved catalog、私有 HTTPS、CA 与 bearer。标准合成路径在同 SHA CI/本地 Compose 验收前仍为 `IMPLEMENTED`，不可称 `STAGING_VERIFIED` 或 `PRODUCTION_VERIFIED`。禁用回滚：`MCP_ENABLED=false` 和 `A2A_AFTERSALES_ENABLED=false`。详见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md)、[A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。
+- **MCP 外部工具接入（`tools/mcp_adapter.py`）runtime fallback 默认关闭**：`MCP_ENABLED=false`；普通 Compose profile 通过生成的合成 allowlist 默认启用产品文档工具，工业 profile 必须显式提供已批准配置。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，
   同名时跳过、绝不覆盖 native。
@@ -256,10 +256,11 @@ make runtime-delivery
   - 命名空间 `mcp__{server}__{tool}`；server 名禁止含 `__`；超长名截断补 sha256。
   - 启动期结构校验：`core/config.py::validate_mcp_settings`（fail closed）。
     `MCP_FAIL_CLOSED=true` 时初始化失败阻止启动，而不是静默降级为 native-only。
+  - **部署默认**：普通 Compose profile 默认启用合成产品文档 MCP，首次启动的私有 protocol volume 生成 A2A bearer；工业 profile 不得使用合成目录。显式回滚 `MCP_ENABLED=false`。
   - **边界（不得越界宣称）**：写操作 MCP 工具**未接入**（缺幂等 ledger + 人工审批
     两道防线）；RBAC 是**请求级**而非 per-tool，不能声称"MCP 工具经过了 RBAC"；
     响应侧结果大小当前**不设上限**（只限请求 payload 字节），属已知缺口；
-    官方 `mcp` SDK 是 `requirements-optional.txt` 里的**可选**依赖，延迟 import。
+    官方 `mcp` SDK 是标准运行时依赖；未开启/外部配置错误时仍 fail closed。
   - **Evidence**：`IMPLEMENTED`。端到端契约（`registry → adapter → 本地 fake
     server → result → policy/telemetry`）由
     `tests/integration/test_mcp_contract_e2e.py` + `tests/integration/fake_mcp_server.py`

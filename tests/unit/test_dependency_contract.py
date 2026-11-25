@@ -202,6 +202,16 @@ def test_a2a_dependencies_are_explicitly_declared():
 
 
 @pytest.mark.unit
+def test_standard_business_protocol_sdks_are_runtime_dependencies():
+    declared = _declared_names(REQ)
+    assert {"mcp", "a2a-sdk"} <= declared
+    runtime = REQ.read_text(encoding="utf-8")
+    interop = REQ_A2A.read_text(encoding="utf-8")
+    assert re.search(r"(?m)^a2a-sdk\[fastapi\]==1\.3\.1\s*$", runtime)
+    assert re.search(r"(?m)^a2a-sdk\[fastapi\]==1\.3\.1\s*$", interop)
+
+
+@pytest.mark.unit
 def test_prometheus_client_is_declared():
     """回归锁定：prometheus_client 曾缺失导致所有指标静默变 no-op。"""
     declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
@@ -235,9 +245,9 @@ def test_allowed_undeclared_entries_are_documented():
     declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     for mod, reason in ALLOWED_UNDECLARED.items():
         assert reason.strip(), f"{mod} 的豁免必须写明理由"
-        assert not _is_declared(
-            mod, declared
-        ), f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
+        assert not _is_declared(mod, declared), (
+            f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
+        )
 
 
 @pytest.mark.unit

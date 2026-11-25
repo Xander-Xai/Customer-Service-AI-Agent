@@ -597,8 +597,9 @@ TOOL_RESULT_CACHE_ENABLED = os.getenv("TOOL_RESULT_CACHE_ENABLED", "false").lowe
 TOOL_EXECUTION_TIMEOUT_SECONDS = _float_env("TOOL_EXECUTION_TIMEOUT_SECONDS", 30.0)
 
 # ===== MCP（Model Context Protocol）外部工具接入 =====
-# 默认**关闭**。MCP 工具是来自外部进程（可能是第三方）的不可信输入源，
-# 与进程内 native 工具的信任级别不同，因此必须显式开启 + 显式 allowlist。
+# Runtime fallback 默认**关闭**。标准 Compose 会显式开启并提供受限 synthetic
+# allowlist；工业部署必须提供显式批准的 allowlist。MCP 工具是外部不可信输入，
+# 与进程内 native 工具的信任级别不同。
 #
 # MCP_SERVERS 是 JSON 数组 allowlist，每条形如：
 #   {"name": "catalog", "transport": "stdio", "command": "python3",
@@ -785,7 +786,7 @@ def _resolve_execution_mode() -> str:
         return "queued" if AGENT_RUN_DISPATCH == "celery" else "inline"
     if AGENT_EXECUTION_MODE_RAW not in ("inline", "queued"):
         raise ConfigurationError(
-            f"AGENT_EXECUTION_MODE 非法: {AGENT_EXECUTION_MODE_RAW!r}" "（仅支持 inline | queued）"
+            f"AGENT_EXECUTION_MODE 非法: {AGENT_EXECUTION_MODE_RAW!r}（仅支持 inline | queued）"
         )
     expected_dispatch = "celery" if AGENT_EXECUTION_MODE_RAW == "queued" else "inline"
     if AGENT_RUN_DISPATCH_RAW and expected_dispatch != AGENT_RUN_DISPATCH:

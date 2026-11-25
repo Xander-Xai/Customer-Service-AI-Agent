@@ -2,8 +2,8 @@
 
 为什么用 stub 而不是真装 ``mcp``：
 
-- ``mcp`` 在 ``requirements-optional.txt``（``MCP_ENABLED`` 默认 false，核心功能
-  不依赖它）。CI 的 ``test`` job 只装 ``requirements.txt``，因此
+- ``mcp`` 是标准部署依赖（runtime fallback 的 ``MCP_ENABLED`` 仍默认 false）。CI 的 ``test``
+  job 安装 ``requirements.txt``，因此
   ``McpSdkClient`` 的 ~100 条语句在那条 lane 上**结构性地一行都跑不到**——
   这正是 PR #42 把 coverage 拖到 79.84% 的原因之一。
 - 这里要验的是**本仓自己**的逻辑，不是第三方 SDK 的行为：SDK 版本双读

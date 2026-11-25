@@ -2,7 +2,7 @@
 
 > **工业运行时治理候选（2026-11-25）**：新增用户身份绑定、请求幂等冲突拒绝、严格 checkpoint 探测、API/Worker ERP 与加密配置一致性。`CSAI_RUNTIME_PROFILE=industrial` 是待验收的严格发布配置，非默认 demo，也不代表真实生产通过。详见 [工业发布契约](docs/architecture/industrial-runtime-admission.md)。
 
-> **架构治理（2026-11-25）**：唯一主线是 LangGraph 领域路由 + 受限 ReAct + 同步只读/异步耐久运行时；ResponseAgent 是确定性后处理角色，MCP/A2A 为可选边界，本地幂等账本不保证外部 ERP exactly-once。见 [架构裁决与裁剪门禁](docs/architecture.md#architecture-decision-freeze--2026-11-25)。
+> **架构治理（2026-11-25）**：唯一主线是 LangGraph 领域路由 + 受限 ReAct + 同步只读/异步耐久运行时；ResponseAgent 是确定性后处理角色。标准 Compose 部署启用合成数据上的 MCP/A2A 只读业务链路，工业 profile 必须改用批准目录、私有 TLS 与外部凭据；本地账本不保证 ERP exactly-once。见 [架构裁决与裁剪门禁](docs/architecture.md#architecture-decision-freeze--2026-11-25)。
 
 
 > **Memory 专项定位（2026-11-24）**：聚焦任务/会话状态、Checkpoint、人工审批、工具回执与可恢复性，历史摘要不代表系统指令或业务事实。后续治理不等于历史生产交付。见 [Memory 工程定位与验收](docs/reference/memory-engineering-positioning-20261124.md)。
@@ -30,7 +30,7 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
-**业务协议边界（后续工程补强，默认关闭）**：MCP 已接入可由产品文档责任方提供的、摘要锁定的 SKU 使用/存储/包装说明（#72）；A2A 已接入独立售后流程专家（#73），只处理枚举化问题/渠道/阶段，不授权退款、不查询 ERP；服务端仅监听 loopback；#78 已合入受批准的私有 HTTPS 客户端路径（固定 DNS/CA，不跟随重定向），真实 TLS 入口待验收。原合成 FAQ 仅作协议回归。真实授权目录、网络与业务验收仍未完成，不是历史任职时已部署的证据。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+**业务协议边界**：标准 Compose 部署默认接入合成 SKU 使用/存储文档 MCP 与独立售后规则 A2A peer；peer bearer 在本地首次启动时生成并保存在私有 Docker volume，不提交到 Git。工具只读、不授权退款、不查询 ERP。禁用回滚为 `MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false`。`CSAI_RUNTIME_PROFILE=industrial` 拒绝合成协议配置，要求 `CSAI_PROTOCOL_MODE=external`、批准目录/摘要及私有 TLS 认证。当前合成数据验收不代表企业目录、真实 TLS、ERP 或生产验证，也不是历史任职时的上线记录。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
 
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 

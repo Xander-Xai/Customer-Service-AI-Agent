@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from tools.readonly_mcp_faq import FAQServer
+    from integrations.mcp_stdio import MCPStdioServer
 else:
-    # Resolve the installed first-party package, never the caller's cwd.
+    # Resolve the installed first-party protocol module, never the caller's cwd.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tools.readonly_mcp_faq import FAQServer
+    from integrations.mcp_stdio import MCPStdioServer
 
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
 MAX_RECORDS = 5000
@@ -137,22 +137,20 @@ class ProductCatalog:
         }
 
 
-class ProductDocumentServer(FAQServer):
+class ProductDocumentServer(MCPStdioServer):
     """Use the existing bounded MCP handshake; replace the business surface."""
 
     def __init__(self, catalog: ProductCatalog):
         super().__init__()
         self.catalog = catalog
+        self.server_name = "product-documents"
 
     def dispatch(self, request: Any) -> dict[str, Any] | None:
         if not isinstance(request, dict):
             return super().dispatch(request)
         method = request.get("method")
         if method not in {"tools/list", "tools/call"} or not self.ready:
-            response = super().dispatch(request)
-            if method == "initialize" and response and "result" in response:
-                response["result"]["serverInfo"] = {"name": "product-documents", "version": "1.0.0"}
-            return response
+            return super().dispatch(request)
         if "id" not in request:
             return None
         response = {"jsonrpc": "2.0", "id": request["id"]}

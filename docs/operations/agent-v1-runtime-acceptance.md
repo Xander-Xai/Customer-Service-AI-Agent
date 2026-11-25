@@ -11,7 +11,7 @@
 | M01–M04 | Python/FastAPI, model/tool loop, server schema/authorization | `api/`, `agents/`, `tools/tool_registry.py`; standalone loop is a separate opt-in reference, not the online LangGraph path |
 | M05–M06, M12 | LangGraph, route selection, orchestration, HITL handoff | `core/graph_builder.py`, `collaboration/modes.py`; fixed Supervisor–Workers (not dynamic planning); paired task benefit still needs measured cases |
 | M09–M10 | AgentRun, leases, queue, checkpoints, side-effect ledger | `runtime/`, `tests/integration/runtime/`; PostgreSQL+Redis tests do not establish external ERP exactly-once |
-| M11 | Internal tool validation, optional MCP client | `tools/mcp_adapter.py`; SKU document MCP and after-sales A2A with explicitly configured private HTTPS client (#78) exist; server remains loopback behind private TLS ingress; no verified real catalog or deployment |
+| M11 | Internal tool validation, MCP/A2A business protocol | `tools/mcp_adapter.py`, `integrations/a2a_policy/`; standard Compose enables synthetic SKU docs and an independent after-sales peer; generated bearer is stored in a private volume; industrial profile requires approved catalogs and private HTTPS/CA. Enterprise data and deployment remain unverified |
 | M13–M16 | Agent evaluation, telemetry, security, service packaging | `evaluation/agent_eval/`, `core/monitoring.py`, `deploy/`; real business success and production P95/cost remain unverified |
 
 The separate cosmetics RAG reference is responsible for complex document ingestion and retrieval ablations. The separate Gaobao reference owns its own read-only synthetic business Harness/Skills evaluations. This repository does not duplicate those pipelines.

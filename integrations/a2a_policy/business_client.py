@@ -35,12 +35,22 @@ async def review_after_sales_procedure(request: dict, *, httpx_client: Any | Non
         max_chars=4000,
         httpx_client=httpx_client,
         tls_ca_file=require_private_ca_file() if base_url.startswith("https://") else None,
+        allow_internal_http=os.getenv("A2A_AFTERSALES_INTERNAL_HTTP", "").lower() == "true",
     )
     try:
         result = json.loads(response, object_pairs_hook=unique_object)
         return validate_result(result, request, digest)
     except (TypeError, ValueError):
         raise A2AContractError("After-sales specialist result failed validation") from None
+
+
+async def verify_business_a2a_peer() -> None:
+    """Readiness probe: authenticate, discover the exact card and validate one bounded result."""
+    result = await review_after_sales_procedure(
+        {"issue": "invoice", "channel": "unknown", "stage": "unknown"}
+    )
+    if result.get("status") not in {"PROCEDURE_FOUND", "REVIEW_REQUIRED"}:
+        raise A2AContractError("After-sales specialist readiness contract failed")
 
 
 def register_business_a2a_tool(registry: Any) -> bool:

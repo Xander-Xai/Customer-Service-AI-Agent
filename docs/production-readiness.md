@@ -33,8 +33,8 @@
 | 混合检索 RAG | `rag/` | Qdrant + BM25 → RRF → cross-encoder rerank，确定性 point ID |
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
 | Tool Result Context Engineering | `core/tool_result_*.py` | 预算/压缩/offload/recovery/scope-safe reuse |
-| Function Calling + MCP 适配器 | `tools/` | MCP 默认关闭，read-only-first，SKU 文档接入；授权目录与实际业务待验证 |
-| A2A 售后程序专家 | `integrations/a2a_policy/` | 默认关闭，独立只读规则服务，支持显式批准的私有 HTTPS 客户端，服务端仍 loopback；生产 TLS 入口和实际目录待验证 |
+| Function Calling + MCP 适配器 | `tools/` | 标准 Compose 默认启用合成 SKU 文档，read-only-first；工业部署需批准目录，生产数据待验证 |
+| A2A 售后程序专家 | `integrations/a2a_policy/` | 标准 Compose 启动独立合成 peer 并生成私有 bearer；工业部署要求批准目录和私有 HTTPS/CA；企业 TLS/目录待验证 |
 | 分布式 Agent Runtime | `runtime/` | AgentRun 唯一真相源 · Postgres checkpoint · Redis 锁 · Celery worker · 三层幂等 · DLQ 重放 · run 事件流 |
 | Human-in-the-Loop 审批治理 | `core/hitl/` · `runtime/statuses.py` | 执行前拦截 · durable 审批 · 职责分离 · TTL 拒绝优先 · 审批幂等双防线 |
 | FastAPI 服务与安全 | `api/` · `auth/` | JWT + Argon2id + 4 级 RBAC · CSRF 双提交 · CSP nonce · 限流 · SSRF 防护 |

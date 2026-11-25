@@ -71,6 +71,61 @@ services:
     networks:
       - cs-network
 
+  # One-time private credential generation for the standard synthetic local
+  # MCP/A2A profile. The generated token and pin live only in this Docker
+  # volume; industrial deployments set CSAI_PROTOCOL_MODE=external and supply
+  # approved external catalog/TLS settings instead.
+  protocol-init:
+    build: ../..
+    user: "0:0"
+    entrypoint: ["python3", "scripts/prepare_standard_protocol_config.py"]
+    command: ["--output-directory", "/run/csai-protocol"]
+    environment:
+      - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-standard}
+    volumes:
+      - protocol-config:/run/csai-protocol
+    restart: "no"
+    networks:
+      - cs-network
+
+  # Independent A2A policy specialist for the standard local synthetic profile.
+  # No host port is published; industrial deployments use their reviewed
+  # private-HTTPS peer and configure CSAI_PROTOCOL_MODE=external.
+  a2a-peer:
+    build: ../..
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ]; then
+          exec sleep infinity;
+        fi;
+        exec /bin/sh /app/scripts/exec_with_protocol_config.sh python3 -m
+        integrations.a2a_policy.business_server --catalog
+        /app/deploy/fixtures/after-sales-procedures.synthetic.json
+        --authorized-customer-disclosure
+    environment:
+      - SERVICE_ROLE=worker
+      - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
+    volumes:
+      - protocol-config:/run/csai-protocol:ro
+    depends_on:
+      protocol-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ]; then exit 0; fi;
+          python3 -c "import httpx; r=httpx.get('http://localhost:41243/.well-known/agent-card.json', timeout=2); assert r.status_code==200"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - protocol-network
+
   # ===== Nginx 反向代理（v3.9）=====
   nginx:
     # 构建上下文 = deploy/nginx/（含 Dockerfile + nginx.conf）。
@@ -91,7 +146,7 @@ services:
       - ../nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
       app:
-        condition: service_started
+        condition: service_healthy
       # 缺证书时先在这里失败，nginx 不会被拉起（#57）
       tls-check:
         condition: service_completed_successfully
@@ -121,6 +176,19 @@ services:
       # 进程角色：决定 core/config.py 施加哪一套校验（见 core/config.py::SERVICE_ROLE）。
       # API 需要 API_KEY / CORS / JWT / Session 密钥；worker 不需要。
       - SERVICE_ROLE=api
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-standard}
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      - MCP_FAIL_CLOSED=${MCP_FAIL_CLOSED:-true}
+      - MCP_SERVERS=${MCP_SERVERS:-}
+      - A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}
+      - A2A_AFTERSALES_INTERNAL_HTTP=${A2A_AFTERSALES_INTERNAL_HTTP:-false}
+      - A2A_AFTERSALES_PRIVATE_HTTPS=${A2A_AFTERSALES_PRIVATE_HTTPS:-false}
+      - A2A_AFTERSALES_ENDPOINT=${A2A_AFTERSALES_ENDPOINT:-}
+      - A2A_AFTERSALES_TOKEN=${A2A_AFTERSALES_TOKEN:-}
+      - A2A_AFTERSALES_POLICY_SHA256=${A2A_AFTERSALES_POLICY_SHA256:-}
+      - A2A_AFTERSALES_CA_FILE=/run/a2a-ca/ca.pem
+      - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       # Canonical default from core/config.py: Qwen/Qwen3-8B (see .env.example)
@@ -217,8 +285,12 @@ services:
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
       # v4.0: 数据库持久化
       - ../../data:/app/data
+      - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
       # 与 worker 共享的 Prometheus 多进程样本目录
       - prom-metrics:/app/var/prom-metrics
+      - protocol-config:/run/csai-protocol:ro
+    entrypoint: ["/bin/sh", "/app/scripts/exec_with_protocol_config.sh"]
+    command: ["gunicorn", "api.app_factory:app", "-c", "gunicorn.conf.py"]
     depends_on:
       redis:
         condition: service_healthy
@@ -226,6 +298,10 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_started
+      a2a-peer:
+        condition: service_healthy
+      protocol-init:
+        condition: service_completed_successfully
       metrics-init:
         condition: service_completed_successfully
     restart: unless-stopped
@@ -236,6 +312,7 @@ services:
       retries: 3
     networks:
       - cs-network
+      - protocol-network
 
   # ===== Celery Worker（异步 Agent Run 执行）=====
   # 独立于 API 进程；API 关闭不影响已入队任务。业务状态真相源是 PostgreSQL，
@@ -260,6 +337,19 @@ services:
       # 用 subprocess 实测这条导入链），因此 worker 从不需要该变量。与 app 共用同一
       # Docker image 不构成注入理由 —— 那只会无谓扩大高权限口令的暴露面。
       - SERVICE_ROLE=worker
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-standard}
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      - MCP_FAIL_CLOSED=${MCP_FAIL_CLOSED:-true}
+      - MCP_SERVERS=${MCP_SERVERS:-}
+      - A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}
+      - A2A_AFTERSALES_INTERNAL_HTTP=${A2A_AFTERSALES_INTERNAL_HTTP:-false}
+      - A2A_AFTERSALES_PRIVATE_HTTPS=${A2A_AFTERSALES_PRIVATE_HTTPS:-false}
+      - A2A_AFTERSALES_ENDPOINT=${A2A_AFTERSALES_ENDPOINT:-}
+      - A2A_AFTERSALES_TOKEN=${A2A_AFTERSALES_TOKEN:-}
+      - A2A_AFTERSALES_POLICY_SHA256=${A2A_AFTERSALES_POLICY_SHA256:-}
+      - A2A_AFTERSALES_CA_FILE=/run/a2a-ca/ca.pem
+      - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
@@ -308,7 +398,10 @@ services:
     volumes:
       - app-logs:/app/logs
       - ../../data:/app/data
+      - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
       - prom-metrics:/app/var/prom-metrics
+      - protocol-config:/run/csai-protocol:ro
+    entrypoint: ["/bin/sh", "/app/scripts/exec_with_protocol_config.sh"]
     depends_on:
       redis:
         condition: service_healthy
@@ -318,6 +411,10 @@ services:
         condition: service_completed_successfully
       qdrant:
         condition: service_started
+      a2a-peer:
+        condition: service_healthy
+      protocol-init:
+        condition: service_completed_successfully
     # Celery-native liveness。
     #
     # 本服务在 compose 里原本**没有** healthcheck，于是继承镜像级 HEALTHCHECK
@@ -351,6 +448,7 @@ services:
     restart: unless-stopped
     networks:
       - cs-network
+      - protocol-network
 
   # ===== Celery Beat（滞留 run 周期 reconciler 的驱动器）=====
   # 恢复闭环的承重结构，不是可选组件。
@@ -572,7 +670,11 @@ volumes:
   # app 与 worker 共享的 Prometheus 多进程 mmap 样本目录。
   # 删掉它 = 指标归零（等价于服务重启，由 metrics-init 负责显式清理）。
   prom-metrics:
+  protocol-config:
 
 networks:
   cs-network:
     driver: bridge
+  protocol-network:
+    driver: bridge
+    internal: true
