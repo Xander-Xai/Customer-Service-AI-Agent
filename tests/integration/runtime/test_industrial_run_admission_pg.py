@@ -8,7 +8,9 @@ from runtime.admission import RunAdmissionRejected
 from runtime.statuses import RunStatus
 
 
-def test_concurrent_industrial_user_admission(run_service, cleanup_created_runs, unique, monkeypatch):
+def test_concurrent_industrial_user_admission(
+    run_service, cleanup_created_runs, unique, monkeypatch
+):
     monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "industrial")
     monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS", "100000")
     monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_USER", "2")
