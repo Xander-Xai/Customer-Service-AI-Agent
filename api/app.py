@@ -134,9 +134,8 @@ def _make_cached_static(
 
 async def _pending_steps(graph_app, graph_config: dict[str, Any]) -> tuple[str, ...]:
     """Inspect synchronous recovery without adopting a pending worker episode."""
-    from runtime.bootstrap import inspect_episode_checkpoint
-
     from core import config as cfg
+    from runtime.bootstrap import inspect_episode_checkpoint
 
     return await inspect_episode_checkpoint(graph_app, graph_config, None, strict=not cfg.DEV_MODE)
 
