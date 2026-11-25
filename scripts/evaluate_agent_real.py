@@ -196,7 +196,9 @@ async def _run_authorized(plan, cases) -> dict:
         async with AgentEvalHarness(hitl_enabled=True, inject_scripted_llm=False) as harness:
 
             if not isinstance(harness.container.llm, OpenAICompatibleClient):
-                raise RealProviderNotAuthorized("runtime did not initialize the expected chat client")
+                raise RealProviderNotAuthorized(
+                    "runtime did not initialize the expected chat client"
+                )
 
             async def _runner(case):
                 with collect_usage() as meter:
