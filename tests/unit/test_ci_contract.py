@@ -270,9 +270,9 @@ class TestExitCodePropagation:
                 continue  # not a blocking test-execution step
             if re.search(r"continue-on-error\s*:\s*true", block):
                 offenders.append(name)
-        assert not offenders, (
-            f"Test-execution steps softened with continue-on-error: true: {offenders}"
-        )
+        assert (
+            not offenders
+        ), f"Test-execution steps softened with continue-on-error: true: {offenders}"
 
 
 class TestCoverageGate:
@@ -678,12 +678,12 @@ class TestRuffGate:
 
     def test_ruff_lint_is_a_blocking_step(self):
         run = _step_run_exact(self.LINT_STEP)
-        assert "ruff check ." in run, (
-            f"The '{self.LINT_STEP}' step no longer runs `ruff check .`:\n{run}"
-        )
-        assert "|| true" not in run, (
-            f"The '{self.LINT_STEP}' step fakes a green exit with `|| true`; Ruff must be blocking."
-        )
+        assert (
+            "ruff check ." in run
+        ), f"The '{self.LINT_STEP}' step no longer runs `ruff check .`:\n{run}"
+        assert (
+            "|| true" not in run
+        ), f"The '{self.LINT_STEP}' step fakes a green exit with `|| true`; Ruff must be blocking."
         assert "continue-on-error" not in _step_block_exact(self.LINT_STEP), (
             f"The '{self.LINT_STEP}' step is softened with continue-on-error; Ruff "
             "lint must fail the job."
@@ -691,9 +691,9 @@ class TestRuffGate:
 
     def test_ruff_format_check_is_a_blocking_step(self):
         run = _step_run_exact(self.FORMAT_STEP)
-        assert "ruff format --check ." in run, (
-            f"The '{self.FORMAT_STEP}' step no longer runs `ruff format --check .`:\n{run}"
-        )
+        assert (
+            "ruff format --check ." in run
+        ), f"The '{self.FORMAT_STEP}' step no longer runs `ruff format --check .`:\n{run}"
         assert "|| true" not in run, (
             f"The '{self.FORMAT_STEP}' step fakes a green exit with `|| true`; Ruff "
             "format must be blocking."
@@ -827,9 +827,9 @@ class TestMcpContractWiring:
             re.sub(r"\s+", " ", m.replace('"', "").replace("'", "").strip())
             for m in re.findall(r"[\"']mcp[^\"']*[\"']", run)
         }
-        assert ci_specs, (
-            f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
-        )
+        assert (
+            ci_specs
+        ), f"No quoted mcp requirement specifier found in the '{self.CI_MCP_STEP}' step:\n{run}"
         declared = self._declared_mcp_spec(self.REQ)
         assert declared is not None, (
             "requirements.txt must declare the official mcp SDK because the standard "

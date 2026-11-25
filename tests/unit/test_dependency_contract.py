@@ -245,9 +245,9 @@ def test_allowed_undeclared_entries_are_documented():
     declared = _declared_names(REQ, REQ_DEV, REQ_OPT, REQ_A2A)
     for mod, reason in ALLOWED_UNDECLARED.items():
         assert reason.strip(), f"{mod} 的豁免必须写明理由"
-        assert not _is_declared(mod, declared), (
-            f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
-        )
+        assert not _is_declared(
+            mod, declared
+        ), f"{mod} 现在已被正式声明或传递提供，应从 ALLOWED_UNDECLARED 移除"
 
 
 @pytest.mark.unit
