@@ -97,7 +97,8 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - >-
-        if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ]; then
+        if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ] ||
+           [ "$${A2A_AFTERSALES_ENABLED:-true}" != true ]; then
           exec sleep infinity;
         fi;
         exec /bin/sh /app/scripts/exec_with_protocol_config.sh python3 -m
@@ -107,6 +108,7 @@ services:
     environment:
       - SERVICE_ROLE=worker
       - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
+      - A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}
     volumes:
       - protocol-config:/run/csai-protocol:ro
     depends_on:
@@ -116,7 +118,8 @@ services:
       test:
         - CMD-SHELL
         - >-
-          if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ]; then exit 0; fi;
+          if [ "$${CSAI_PROTOCOL_MODE:-synthetic}" = external ] ||
+             [ "$${A2A_AFTERSALES_ENABLED:-true}" != true ]; then exit 0; fi;
           python3 -c "import httpx; r=httpx.get('http://localhost:41243/.well-known/agent-card.json', timeout=2); assert r.status_code==200"
       interval: 10s
       timeout: 3s

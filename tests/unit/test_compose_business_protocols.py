@@ -27,6 +27,8 @@ def test_standard_compose_wires_mcp_and_a2a_before_api_and_worker():
 
     assert "ports" not in peer
     assert peer["networks"] == ["protocol-network"]
+    assert "A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}" in peer["environment"]
+    assert "A2A_AFTERSALES_ENABLED" in " ".join(peer["command"])
     assert peer["depends_on"]["protocol-init"]["condition"] == "service_completed_successfully"
     assert any("41243" in str(item) for item in peer["healthcheck"]["test"])
     assert init["user"] == "0:0"

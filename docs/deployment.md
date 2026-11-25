@@ -133,7 +133,7 @@ Compose 工业私有 TLS 的 CA 文件通过 `A2A_AFTERSALES_CA_SOURCE` 从宿�
 
 标准 Compose 首次启动由 `protocol-init` 创建本地随机 peer bearer 和只读配置，`a2a-peer`
 通过 healthcheck 就绪后，API/worker 才启动；该 peer 不发布宿主端口，仅用于合成数据验收。
-关闭能力可设置 `MCP_ENABLED=false` 与 `A2A_AFTERSALES_ENABLED=false`。使用工业 profile
+关闭能力可设置 `MCP_ENABLED=false` 与 `A2A_AFTERSALES_ENABLED=false`；后者让本地 A2A peer 进入不监听的 dormant 状态。使用工业 profile
 时需外部批准目录和私有 HTTPS，且不得复用 synthetic volume；旧 synthetic volume 切换时
 初始化器 fail-closed，需按运维流程明确清理/替换。
 

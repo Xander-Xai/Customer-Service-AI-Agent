@@ -30,7 +30,7 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
-**业务协议边界**：标准 Compose 部署默认接入合成 SKU 使用/存储文档 MCP 与独立售后规则 A2A peer；peer bearer 在本地首次启动时生成并保存在私有 Docker volume，不提交到 Git。工具只读、不授权退款、不查询 ERP。禁用回滚为 `MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false`。`CSAI_RUNTIME_PROFILE=industrial` 拒绝合成协议配置，要求 `CSAI_PROTOCOL_MODE=external`、批准目录/摘要及私有 TLS 认证。当前合成数据验收不代表企业目录、真实 TLS、ERP 或生产验证，也不是历史任职时的上线记录。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+**业务协议边界**：标准 Compose 部署默认接入合成 SKU 使用/存储文档 MCP 与独立售后规则 A2A peer；peer bearer 在本地首次启动时生成并保存在私有 Docker volume，不提交到 Git。工具只读、不授权退款、不查询 ERP。禁用回滚为 `MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false`（关闭时本地 peer 不监听）。`CSAI_RUNTIME_PROFILE=industrial` 拒绝合成协议配置，要求 `CSAI_PROTOCOL_MODE=external`、批准目录/摘要及私有 TLS 认证。当前合成数据验收不代表企业目录、真实 TLS、ERP 或生产验证，也不是历史任职时的上线记录。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
 
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 
