@@ -55,9 +55,8 @@ async def test_real_client_counts_retry_and_preserves_unknown_usage():
     }
     transport = AsyncMock()
     transport.post.side_effect = [httpx.ConnectError("fixture"), response]
-    with patch.object(client, "_get_async_client", return_value=transport):
-        with collect_usage() as scope:
-            await client.async_invoke([HumanMessage(content="fixture")])
+    with patch.object(client, "_get_async_client", return_value=transport), collect_usage() as scope:
+        await client.async_invoke([HumanMessage(content="fixture")])
     evidence = scope.snapshot()
     assert evidence["chat_http_attempts"] == 2
     assert evidence["attempts_with_usage"] == 1
@@ -75,9 +74,8 @@ async def test_real_raw_client_usage_is_collected():
     }
     transport = AsyncMock()
     transport.post.return_value = response
-    with patch.object(client, "_get_async_client", return_value=transport):
-        with collect_usage() as scope:
-            await client.async_invoke_raw([{"role": "user", "content": "fixture"}])
+    with patch.object(client, "_get_async_client", return_value=transport), collect_usage() as scope:
+        await client.async_invoke_raw([{"role": "user", "content": "fixture"}])
     assert scope.snapshot()["input_tokens"] == 2
     assert scope.snapshot()["output_tokens"] == 3
 
