@@ -10,26 +10,45 @@
 
 ```mermaid
 flowchart TD
- U[Web / Authenticated API] --> N[Nginx]
- N --> A[FastAPI identity / session admission]
- A --> F[Inline read-only graph]
- A --> R[AgentRun PostgreSQL]
- R --> Q[Celery / Redis broker]
- Q --> W[Independent worker]
- W --> G[Shared LangGraph]
+ U[Web / Authenticated API]
+ N[Nginx]
+ A[FastAPI identity / session admission]
+ F[Inline read-only graph]
+ R[AgentRun PostgreSQL]
+ Q[Celery / Redis broker]
+ W[Independent worker]
+ G[Shared LangGraph]
+ L[Cache / Routing]
+ D[Domain specialists / bounded ReAct]
+ C[Parallel or fixed supervisor if needed]
+ T[Tool registry / authorized ERP read adapter]
+ H[HITL / operation ledger for writes]
+ E[Quality gate / deterministic finalization]
+ S[SSE or durable result]
+ P[(PostgreSQL checkpoint / CAS)]
+ I[(Redis session ownership / thread lock)]
+ B[Beat / reconciler]
+ X[External ERP / optional MCP and A2A]
+ U --> N
+ N --> A
+ A --> F
+ A --> R
+ R --> Q
+ Q --> W
+ W --> G
  F --> G
- G --> L[Cache / Routing]
- L --> D[Domain specialists / bounded ReAct]
- D --> C[Parallel or fixed supervisor if needed]
- C --> T[Tool registry / authorized ERP read adapter]
- T --> H[HITL / operation ledger for writes]
- H --> E[Quality gate / deterministic finalization]
- E --> S[SSE or durable result]
- W --> P[(PostgreSQL checkpoint / CAS)]
- A --> I[(Redis session ownership / thread lock)]
+ G --> L
+ L --> D
+ D --> C
+ C --> T
+ T --> H
+ H --> E
+ E --> S
+ W --> P
+ A --> I
  W --> I
- B[Beat / reconciler] --> R
- T --> X[External ERP / optional MCP and A2A]
+ B --> R
+ T --> X
 ```
 
 Seven domain roles, ReAct and Response are nine registered runtime roles, not nine autonomous services. Direct routing is the default; parallel and fixed supervisor-workers share fan-out; consultation/hierarchical are compatibility profiles. No dynamic swarm. ResponseAgent is deterministic post-processing. Standalone loop is an offline/reference lane, not an alternative online executor. Local blackboard/message bus are run-local diagnostics, not distributed authorization. Durable human handoff is distinct from write approval.
