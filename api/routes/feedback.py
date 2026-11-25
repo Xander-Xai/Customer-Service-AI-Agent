@@ -126,9 +126,7 @@ async def submit_feedback(request: Request, data: FeedbackRequest):
         except Exception as e:
             logger.debug(f"Feedback Bus 事件发布失败: {e}")
 
-    logger.info(
-        f"[Feedback] session={session_id} resolved={resolved} rating={rating}"
-    )
+    logger.info(f"[Feedback] session={session_id} resolved={resolved} rating={rating}")
     return {"status": "ok", "session_id": session_id, "resolved": resolved, "rating": rating}
 
 
