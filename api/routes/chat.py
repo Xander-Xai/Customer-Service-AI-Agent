@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from api.utils import extract_user_id, sanitize_input, validate_session_id
 from core.concurrency.distributed_lock import ThreadBusyError, thread_busy_payload
+from core.concurrency.fast_path_admission import FastPathAdmissionError
 from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger
 
@@ -279,6 +280,9 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
 
         try:
             result = await ctx.graph_task
+        except FastPathAdmissionError as exc:
+            yield _sse_event({"type": "error", "code": exc.code, "content": "服务繁忙或暂时不可用"})
+            return
         except ThreadBusyError as e:
             logger.info("SSE THREAD_BUSY sid=%s", ctx.sid)
             yield _sse_event(
@@ -359,6 +363,8 @@ async def rest_chat(data: ChatRequest, request: Request):
         if session.session_manager:
             mapped["session_token"] = session.session_manager.generate_session_token(session.sid)
         return mapped
+    except FastPathAdmissionError as exc:
+        return JSONResponse({"error": exc.code, "code": exc.code}, status_code=exc.status)
     except ThreadBusyError as e:
         logger.info("REST THREAD_BUSY sid=%s", session.sid)
         return JSONResponse(thread_busy_payload(e), status_code=409)

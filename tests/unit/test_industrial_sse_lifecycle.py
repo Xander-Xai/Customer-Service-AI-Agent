@@ -118,5 +118,5 @@ async def test_industrial_graph_typeerror_never_invokes_compatibility_retry(monk
     monkeypatch.setattr(app, "_graph_app", graph)
     monkeypatch.setattr("core.config.AGENT_RUN_THREAD_LOCK_ENABLED", False)
     with pytest.raises(TypeError, match="fixture node failed"):
-        await app._run_graph("fixture", "q", user_id="user")
+        await app._run_graph_inner("fixture", "q", user_id="user")
     graph.ainvoke.assert_awaited_once()

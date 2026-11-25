@@ -150,6 +150,24 @@ async def _run_graph(
     multimodal_content=None,
     user_id: str | None = None,
 ) -> dict[str, Any]:
+    from core.concurrency.fast_path_admission import execute_admitted
+    from core.industrial import industrial_enabled
+
+    def operation():
+        return _run_graph_inner(session_id, query, stream_callback, multimodal_content, user_id)
+
+    if industrial_enabled():
+        return await execute_admitted(user_id, operation)
+    return await operation()
+
+
+async def _run_graph_inner(
+    session_id: str,
+    query: str,
+    stream_callback=None,
+    multimodal_content=None,
+    user_id: str | None = None,
+) -> dict[str, Any]:
     """执行 LangGraph 图（原生异步 + SLA 告警 + 解决状态追踪）"""
     from core.shared_blackboard import set_blackboard_session_id
 
@@ -427,6 +445,15 @@ def create_app(
             status_code=503,
         )
 
+    from core.concurrency.fast_path_admission import FastPathAdmissionError
+
+    async def _fast_path_handler(request: Request, exc: Exception):
+        from fastapi.responses import JSONResponse
+
+        assert isinstance(exc, FastPathAdmissionError)
+        return JSONResponse({"error": exc.code, "code": exc.code}, status_code=exc.status)
+
+    app.add_exception_handler(FastPathAdmissionError, _fast_path_handler)
     app.add_exception_handler(ThreadBusyError, _thread_busy_handler)
     app.add_exception_handler(ThreadLockUnavailableError, _thread_lock_unavailable_handler)
 

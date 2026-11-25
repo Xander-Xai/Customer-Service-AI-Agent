@@ -243,7 +243,9 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
     def status():
         with engine.connect() as conn:
             return conn.execute(
-                text("SELECT status, attempt, worker_id FROM agent_runs WHERE id=:id"),
+                text(
+                    "SELECT status, attempt, worker_id, error_code, error_type FROM agent_runs WHERE id=:id"
+                ),
                 {"id": run_id},
             ).fetchone()
 
@@ -335,7 +337,8 @@ def test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill():
 
         final = _wait_for(_terminal, 150)
         assert final is not None, f"run 未进入终态: {status()}"
-        assert final[0] == "SUCCEEDED", f"未恢复成功: {final}"
+        # Preserve the exact failure class before fixture teardown deletes the run.
+        assert final[0] == "SUCCEEDED", f"未恢复成功 (status, attempt, owner, code, type): {final}"
         assert final[1] >= 2, f"应发生重投重做，实际 attempt={final[1]}"
 
         # 4) 关键断言：副作用只发生了一次

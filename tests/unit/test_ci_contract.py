@@ -914,3 +914,28 @@ class TestMcpContractWiring:
                 "preflight must run first, otherwise those lanes already reported "
                 "green with the MCP contract suite skipped."
             )
+
+
+def test_image_publication_requires_all_blocking_lanes():
+    """A failing runtime/eval/frontend job must prevent publishing latest."""
+    workflow = CI_YAML.read_text(encoding="utf-8")
+    build = re.search(r"^  build-and-push:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow, re.M | re.S)
+    assert build is not None
+    needs = re.search(r"^    needs: \[(.*?)\]$", build.group(1), re.M)
+    assert needs is not None
+    assert set(needs.group(1).split(", ")) == {
+        "lint",
+        "test",
+        "dev-compat",
+        "runtime-e2e",
+        "metrics-alerting",
+        "agent-eval",
+        "handoff-frontend",
+        "security",
+    }
+    assert "always()" not in build.group(1)
+    assert "continue-on-error: true" not in build.group(1)
+    deploy = re.search(r"^  deploy:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow, re.M | re.S)
+    assert deploy is not None
+    assert "needs: build-and-push" in deploy.group(1)
+    assert "always()" not in deploy.group(1)

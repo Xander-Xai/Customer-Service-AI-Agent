@@ -74,9 +74,11 @@ def test_fast_path_never_goes_through_worker():
     """源码级锁定：``_run_graph`` 直接 ``ainvoke`` 图，不经过 dispatch/queue。"""
     import inspect
 
-    from api.app import _run_graph
+    from api.app import _run_graph, _run_graph_inner
 
-    src = inspect.getsource(_run_graph)
+    wrapper = inspect.getsource(_run_graph)
+    assert "_run_graph_inner(" in wrapper
+    src = wrapper + inspect.getsource(_run_graph_inner)
     assert "ainvoke" in src, "快路径应直接执行图"
     for forbidden in ("dispatch_run", "apply_async", "execute_run", "celery"):
         assert forbidden not in src, (

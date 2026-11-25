@@ -46,9 +46,9 @@ def test_unit_state_must_not_receive_callable():
     """
     import inspect
 
-    from api.app import _run_graph
+    from api.app import _run_graph, _run_graph_inner
 
-    src = inspect.getsource(_run_graph)
+    src = inspect.getsource(_run_graph) + inspect.getsource(_run_graph_inner)
     assert 'state["stream_callback"]' not in src, (
         "_run_graph 不得再把 async 可调用对象放进 LangGraph state "
         "(checkpointer 无法序列化 function)"
