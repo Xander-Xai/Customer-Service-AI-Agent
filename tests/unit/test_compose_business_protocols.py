@@ -7,6 +7,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "deploy/compose/docker-compose.yml"
 CANARY = ROOT / "deploy/compose/docker-compose.canary.yml"
+ENV_EXAMPLE = ROOT / ".env.example"
 
 
 def test_standard_compose_wires_mcp_and_a2a_before_api_and_worker():
@@ -48,6 +49,12 @@ def test_standard_compose_default_has_explicit_rollback_and_fail_closed():
     assert "MCP_FAIL_CLOSED=${MCP_FAIL_CLOSED:-true}" in text
     assert "A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}" in text
     assert "CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}" in text
+
+
+def test_non_compose_runtime_example_does_not_enable_empty_protocol_config():
+    env = ENV_EXAMPLE.read_text(encoding="utf-8")
+    assert "MCP_ENABLED=\n" in env
+    assert "A2A_AFTERSALES_ENABLED=\n" in env
 
 
 def test_canary_overlay_uses_the_same_protocol_readiness_boundary():
