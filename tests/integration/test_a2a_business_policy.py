@@ -235,8 +235,20 @@ async def test_business_specialist_uses_real_sdk_over_independent_local_process(
                 endpoint + "/a2a/jsonrpc", content=b"{}", headers={"Authorization": "Bearer wrong"}
             )
             assert denied.status_code == 401
-            from integrations.a2a_policy.business_client import verify_business_a2a_peer
+            from integrations.a2a_policy.business_client import (
+                register_business_a2a_tool,
+                verify_business_a2a_peer,
+            )
+            from tools.tool_registry import ToolRegistry
 
+            registry = ToolRegistry()
+            assert register_business_a2a_tool(registry)
+            receipt = await registry.execute_raw(
+                "after_sales_procedure_review", REQUEST, return_receipt=True
+            )
+            assert receipt.ok
+            assert receipt.value["policy_sha256"] == digest
+            assert receipt.value["execution_authorized"] is False
             await verify_business_a2a_peer()
     finally:
         if process.poll() is None:
