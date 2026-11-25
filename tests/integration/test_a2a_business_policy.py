@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import importlib.util
 import json
 import os
 import socket
@@ -170,6 +171,8 @@ async def test_business_specialist_uses_real_sdk_over_independent_local_process(
     catalog, monkeypatch
 ):
     pytest.importorskip("a2a")
+    if importlib.util.find_spec("sqlalchemy") is None:
+        pytest.skip("ToolRegistry integration requires the standard Agent runtime dependencies")
     path, digest = catalog
     token = "b" * 64
     with socket.socket() as listener:
