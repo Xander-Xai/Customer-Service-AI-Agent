@@ -111,3 +111,7 @@ HITL_ENABLED=true
 ### 工业快路径执行容量（2026-11-25，独立候选）
 
 #83/#84 已合并，前述候选记录为历史。工业 API 的共享 _run_graph 入口（REST、文字/图片 SSE、调用该入口的媒体路由）先经过 Redis TIME + Lua 原子双配额：默认全局 32、用户 2；配置 CSAI_FAST_PATH_MAX_ACTIVE、CSAI_FAST_PATH_MAX_ACTIVE_PER_USER。每次执行独立随机 token，用户键 HMAC，过期成员原子清除，超额不插入。默认 90 秒协作式 deadline（CSAI_FAST_PATH_DEADLINE_SECONDS），要求小于 thread lock TTL 且留 10s margin，租约 TTL=deadline+30s；返回成功前再次核查两级租约及本地 deadline；Redis 不可用拒绝，用户 429、全局/租约失效 503、deadline 504；已开始 SSE 则 error event 无 done。正常/取消/异常尝试 owner-only ZREM，崩溃依赖过期。配置须在全部 API 副本一致；默认值不是压测结果。此为快路径 graph execution 数量，不是 SSE socket、媒体预处理、Worker/Broker、模型 token 或实际物理并行度。协作式超时不能终止同步线程/外部已发请求；Redis 重启、时钟跳变、事件循环阻塞和长时间取消可能造成租约与真实执行不一致，最终检查不是写入 fencing，不能保证 checkpoint/副作用回滚。真实多副本负载、Redis 故障恢复及 Thread lease fencing 仍未验收。
+
+### 2026-11-25 验收纠偏
+
+#84 已合并，但 main `04455afc` CI 45572038791 的 Gate11 worker kill 恢复出现 FAILED（205 pass / 1 fail），此前 #84 候选通过不能覆盖这一失败。#85 初始 head `d767ba3f` CI 45572249107 的真实 Redis 容量用例通过，但源码契约未随 `_run_graph` 包装器更新，单测两项与集成 checkpoint 源码检查失败，另有 Ruff E721/SIM105。修正检查同时覆盖包装器与实际执行函数，保留原断言；补充内存 ThreadLock 到期不可续租回归（防止过期 owner 复活，仅与 Redis 原语语义对齐，不是生产 fencing）。Gate11 失败时保留 error_code/error_type，不降低 SUCCEEDED 或副作用计数断言。主线 Gate11 根因仍未确证，须以最新完整 CI 和失败诊断为准；不将偶发通过等同于修复。

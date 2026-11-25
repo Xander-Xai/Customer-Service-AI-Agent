@@ -63,3 +63,18 @@ async def test_redis_failure_refuses_operation(monkeypatch):
         await execute_admitted("owner", graph)
     assert error.value.code == "FAST_PATH_UNAVAILABLE"
     graph.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_expired_memory_thread_owner_cannot_resurrect_lease():
+    from runtime.thread_lock import InMemoryThreadLock
+
+    now = [0.0]
+    manager = InMemoryThreadLock(clock=lambda: now[0])
+    assert await manager.acquire("thread", "old-owner", 1)
+    now[0] = 1.0
+    assert not await manager.refresh("thread", "old-owner", 1)
+    assert await manager.acquire("thread", "new-owner", 1)
+    assert not await manager.release("thread", "old-owner")
+    assert await manager.refresh("thread", "new-owner", 1)
+    await manager.close()

@@ -80,9 +80,10 @@ class InMemoryThreadLock:
     async def refresh(self, thread_id: str, owner: str, ttl_seconds: float) -> bool:
         async with self._guard:
             existing = self._locks.get(thread_id)
-            if existing is None or existing[0] != owner:
+            now = self._clock()
+            if existing is None or existing[0] != owner or existing[1] <= now:
                 return False
-            self._locks[thread_id] = (owner, self._clock() + ttl_seconds)
+            self._locks[thread_id] = (owner, now + ttl_seconds)
             return True
 
     async def is_locked(self, thread_id: str) -> bool:

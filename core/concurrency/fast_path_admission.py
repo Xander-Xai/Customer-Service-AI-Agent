@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hmac
 import os
 import secrets
@@ -92,11 +93,13 @@ async def execute_admitted(user_id: str | None, operation: Callable[[], Awaitabl
             decision = await client.eval(ACQUIRE, 2, *keys, maximum, per_user, ttl_ms, token)
         except Exception as exc:
             raise FastPathAdmissionError("FAST_PATH_UNAVAILABLE", 503) from exc
+        if not isinstance(decision, int) or isinstance(decision, bool):
+            raise FastPathAdmissionError("FAST_PATH_UNAVAILABLE", 503)
         if decision == 2:
             raise FastPathAdmissionError("FAST_PATH_GLOBAL_BUSY", 503)
         if decision == 3:
             raise FastPathAdmissionError("FAST_PATH_USER_BUSY", 429)
-        if type(decision) is not int or decision != 1:
+        if decision != 1:
             raise FastPathAdmissionError("FAST_PATH_UNAVAILABLE", 503)
 
         try:
@@ -111,7 +114,7 @@ async def execute_admitted(user_id: str | None, operation: Callable[[], Awaitabl
                 valid = await client.eval(VALID, 2, *keys, token)
             except Exception as exc:
                 raise FastPathAdmissionError("FAST_PATH_UNAVAILABLE", 503) from exc
-            if type(valid) is not int or valid != 1:
+            if not isinstance(valid, int) or isinstance(valid, bool) or valid != 1:
                 raise FastPathAdmissionError("FAST_PATH_LEASE_LOST", 503)
             if time.monotonic() - started >= deadline:
                 raise FastPathAdmissionError("FAST_PATH_DEADLINE", 504)
@@ -120,7 +123,5 @@ async def execute_admitted(user_id: str | None, operation: Callable[[], Awaitabl
             # Join/cancellation is cooperative. Redis failure leaves an expiring
             # reservation rather than a permanent slot leak.
             with anyio.CancelScope(shield=True):
-                try:
+                with contextlib.suppress(Exception):
                     await client.eval(RELEASE, 2, *keys, token)
-                except Exception:
-                    pass

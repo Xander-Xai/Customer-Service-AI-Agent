@@ -267,9 +267,9 @@ class TestStreamCallbackNotCheckpointed:
     def test_run_graph_does_not_put_callable_into_state(self):
         import inspect
 
-        from api.app import _run_graph
+        from api.app import _run_graph, _run_graph_inner
 
-        src = inspect.getsource(_run_graph)
+        src = inspect.getsource(_run_graph) + inspect.getsource(_run_graph_inner)
         assert 'state["stream_callback"]' not in src
         assert "set_stream_callback" in src
 
