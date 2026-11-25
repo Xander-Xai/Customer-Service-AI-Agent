@@ -34,6 +34,7 @@ from core.config import (
     RETRY_MAX_DELAY,
 )
 from core.logger import get_logger, get_trace_id
+from llm.usage_scope import begin_attempt
 
 logger = get_logger("llm_client")
 
@@ -255,6 +256,7 @@ class OpenAICompatibleClient:
     ):
         """The retry loop of ``async_invoke``; the span is already open by the caller."""
         for attempt in range(self.max_retries):
+            usage_attempt = begin_attempt()
             try:
                 resp = await client.post(
                     f"{self.base_url}/chat/completions",
@@ -264,6 +266,8 @@ class OpenAICompatibleClient:
                 )
                 resp.raise_for_status()
                 result = resp.json()
+                if usage_attempt is not None:
+                    usage_attempt.observe(result)
                 if "choices" in result and result["choices"]:
                     message = result["choices"][0].get("message", {})
                     content = message.get("content", "") or ""
@@ -358,6 +362,7 @@ class OpenAICompatibleClient:
         _call_start = time.time()
 
         for attempt in range(self.max_retries):
+            usage_attempt = begin_attempt()
             try:
                 resp = await client.post(
                     f"{self.base_url}/chat/completions",
@@ -367,6 +372,8 @@ class OpenAICompatibleClient:
                 )
                 resp.raise_for_status()
                 result = resp.json()
+                if usage_attempt is not None:
+                    usage_attempt.observe(result)
                 if self.circuit_breaker:
                     await self.circuit_breaker.record_success()
                 # v5.1: Token 用量追踪
@@ -406,6 +413,7 @@ class OpenAICompatibleClient:
         call_timeout = httpx.Timeout(timeout or self.timeout)
 
         for attempt in range(self.max_retries):
+            usage_attempt = begin_attempt()
             try:
                 async with client.stream(
                     "POST",
@@ -427,6 +435,8 @@ class OpenAICompatibleClient:
                                 return
                             try:
                                 chunk = json.loads(data)
+                                if usage_attempt is not None:
+                                    usage_attempt.observe(chunk)
                                 choices = chunk.get("choices", [])
                                 if choices:
                                     finish_reason = choices[0].get("finish_reason")

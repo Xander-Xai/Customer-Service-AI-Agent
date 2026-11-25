@@ -252,6 +252,7 @@ class RealCaseResult:
     route_source: str | None = None
     terminal_state: str | None = None
     fallback_observed: bool | None = None
+    chat_http_metering: dict[str, Any] | None = None
     latency_ms: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -270,6 +271,7 @@ class RealCaseResult:
             "route_source": self.route_source,
             "terminal_state": self.terminal_state,
             "fallback_observed": self.fallback_observed,
+            "chat_http_metering": self.chat_http_metering,
             "latency_ms": self.latency_ms,
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
@@ -529,7 +531,8 @@ async def run_real_provider_lane(
         results.append(
             RealCaseResult(
                 case_id=case_id,
-                status=STATUS_OK,
+                status=STATUS_ERROR if outcome.get("execution_error") else STATUS_OK,
+                error="GraphExecutionError" if outcome.get("execution_error") else None,
                 route=outcome.get("route"),
                 mode=outcome.get("mode"),
                 tool_names=names,
@@ -538,6 +541,7 @@ async def run_real_provider_lane(
                 route_source=outcome.get("route_source"),
                 terminal_state=outcome.get("terminal_state"),
                 fallback_observed=outcome.get("fallback_observed"),
+                chat_http_metering=outcome.get("chat_http_metering"),
                 latency_ms=round((clock() - started) * 1000, 3),
                 input_tokens=in_tok if input_is_metered else None,
                 output_tokens=out_tok if output_is_metered else None,
