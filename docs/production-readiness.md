@@ -159,3 +159,7 @@ LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
 
 
 生产在线图生成式响应缓存采取 fail-closed 策略：`DEV_MODE=false` 时，无论意图标签或命中分数均不读写响应缓存；开发环境仍保留评测路径。此决策不改变知识检索缓存和独立工具回执/工具结果复用的合同。重新启用前须通过跨客户、同客户跨任务、上下文、权限与新鲜度的配对负控制，不以旧 benchmark 作为上线许可。
+
+### Release gate correction (2026-11-25)
+
+Main CI 45572038791 (04455afc) had Runtime E2E Gate11 failure, but build-and-push succeeded because only test/security were dependencies. Deployment was skipped. Candidate #85 makes all eight quality job IDs required before image publication (including all matrix test jobs), adds static dependency regression; deploy continues to depend on publication. This is not a deployment acceptance or image revocation. Previously published image tags need independent operator audit before reuse; no image deletion, registry mutation or deployment was requested. Gate11 recovery remains unverified on the failed main SHA; exact new CI and failure diagnostics are required.
