@@ -103,15 +103,21 @@ async def test_real_independent_process_a2a_rpc_over_loopback(monkeypatch):
             str(port),
         ],
         env=os.environ.copy(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     try:
         ready = False
         async with httpx.AsyncClient(timeout=1.0, trust_env=False) as check:
             for _ in range(70):
                 if process.poll() is not None:
-                    raise AssertionError("A2A peer process failed during startup")
+                    stdout, stderr = process.communicate()
+                    raise AssertionError(
+                        "A2A peer process failed during startup "
+                        f"(exit={process.returncode}); stderr={stderr[-2000:]!r}; "
+                        f"stdout={stdout[-1000:]!r}"
+                    )
                 try:
                     response = await check.get(base_url + "/.well-known/agent-card.json")
                     if response.status_code == 200:
@@ -128,12 +134,14 @@ async def test_real_independent_process_a2a_rpc_over_loopback(monkeypatch):
         assert result["source"] == "synthetic:a2a:faq-v1"
         assert result["answer"].startswith("SYNTHETIC EXAMPLE ONLY:")
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=3)
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=3)
+        process.communicate()
 
 
 @pytest.mark.asyncio

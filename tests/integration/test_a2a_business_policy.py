@@ -186,8 +186,9 @@ async def test_business_specialist_uses_real_sdk_over_independent_local_process(
             "--authorized-customer-disclosure",
         ],
         env=environment,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     monkeypatch.setenv("APP_ENV", "testing")
     monkeypatch.setenv("A2A_AFTERSALES_ENABLED", "true")
@@ -199,7 +200,12 @@ async def test_business_specialist_uses_real_sdk_over_independent_local_process(
         async with httpx.AsyncClient() as client:
             for _ in range(100):
                 if process.poll() is not None:
-                    pytest.fail("A2A specialist process exited before readiness")
+                    stdout, stderr = process.communicate()
+                    pytest.fail(
+                        "A2A specialist process exited before readiness "
+                        f"(exit={process.returncode}); stderr={stderr[-2000:]!r}; "
+                        f"stdout={stdout[-1000:]!r}"
+                    )
                 try:
                     response = await client.get(endpoint + "/.well-known/agent-card.json")
                     if response.status_code == 200:
@@ -218,9 +224,11 @@ async def test_business_specialist_uses_real_sdk_over_independent_local_process(
 
             await verify_business_a2a_peer()
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        process.communicate()
