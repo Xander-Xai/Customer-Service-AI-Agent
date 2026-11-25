@@ -567,9 +567,15 @@ def test_idempotent_replay_of_create_does_not_duplicate_dispatch(env):
     """幂等请求重试：同一个 idempotency_key 只产生一个 run、一条投递。"""
     svc, _repo = env
     key = f"scope:{uuid.uuid4().hex[:8]}"
-    first = svc.create_run(query="q", session_id=f"s-{uuid.uuid4().hex[:8]}", idempotency_key=key)
-    second = svc.create_run(query="q", session_id=f"s-{uuid.uuid4().hex[:8]}", idempotency_key=key)
+    from runtime.run_service import RunIdempotencyConflict
+
+    sid = f"s-{uuid.uuid4().hex[:8]}"
+    first = svc.create_run(query="q", session_id=sid, idempotency_key=key)
+    second = svc.create_run(query="q", session_id=sid, idempotency_key=key)
     assert first["id"] == second["id"], "幂等键命中同一个 run"
+    assert second["created_by_request"] is False
+    with pytest.raises(RunIdempotencyConflict):
+        svc.create_run(query="q", session_id=f"s-{uuid.uuid4().hex[:8]}", idempotency_key=key)
 
     dispatcher = _Recorder()
     asyncio.run(
