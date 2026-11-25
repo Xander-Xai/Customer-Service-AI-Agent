@@ -25,11 +25,16 @@ class Attempt:
         completion = usage.get("completion_tokens")
         total = usage.get("total_tokens")
         if (
-            type(prompt) is int
-            and type(completion) is int
+            isinstance(prompt, int)
+            and not isinstance(prompt, bool)
+            and isinstance(completion, int)
+            and not isinstance(completion, bool)
             and prompt >= 0
             and completion >= 0
-            and (total is None or (type(total) is int and total == prompt + completion))
+            and (
+                total is None
+                or (isinstance(total, int) and not isinstance(total, bool) and total == prompt + completion)
+            )
         ):
             self.usage = (prompt, completion)
 
