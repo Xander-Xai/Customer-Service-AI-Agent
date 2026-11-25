@@ -52,15 +52,17 @@ def check_jwt_auth(request) -> dict | None:
     auth_header = request.headers.get("Authorization", "")
     jwt_token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
     if jwt_token:
-        return _decode_jwt_token(jwt_token)
+        payload = _decode_jwt_token(jwt_token)
+        if payload and payload.get("type") in (None, "access"):
+            return payload
     return None
 
 
 def extract_user_id(request) -> str | None:
     """从请求中提取当前用户 ID（JWT sub 字段）"""
     payload = check_jwt_auth(request)
-    if payload:
-        return payload.get("sub")
+    if payload and payload.get("sub") is not None:
+        return str(payload["sub"])
     return None
 
 

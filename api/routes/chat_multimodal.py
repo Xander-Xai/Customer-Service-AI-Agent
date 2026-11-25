@@ -214,7 +214,7 @@ async def chat_with_voice(
 
     run_graph = request.app.state.run_graph
     start = time.time()
-    result = await run_graph(auth.sid, text)
+    result = await run_graph(auth.sid, text, user_id=auth.user_id)
     elapsed = time.time() - start
 
     return {
@@ -334,7 +334,9 @@ async def chat_with_file(
         query = sanitize_input(query[:MAX_QUERY_LENGTH]) or "请分析这张图片"
         run_graph = request.app.state.run_graph
         start = time.time()
-        result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
+        result = await run_graph(
+            auth.sid, query, multimodal_content=multimodal_content, user_id=auth.user_id
+        )
     elif content_type.startswith("video/"):
         video_desc = await _handle_video_upload(file, query, request)
         if video_desc is None:
@@ -345,7 +347,7 @@ async def chat_with_file(
         combined_query = sanitize_input(combined_query[:MAX_QUERY_LENGTH])
         run_graph = request.app.state.run_graph
         start = time.time()
-        result = await run_graph(auth.sid, combined_query)
+        result = await run_graph(auth.sid, combined_query, user_id=auth.user_id)
     elif any(filename.lower().endswith(ext) for ext in (".pdf", ".docx", ".doc", ".txt", ".md")):
         doc_text = await _handle_document_upload(file, query, request)
         if doc_text is None:
@@ -356,7 +358,7 @@ async def chat_with_file(
         combined_query = sanitize_input(combined_query[:MAX_QUERY_LENGTH])
         run_graph = request.app.state.run_graph
         start = time.time()
-        result = await run_graph(auth.sid, combined_query)
+        result = await run_graph(auth.sid, combined_query, user_id=auth.user_id)
     else:
         return JSONResponse(
             {"error": "不支持的文件格式。支持: 图片、视频、PDF、DOCX、TXT/MD"},
@@ -430,7 +432,7 @@ async def chat_multimodal(
             # v6.1: 调用 run_graph 实现完整 AI 对话
             run_graph = request.app.state.run_graph
             start = time.time()
-            result = await run_graph(auth.sid, transcription)
+            result = await run_graph(auth.sid, transcription, user_id=auth.user_id)
             elapsed = time.time() - start
 
             return {
@@ -469,7 +471,9 @@ async def chat_multimodal(
             query = sanitize_input((message or "请分析这张图片")[:MAX_QUERY_LENGTH])
             run_graph = request.app.state.run_graph
             start = time.time()
-            result = await run_graph(auth.sid, query, multimodal_content=multimodal_content)
+            result = await run_graph(
+                auth.sid, query, multimodal_content=multimodal_content, user_id=auth.user_id
+            )
             elapsed = time.time() - start
 
             return {

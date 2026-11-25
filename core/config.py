@@ -1520,6 +1520,13 @@ def validate_session_encryption_previous_keys(
 # ===== P0-3: 生产环境关键配置启动校验 =====
 def validate_required_config():
     """生产环境启动时校验关键配置项非空非占位符"""
+    from core.industrial import industrial_enabled, validate_industrial_profile
+
+    if industrial_enabled():
+        industrial_errors = validate_industrial_profile({**globals(), "DEV_MODE": _DEV_MODE})
+        if industrial_errors:
+            raise ConfigurationError("; ".join(industrial_errors))
+
     # ---- 超时/租约交叉不变量（**先于** DEV_MODE 早退）----
     # 与 HITL 同理：这些关系错了会在运行时产生**不确定的重复执行**（重复投递、
     # 重复写、锁丢失），与「是不是生产」无关。开发机上放过它意味着集成测试拿到

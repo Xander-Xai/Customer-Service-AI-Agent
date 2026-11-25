@@ -36,7 +36,13 @@ services:
       - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-true}
       - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
       - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-}
       - ERP_MODE=${ERP_MODE:-mock}
+      - ERP_BASE_URL=${ERP_BASE_URL:-}
+      - ERP_APP_ID=${ERP_APP_ID:-}
+      - ERP_APP_SECRET=${ERP_APP_SECRET:-}
+      - ERP_DB_ID=${ERP_DB_ID:-}
+      - ERP_USER_CUSTOMER_MAP=${ERP_USER_CUSTOMER_MAP:-}
     volumes:
       - ../../chat_sessions:/app/chat_sessions
       - app-logs:/app/logs
@@ -59,6 +65,24 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+
+  # API and worker must use the same ERP mode and session security contract.
+  worker:
+    environment:
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-}
+      - DEV_MODE=false
+      - LOG_FORMAT=json
+      - SESSION_STORAGE_BACKEND=redis
+      - SESSION_ENCRYPTION_KEY=${SESSION_ENCRYPTION_KEY:-}
+      - SESSION_ENCRYPTION_REQUIRED=${SESSION_ENCRYPTION_REQUIRED:-true}
+      - SESSION_ENCRYPTION_PLAINTEXT_COMPAT=${SESSION_ENCRYPTION_PLAINTEXT_COMPAT:-legacy}
+      - SESSION_ENCRYPTION_KEY_PREVIOUS=${SESSION_ENCRYPTION_KEY_PREVIOUS:-}
+      - ERP_MODE=${ERP_MODE:-mock}
+      - ERP_BASE_URL=${ERP_BASE_URL:-}
+      - ERP_APP_ID=${ERP_APP_ID:-}
+      - ERP_APP_SECRET=${ERP_APP_SECRET:-}
+      - ERP_DB_ID=${ERP_DB_ID:-}
+      - ERP_USER_CUSTOMER_MAP=${ERP_USER_CUSTOMER_MAP:-}
 
   # ===== M4: Loki 日志聚合（生产环境默认启用）=====
   loki:

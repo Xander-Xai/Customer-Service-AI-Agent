@@ -1,5 +1,7 @@
 # Customer Service AI Agent
 
+> **工业运行时治理候选（2026-11-25）**：新增用户身份绑定、请求幂等冲突拒绝、严格 checkpoint 探测、API/Worker ERP 与加密配置一致性。`CSAI_RUNTIME_PROFILE=industrial` 是待验收的严格发布配置，非默认 demo，也不代表真实生产通过。详见 [工业发布契约](docs/architecture/industrial-runtime-admission.md)。
+
 > **架构治理（2026-11-25）**：唯一主线是 LangGraph 领域路由 + 受限 ReAct + 同步只读/异步耐久运行时；ResponseAgent 是确定性后处理角色，MCP/A2A 为可选边界，本地幂等账本不保证外部 ERP exactly-once。见 [架构裁决与裁剪门禁](docs/architecture.md#architecture-decision-freeze--2026-11-25)。
 
 

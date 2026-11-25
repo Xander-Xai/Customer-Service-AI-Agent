@@ -15,7 +15,7 @@
   重放改写。重放只重置 run 的可重试字段与 attempt 计数。
 * 需要人工确认（``--yes`` 之前会打印将要发生的事），避免误触生产写操作。
 
-退出码：0 = 已重新投递；2 = run 不存在/状态不合法；3 = 入队失败。
+退出码：0 = 已重新投递；2 = run 不存在/状态不合法；3 = 入队失败；4 = 工业准入拒绝或不可用。
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ def _iso(value) -> str | None:
 
 
 async def replay(run_id: str, *, delay: float, assume_yes: bool) -> int:
+    from runtime.admission import RunAdmissionRejected, RunAdmissionUnavailable
     from runtime.run_service import RunNotFound, RunService
     from runtime.statuses import InvalidRunTransition
 
@@ -75,6 +76,9 @@ async def replay(run_id: str, *, delay: float, assume_yes: bool) -> int:
     except InvalidRunTransition as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
+    except (RunAdmissionRejected, RunAdmissionUnavailable) as e:
+        print(f"[FAIL] Industrial replay admission: {e}", file=sys.stderr)
+        return 4
 
     print("\n=== 重放后 ===")
     print(f"  status       : {updated['status']}")

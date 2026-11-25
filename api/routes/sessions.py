@@ -3,9 +3,12 @@
 从 api/app.py create_app() 提取。
 """
 
-from fastapi import APIRouter, Request
+import asyncio
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from core.industrial import industrial_enabled
 from core.logger import get_logger
 
 router = APIRouter()
@@ -43,13 +46,10 @@ def extract_checkpoint_id(checkpoint: object) -> str | None:
 
 def _extract_user_id(request: Request) -> str | None:
     """从 JWT payload 或 API Key 认证结果中提取 user_id"""
-    state = request.app.state
-    payload = getattr(state, "_current_jwt_payload", None) or getattr(
-        request.state, "jwt_payload", None
-    )
-    if payload:
-        return str(payload.get("sub", ""))
-    return None
+    from api.utils import extract_user_id
+
+    actor = extract_user_id(request)
+    return str(actor) if actor is not None else None
 
 
 def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool) -> bool:
@@ -59,11 +59,43 @@ def _check_session_ownership(session: dict, user_id: str | None, dev_mode: bool)
     if not user_id:
         return False
     session_user = session.get("user_id")
-    if not session_user:
-        # 会话无归属用户 - 仅允许当前用户在非DEV_MODE下访问
-        # 避免未认证状态下创建的会话被任意已认证用户看到
-        return True  # 向后兼容：匿名会话对所有认证用户可见
-    return session_user == user_id
+    return bool(session_user and str(session_user) == str(user_id))
+
+
+async def require_industrial_session(request: Request, session_id: str) -> None:
+    if not industrial_enabled():
+        return
+    from auth.router import get_current_user_from_request
+    from core.session.ownership import (
+        SessionOwnerDenied,
+        SessionOwnerUnavailable,
+        require_session_owner,
+    )
+
+    actor = await asyncio.to_thread(get_current_user_from_request, request)
+    if actor is None:
+        raise HTTPException(status_code=401, detail="Authenticated user required")
+    try:
+        await require_session_owner(session_id, str(actor.id))
+    except SessionOwnerDenied as exc:
+        raise HTTPException(status_code=403, detail="Session ownership not verified") from exc
+    except SessionOwnerUnavailable as exc:
+        raise HTTPException(status_code=503, detail="Session ownership unavailable") from exc
+
+
+async def _filter_industrial_sessions(request: Request, result: dict) -> dict:
+    if not industrial_enabled():
+        return result
+    allowed = []
+    for session in result.get("sessions", []):
+        try:
+            await require_industrial_session(request, session["session_id"])
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+        else:
+            allowed.append(session)
+    return {**result, "sessions": allowed, "total": len(allowed)}
 
 
 @router.get("/api/sessions")
@@ -76,16 +108,21 @@ async def list_sessions(request: Request, offset: int = 0, limit: int = 20):
         limit = min(max(limit, 1), 100)
         result = await sm.list_sessions_brief(offset=offset, limit=limit)
         user_id = _extract_user_id(request)
-        if user_id and not dev_mode:
-            filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
+        if not dev_mode:
+            filtered = [
+                s
+                for s in result.get("sessions", [])
+                if user_id and str(s.get("user_id") or "") == str(user_id)
+            ]
             result["sessions"] = filtered
             result["total"] = len(filtered)
-        return result
+        return await _filter_industrial_sessions(request, result)
     return {"sessions": [], "total": 0, "offset": offset, "limit": limit}
 
 
 @router.get("/api/sessions/{session_id}")
 async def get_session(session_id: str, request: Request):
+    await require_industrial_session(request, session_id)
     state = request.app.state
     sm = getattr(state, "session_manager", None)
     dev_mode = getattr(state, "dev_mode", False)
@@ -158,6 +195,11 @@ async def delete_session_checkpoint(request: Request, session_id: str) -> bool:
 
 @router.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, request: Request):
+    await require_industrial_session(request, session_id)
+    if industrial_enabled():
+        # A coordinated retention/deletion workflow must also cover active runs,
+        # checkpoints and approvals; do not advertise partial deletion as complete.
+        raise HTTPException(status_code=503, detail="Coordinated session deletion not released")
     state = request.app.state
     sm = getattr(state, "session_manager", None)
     dev_mode = getattr(state, "dev_mode", False)
@@ -195,6 +237,7 @@ async def get_session_checkpoint(session_id: str, request: Request):
 
     from api.utils import sanitize_input
 
+    await require_industrial_session(request, session_id)
     clean_id = sanitize_input(session_id)
     if not clean_id:
         return JSONResponse({"error": "无效的 session_id"}, status_code=400)
@@ -255,15 +298,20 @@ async def list_history(request: Request, offset: int = 0, limit: int = 20):
     limit = min(max(limit, 1), 100)
     result = await sm.list_sessions_brief(offset=offset, limit=limit)
     user_id = _extract_user_id(request)
-    if user_id and not dev_mode:
-        filtered = [s for s in result.get("sessions", []) if s.get("user_id") == user_id]
+    if not dev_mode:
+        filtered = [
+            s
+            for s in result.get("sessions", [])
+            if user_id and str(s.get("user_id") or "") == str(user_id)
+        ]
         result["sessions"] = filtered
         result["total"] = len(filtered)
-    return result
+    return await _filter_industrial_sessions(request, result)
 
 
 @router.get("/api/history/{session_id}/messages")
 async def get_history_messages(session_id: str, request: Request):
+    await require_industrial_session(request, session_id)
     state = request.app.state
     sm = getattr(state, "session_manager", None)
     if not sm:

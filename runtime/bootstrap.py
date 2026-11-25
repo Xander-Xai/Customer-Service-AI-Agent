@@ -50,10 +50,24 @@ def _validate_checkpoint_owner(
 
 
 async def inspect_episode_checkpoint(
-    graph: Any, config: dict[str, Any], run_id: str | None, *, approval_resume: bool = False
+    graph: Any,
+    config: dict[str, Any],
+    run_id: str | None,
+    *,
+    approval_resume: bool = False,
+    strict: bool = False,
 ) -> tuple[str, ...]:
     """Validate checkpoint ownership before resuming, never from conversation text."""
-    snapshot = await _read_episode_checkpoint(graph, config, run_id)
+    if strict:
+        try:
+            snapshot = await graph.aget_state(config)
+        except Exception as exc:
+            raise TransientError("Cannot inspect checkpoint") from exc
+        # Even ownerless incomplete legacy turns have no authenticated task ID.
+        if run_id is None and (getattr(snapshot, "next", ()) or getattr(snapshot, "tasks", ())):
+            raise CheckpointEpisodeMismatch("Incomplete checkpoint requires reconciliation")
+    else:
+        snapshot = await _read_episode_checkpoint(graph, config, run_id)
     return _validate_checkpoint_owner(snapshot, run_id, approval_resume=approval_resume)
 
 
@@ -243,8 +257,15 @@ class AgentRuntime:
         if not self._started:
             await self.start()
 
+        from core.industrial import industrial_enabled
         from core.shared_blackboard import set_blackboard_session_id
 
+        if industrial_enabled():
+            from core.session.ownership import require_session_owner
+
+            await require_session_owner(thread_id, user_id)
+            await self.container.session_mgr.create_session(thread_id)
+            self.container.session_mgr.set_user_id(thread_id, user_id)
         set_blackboard_session_id(thread_id)
 
         state: dict[str, Any] = {

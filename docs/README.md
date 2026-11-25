@@ -1,5 +1,7 @@
 # 文档索引
 
+- [工业运行时发布契约（候选）](architecture/industrial-runtime-admission.md)：身份与状态所有权、部署一致性、业务验收和 NO-GO 门禁。
+
 > Current entry point: [reference/current-state.md](reference/current-state.md)（当前事实 + 验证命令，不硬编码 HEAD）。
 > Runtime version 由 `core/config.py::VERSION` 决定；带日期的对齐报告（`reports/plans/**`）是历史审计快照，不是 Current Truth。
 

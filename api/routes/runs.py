@@ -16,6 +16,7 @@ API 只负责「创建 + 入队」，不拥有执行生命周期；执行在独�
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import cast
 
@@ -27,7 +28,14 @@ from api.utils import extract_user_id, sanitize_input
 from core.config import MAX_QUERY_LENGTH
 from core.logger import get_logger, get_trace_id
 from runtime import metrics as run_metrics
-from runtime.run_service import RunNotFound, RunService, build_idempotency_scope
+from runtime.admission import RunAdmissionRejected, RunAdmissionUnavailable
+from runtime.run_service import (
+    RunIdempotencyConflict,
+    RunNotFound,
+    RunService,
+    build_idempotency_scope,
+    verify_idempotent_request,
+)
 
 router = APIRouter()
 logger = get_logger("api.runs")
@@ -86,8 +94,16 @@ def _check_ownership(request: Request, run: dict) -> bool:
         return True
     owner = run.get("user_id")
     if not owner:
-        return True  # 匿名 run 向后兼容
-    return bool(extract_user_id(request) == owner)
+        return False  # legacy anonymous records require operator reconciliation
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled():
+        from auth.router import get_current_user_from_request
+
+        actor = get_current_user_from_request(request)
+        return actor is not None and str(actor.id) == str(owner)
+    actor = extract_user_id(request)
+    return actor is not None and str(actor) == str(owner)
 
 
 @router.post("/api/runs")
@@ -97,17 +113,34 @@ async def create_run(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     from api.routes.chat import _SessionValidationError, get_authenticated_session
+    from core.industrial import industrial_enabled
+
+    if industrial_enabled() and (
+        not data.session_id or not (idempotency_key or data.idempotency_key or "").strip()
+    ):
+        return JSONResponse(
+            {"error": "Existing session and Idempotency-Key required"}, status_code=400
+        )
 
     try:
         session = await get_authenticated_session(request, data.session_id, data.session_token)
     except _SessionValidationError as e:
         return JSONResponse({"error": e.detail}, status_code=e.status_code)
 
+    if not getattr(request.app.state, "dev_mode", False) and not session.user_id:
+        return JSONResponse({"error": "Authenticated user required"}, status_code=401)
+
     query = sanitize_input(data.query)[:MAX_QUERY_LENGTH]
     if not query:
         return JSONResponse({"error": "query 不能为空"}, status_code=400)
 
     service = _get_service(request)
+    if (
+        idempotency_key is not None
+        and data.idempotency_key is not None
+        and idempotency_key.strip() != data.idempotency_key.strip()
+    ):
+        return JSONResponse({"error": "Conflicting idempotency keys"}, status_code=400)
     raw_key = (idempotency_key or data.idempotency_key or "").strip()
     if len(raw_key) > IDEMPOTENCY_KEY_INPUT_MAX:
         # header 与 body 走同一契约：超限直接 400，而不是等 DB 报 value too long。
@@ -121,20 +154,40 @@ async def create_run(
         else None
     )
 
-    # 幂等命中：同 user + endpoint + key 不重复创建/入队，返回原 run
-    if scoped_key:
-        existing = service.get_by_idempotency_key(scoped_key)
-        if existing is not None:
-            run_metrics.record_idempotency_hit()
-            return JSONResponse(_serialize(existing), status_code=202)
+    try:
+        if scoped_key:
+            existing = await asyncio.to_thread(service.get_by_idempotency_key, scoped_key)
+            if existing is not None:
+                verify_idempotent_request(
+                    existing, query=query, session_id=session.sid, user_id=session.user_id
+                )
+                run_metrics.record_idempotency_hit()
+                return JSONResponse(_serialize(existing), status_code=202)
 
-    run = service.create_run(
-        query=query,
-        session_id=session.sid,
-        user_id=session.user_id,
-        idempotency_key=scoped_key,
-        trace_id=get_trace_id(),
-    )
+        run = await asyncio.to_thread(
+            service.create_run,
+            query=query,
+            session_id=session.sid,
+            user_id=session.user_id,
+            idempotency_key=scoped_key,
+            trace_id=get_trace_id(),
+        )
+    except RunIdempotencyConflict:
+        return JSONResponse({"error": "IDEMPOTENCY_CONFLICT"}, status_code=409)
+    except RunAdmissionRejected as exc:
+        return JSONResponse(
+            {"error": "RUN_CAPACITY_EXCEEDED", "scope": exc.scope},
+            status_code=503 if exc.scope == "global" else 429,
+            headers={"Retry-After": "10"},
+        )
+    except RunAdmissionUnavailable:
+        return JSONResponse({"error": "RUN_ADMISSION_UNAVAILABLE"}, status_code=503)
+
+    # The DB uniqueness winner alone publishes. The reconciler covers a crash
+    # after the winning insert but before broker publication.
+    if run.get("created_by_request") is False:
+        run_metrics.record_idempotency_hit()
+        return JSONResponse(_serialize(run), status_code=202)
 
     from runtime import dispatch
 
@@ -146,7 +199,7 @@ async def create_run(
             service.mark_dead_letter(
                 run["id"],
                 error_code="DISPATCH_FAILED",
-                error_message=str(e),
+                error_message="Broker publication failed",
                 error_type="transient",
             )
         return JSONResponse({"error": "任务调度失败，请稍后重试"}, status_code=503)
@@ -157,6 +210,12 @@ async def create_run(
             "run_id": run["id"],
             "status": run["status"],
             "thread_id": run["thread_id"],
+            "session_id": run["session_id"],
+            "session_token": (
+                session.session_manager.generate_session_token(session.sid)
+                if session.session_manager
+                else ""
+            ),
         },
         status_code=202,
     )

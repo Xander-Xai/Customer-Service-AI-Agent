@@ -107,6 +107,8 @@ def build_graph(container: ServiceContainer, checkpointer=None):
         if c.router is None:
             init_tasks.append(c._init_router())
         await asyncio.gather(*init_tasks)
+        if state.get("user_id"):
+            c.session_mgr.set_user_id(session_id, str(state["user_id"]))
 
         context = await c.session_mgr.get_conversation_context(session_id)
         context_text = "\n".join([m.get("content", "") for m in context[-6:]]) if context else ""

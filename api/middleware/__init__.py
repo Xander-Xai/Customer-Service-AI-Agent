@@ -55,10 +55,11 @@ def _redis_rate_limit(client_ip: str, max_requests: int, window_seconds: int) ->
         key = f"csai:rate:{client_ip}"
         pipe = r.pipeline()
         pipe.zremrangebyscore(key, 0, now - window_seconds)
-        pipe.zadd(key, {str(now): now})
+        pipe.zadd(key, {secrets.token_hex(16): now})
+        pipe.zcard(key)
         pipe.expire(key, window_seconds)
         result = pipe.execute()
-        return result[1] <= max_requests
+        return result[2] <= max_requests
     except Exception as e:
         logger.debug(f"[Redis] 限流操作失败: {e}")
         # v6.3: 返回 None 表示 Redis 不可用，而非 False（拒绝）
@@ -125,6 +126,24 @@ def setup_middleware(app: FastAPI):
         ):
             return await call_next(request)
         client_ip = request.client.host if request.client else "unknown"
+        from core.industrial import industrial_enabled
+
+        if industrial_enabled():
+            from api.middleware.industrial_rate_limit import admit_http
+
+            if path_norm == "/api/auth/login":
+                scope, maximum, window = "login", 5, 300
+            elif path_norm == "/api/auth/register":
+                scope, maximum, window = "register", 3, 3600
+            else:
+                scope, maximum, window = "http", _RATE_LIMIT_MAX, _RATE_LIMIT_WINDOW
+            admitted = await admit_http(client_ip, scope, maximum, window)
+            if admitted is None:
+                return JSONResponse({"error": "Rate limiter unavailable"}, status_code=503)
+            if not admitted:
+                return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
+            return await call_next(request)
+
         now = time.time()
 
         auth_path = request.url.path
