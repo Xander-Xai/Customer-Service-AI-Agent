@@ -207,8 +207,10 @@ class TestReadScopeKeys:
         assert "t:" + hash_identity("t1") in keys
 
 
-def test_graph_response_cache_does_not_replace_business_execution():
+def test_graph_response_cache_does_not_replace_business_execution(monkeypatch):
     from cache.cache_policy import graph_response_cache_allowed
+
+    monkeypatch.setattr("core.config.DEV_MODE", True)
 
     state = {"customer_query": "产品成分是什么"}
     assert graph_response_cache_allowed(state, durable_run=False)
@@ -228,3 +230,11 @@ def test_graph_response_cache_does_not_replace_business_execution():
         ("customer_query", "我要转人工客服"),
     ):
         assert not graph_response_cache_allowed({**state, key: value}, durable_run=False), key
+
+
+def test_production_graph_rejects_even_public_response_cache(monkeypatch):
+    from cache.cache_policy import graph_response_cache_allowed
+
+    monkeypatch.setattr("core.config.DEV_MODE", False)
+    state = {"customer_query": "产品成分是什么", "query_type": "product_info", "user_id": "u1"}
+    assert not graph_response_cache_allowed(state, durable_run=False)

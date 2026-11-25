@@ -22,7 +22,7 @@
 | ResponseAgent | 定性为确定性后处理节点 | process 做清洗、质量规则、缓存、事件；不额外算自主 LLM Agent；保留兼容类名，禁止无必要模型调用 |
 | ReAct / 协作模式 | 条件启用 | 简单查询直接工具/专家；仅复杂任务启用协作；限制循环、传播部分失败及未完成审批 |
 | MCP | 按实际工具所有权启用 | 默认关闭；#72 的版本化 SKU 支持文档经统一注册表接入；合成 FAQ 仅协议回归，实际目录须经授权验收 |
-| A2A | 按独立服务所有权启用 | 默认关闭；#73 售后程序专家只接收枚举化描述，loopback、摘要锁定目录，不授权写入；真实网络/目录验收仍缺 |
+| A2A | 按独立服务所有权启用 | 默认关闭；#73 售后程序专家只接收枚举化描述，服务端 loopback、#78 私有 HTTPS 客户端、摘要锁定目录，不授权写入；真实 TLS 入口/目录验收仍缺 |
 | Redis lease / PostgreSQL CAS | 保留，不夸大 | 锁、owner CAS、工具账本职责不同；旧 worker 的外部请求不能仅靠本地 CAS 撤销 |
 | ERP 写操作 | 安全优先 | 外部结果不明时禁止盲重试；需要外部幂等键、结果查询或人工对账；未确认写入不得报告成功 |
 | Cache / Memory | 保留独立责任 | Cache 可重建；Session 是上下文；Checkpoint 是图状态；AgentRun/ledger 是持久业务事实；缓存不能授权写操作 |
@@ -395,3 +395,8 @@ Parallel 的关键词命中仅表示辅助领域，不能替代路由主责 Agen
 ### Quality retry and cache compatibility boundary
 
 An upgraded collaboration may return tool receipts or pending approval proposals without response text. The graph propagates these independently of prose before revisiting HITL; an empty upgraded response is explicitly degraded, not a replay of the prior candidate. Response-cache payload version v3 invalidates legacy entries written before the graph-level eligibility guard. This is a cache compatibility change, not proof of context-independent or privacy-safe semantic reuse; paired cache/quality and real ERP acceptance remain pending.
+
+
+### 生成式响应缓存发布门禁
+
+生产在线图（`DEV_MODE=false`）不读取或写入生成式响应缓存；低层 L1/L2/L3 留作开发评测。公开意图 allowlist 不证明误分类安全，也不证明同一查询在不同会话的答案相同。业务运行时、真实 ERP 对账、检索与独立工具结果合同不变。需要独立评测和显式架构审查才能重新开启。

@@ -30,7 +30,7 @@
 > 完整数据来源清单、已执行审计结论与已知残留：
 > **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
 
-**业务协议边界（后续工程补强，默认关闭）**：MCP 已接入可由产品文档责任方提供的、摘要锁定的 SKU 使用/存储/包装说明（#72）；A2A 已接入独立售后流程专家（#73），只处理枚举化问题/渠道/阶段，不授权退款、不查询 ERP；当前已合并的业务 A2A 仅支持 loopback。原合成 FAQ 仅作协议回归。真实授权目录、网络与业务验收仍未完成，不是历史任职时已部署的证据。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
+**业务协议边界（后续工程补强，默认关闭）**：MCP 已接入可由产品文档责任方提供的、摘要锁定的 SKU 使用/存储/包装说明（#72）；A2A 已接入独立售后流程专家（#73），只处理枚举化问题/渠道/阶段，不授权退款、不查询 ERP；服务端仅监听 loopback；#78 已合入受批准的私有 HTTPS 客户端路径（固定 DNS/CA，不跟随重定向），真实 TLS 入口待验收。原合成 FAQ 仅作协议回归。真实授权目录、网络与业务验收仍未完成，不是历史任职时已部署的证据。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
 
 **Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
 
@@ -815,3 +815,10 @@ customer-service-ai-agent/
 - **验证边界**：CI/runtime tests are not a production SLA; real ERP writes, live traffic and the published RAG relevance metrics remain unverified in the stated scope.
 - **公开交叉索引**：[Beauty RAG](https://github.com/Xander-Xai/Beauty-Industry-RAG-QA-System) owns a different domain-focused retrieval reference; an ecosystem link is not a shared production deployment.
 - 代码、测试、指标及发布的唯一技术权威在本仓；任何外部商业研究、PR、演示、内容制作或私人计划均不能替本仓证明生产安全、真实客户验收或收入。
+
+
+### 最新交付证据（2026-11-25）
+
+#76 已合并统一架构（Routing / Parallel / fixed Supervisor–Workers、未知外部写拒绝重放、缓存门控）；#78 已合并私有 HTTPS A2A 客户端，#79 已合并[会话格式盘点](docs/operations/session-record-inventory.md)，#81 已合并真实模型轨迹与计划分母诊断。#79 只读取显式授权离线导出并输出聚合统计，不证明历史明文来源，不执行迁移。#81 不是实际模型/ERP 质量证明。#80 的检索评测完整性加固以实际 merge 和 exact-head CI 为准。禁止将实验、历史指标或未部署能力当成生产交付。
+
+生产在线图生成式响应缓存禁用门禁随 #80 的最新代码治理验收，见 [生产准备度](docs/production-readiness.md)；开发保留缓存评测，不能据此宣称生产命中率或延迟收益。

@@ -153,3 +153,22 @@ async def test_empty_upgraded_response_preserves_tool_receipt_and_disables_cache
         assert cache.writes == []
     finally:
         await container.close()
+
+
+async def test_production_graph_neither_reads_nor_writes_generated_response_cache(monkeypatch):
+    from unittest.mock import Mock
+
+    first = _Mode("sequential", "这是当前任务重新执行后生成的完整客服回答。")
+    upgraded = _Mode("consultation", "不应调用的升级回答。")
+    container, cache = await _make_container(first, upgraded)
+    try:
+        monkeypatch.setattr("core.config.DEV_MODE", False)
+        monkeypatch.setattr("core.config.EVAL_RETRY_ENABLED", False)
+        cache.get = Mock(return_value="另一个客户的历史缓存回答")
+        observed = await _drain_graph(container, thread_id=f"production-cache-{uuid4().hex}")
+        assert first.calls == 1
+        assert observed["response"] == first.response
+        cache.get.assert_not_called()
+        assert cache.writes == []
+    finally:
+        await container.close()

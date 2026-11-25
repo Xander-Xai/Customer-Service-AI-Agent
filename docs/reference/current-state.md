@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-25 核查增量**：#81 已合入 main，真实轨迹评测保留失败/不可达样本；#80 reviewed-gold 与 #82 provider attempt metering 尚未合并（核查快照，实时状态以 PR 为准）。新增 [工业运行时治理候选](../architecture/industrial-runtime-admission.md)；严格模式及回归用例须在候选合并与 CI 后才计入 main。
+> **2026-11-25 核查增量**：#81 已合入 main，真实轨迹评测保留失败/不可达样本；#80 reviewed-gold 已合并；#82 provider attempt metering 以实时 PR 与 CI 为准。新增 [工业运行时治理候选](../architecture/industrial-runtime-admission.md)；严格模式及回归用例须在候选合并与 CI 后才计入 main。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -240,7 +240,7 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
-- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，当前已合并服务仅 loopback，不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
+- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，服务端仅 loopback；#78 已合入受批准的私有 HTTPS 客户端，实际 TLS 入口仍待验收；不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
 - **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，
@@ -666,3 +666,12 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
 - Snapshot SHA != Current HEAD（用 `git rev-parse HEAD` 获取当前 HEAD）。
 - ADR 的历史决策正文不修改；当决策被取代时只更新 Status 行（例如 ADR-003 被
   [ADR-007](../decisions/007-current-default-llm.md) 取代）。
+
+
+## 交付治理增量（2026-11-25）
+
+- #76 已合入；#77 重叠方案已由同一工具拒绝重放、错误分类和 PostgreSQL 回归覆盖，关闭不独立合并。
+- #79 [会话格式盘点](../operations/session-record-inventory.md) 已合入，仅离线聚合、无原文、无解密、无自动迁移；实际 store 覆盖及来源证明仍 OPEN。
+- #81 真实轨迹诊断及 planned denominator 已合入；路由/参数/终态标签不等于独立业务 gold。#80 评测完整性加固随其实际合并状态核对。
+
+- 生成式响应缓存的生产读写禁用门禁由 #80 的最新治理分支补强，按实际合并与 exact-head CI 核对。开发模式保留评测；不影响 RAG 或工具结果治理。
