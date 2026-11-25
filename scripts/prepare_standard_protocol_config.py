@@ -83,7 +83,7 @@ def main() -> int:
                             "/app/deploy/fixtures/product-support-documents.synthetic.json",
                             "--sha256",
                             product_digest,
-                            "--authorized-customer-disclosure",
+                            "--synthetic-fixture",
                         ],
                         "allowed_tools": ["lookup_product_support_document"],
                         "risk_level": "low",

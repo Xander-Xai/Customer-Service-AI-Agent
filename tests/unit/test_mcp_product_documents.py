@@ -34,6 +34,12 @@ def test_private_catalog_loads_pinned_source_and_expiry(tmp_path):
     path, digest = _catalog(tmp_path, records)
     catalog = ProductCatalog(path, digest)
     assert catalog.lookup("SKU-001", "storage")["catalog_sha256"] == digest
+    assert (
+        catalog.lookup("SKU-001", "storage")["provenance"]
+        == "OPERATOR_APPROVED_CUSTOMER_PUBLIC_CATALOG"
+    )
+    synthetic = ProductCatalog(path, digest, synthetic_fixture=True)
+    assert synthetic.lookup("SKU-001", "storage")["provenance"] == "SYNTHETIC_LOCAL_FIXTURE"
     assert catalog.lookup("EXPIRED", "storage")["status"] == "NOT_AVAILABLE"
     assert catalog.lookup("UNKNOWN", "storage")["status"] == "NOT_AVAILABLE"
     with pytest.raises(ValueError):

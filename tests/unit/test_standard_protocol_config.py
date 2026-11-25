@@ -24,6 +24,8 @@ def test_synthetic_protocol_config_is_private_and_reusable(tmp_path, monkeypatch
     assert "MCP_FAIL_CLOSED=true" in text
     assert "A2A_AFTERSALES_TOKEN=" in text
     assert hashlib.sha256(PRODUCT_CATALOG.read_bytes()).hexdigest() in text
+    assert "--synthetic-fixture" in text
+    assert "--authorized-customer-disclosure" not in text
     assert stat.S_IMODE(output.stat().st_mode) == 0o440
     token = next(
         line.split("=", 1)[1]

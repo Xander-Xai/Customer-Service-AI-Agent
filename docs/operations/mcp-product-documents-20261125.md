@@ -33,6 +33,7 @@ The standard Compose deployment starts with the committed synthetic fixture and
 registers `mcp__productdocs__lookup_product_support_document` into the actual
 ToolRegistry through the official MCP SDK and real stdio subprocess. First boot
 creates A2A credentials in a private Docker volume; no secret is committed.
+Its result provenance is `SYNTHETIC_LOCAL_FIXTURE`, not operator approval.
 Industrial mode requires an operator-approved catalog and digest. Set
 `MCP_ENABLED=false` for rollback. CI/local fixture evidence does not prove
 product correctness or enterprise approval.

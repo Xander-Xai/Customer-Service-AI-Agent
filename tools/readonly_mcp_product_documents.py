@@ -69,7 +69,7 @@ def _date(value: Any) -> date:
 
 
 class ProductCatalog:
-    def __init__(self, path: Path, expected_sha256: str):
+    def __init__(self, path: Path, expected_sha256: str, *, synthetic_fixture: bool = False):
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
             raise ValueError("Pinned catalog digest required")
         with path.open("rb") as handle:
@@ -85,6 +85,11 @@ class ProductCatalog:
         if not isinstance(records, list) or not 1 <= len(records) <= MAX_RECORDS:
             raise ValueError("Invalid catalog population")
         self.digest = expected_sha256
+        self.provenance = (
+            "SYNTHETIC_LOCAL_FIXTURE"
+            if synthetic_fixture
+            else "OPERATOR_APPROVED_CUSTOMER_PUBLIC_CATALOG"
+        )
         self.records = {}
         for record in records:
             if not isinstance(record, dict) or set(record) != {
@@ -133,7 +138,7 @@ class ProductCatalog:
             "valid_until": record["valid_until"],
             "catalog_sha256": self.digest,
             "text": record["text"],
-            "provenance": "OPERATOR_APPROVED_CUSTOMER_PUBLIC_CATALOG",
+            "provenance": self.provenance,
         }
 
 
@@ -188,10 +193,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
-    parser.add_argument("--authorized-customer-disclosure", action="store_true", required=True)
+    disclosure = parser.add_mutually_exclusive_group(required=True)
+    disclosure.add_argument("--authorized-customer-disclosure", action="store_true")
+    disclosure.add_argument("--synthetic-fixture", action="store_true")
     args = parser.parse_args()
     try:
-        server = ProductDocumentServer(ProductCatalog(args.catalog, args.sha256))
+        server = ProductDocumentServer(
+            ProductCatalog(args.catalog, args.sha256, synthetic_fixture=args.synthetic_fixture)
+        )
     except (OSError, TypeError, ValueError):
         print("Product catalog unavailable or invalid", file=sys.stderr)
         return 2
