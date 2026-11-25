@@ -168,5 +168,11 @@ async def delegate_readonly_task(
     # This is a cooperative deadline, including discovery and SDK cleanup.
     try:
         return await asyncio.wait_for(exchange(), timeout=A2A_DEADLINE_SECONDS)
+    except A2AContractError:
+        raise
     except (httpx.HTTPError, asyncio.TimeoutError, OSError):
+        raise A2AContractError("A2A peer unavailable") from None
+    except Exception:
+        # SDK discovery/task transport errors are not always httpx exceptions.
+        # Normalize them at the protocol boundary and keep startup fail-closed.
         raise A2AContractError("A2A peer unavailable") from None
