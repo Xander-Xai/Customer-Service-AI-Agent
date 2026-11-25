@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+from pathlib import Path
 
 import httpx
 import pytest
@@ -102,6 +103,7 @@ async def test_real_independent_process_a2a_rpc_over_loopback(monkeypatch):
             "--port",
             str(port),
         ],
+        cwd=Path(__file__).resolve().parents[2],
         env=os.environ.copy(),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
