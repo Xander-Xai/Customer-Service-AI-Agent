@@ -24,6 +24,10 @@ def test_standard_compose_wires_mcp_and_a2a_before_api_and_worker():
         assert "/app/scripts/exec_with_protocol_config.sh" in service["entrypoint"]
         assert "protocol-config:/run/csai-protocol:ro" in service["volumes"]
         assert "${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro" in service["volumes"]
+        assert (
+            "${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro"
+            in service["volumes"]
+        )
 
     assert "ports" not in peer
     assert peer["networks"] == ["protocol-network"]
@@ -55,4 +59,8 @@ def test_canary_overlay_uses_the_same_protocol_readiness_boundary():
     assert "/app/scripts/exec_with_protocol_config.sh" in canary["entrypoint"]
     assert "protocol-config:/run/csai-protocol:ro" in canary["volumes"]
     assert "${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro" in canary["volumes"]
+    assert (
+        "${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro"
+        in canary["volumes"]
+    )
     assert "protocol-network" in canary["networks"]

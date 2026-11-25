@@ -119,6 +119,7 @@ python3 scripts/generate_prod_env.py     # 生成 .env.prod（高熵随机凭据
 | `QDRANT_URL` | 向量库 |
 | `CSAI_PROTOCOL_MODE` | 普通 Compose 默认 `synthetic`：启用仓库合成产品文档 MCP 与独立 A2A peer；`industrial` profile 禁止 synthetic，必须设为 `external` |
 | `MCP_SERVERS` | 标准 synthetic profile 由私有 protocol-config volume 提供；external/industrial 必须显式配置批准的 allowlist，否则 fail-closed |
+| `MCP_PRODUCT_CATALOG_SOURCE` | Compose external/industrial 的宿主机批准目录文件；只读挂载到 `/run/mcp/product-docs.json`，allowlist 必须固定其 SHA-256 |
 | `A2A_AFTERSALES_*` | 标准 synthetic profile 在首次启动时生成 bearer 与 policy digest；industrial 必须显式提供批准目录、HTTPS endpoint、CA 与 bearer |
 
 Compose 工业私有 TLS 的 CA 文件通过 `A2A_AFTERSALES_CA_SOURCE` 从宿主机只读挂载；应用进程内固定读取 `/run/a2a-ca/ca.pem`。CA 文件缺失或为空时 A2A readiness fail closed。

@@ -288,6 +288,7 @@ services:
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
       # v4.0: 数据库持久化
       - ../../data:/app/data
+      - ${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro
       - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
       # 与 worker 共享的 Prometheus 多进程样本目录
       - prom-metrics:/app/var/prom-metrics
@@ -401,6 +402,7 @@ services:
     volumes:
       - app-logs:/app/logs
       - ../../data:/app/data
+      - ${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro
       - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
       - prom-metrics:/app/var/prom-metrics
       - protocol-config:/run/csai-protocol:ro

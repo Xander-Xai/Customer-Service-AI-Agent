@@ -88,6 +88,7 @@ services:
       - ../../chat_sessions:/app/chat_sessions
       - canary-logs:/app/logs
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
+      - ${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro
       - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
       - protocol-config:/run/csai-protocol:ro
     entrypoint: ["/bin/sh", "/app/scripts/exec_with_protocol_config.sh"]
