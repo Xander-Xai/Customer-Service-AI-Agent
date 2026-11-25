@@ -194,7 +194,6 @@ async def _run_authorized(plan, cases) -> dict:
     # Startup may issue a paid health-check request; account separately.
     with collect_usage() as lifecycle:
         async with AgentEvalHarness(hitl_enabled=True, inject_scripted_llm=False) as harness:
-
             if not isinstance(harness.container.llm, OpenAICompatibleClient):
                 raise RealProviderNotAuthorized(
                     "runtime did not initialize the expected chat client"

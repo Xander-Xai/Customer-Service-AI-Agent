@@ -33,7 +33,11 @@ class Attempt:
             and completion >= 0
             and (
                 total is None
-                or (isinstance(total, int) and not isinstance(total, bool) and total == prompt + completion)
+                or (
+                    isinstance(total, int)
+                    and not isinstance(total, bool)
+                    and total == prompt + completion
+                )
             )
         ):
             self.usage = (prompt, completion)
