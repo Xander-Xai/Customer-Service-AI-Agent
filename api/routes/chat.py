@@ -207,41 +207,38 @@ async def _sse_stream_generator(ctx: SSEStreamContext):
         yield _sse_event({"type": "status", "content": ctx.status_msg})
         yield _sse_event({"type": "progress", "content": ctx.progress_msg})
 
-        if not ctx.graph_task.done():
-            while True:
+        while not ctx.graph_task.done() or not ctx.chunk_queue.empty():
+            if not ctx.chunk_queue.empty():
+                event = ctx.chunk_queue.get_nowait()
+            else:
                 queue_task = asyncio.create_task(ctx.chunk_queue.get())
-                done, pending = await asyncio.wait(
-                    {queue_task, ctx.graph_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                if queue_task in done:
+                try:
+                    done, _ = await asyncio.wait(
+                        {queue_task, ctx.graph_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if queue_task not in done:
+                        # The graph finished; drain any already queued events.
+                        continue
                     event = queue_task.result()
-                    if event is None:
-                        break
-                    if isinstance(event, dict) and event.get("type") in (
-                        "chunk",
-                        "status",
-                        "thinking",
-                        "tool_call",
-                        "tool_result",
-                        "rag_status",
-                        "agent_switch",
-                        "content_complete",
-                    ):
-                        yield _sse_event(event)
-                    if ctx.graph_task.done() and ctx.chunk_queue.empty():
-                        break
-                else:
-                    queue_task.cancel()
-                    await asyncio.gather(queue_task, return_exceptions=True)
-                    break
+                finally:
+                    # Never await the still-running graph in the per-event loop.
+                    if not queue_task.done():
+                        queue_task.cancel()
+                        await asyncio.gather(queue_task, return_exceptions=True)
 
-                for task in pending:
-                    if task is not ctx.graph_task:
-                        task.cancel()
-                if pending:
-                    await asyncio.gather(*pending, return_exceptions=True)
+            if event is None:
+                break
+            if isinstance(event, dict) and event.get("type") in (
+                "chunk",
+                "status",
+                "thinking",
+                "tool_call",
+                "tool_result",
+                "rag_status",
+                "agent_switch",
+                "content_complete",
+            ):
+                yield _sse_event(event)
 
         try:
             result = await ctx.graph_task
