@@ -135,9 +135,12 @@ def _make_cached_static(
 async def _pending_steps(graph_app, graph_config: dict[str, Any]) -> tuple[str, ...]:
     """Inspect synchronous recovery without adopting a pending worker episode."""
     from core import config as cfg
+    from core.industrial import industrial_enabled
     from runtime.bootstrap import inspect_episode_checkpoint
 
-    return await inspect_episode_checkpoint(graph_app, graph_config, None, strict=not cfg.DEV_MODE)
+    return await inspect_episode_checkpoint(
+        graph_app, graph_config, None, strict=industrial_enabled() or not cfg.DEV_MODE
+    )
 
 
 async def _run_graph(
@@ -219,6 +222,9 @@ async def _run_graph(
             try:
                 result = await _graph_app.ainvoke(graph_input, config=graph_config)
             except (AttributeError, TypeError):
+                if industrial_enabled():
+                    # A node may already have executed; never retry without config.
+                    raise
                 # 无 checkpointer 的旧图：不接受 config。续跑模式没有 state 可传，
                 # 此时退回有 config 的调用会必然失败，直接抛原始错误更有诊断价值。
                 if graph_input is None:

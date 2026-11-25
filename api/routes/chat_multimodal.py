@@ -134,7 +134,7 @@ async def stream_multimodal_chat(
 
     query = sanitize_input(query[:MAX_QUERY_LENGTH]) or "请分析这张图片"
 
-    from .chat import SSEStreamContext, _build_sse_stream_context, _sse_stream_generator
+    from .chat import ManagedSSE, SSEStreamContext, _build_sse_stream_context
 
     graph_task, chunk_queue = _build_sse_stream_context(
         request,
@@ -156,11 +156,10 @@ async def stream_multimodal_chat(
         progress_msg="正在识别图片内容...",
     )
 
-    from fastapi.responses import StreamingResponse
-
-    return StreamingResponse(
-        _sse_stream_generator(ctx),
+    return ManagedSSE(
+        ctx,
         media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
