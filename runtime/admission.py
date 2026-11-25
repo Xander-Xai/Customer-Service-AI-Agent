@@ -31,7 +31,9 @@ def _limit(name: str, default: int) -> int:
     return value
 
 
-def admit_new_run(session, *, user_id: str | None, thread_id: str, idempotency_key: str | None):
+def admit_new_run(
+    session, *, user_id: str | None, thread_id: str, idempotency_key: str | None
+):
     """Serialize the check and insert in the caller's transaction.
 
     A matching idempotency key returns its existing row even under saturation;

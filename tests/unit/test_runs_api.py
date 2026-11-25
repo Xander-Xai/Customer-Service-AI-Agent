@@ -151,3 +151,30 @@ def test_dispatch_failure_returns_503_and_dead_letter(client, monkeypatch):
     dead = client.service.list_dead_letters()
     assert len(dead) == 1
     assert dead[0]["error_code"] == "DISPATCH_FAILED"
+
+
+@pytest.mark.parametrize(("scope", "status"), [("user", 429), ("thread", 429), ("global", 503)])
+def test_run_admission_capacity_rejects_without_dispatch(client, monkeypatch, scope, status):
+    from runtime.admission import RunAdmissionRejected
+
+    def reject(**kwargs):
+        raise RunAdmissionRejected(scope)
+
+    monkeypatch.setattr(client.service, "create_run", reject)
+    response = client.post("/api/runs", json={"query": "fixture", "session_id": "quota-test"})
+    assert response.status_code == status
+    assert response.json() == {"error": "RUN_CAPACITY_EXCEEDED", "scope": scope}
+    assert client.dispatch_calls == []
+
+
+def test_run_admission_unavailable_rejects_without_dispatch(client, monkeypatch):
+    from runtime.admission import RunAdmissionUnavailable
+
+    def reject(**kwargs):
+        raise RunAdmissionUnavailable("fixture")
+
+    monkeypatch.setattr(client.service, "create_run", reject)
+    response = client.post("/api/runs", json={"query": "fixture", "session_id": "quota-test"})
+    assert response.status_code == 503
+    assert response.json()["error"] == "RUN_ADMISSION_UNAVAILABLE"
+    assert client.dispatch_calls == []

@@ -39,11 +39,13 @@ def test_concurrent_industrial_user_admission(run_service, cleanup_created_runs,
     assert replay["id"] == saved["id"]
     assert replay["created_by_request"] is False
     # Terminal completion/cancellation releases capacity without Redis counters.
-    run_service.mark_cancelled(saved["id"])
+    run_service.cancel_run(saved["id"])
     assert isinstance(submit(7), dict)
 
 
-def test_industrial_thread_capacity_includes_pending(run_service, cleanup_created_runs, unique, monkeypatch):
+def test_industrial_thread_capacity_includes_pending(
+    run_service, cleanup_created_runs, unique, monkeypatch
+):
     monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "industrial")
     monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS", "100000")
     monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_USER", "5")
@@ -61,3 +63,29 @@ def test_industrial_thread_capacity_includes_pending(run_service, cleanup_create
             query="other", session_id=sid, user_id=owner, idempotency_key=unique("quota-key")
         )
     assert exc.value.scope == "thread"
+
+
+def test_industrial_global_capacity_counts_all_owners(
+    run_service, pg_engine, cleanup_created_runs, unique, monkeypatch
+):
+    from sqlalchemy import func, select
+
+    from db.models import AgentRun
+    from runtime.statuses import TERMINAL_STATUSES
+
+    with pg_engine.connect() as conn:
+        active = AgentRun.status.notin_([status.value for status in TERMINAL_STATUSES])
+        count = select(func.count()).select_from(AgentRun).where(active)
+        baseline = conn.execute(count).scalar_one()
+    monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "industrial")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS", str(baseline + 1))
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_USER", "5")
+    monkeypatch.setenv("CSAI_MAX_OUTSTANDING_RUNS_PER_THREAD", "1")
+    run_service.create_run(
+        query="fixture", session_id=unique(), user_id=unique(), idempotency_key=unique()
+    )
+    with pytest.raises(RunAdmissionRejected) as exc:
+        run_service.create_run(
+            query="other", session_id=unique(), user_id=unique(), idempotency_key=unique()
+        )
+    assert exc.value.scope == "global"

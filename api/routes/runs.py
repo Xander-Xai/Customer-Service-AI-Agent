@@ -16,6 +16,7 @@ API 只负责「创建 + 入队」，不拥有执行生命周期；执行在独�
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from typing import cast
 
@@ -155,7 +156,7 @@ async def create_run(
 
     try:
         if scoped_key:
-            existing = service.get_by_idempotency_key(scoped_key)
+            existing = await asyncio.to_thread(service.get_by_idempotency_key, scoped_key)
             if existing is not None:
                 verify_idempotent_request(
                     existing, query=query, session_id=session.sid, user_id=session.user_id
@@ -163,7 +164,8 @@ async def create_run(
                 run_metrics.record_idempotency_hit()
                 return JSONResponse(_serialize(existing), status_code=202)
 
-        run = service.create_run(
+        run = await asyncio.to_thread(
+            service.create_run,
             query=query,
             session_id=session.sid,
             user_id=session.user_id,
