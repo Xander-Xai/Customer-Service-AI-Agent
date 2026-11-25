@@ -67,6 +67,7 @@ Seven domain roles, ReAct and Response are nine registered runtime roles, not ni
 | prod app real ERP 而 worker mock；加密要求不一致 | prod overlay 统一两者 ERP 模式与凭据/映射、加密配置 |
 | 反馈写失败仍报成功 | industrial 返回 503，不将未提交反馈计作成功 |
 | SSE 首个事件后可能等待整个图完成，图先结束时遗漏缓冲事件 | 按队列逐项转发；仅取消临时队列读取任务，图结束后排空已缓冲事件；不改变在途业务取消合同 |
+| Redis ZADD 返回新增成员数而非窗口总量；登录/注册本地限流，Redis 故障回退 | 修复旧窗口 ZCARD；industrial 使用 Redis TIME + 原子 Lua 滑窗，登录/注册/普通 HTTP 独立作用域，429/503，无内存回退；健康与静态资源保持豁免 |
 | 旧 WS 旁路、会话删除未覆盖活跃 Run/审批/账本 | industrial 暂停旧 WS 和旧删除入口；不是功能完成 |
 
 ## 工业候选配置
@@ -90,3 +91,7 @@ HITL_ENABLED=true
 `pytest -q tests/unit/test_industrial_admission.py tests/unit/test_runs_api.py tests/test_episode_checkpoint_ownership.py --no-cov -o addopts=''`
 
 新增离线测试覆盖配置拒绝、Redis fixture 归属拒绝与故障、严格 checkpoint 读取、请求幂等冲突；旧会话测试改用已验证 bearer，拒绝无归属会话、refresh token 和不可信状态；PG 重放用例验证同会话复用、异会话冲突；SSE 回归验证图未完成时连续转发及结束后排空缓冲。不声称已运行或通过。需 exact-head CI、真实 PostgreSQL/Redis 并发与故障注入（含 API 与 worker 接管、崩溃、重投、Redis 状态丢失）、真实客户端、真实 ERP 只读与授权范围、独立人工审批/业务回执、真实模型与 review gold、provider 成本、负载与监控、备份恢复和隐私删除验收。#75 #46 #33 #49 #31 #25 保留开放，不凭合成用例或本地证据关闭。工业 release NO-GO 直到完成真实授权和全部发布门禁。
+
+### HTTP admission regression（2026-11-25）
+
+工业 HTTP 使用共享 Redis 时间、原子检查及记录，IP 键由一致的 JWT secret HMAC 派生，密钥轮换会重置窗口。每次请求创建有连接及读取超时的 Redis client；限流规则使用进程配置，所有副本须一致。普通 HTTP 默认 60/60s，登录 5/300s，注册 3/3600s；拒绝不插入成员或延长 TTL。仅以可信 ASGI client 地址为依据，不自行信任转发头；真实代理配置、连接池容量、租户与任务并发配额仍待验收。新增 HTTP 200/429/503/健康豁免、旧 ZCARD 及真实 Redis 并发回归，后者纳入既有 runtime-e2e 目录。不得将这项检查等同于生产容量测试或防 DDoS 认证。
