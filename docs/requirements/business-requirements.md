@@ -183,7 +183,7 @@ Run 的幂等键 `run_id:approval:{approval_id}` 保证恢复不会重复执行�
 | F4 | 业务完成必须区分"交付"与"解决" | `core.outcome` 五级 `business_outcome` | 实现并验证 |
 | F5 | 耐久工单 + 坐席工作台 | `tests/unit/test_handoff_*.py` | 实现，默认关闭；生产验收未做 |
 | F6 | 异步耐久 Run（跨进程恢复） | `make runtime-e2e` / `make runtime-chaos` | 实现并验证（Level 2） |
-| F7 | MCP 只读工具接入（默认关闭） | `make test-mcp` / `make mcp-verify` | 实现并验证（本地 fake server） |
+| F7 | MCP 只读工具接入（标准 Compose 合成目录默认启用；非 Compose runtime fallback 关闭） | `make test-mcp` / `make mcp-verify` + PR #87 Compose evidence | 实现；协议 SDK/Registry synthetic fixture 已验证，完整 API/Worker readiness 与企业目录验收未完成 |
 | F8 | 转人工的完整闭环（工单 + 消息 + 坐席认领） | `tests/unit/test_handoff_*.py` | 实现；通知/SLA 未做 |
 
 ### 4.2 接口规格

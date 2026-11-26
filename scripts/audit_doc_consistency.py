@@ -133,6 +133,7 @@ ACTIVE_EXTRA = [
     Path("README.md"),
     Path("CLAUDE.md"),
     Path("AGENTS.md"),
+    Path("CONTRIBUTING.md"),
     Path("docs/README.md"),
     # Public-repository data-provenance declaration. It is a CURRENT statement
     # about what this repository ships, not a dated audit snapshot, so it is

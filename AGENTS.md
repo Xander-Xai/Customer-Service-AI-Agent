@@ -21,3 +21,13 @@
 - Follow [architecture decision freeze](docs/architecture.md#architecture-decision-freeze--2026-11-25). No new autonomous role, framework or remote boundary without a concrete business need, simpler baseline, failure contract and regression evidence. ResponseAgent is a deterministic postprocessor; never claim ERP exactly-once from local CAS/ledger. Separate architecture simplification from capability-gap work.
 
 - Response text cache must not short-circuit durable work or replace tool/approval receipts. Keep response cache eligibility shared by the actual graph read and normal finalization write; fallback finalization must not cache. Do not claim semantic matching safety without independent evaluation.
+
+## Change and acceptance workflow
+- Keep changes scoped to this repository. Do not edit sibling portfolio projects or rewrite user-owned worktrees.
+- Classify verification by impact: **L0** documentation/config wording (link and consistency checks); **L1** isolated logic (targeted unit tests + lint); **L2** service/database/API integration (relevant integration tests and contract checks); **L3** Runtime, security, concurrency, persistence, protocol, or deployment changes (real dependency tests/fault cases and required full CI). A lower level does not substitute for a higher one when the changed boundary requires it.
+- For a PR, verify exact base/head, draft state, review state and all required checks. Do not merge while a required check is failed, skipped without justification, or pending. Main-branch presence and post-merge CI are separate evidence.
+- Close an Issue only when its stated acceptance criteria are met. For external acceptance blockers, record completed code/tests, remaining environment/owner prerequisites and objective pass criteria; do not replace real ERP, staff UAT, human labels or production validation with fixtures.
+- Delete a local or remote branch only after checking PR linkage, worktree use, merge/squash equivalence, unique commits and uncommitted content. Preserve unclear or unique work for review.
+- Report CI, published releases/images and deployments separately. No release or production deployment without explicit authorization and the documented release gates.
+
+Contribution and risk-level test procedures are in [`CONTRIBUTING.md`](CONTRIBUTING.md).

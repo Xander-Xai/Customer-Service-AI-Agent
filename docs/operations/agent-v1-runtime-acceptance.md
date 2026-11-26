@@ -1,6 +1,6 @@
 # Agent V1 Runtime: scope, acceptance and evidence
 
-**工业准入候选（2026-11-25）**：用户、会话、任务绑定、幂等冲突、checkpoint 失败拒绝、API/Worker 配置一致性及严格会话存储已新增候选代码。详见 [工业发布契约](../architecture/industrial-runtime-admission.md)。新增测试不等于测试已通过；真实业务、真实跨进程执行和隐私验收未完成。
+**工业准入代码已在主线实现**：用户/会话/任务绑定、幂等冲突、checkpoint 失败拒绝、API/Worker 配置一致性及严格会话存储见 [Industrial Runtime Admission](../architecture/industrial-runtime-admission.md)。新增或通过的测试不等于真实业务、真实跨进程生产运行或隐私迁移已验收；实时证据与限制见 [Production Readiness](../production-readiness.md)。
 
 > CURRENT engineering task register. This is an independently maintained public reference implementation with synthetic test data. Only source at the checked-out commit and its own CI artifacts establish status. The scope is narrower than production certification.
 

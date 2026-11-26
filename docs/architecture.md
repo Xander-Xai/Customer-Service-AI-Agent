@@ -1,6 +1,6 @@
 # Architecture
 
-**工业运行时增量（候选）**：保持同一 LangGraph 与同一耐久 Runtime；新增身份准入及状态所有权边界，不新建 Agent 框架。[工业发布契约](architecture/industrial-runtime-admission.md) 记录实现与未完成门禁。未合并、未同 SHA 验收的功能不计为 main 已交付。
+**工业运行时准入**：在同一 LangGraph 与同一 durable Runtime 中增加身份准入及状态所有权边界，不新建 Agent 框架。[准入契约](architecture/industrial-runtime-admission.md)记录实现与未完成门禁。代码在 main 中不等于真实工业部署验收；外部状态见[当前事实](reference/current-state.md)与[生产准备度](production-readiness.md)。
 
 > 🟢 CURRENT — 随代码与配置同步更新。本文只写**结构性事实与设计理由**；
 > 版本号、模型名、路径数等会漂移的数值一律去

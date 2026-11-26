@@ -1,6 +1,6 @@
 # Runtime State Ownership
 
-**候选增量**：`core/session/ownership.py` 中工业会话归属为独立 Redis 记录，固定 30 天 TTL，仅服务端新 ID 可注册；旧 ID 不自动迁移，过期或 Redis 失败拒绝执行。该记录不是永久身份数据库或删除证明。AgentRun 仍为业务真相源；会话 metadata 不授予权限。详见 [工业准入](../architecture/industrial-runtime-admission.md)。
+**工业准入实现**：`core/session/ownership.py` 中工业会话归属为独立 Redis 记录，固定 30 天 TTL，仅服务端新 ID 可注册；旧 ID 不自动迁移，过期或 Redis 失败拒绝执行。该记录不是永久身份数据库或删除证明。AgentRun 仍为业务真相源；会话 metadata 不授予权限。实现存在不代表真实身份提供方/Redis 部署已验收，详见[工业准入](../architecture/industrial-runtime-admission.md)及[生产准备度](../production-readiness.md)。
 
 > Status: CURRENT（随 `core/concurrency/`、`runtime/`、`core/checkpointer.py` 实现同步）。
 > 目的：明确每一种运行时状态的 **owner / scope / storage / 是否跨 Worker / 是否 durable**，

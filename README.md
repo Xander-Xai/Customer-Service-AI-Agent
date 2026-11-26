@@ -1,830 +1,213 @@
 # Customer Service AI Agent
 
-> **工业运行时治理候选（2026-11-25）**：新增用户身份绑定、请求幂等冲突拒绝、严格 checkpoint 探测、API/Worker ERP 与加密配置一致性。`CSAI_RUNTIME_PROFILE=industrial` 是待验收的严格发布配置，非默认 demo，也不代表真实生产通过。详见 [工业发布契约](docs/architecture/industrial-runtime-admission.md)。
+> A production-oriented customer-service Agent system built with LangGraph, featuring multi-agent orchestration, durable execution, governed tool calling, human handoff, and reproducible evaluation.
 
-> **架构治理（2026-11-25）**：唯一主线是 LangGraph 领域路由 + 受限 ReAct + 同步只读/异步耐久运行时；ResponseAgent 是确定性后处理角色。标准 Compose 部署启用合成数据上的 MCP/A2A 只读业务链路，工业 profile 必须改用批准目录、私有 TLS 与外部凭据；本地账本不保证 ERP exactly-once。见 [架构裁决与裁剪门禁](docs/architecture.md#architecture-decision-freeze--2026-11-25)。
+这是一个独立维护的客服 Agent 工程参考实现：将客户请求路由到领域处理流程，并在需要时使用受控工具、持久化任务状态和人工审批/坐席接管。项目展示可检查、可运行的 Agent Runtime 与业务边界，不是通用 Agent Framework，也不代表任何企业的官方或生产系统。
 
+> **PRODUCTION NOT_VERIFIED**：生产验收尚未完成。生产多副本长期稳定与 autoscaling、企业 provider/ERP、容量和坐席 SLA 均须按 [Production Readiness](docs/production-readiness.md) 单独验证；本地演示和 CI 不构成生产验收。
 
-> **Memory 专项定位（2026-11-24）**：聚焦任务/会话状态、Checkpoint、人工审批、工具回执与可恢复性，历史摘要不代表系统指令或业务事实。后续治理不等于历史生产交付。见 [Memory 工程定位与验收](docs/reference/memory-engineering-positioning-20261124.md)。
+[![Main CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
+![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
+![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)
+[![Latest Release](https://img.shields.io/github/v/release/Xander-Xai/Customer-Service-AI-Agent)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)
 
-> **LangGraph-based Customer Service AI Agent** — multi-agent orchestration, hybrid RAG,
-> tool execution, durable runtime, HITL and observability.
+## 项目特点
 
-一个**独立维护**的 LangGraph 多智能体客服工程参考实现：四层状态机动态路由
-（缓存检查 → 意图路由 → 专家 Agent 协作 → 响应后处理），叠加分布式执行底座
-（PostgreSQL checkpoint + Redis 锁 + Celery worker + 工具副作用幂等 ledger）
-与高风险操作的人工审批治理。
+- **Multi-Agent orchestration**：LangGraph 以领域路由为主，仅在多领域任务需要时执行并行或固定主从协作；[架构与编排边界](docs/architecture.md) · [`core/graph_builder.py`](core/graph_builder.py)
+- **Durable Agent Runtime**：API 快路径与异步耐久任务分流；异步执行由 `AgentRun`、PostgreSQL checkpoint、Redis、Celery 和恢复协调器支撑；[Runtime 设计](docs/design/agent-runtime.md) · [`runtime/`](runtime/)
+- **Governed tool execution**：Function Calling 与 MCP 工具经 `ToolRegistry`；直接 ERP 读取走独立授权 adapter。风险、回执和幂等边界由服务端控制；HITL 审批不等于业务动作已完成；[工具执行边界](docs/design/tool-execution-boundaries.md)
+- **Task memory and recovery**：恢复依据 checkpoint、run ledger、审批记录及已授权工具回执；对话摘要只作为上下文，不是订单事实或执行凭证；[Memory 定位](docs/reference/memory-engineering-positioning-20261124.md)
+- **MCP / A2A**：标准 Compose 默认以合成数据启用只读 ProductDocs MCP 与独立售后 A2A peer；普通 Python runtime 的 fallback 仍关闭，工业 profile 拒绝合成配置。完整应用 Compose readiness、真实 provider、企业目录/TLS 与 ERP 验收仍未完成；[当前状态](docs/reference/current-state.md) · [Issue #86](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/86)
+- **Human handoff**：高风险动作审批与客户转人工是两种不同流程；工单及坐席工作台代码已入主线，真实坐席、通知与 SLA UAT 尚未完成；[工单运维与验收](docs/human-handoff-operations.md)
+- **Evaluation and observability**：离线 Agent Eval 测编排/治理行为；指标有显式分子、分母和证据边界；[Agent Eval](docs/reference/agent-evaluation.md) · [评测总览](docs/evaluation.md)
 
-> **项目与数据边界（请先读）**
->
-> - 本仓库是独立维护的多智能体客服工程参考实现，**不代表任何特定企业的官方客服系统**，
->   也不是任何生产系统的等价镜像。
-> - 示例知识库、客户会话、商品、订单、售后及投诉数据均为**合成或经授权可公开**的资料，
->   不含真实客户信息、企业内部订单、商业秘密、生产日志、数据库凭据或未经授权公开的
->   第三方资产。
-> - 退款、订单修改等工具调用用于演示**工作流、审批、幂等与故障恢复机制**，不应被理解为
->   已接入真实企业 ERP 或具备真实交易执行能力。
-> - 测试与运行验证仅对**已执行的测试环境和条件**负责；不代表生产高可用、安全认证或实际
->   业务正确性得到验证。
->
-> 完整数据来源清单、已执行审计结论与已知残留：
-> **[DATA_PROVENANCE.md](DATA_PROVENANCE.md)**。
-
-**业务协议边界**：标准 Compose 部署默认接入合成 SKU 使用/存储文档 MCP 与独立售后规则 A2A peer；peer bearer 在本地首次启动时生成并保存在私有 Docker volume，不提交到 Git。工具只读、不授权退款、不查询 ERP。禁用回滚为 `MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false`（关闭时本地 peer 不监听）。`CSAI_RUNTIME_PROFILE=industrial` 拒绝合成协议配置，要求 `CSAI_PROTOCOL_MODE=external`、批准目录/摘要及私有 TLS 认证。当前合成数据验收不代表企业目录、真实 TLS、ERP 或生产验证，也不是历史任职时的上线记录。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md)、[A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) 和 [独立 A2A SDK CI](.github/workflows/a2a-interop.yml)。
-
-**Agent V1 Runtime 工程验收**：[技术模块与证据清单](docs/operations/agent-v1-runtime-acceptance.md)。本仓专注 Agent 编排、审批、运行时可靠性与受控副作用；未合并分支和本地 staging 测试不构成生产交付证据。
-
-[![CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
-![License](https://img.shields.io/badge/license-Apache--2.0-green)
-
-**可运行的工程参考实现，不等于生产上线认证**：`make test` 默认**离线**可跑（无 API Key、不出公网）；CI 在 3 个 Python
-版本上跑单测/集成，并在**真实** PostgreSQL + Redis 上跑分布式运行时验收
-（依赖缺失时硬 FAIL，不静默 skip）。
-
-| 事实项 | 当前值 | 真相源 |
-|---|---|---|
-| Runtime version | `6.3` | `core/config.py::VERSION` |
-| LLM（默认） | `siliconflow` / `Qwen/Qwen3-8B` | `core/config.py` |
-| Embedding / Rerank | `BAAI/bge-large-zh-v1.5` / `BAAI/bge-reranker-v2-m3` | `core/config.py` |
-| 运行时角色 / 兼容执行标识 | 9 / 5（3 类编排） | `agents/`、`collaboration/modes.py` |
-| OpenAPI 路径数 | 以 [API 参考](docs/reference/api-reference.md#当前接口总览) 的生成快照为准 | `make facts` / `make openapi-check` |
-| RAG 正式 649-query 指标 | **NOT_VERIFIED**（且当前不可测） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
-| 生产上线验收 | **未完成** | [Production Readiness](docs/production-readiness.md) · [生产准备度检查清单](docs/checklists/production-readiness-checklist.md) |
-| 公开发布记录 | 按 Release/tag 查阅 | [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) |
-
-> **分支、发布和部署分别核对。** 本文描述 `main`。已发布内容以 Release 对应 tag 为准。
-> GHCR 镜像由 `build-and-push` 构建，`deploy` 另受 `DEPLOY_HOST` 配置门控。
-> 生产验收证据见 [Production Readiness](docs/production-readiness.md)。
-
-**当前实现**见 [当前事实入口](docs/reference/current-state.md)，上线验收按 [生产准备度](docs/production-readiness.md) 逐项执行；直接 ERP 领域只读调用使用授权适配器而非 ToolRegistry，详见 [工具边界](docs/design/tool-execution-boundaries.md)。转人工工单后端已合入，默认关闭。
-坐席 Web 工作台的交付状态以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。
-
-**实时状态** · [`main` 提交](https://github.com/Xander-Xai/Customer-Service-AI-Agent/commits/main/) · [Pull Requests](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pulls) · [Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) · [Actions](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions?query=branch%3Amain) · [Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)。核对分支 HEAD、PR 合并状态和同一 SHA 的 Actions。
-版本变更历史在 [docs/reports/releases/changelog.md](docs/reports/releases/changelog.md)。
-
-> **关于证据**：本仓库区分「代码存在」与「证据支持」。正式 RAG 指标、生产 QPS/P95、
-> 真实 ERP 写操作、真实用户业务指标一律标记 `NOT_VERIFIED` / `NOT_MEASURED`。
-> 任何未经 provenance 支撑的数字都不应从这里、README 或任何对外材料中被引用为当前结果。
-> 完整不宣称清单见 [docs/limitations.md](docs/limitations.md)。
-
----
-
-## Contents
-
-- [Problem](#problem) — 客服场景为什么难
-- [Solution](#solution) — 这套架构怎么解决
-- [Architecture](#architecture) — 图、状态机、协作模式
-- [Key Features](#key-features) — 企业级能力的源码锚点
-- [Demo](#demo) — 一键可审计的离线演示
-- [Quick Start](#quick-start) — 最小可跑路径与部署变量
-- [Tech Stack](#tech-stack) — 选型一览
-- [Evaluation](#evaluation) — 测过什么、怎么复核
-- [Limitations](#limitations) — **先读这一节**
-- [Roadmap](#roadmap) — P0 / P1 / P2
-- [Project Structure](#project-structure) — 目录
-- [Business Scenarios](#business-scenarios) — 业务场景映射
-- [Docs](#docs) — 文档入口
-
----
-
-## Problem
-
-企业智能客服的难点不在"能不能调通 LLM"，而在下面这六件事。任何一件没做对，
-上线后就会以事故的形式出现。
-
-### 1. 长任务与在线交互是两种负载，不能用同一套机制
-
-用户问"这个成分会不会刺激"，要在两秒内回答。
-但一个需要人工审批的退款，可能要挂几十分钟。
-
-用同步接口处理后者 = HTTP 早就超时了，副作用还悬在半空。
-用队列处理前者 = 凭空多一跳延迟，用户已经关页面了。
-
-### 2. Agent 一定会做出有副作用的动作
-
-只要 Agent 能调工具，它就能"真的"下单、退款、改单。
-于是问题从"Agent 聪不聪明"变成"**它什么时候被允许做不可逆的事**"。
-LLM 说"我觉得该退款"不构成授权。
-
-### 3. 崩溃 + 重投 = 重复副作用
-
-分布式执行必然是 at-least-once：worker 崩了，任务会被重新投递。
-如果幂等没做对，**一次崩溃就变成两次扣款**。
-"不重复发起"不是框架给你的，是你自己要用 ledger 换来的——而且只在**本仓 ledger 层**成立；
-端到端 exactly-once 还要下游接受同一把幂等键。
-
-### 4. 状态散落在四个互不相干的地方
-
-对话历史、图执行位置、响应缓存、工具结果——它们有**不同的生命周期、
-不同的 scope、不同的失效条件**，其中工具结果还带用户身份。
-把它们塞进一个"上下文管理器"必然出现"该留的丢了 / 不该留的留下了"。
-
-### 5. 工具结果是上下文杀手
-
-一次 ERP 查询返回几百条记录。全塞进 prompt：撑爆上下文、烧 token、
-而且挤掉用户问题本身。**没有做过工具结果上下文工程的 Agent，成本和
-质量都会随数据量线性恶化。**
-
-### 6. 最难的不是上线，是"你怎么知道它还好使"
-
-指标显示一切正常，但 DLQ 里躺了 200 个 run——因为**告警规则依赖的指标
-从来没被导出过**。这类"看起来有监控、实际上没有闭环"的问题，
-在真实生产里是最高频的静默故障。
-
----
-
-## Solution
-
-> 一句话：**一个同步快路径 + 异步耐久路径并存的企业客服 Agent 服务。**
-> 快路径用 LangGraph 实时编排多 Agent 回答请求；长任务落库入队，
-> 由 Celery worker 从 Postgres checkpoint 续跑，并给每一次工具副作用加**去重记账**
-> （本仓 ledger 抑制已确认操作的重复执行；外部结果未知需要查询或对账）。
-
-针对上面六个问题：
-
-| 问题 | 方案 | 关键点 |
-|---|---|---|
-| 两种负载 | **Hybrid 双路径** | 快路径 `POST /api/chat` 永远 inline 不经队列；异步 `POST /api/runs` 落库 + 入队。共享同一份图与 checkpoint |
-| 有副作用的 Agent | **执行前拦截 + 人工审批** | HIGH 风险调用被**摘出**到 `pending_actions`（不执行），由图节点 `interrupt()` 逐个等人决策 |
-| 崩溃重投 | **三层幂等** | run 级（终态 no-op + 唯一约束）· thread 级（Redis 锁 + lease）· 工具级（`tool_side_effects` ledger，原子 claim） |
-| 状态四分 | **四类状态显式分离** | checkpoint（Postgres，跨进程）· session（Redis）· response cache（三层）· tool store（Redis，**scope 精确绑定**） |
-| 工具结果 | **Tool Result Context Engineering** | 压缩 → 字段白名单 → 预算裁剪（**优先丢最大的非标识字段**）→ 超限卸载 → 旧消息 stub 化 |
-| 可观测闭环 | **三条独立信号 + 证据分级** | Trace（OTel 语义 span）/ Metric（~70 个 prometheus_client 指标）/ Log（两层密钥脱敏）；`NOT_VERIFIED` 是一等公民 |
-
-**四条设计原则**（贯穿全仓，也是本项目与"会调 LangChain"的差别）：
-
-1. **Fail closed, never fail silently.**
-   Postgres checkpoint 起不来 → 拒绝回退 `MemorySaver`（`core/container.py:341-351`）。
-   embedding 挂 → 语义缓存失效并显式标记 degraded，**不静默退化成词面命中**。
-   无治理上下文的写操作 → 拒绝执行。
-2. **AgentRun 表是唯一真相源.** Celery result backend 不是（`task_ignore_result=True`）。
-3. **副作用必须可去重，且要写清楚去重到哪一层.** 用**重放稳定**
-   `operation_key`（`build_replay_stable_operation_key`，非 HITL；HITL 用
-   `run_id:approval:{approval_id}`）+ 原子 claim 换，而不是假装消息队列是
-   exactly-once。**不能用 `run_id:tool_call_id`**：`tool_call_id` 由 LLM 生成，节点
-   重放时会变，同一笔逻辑写操作换键后会被执行两次。**边界**：ledger 让**本仓**不重复发起同一次写；外部系统的
-   exactly-once 需要下游接受同一把幂等键——本仓**不提供、不宣称**端到端保证。
-4. **没证据就不写数字.** 正式检索指标当前**不可测**（gold 不是相关度标注），
-   所以本仓库不发布任何 Hit@K / MRR 百分比。用随机同类别文档当 gold 算出来的数字
-   **比没有数字更糟**。
-
----
-
-## Architecture
+## 架构概览
 
 ```mermaid
-flowchart TB
-    subgraph Input["接入层"]
-        WS[WebSocket /ws/chat]
-        REST[REST API /api/chat]
-        SSE[SSE /api/chat/stream]
-        MM["统一多模态入口 /api/chat/multimodal"]
-        RUNS["异步 run 入口 /api/runs"]
-    end
-
-    subgraph Middleware["中间件层"]
-        TRACE["1. trace_id 追踪"]
-        CSRF["2. CSRF 双重 Cookie 提交"]
-        AUTH["3. API Key / JWT · 4 级 RBAC"]
-        CSP["4. 安全头 CSP/HSTS"]
-        RATE["5. 限流 60req/min/IP"]
-    end
-
-    subgraph Graph["LangGraph StateGraph · 9 节点"]
-        C0["Layer 0 · check_cache"]
-        C1["Layer 1 · classify_query"]
-        C2["Layer 2 · 协作模式（5 选 1）"]
-        GATE["human_approval_gate"]
-        C3["Layer 3 · final_response"]
-    end
-
-    subgraph Cache["三层响应缓存"]
-        L1["L1 Redis 精确缓存 · MD5 SETEX"]
-        L2["L2 Qdrant 语义缓存 · BGE 向量"]
-        L3["L3 Jaccard 回退 · jieba 分词"]
-    end
-
-    subgraph Router["双层路由（asyncio.gather 并行）"]
-        LLM["LLM Router · JSON 分类"]
-        RULE["Rule Classifier · 正则 + 复杂度评分"]
-    end
-
-    subgraph Experts["9 个 Agent 角色"]
-        PA[ProductAgent]
-        TA[TechAgent]
-        BA[BillingAgent]
-        CA[ComplaintAgent]
-        GA[GeneralAgent]
-        SA[SalesAgent]
-        AA[AftersalesAgent]
-        RA[ReActAgent]
-        RPA[ResponseAgent]
-    end
-
-    subgraph Retrieval["检索与工具"]
-        RAG["Qdrant · 4+1 collection"]
-        BM25["BM25 词法检索"]
-        RRF["RRF 融合"]
-        RRK["Reranker · bge-reranker-v2-m3"]
-        ERP["金蝶 ERP · Mock/Real · HMAC"]
-        FC["Function Calling 工具集"]
-        MCP["MCP 适配器 · 默认关闭"]
-    end
-
-    subgraph Runtime["分布式执行底座"]
-        RUN["AgentRun 状态机 · agent_runs 表为唯一真相源"]
-        CP["PostgreSQL LangGraph Checkpoint"]
-        LOCK["Redis per-thread 锁 · Lua CAS"]
-        CELERY["Celery worker · acks_late + 幂等"]
-        LEDGER["tool_side_effects 幂等 ledger"]
-        DLQ["agent_dead_letters + 重放"]
-    end
-
-    subgraph HITL["人工审批治理"]
-        APPR["human_approvals · TTL / 职责分离"]
-    end
-
-    WS --> TRACE
-    TRACE --> CSRF
-    CSRF --> AUTH
-    AUTH --> CSP
-    CSP --> RATE
-    RATE --> C0
-    RUNS --> C0
-    C0 --> L1
-    L1 -->|"hit"| C3
-    L1 -->|"miss"| L2
-    L2 -->|"hit"| C3
-    L2 -->|"miss"| L3
-    L3 -->|"hit"| C3
-    L3 -->|"miss"| C1
-    C1 --> LLM
-    C1 --> RULE
-    LLM --> C2
-    RULE --> C2
-    C2 --> Experts
-    Experts --> GATE
-    GATE --> C3
-    Experts --> RAG
-    Experts --> ERP
-    Experts --> FC
-    Experts --> MCP
-    RAG --> BM25
-    BM25 --> RRF
-    RRF --> RRK
-    RRK --> Experts
-    RUN --> CP
-    RUN --> LOCK
-    RUN --> CELERY
-    RUN --> LEDGER
-    RUN --> DLQ
-
-    style C0 fill:#e1f5fe
-    style C1 fill:#fff3e0
-    style C2 fill:#e8f5e9
-    style GATE fill:#fff8e1
-    style C3 fill:#fce4ec
-    style HITL fill:#fff8e1
+flowchart LR
+    C[客户]
+    W[Web / API]
+    C --> W
+    H[人工坐席]
+    T[持久化工单]
+    H <--> T
+    A[认证与权限]
+    W --> A
+    A --> T
+    F[Fast path\n同步只读请求]
+    R[Durable path\nAgentRun + Celery]
+    A --> F
+    A --> R
+    G[LangGraph\nRouter / Orchestration]
+    F --> G
+    R --> G
+    M[领域 Agent / bounded ReAct]
+    G --> M
+    TR[ToolRegistry]
+    M --> TR
+    Q[RAG\nQdrant + BM25]
+    M --> Q
+    ERP[授权 ERP Adapter]
+    TR --> ERP
+    MCP[MCP\nread-only synthetic catalog]
+    TR --> MCP
+    A2A[A2A\nafter-sales peer]
+    TR --> A2A
+    HITL[HITL approval]
+    G --> HITL
+    X[Response postprocessor]
+    G --> X
+    PG[(PostgreSQL\nAgentRun + checkpoint)]
+    REDIS[(Redis\nsession / lease / broker)]
+    CW[Celery worker + beat]
+    O[Evaluation / OTel / Prometheus]
+    X --> C
+    R --> PG
+    R --> REDIS
+    R --> CW
+    G --> PG
+    G --> REDIS
+    X --> O
+    G --> T
 ```
 
-### 四层状态机
+图中是当前 `main` 的概念边界；标准 Compose 的协议目录是合成数据，不代表企业目录、provider、ERP 或退款资格已验收。运行时恢复依据 durable run/checkpoint/授权回执；本地账本不保证 ERP 端到端 exactly-once。详见 [Architecture](docs/architecture.md)。
 
-| 层 | 节点 | 做什么 | 关键设计 |
-|---|---|---|---|
-| **Layer 0** | `check_cache` | L1 精确 → L2 语义 → L3 Jaccard 回退 | 仅符合响应缓存边界的请求可短路到 Layer 3；durable run、图片、明确人工接管请求绕过缓存；embedding 不可用时 **fail closed** |
-| **Layer 1** | `classify_query` | LLM 分类器 ∥ 规则分类器 | `asyncio.gather` 并行；高置信规则匹配（≥ 0.75）**跳过 LLM 调用** |
-| **Layer 2** | 协作模式节点 | Sequential / Parallel / Consultation / Hierarchical / ReAct | 路由、复杂度及关键词规则选择五个兼容执行标识 |
-| **审批闸** | `human_approval_gate` | 逐个 `interrupt()` 等待人工决策 | **无 HIGH 风险动作时是纯 no-op**（普通流量零开销） |
-| **Layer 3** | `quality_gate` / `mode_upgrade_retry` / `final_response` | 安全条件下最多一次升级 → 最终评估、缓存、事件 | 工具或审批活动禁止质量驱动重放；缓存命中直接最终处理 |
+## 快速体验
 
-图定义：`core/graph_builder.py::build_graph`（唯一生产 `StateGraph`）。
-状态：`core/state.py:6`（`AgentState`，单一定义点）。
-节点逐行与边设计理由见 [docs/architecture.md](docs/architecture.md)。
+### 路径 A：离线、无 API Key 的确定性演示
 
-### 一次请求实际怎么走
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as 用户
-    participant API as FastAPI
-    participant G as LangGraph
-    participant A as 专家 Agent
-    participant R as Qdrant + BM25
-    participant T as ToolRegistry
-    participant L as 幂等 ledger
-
-    U->>API: POST /api/chat（或 /api/runs 异步）
-    API->>API: auth / 限流 / 净化 / per-thread 锁
-    API->>G: ainvoke(thread_id=session_id)
-    G->>G: Layer 0 check_cache（L1→L2→L3）
-    alt 缓存命中
-        G-->>API: 直接产出响应
-    else 未命中
-        G->>G: Layer 1 LLM ∥ 规则 路由（可短路）
-        G->>G: Layer 2 选协作模式（5 选 1）
-        G->>A: 调用领域 Agent
-        A->>R: 混合检索 + RRF + rerank
-        R-->>A: Top-K 证据
-        opt 该角色是 ReActAgent
-            A->>T: execute_raw（唯一执行边界）
-            T->>L: 有副作用？原子 claim
-            L-->>T: 命中则返回已存结果，不重做
-            T-->>A: 结果经上下文工程裁剪
-        end
-        A-->>G: AgentState
-        G->>G: human_approval_gate（HIGH 风险逐个 interrupt）
-        G->>G: quality_gate（安全条件下最多一次升级，重新检查审批）
-        G->>G: final_response（最终评估 / 缓存 / 事件）
-        G-->>API: final_response
-    end
-    API-->>U: 响应 / SSE 流
-```
-
-Agent 角色内部循环、工具边界与幂等记账的细节图见
-[docs/agent-design.md §2.0](docs/agent-design.md)；异步路径与崩溃恢复见
-[docs/architecture.md §2.1](docs/architecture.md)。
-
-### 主流编排模式与兼容执行标识
-
-| 模式 | 何时选 | 结构 |
-|---|---|---|
-| `Sequential` | 单意图、单一领域（**默认**） | Routing → 单专家直接执行；非多 Agent 串行链 |
-| `Parallel` | 多领域可切分（成分 + 库存 + 价格） | 并发执行 → 聚合 |
-| `Consultation` | 需要专家意见但由主 Agent 交付 | 固定辅助专家 → 主专家汇总 |
-| `Hierarchical` | 投诉、复杂任务需分解 | 代码预定义子任务 → 并行执行 → 协调者汇总；非动态 LLM 规划 |
-| `ReAct` | 需检索 + 工具调用的多步推理 | 单 Agent 有界工具循环；非多 Agent 协作 |
-
-单域投诉由投诉 Agent 直接处理；确有产品或订单等其他领域子任务时才走 `Hierarchical`。这保留跨域汇总口径，同时避免仅有一个子任务时再调用通用协调者。Sequential 与 ReAct 共享单 Agent 执行、超时、事件和工具回执边界；ReAct 的差异在所选 Agent 及工具策略，不是另一套调度实现。
-
-架构术语以 [权威架构文档](docs/architecture.md) 为准：Routing 是主架构，并行分发和固定主从汇总是两个多 Agent 模式族。Consultation 与 Hierarchical 属于同一固定主从模式族，ReAct 属于单 Agent 内部策略；五个旧标识保留用于节点、SSE 和监控兼容。规则质量门控加一次安全重试不是双模型 Evaluator–Optimizer。本轮协作仅使用当前调用结果，不从会话黑板恢复旧子任务。
-
-### 为什么不是一条裸 Chain
-
-裸 `if/elif` + LLM 在四个地方会断：路由与分支管理复杂（并非所有角色和模式可组合）、
-没有"暂停等人"的原语、进程死了状态就没了、多 Agent 中间结果没有统一载体。
-LangGraph 恰好提供了这四个原语（`StateGraph` / `interrupt()` / Checkpointer /
-`AgentState`）——详见 [docs/agent-design.md](docs/agent-design.md)。
-
-Response Cache（L1/L2/L3）与 **Tool Result Cache、Tool Result Store、Session Memory、
-LangGraph Checkpoint 是相互独立的机制**（[ADR-006](docs/decisions/)），不共用 TTL
-或失效条件。
-
----
-
-## Key Features
-
-每一项都有源码锚点。这一节是本项目与「会调 LangChain」的差别。
-
-### 分布式 Agent Runtime
-
-- **AgentRun 是唯一真相源**：业务状态只认 `agent_runs` 表；Celery result backend
-  **不是**真相源（`task_ignore_result=True`）。状态机 9 状态、DB 层原子 CAS 转移：
-  `runtime/statuses.py:45-103`、`runtime/repository.py:182,211`。
-- **四个 ID 严格区分**：`thread_id`（对话级 == `session_id`）· `run_id`（单轮执行）·
-  `task_id`（Celery，重投会变）· `AgentRun`（业务记录，跨重投稳定）。
-  **为什么重要**：崩溃恢复时 Celery 用**新 task_id** 重投同一条 run，
-  把 task_id 当业务标识会让幂等键变化 → **重试真的重复扣款**。
-- **at-least-once，明确不是 exactly-once**：`task_acks_late` +
-  `task_reject_on_worker_lost` + Redis `visibility_timeout`。正确性由三层幂等承担。
-- **崩溃恢复**：worker 崩溃 → 未 ACK 任务重投 → lease 过期后 `mark_running` 接管
-  （attempt+1）→ **从 checkpoint `next` 续跑**（`runtime/bootstrap.py`）→ 退避重试 →
-  用尽写 DLQ → `scripts/replay_dead_run.py` **复用原 `run_id`** 人工重放
-  （新 run_id 会绕过工具幂等键）。
-- **归属权 fencing（owner CAS）**：worker 提交终态走 `transition_owned()`，
-  ownership 谓词长在**同一条 UPDATE 的 WHERE 内部**（`SELECT → 判断 → UPDATE` 是
-  TOCTOU）。失去所有权抛 `RunOwnershipLost`，executor 读到即退出：不记失败、不重试、
-  不进 DLQ、不消耗 attempt。
-- **Checkpoint 生产 fail-closed**：三层守卫（`core/config.py:637`、
-  `core/container.py:341-351`、`core/container.py:278-289`）。内存 checkpoint 在多副本下
-  会给出"看起来正常但状态已丢"的行为，**比启动失败危险得多**。
-
-### Human-in-the-Loop 高风险审批
-
-高风险工具调用在**执行前**被摘出到 `state["pending_actions"]`（**不执行**），
-由图节点 `human_approval_gate` 逐个 `interrupt()`。
-
-- 风险分级 LOW/MEDIUM/HIGH，优先级为「工具显式声明 > 工具名白名单 > 金额阈值 >
-  默认 LOW」，**只有 HIGH 需要审批**；判定失败 fail-closed。
-- 审批落表（唯一约束 `(run_id, action, proposal_fingerprint)`），
-  `PENDING → APPROVED | REJECTED | EXPIRED` 均为终态。
-- **职责分离** `reviewer_id != user_id` 在 **service 层**强制
-  （`core/hitl/approval_service.py:338-349`），API 层不是唯一防线。
-- TTL 到期落 `EXPIRED`，**按拒绝处理，绝不默认放行**，并在读/决策/恢复**三处收敛**，
-  保证图不会死等。
-- **幂等双防线**（缺一不可）：审批防「不该做的被做了」，side-effect ledger 防
-  「做了一次被重做」。已批准执行走 `operation_key = run_id:approval:{approval_id}`，
-  在**任意次重试中恒定**。
-- `/api/chat` 快路径**无 run 上下文，明确不在该治理边界内**；补偿措施是**拒绝**
-  无治理的副作用调用，不是放行。
-
-设计：[docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md)
-
-### 工具执行的统一边界
-
-原生 Function Calling 工具与 MCP 注册工具经过 `ToolRegistry.execute_raw`，因此可统一做授权、超时、
-幂等、缓存、脱敏、埋点。**模型永远拿不到 tool store 的访问权**——只能用
-`recover_tool_result(reference_id)`，而这仍受 scope 精确校验
-（不同 `(user_id, session_id)` 拿不到别人的结果）。否则一次 prompt injection
-就能捞走别的用户的工具结果。
-
-### 评测的真实性
-
-正式评测流水线会**自我认证失败**：`scripts/rag_evidence_validity.py` 从执行事实
-（子集运行？查询数？四条 ablation leg？请求错误？降级比例？required channel
-是否真的跑过并产出候选？gold 覆盖？）判定有效性，**不看指标大小**——
-一个真正差的检索器产出低 Hit@K 是**有效测量**。生产者写 `evidence_validity` 块且在
-`INVALID` 时不允许输出 `VERIFIED_FULL`；消费者**重算**并交叉核对。
-手工编辑或旧版 artifact 无法自我认证。
-
-### 其他
-
-| 能力 | 锚点 |
-|---|---|
-| Tool Result Context Engineering | `core/tool_result_*.py`（预算、压缩、offload/recovery、scope-safe exact reuse） |
-| MCP 适配器 | `tools/mcp_adapter.py`（11 条 fail-closed 策略、8 类错误分类、init 回滚事务；默认关闭） |
-| 三层响应缓存 | `cache/`（L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退） |
-| 混合检索 | `rag/`（Qdrant + BM25 → RRF → cross-encoder rerank；确定性 point ID） |
-| Token 配额与追踪 | `core/token_tracker.py`（用户级日/月限额，Redis 持久化 + 内存回退） |
-| 分布式追踪 | `core/tracing.py` + `core/telemetry.py`（5 个语义 span，属性白名单 + 敏感键黑名单双层） |
-| 结构化日志 | `core/logger.py`（两层密钥脱敏；`scrub_exception_message()` 就地脱敏，**防止 ASGI 自己的 traceback 泄漏**） |
-| 输入净化与注入防御 | `api/utils.py` + 历史对话包在「不可信数据」边界标记内 |
-| 数据权限与会话隔离 | ContextVar per-session SharedBlackboard + 可选 Fernet 会话加密（AES-128-CBC + HMAC-SHA256） |
-| 文档一致性守卫 | `scripts/audit_doc_consistency.py`（链接/配置/OpenAPI/生命周期/指标声明/Mermaid 结构/HITL 默认值/状态机完整性/生产声明） |
-
-### 证据分级
-
-| 级别 | 含义 | 现状 |
-|---|---|---|
-| **Level 1 — IMPLEMENTED** | 代码存在且可读 | 图编排、工具循环、RAG、分布式 Runtime、HITL、OTel |
-| **Level 2 — CI VERIFIED** | 真实基础设施 + 命令 + 可复查 artifact | `make runtime-e2e`（真实 PG + Redis + 多进程 Celery）、`make runtime-chaos`（SIGKILL worker 恢复）在 CI lane 上跑；OTel Collector 传输链路（`make otel-collector-smoke`）为 **LOCALLY VERIFIED**，不在 CI lane |
-| **Level 3 — 生产验证** | 真实生产集群 / 多副本 / 真实流量 | **全部 NOT_VERIFIED** |
-
-> **Level 2 ≠ 生产验证。** 本仓库任何文档都不得把 Level 2 说成"生产集群已验证"。
-
----
-
-## Demo
+要求 Python 3.10–3.12、仓库声明的依赖及 `make`。该路径使用 Mock LLM 和本地 fixture，不访问外网：
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt -r requirements-dev.txt
 make demo-offline
 ```
 
-离线、确定性地跑通「正常客服路由」，并输出证据卡（Mock LLM、无 API Key、无出网）：
-包含 scenario / `MOCK/OFFLINE` / verdict（`PASS` / `FAIL` / `NOT_RUN`）/ Git SHA /
-UTC 时间戳 / 源码与测试锚点。退出码即底层检查退出码——
-**「没跑」或「跑挂」永远不会被输出成 `PASS`**。
-详见 [docs/guides/offline-demo.md](docs/guides/offline-demo.md)。
+成功时会打印 `MOCK/OFFLINE` proof card，并写入 gitignored 的 `artifacts/demo/`。proof card 会记录实际执行时的 SHA、时间、命令与测试锚点；运行使用 egress guard，不需要 provider key。它验证的是 Mock LLM 下的工程路径，不是模型质量或生产验收。细节见 [offline demo guide](docs/guides/offline-demo.md)。
 
----
+### 路径 B：标准 Docker Compose 本地栈
 
-## Quick Start
-
-### 最小可跑路径（默认离线，不需要任何 API Key）
+要求 Docker Engine / Compose plugin、可拉取依赖的网络及获准的限额 LLM 测试凭证。Compose 启动时会请求配置的 provider，可能产生费用；不要将 `.env`、生成密钥或自签证书提交到仓库。
 
 ```bash
-# 1) 环境
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-
-# 2) 跑测试（默认离线：不发起公网请求，Mock 一切外部依赖）
-make test
-
-# 3) 读当前事实（不硬编码任何数字，全部从代码/配置推导）
-make facts
-make audit-docs        # 文档一致性守卫
+# 当前 shell 内生成一次性本地密码；关闭终端后需要重新导出。
+export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+export POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+export DATABASE_URL="postgresql://csai:${POSTGRES_PASSWORD}@postgres:5432/csai"
+export GRAFANA_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+export JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export SESSION_TOKEN_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+read -r -s -p "Authorized LLM provider test key: " OPENAI_API_KEY; printf '\n'; export OPENAI_API_KEY
+export NGINX_HTTP_PORT=8080 NGINX_HTTPS_PORT=8443
+make tls-local-cert
+docker compose -f deploy/compose/docker-compose.yml config
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+docker compose -f deploy/compose/docker-compose.yml ps
+docker compose -f deploy/compose/docker-compose.yml exec -T app \
+  curl -fsS http://localhost:8000/api/health
 ```
 
-### 起服务
-
-```bash
-make dev               # → http://localhost:8000（热重载）
-make prod              # 生产栈（Docker Compose + Nginx + TLS），缺 TLS 物料会 fail fast
-make tls-local-cert    # 仅本地开发：生成本地自签证书
-```
-
-标准 Compose profile 默认启动合成数据上的只读 MCP 产品文档工具和 A2A 售后规则 peer；可用
-`MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false` 回滚关闭。关闭 peer 只影响相应协议能力，
-不代表应用业务 readiness。合成目录、容器 healthcheck 或 HTTP 200 均不证明模型可用、真实企业
-目录/TLS/ERP 已验收；请同时查看 `/api/health` 的 component 状态。工业 profile 必须使用批准的外部目录与私有 TLS 配置，合成配置会 fail closed。详见
-[协议部署边界](docs/deployment.md)。
-
-### 部署前必须设置的变量
-
-| 变量 | 为什么 | 缺了会怎样 |
-|---|---|---|
-| `ADMIN_PASSWORD` | app 首次启动用它引导 admin 账号 | `docker compose config` 直接失败并提示 |
-| `POSTGRES_PASSWORD` / `JWT_SECRET` / `SESSION_TOKEN_SECRET` / `API_KEY` | 生产凭据 | 启动校验 **fail-fast，不降级** |
-| `LLM_PROVIDER` 对应凭据 | LLM 调用 | 熔断器连续失败后降级到规则引擎 |
-| `HITL_HIGH_RISK_TOOLS` 或 `HITL_HIGH_AMOUNT_THRESHOLD` | 让审批开关真的生效 | **静默什么都不拦**（见 [Limitations](#limitations)） |
-
-配置全表见 [docs/reference/configuration.md](docs/reference/configuration.md)，
-模板见 [`.env.example`](.env.example)（提交的是占位符，不是密钥），
-部署细节见 [docs/deployment.md](docs/deployment.md)。
+App startup runs Alembic upgrade. The health endpoint returns JSON; inspect `status` and component fields. HTTP 200 or a healthy Docker probe alone does not establish provider readiness. Standard Compose also initializes the synthetic read-only ProductDocs MCP and A2A peer; neither uses real customer or ERP data.
 
 ### 端口语义
 
-| 场景 | 地址 | 说明 |
-|---|---|---|
-| 开发（`make dev`） | `localhost:8000` | dev override **确实**发布 app:8000 |
-| 生产 | nginx `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`（默认 80 / 443） | app 只 `expose: 8000`、**不对宿主机发布** |
+`make dev` 和开发 Compose override 将 API 发布为 `http://localhost:8000`。生产 Compose 只由 nginx 对外发布入口：`NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT` 默认映射到容器 80/443；app 的 8000 与 Prometheus 的 9090 仅供 Compose 网络内部访问。
 
-生产栈唯一发布应用端口的是 nginx——TLS、安全响应头、灰度流量分割都在它那里。
-**8000 不是生产可达地址。**
-
----
-
-## Tech Stack
-
-| 层 | 选型 |
-|---|---|
-| 编排 | LangGraph（`StateGraph` + PostgreSQL checkpointer + `interrupt()`） |
-| 服务 | Python 3.10+ · FastAPI · SSE · WebSocket · Uvicorn/Gunicorn |
-| 检索 | Qdrant（4+1 collection）· BM25 · RRF 融合 · `bge-reranker-v2-m3` |
-| 异步 | Celery（Redis broker）· `acks_late` · `visibility_timeout` · DLQ |
-| 状态 | PostgreSQL 15（`agent_runs` / `agent_dead_letters` / `tool_side_effects` / `human_approvals`）+ Redis 7（Session / Cache / JWT 黑名单 / per-thread 锁） |
-| 观测 | OpenTelemetry 语义 span + Prometheus + Grafana + Alertmanager + Loki |
-| 安全 | Argon2id · JWT（access + refresh + Redis 黑名单）· 4 级 RBAC · CSRF 双提交 · CSP nonce · SSRF 防护 · 限流 |
-| 部署 | Docker Compose 6 变体（base / prod / override / canary / scale / monitoring）+ Nginx + TLS |
-| 工具 | OpenAI Function Calling · 标准 Compose 的只读合成 MCP/A2A（显式可关闭；工业配置需授权）· 金蝶 ERP 适配器（Mock/Real + HMAC + 重试 + 分页） |
-| 前端 | 原生 JS + Vite 8 · Vitest（可嵌入 widget） |
-
----
-
-## Evaluation
+停止服务：
 
 ```bash
-make test          # 默认离线：无 API Key、无公网访问
-make test-fast     # 跳过 stress 标记的慢测试
-make test-cov      # 覆盖率报告（门槛 80%）
-npm test           # 前端 Vitest
+docker compose -f deploy/compose/docker-compose.yml down
 ```
 
-测试数量以 `pytest --collect-only -q` / `npm test` 的当前输出为准，不在文档里硬编码。
+标准多 worker 部署须共享 PostgreSQL checkpoint、Redis session 和 Redis thread lock（`AGENT_RUN_THREAD_LOCK_BACKEND=redis`，per-thread）。工业 profile 与外部授权要求见[部署指南](docs/deployment.md)及[准入契约](docs/architecture/industrial-runtime-admission.md)。
 
-| 门禁 | 命令 | 需要的环境 |
+### Compose 验收状态
+
+2026-11-26 在 WSL2/Docker 29.5.2 + Compose 5.1.4 上，PR #87 代码构建了新 app/worker/beat 镜像，隔离基础服务和协议容器启动；API 因未提供 `OPENAI_API_KEY` 在配置校验处 fail-closed，worker/beat 未保持 healthy（其各自原因未单独采集），所以完整标准 Compose readiness 未通过。另用同一 app image 的临时测试进程（`APP_MODE=dev` / `DEV_MODE=true`）及私有 synthetic protocol volume，分别通过官方 MCP SDK → stdio → `ToolRegistry` SKU 查询和 A2A SDK → 独立售后 peer 业务调用（`execution_authorized=false`）。该回环证明协议组件，不证明标准 app graph readiness 或路由。临时容器、网络、volume 已清理；外部验收继续见 [Issue #86](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/86)。
+
+## 业务场景与评测
+
+表中输入来自合成 fixture / 测试，不是真实客户对话：
+
+| 场景与输入 | 处理过程 | 输出 / 状态边界 |
 |---|---|---|
-| 代码规范（Ruff check + format，**阻塞**） | `make lint` | 无 |
-| 文档事实一致性（`make audit-docs` 守卫） | `make audit-docs` | 无 |
-| OpenAPI 快照一致 | `make openapi-check` | 无 |
-| 分布式运行时验收 | `make runtime-e2e` | 真实 PostgreSQL + Redis + 多进程 Celery（**缺失时硬 FAIL**） |
-| worker 崩溃恢复（SIGKILL） | `make runtime-chaos` | 同上 |
-| 运行时证据报告 | `make runtime-verify` | 同上 → `artifacts/distributed-runtime/<ts>/report.json` |
-| DLQ 人工重放 | `make runtime-replay-help` | 同上 |
-| RAG 正式 649-query 评测 | `make rag-eval-import` → `make rag-eval-649-preflight` → `make rag-eval-649` | 真实 provider + 已索引语料（**当前 NOT_VERIFIED**） |
+| 商品咨询：“这款精华液多少钱？” | 单专家路由；离线测试用可控 Mock LLM，验证 cache miss、分类和响应后处理 | 断言响应非空、路由字段存在；模拟答复不可作为商品事实。见 [`test_integration.py`](tests/integration/test_integration.py) |
+| 商品支持文档查找 | Compose 合成 ProductDocs 由 MCP stdio server 只读查询，注册至 ToolRegistry | 回执标记 `SYNTHETIC_LOCAL_FIXTURE`；不是批准企业目录。见 [MCP 产品文档](docs/operations/mcp-product-documents-20261125.md) |
+| 售后流程查询 | A2A SDK 将枚举化问题/阶段委派给独立规则 peer | 合成结果不授权退款或证明退款资格；`execution_authorized=false`。见 [A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) |
+| 高风险动作或需要人工 | 耐久 run → 风险识别 → 审批 interrupt；客户转人工进入独立工单生命周期 | `WAITING_APPROVAL` 不是动作完成；真实 ERP 写入与坐席运营 UAT 未验证。见 [HITL](docs/design/human-in-the-loop.md) · [Handoff](docs/human-handoff-operations.md) |
 
-CI 有 9 个 job：`lint`（Ruff check + format，blocking）、`test`（3 个 Python 版本 +
-MCP 契约**禁止静默 skip**）、`dev-compat`、`runtime-e2e`（真实 PG + Redis + chaos）、
-`metrics-alerting`（指标暴露面契约 + 官方 `promtool` + 真实 Prometheus 端到端）、
-`agent-eval`（契约阻塞；分数在人工标注完成前必须 `NOT_MEASURED`，不冒充 PASS）、
-`security`、`build-and-push`、`deploy`（容器内健康探测 + Celery 原生 worker 就绪断言）。
+Agent Eval scripted baseline 衡量执行编排与治理，不衡量真实模型效果；115-case 数据 `human_confirmed_only=0`，整体 `INCONCLUSIVE`。**当前 649-query 正式指标：`NOT_VERIFIED`**（RAG benchmark gold 缺少人工相关性判断）。详见[当前事实](docs/reference/current-state.md)、[生产准备度](docs/production-readiness.md)及[RAG 评测参考](docs/reference/rag-evaluation.md)。
 
-> ⚠️ **CI 绿色 ≠ 所有扫描都达到阻塞门禁标准。** `security` job 里有两步是
-> **`continue-on-error: true` 的信息性步骤**，失败不会让 job 变红：
-> **gradual mypy**（存量模块的渐进式类型检查，存量类型错误**仍然存在**、未清零）与
-> **pip-audit**（依赖漏洞扫描）。真正**阻塞**的是：strict mypy（新模块）、
-> bandit、公开仓库边界守卫、secret 检查、Ruff、全部测试 lane 与 runtime-e2e。
-> 看到 `security = success` 时不能推断「依赖无漏洞」或「类型债已清」。
+Runtime E2E 曾出现 Gate11 worker-recovery 间歇性 `CheckpointEpisodeMismatch`；相同 SHA CI 重跑与 main commit `31a11f91d9a09ba6d5e8763db84151be930f9a27` 上的本地 PostgreSQL/Redis 定向测试通过，但根因尚未定位。详见[当前事实](docs/reference/current-state.md#runtime-gate11-间歇性失败观察)；一次通过不等于竞态已修复。
 
-> **为什么有些测试"不允许 skip"？** 一个会因为"依赖没装 / 环境没配"而变绿的测试
-> 证明了不了任何事，却会给人"已验证"的错觉。分布式 Runtime 验收的
-> `TEST_DISTRIBUTED_DB_URL` 缺失时是**硬 FAIL**。
+常用验证命令：
 
-评测与证据的完整口径见 [docs/evaluation.md](docs/evaluation.md)。
-
----
-
-## Limitations
-
-> **这一节是本 README 里最重要的一节。**
-> 下文同时记录已修复的断链、当前实现范围和待验收项。
-
-> 本节整体状态：**`PRODUCTION NOT_VERIFIED`**。
-> Compose 扩容能力可配置 ≠ 多副本在生产跑过；
-> Level 2 的真实验收（真实 PG / Redis / 多进程 Celery、SIGKILL 崩溃恢复）
-> **不等于**生产验证。
-
-完整清单（含代码级债务与未做方向）见 **[docs/limitations.md](docs/limitations.md)**。
-
-### 展示状态：`SHOWCASE_READY_WITH_DISCLOSED_LIMITATIONS`
-
-主要架构、测试入口与可复现范围已清晰，**活跃文档与实际代码在已核查范围内一致**；
-可作为 AI 大模型应用开发（RAG / Agent）方向的开源工程参考。
-**尚未得到生产环境完整验证。** 本状态**不等于** `PRODUCTION_READY`、
-`SECURITY_CERTIFIED`、Level 3 已验证、端到端 exactly-once，也不代表已随 `v1.0.1`
-发布。后续只有明确缺陷、安全事件、必要依赖更新或真实新需求才触发工程修改。
-
-### 已知功能断链（声明强于事实）
-
-| # | 问题 | 状态 | 说明 |
-|---|---|---|---|
-| 1 | **DLQ 告警断链** | **已修复（暴露链 `VERIFIED_LOCAL`）/ 通知链 `NOT_VERIFIED`** | 断链有两半：① 注册表**从未被序列化**（唯一的 `/metrics/prometheus` 手工拼接 `csai_*`，全仓无 `generate_latest`）；② `agent_run_dead_letter_total` 由 **worker 容器**递增而 Prometheus 只抓 **app 容器**，进程内 REGISTRY 互不可见。现在有 `GET /metrics`（`generate_latest`）+ `PROMETHEUS_MULTIPROC_DIR` 多进程聚合 + `bearer_token_file` 抓取凭据。真实 `prom/prometheus:v2.51.0` 上 `AgentRunDeadLetterDetected` 实际进入 `firing`（`make metrics-exposure-verify`；`make alert-rules-test` 是官方 `promtool test rules`）。**仍未验证**：Alertmanager 实际投递、整套 compose 栈端到端、Grafana 真实渲染 |
-| 2 | **转人工坐席** | **持久化工单后端已实现，生产待验证** | 工单、坐席领取队列、消息与关闭/重开 API 已实现。启用需应用迁移 `007_durable_human_handoff` 和设置 `HUMAN_HANDOFF_ENABLED=true`。坐席 Web 工作台以 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 的合并记录为准。通知与 SLA 见 [人工交接运维说明](docs/human-handoff-operations.md)。 |
-| 3 | **`HITL_ENABLED=true` 但没配 = 静默放行** | **已修复（fail-closed）** | ① **启动校验** `core.config.validate_hitl_settings`：`HITL_ENABLED=true` 而两条 HIGH 规则全空 → **拒绝启动**（此前是 LOW 全放行且无任何告警）。校验先于 `DEV_MODE` 早退，开发机同样受约束。② **执行期兜底**：治理开启时，`side_effect=True` 却没被任何规则认领风险等级的工具一律判 **HIGH**；只读工具不受影响 |
-
-### 工具执行层的真实边界
-
-| 能力 | 状态 | 说明 |
-|---|---|---|
-| 原生工具超时 | `Implemented` | `TOOL_EXECUTION_TIMEOUT_SECONDS`（默认 30s）覆盖只读与幂等 ledger **两条**分支。**只读超时降级为可解释错误；副作用超时必须冒泡** —— 转成字符串会被 ledger 记成 `SUCCEEDED`，重投递时直接返回缓存，副作用再也不会发生 |
-| 工具级重试 | **不存在** | `RETRY_MAX_ATTEMPTS` 只作用于 **LLM 客户端**。不要因为 LLM 有重试就说工具层也有 |
-| 工具级熔断 | **不存在** | `CircuitBreaker` 只保护 LLM，不保护 ERP / MCP |
-| 并行工具调用 | **不存在** | `agents/base_agent.py` 的工具循环是顺序 `for`；`asyncio.gather` 只用于上下文准备 |
-
-> 这三条"不存在"由 `tests/unit/test_tool_execution_reliability.py::TestAbsentToolLayerFeatures`
-> **断言其不存在** —— 补上它们会失败并要求同时补配置、文档与验证，
-> 避免又出现一句无法验证的"工具层支持重试"。
-
-### 证据状态
-
-| 项 | 状态 | 原因 |
-|---|---|---|
-| RAG 正式 649-query 指标 | `NOT_VERIFIED`，且**当前不可测** | shipped gold **没有任何一条是人工相关度判定**（是"同类别随机抽样"），另有 160 个 gold id 不在语料中。流水线完整，缺的是标注 |
-| 真实 ERP 写操作（退款/改单） | `NOT_VERIFIED` | 只在 `tools/hitl_staging_tools.py` 上验证了**治理机制**，不是金蝶 ERP 的正确性。无企业 staging 环境 |
-| 生产集群 / 多副本长期稳定性 / K8s autoscaling / 跨区域 | `NOT_VERIFIED` | 无生产环境 |
-| 生产 QPS / P95 / P99 / Token 成本 / 真实用户 FCR 与满意度 | `NOT_MEASURED` | 有 8 个 benchmark 脚本，但**无 SLO 定义、无生产基线** |
-| 真实 trace 后端（Jaeger / Tempo） | `NOT_VERIFIED` | 已验证的 Collector 只有 `debug` exporter，**无持久化、无查询 UI** |
-| Nginx 横向扩容 | `NOT_VERIFIED` | 多副本可渲染，但 upstream 分发到多副本未验证 |
-| MCP 真实第三方 server | `NOT_VERIFIED` | 适配器已进 `main`（默认关闭 / read-only-first），有 deterministic fake-server 契约测试；真实 server 的网络/鉴权/多副本/写工具未验证 |
-
-### 默认关闭 / 明确不在边界内
-
-| 项 | 说明 |
-|---|---|
-| `HITL_ENABLED` 默认 `false` | 需要显式开启 + 显式配规则 |
-| `POST /api/chat` 快路径 | **无 run 上下文，明确不在 HITL 治理边界内**。补偿措施是拒绝无治理的写操作 |
-| 待审批主动通知 | 只有轮询队列，**没有 push / 邮件 / IM** |
-| MCP 写操作工具 | **结构上不可能存在**：只注册 `risk_level=low` 的 MCP 服务器 |
-| `media/` 与 `alerts/` | 是 **API 层集成，不是 Agent 可调用的工具**。不要算进"工具生态" |
-| LangGraph `store` 长期记忆 | `compile()` 只传 `checkpointer`；跨会话记忆由 `core/session/` 承担，两者**明确分离** |
-| LangSmith / Langfuse / OpenInference | **未集成**。tracing 是手写 span，不是 LangChain-native |
-| Kubernetes manifests | **没有**。没有真实集群与多副本一致性验证的 K8s manifest 是**装饰性声明，比没有更糟** |
-| Agent 行为回归评测（Agent Eval V1） | **已实现**：真实编译图 + 脚本化 LLM（零出网）+ JSONL 用例集，测编排/治理/路由行为。**不测**模型能力。见 `docs/reference/agent-evaluation.md` |
-| LLM-as-judge 语义质量 | **未实现**。`agents/evaluator.py` 是启发式关键词打分 |
-
-### 没有做的技术选择（及理由）
-
-写清楚不做什么和写清楚做了什么一样重要：
-
-| 不做 | 理由 |
-|---|---|
-| `interrupt_before` / `interrupt_after` | 无法表达"只有 HIGH 风险工具才审批"这种**数据相关**条件 |
-| LangGraph 原生 `astream` / `astream_events` | 走自建 callback 总线。**有代价**：`stream_callback` 若作为 state channel 会破坏 checkpoint 序列化，生产已改走 ContextVar，但 `core/state.py:19` 的声明仍在 |
-| 把同步快路径也异步化 | 给秒级交互凭空加一跳延迟 |
-| 把异步长任务也走同步 | 审批可能挂几十分钟，HTTP 等不了；且崩溃 = 状态丢失 |
-| Celery result backend 作为真相源 | 真相源是 `agent_runs` 表 |
-| Agent 之间自由对话 | 本项目是**受控编排**（LangGraph 决定调谁），要可预测的成本与延迟 |
-
-整改计划（按 P0/P1/P2 分类、含执行顺序与验收方式）：
-[docs/reports/audit/PROJECT_FINALIZATION_PLAN.md](docs/reports/audit/PROJECT_FINALIZATION_PLAN.md)
-
----
-
-## Roadmap
-
-按「上线可信度 → 工程纵深 → 未来扩展」排序。完整规格与验收方式见
-[PROJECT_FINALIZATION_PLAN.md](docs/reports/audit/PROJECT_FINALIZATION_PLAN.md) 与
-[production-readiness.md](docs/production-readiness.md#production-upgrade-roadmap)。
-
-### P0 — 上线前必须闭环（否则存在静默故障/安全边界缺口）
-
-- ~~**监控序列化闭环**：让 DLQ 告警规则真正可触发。~~ **已完成**
-  （`GET /metrics` + 多进程聚合 + 抓取凭据；真实 Prometheus 上告警实际 FIRING）。
-  剩余：Alertmanager 实际投递端到端、整套 compose 栈验证。
-- ~~**HITL 配置 fail-closed**~~ **已完成**（启动校验 + side_effect 兜底）。
-- ~~**未预期异常 ACK 掉滞留 run**~~ **已完成**（`runtime/executor.py`：逃逸以触发
-  broker 重投的 `raise` 曾写在 `contextlib.suppress` 内部被吞掉，等于 ACK 了一个
-  没有待投递消息的 `QUEUED/RETRYING` run）。
-- ~~**审批 TTL 过期分支的并发覆写**~~ **已完成**（`core/hitl/approval_service.py`：
-  过期收敛曾是唯一一条非 CAS 写入，可把并发已 `APPROVED` 覆写成 `EXPIRED`，
-  让已批准的决策永远送不到工具）。
-- **生产凭据/证书/ERP/CORS**：替换全部占位符，接入真实 TLS、金蝶 ERP 与 `CORS_ORIGINS`。
-- ~~**告警可执行性契约测试**~~ **已完成**
-  （`tests/unit/test_metrics_exposure_contract.py` 断言告警与 Grafana 引用的每个
-  指标名都可达；另有官方 `promtool test rules`）。
-
-### P1 — 工程纵深（让「企业级」从设计变成可验证）
-
-- ~~原生工具超时~~ **已完成**；仍待做：并行调用、工具级熔断与重试
-  （需先定义「读可重试、写不可重试」的边界）。
-- ~~**broker 投递语义核查 + 恢复闭环补齐**~~ **已完成**（`make runtime-delivery`
-  真实 Redis broker + 真实 Celery worker 实测）：普通异常 / `RetryPublicationError` /
-  软硬超时全部 `reject(requeue=False)`——**消息被丢弃、不重投**；只有 worker 进程
-  被杀（`WorkerLostError`）才重投。恢复因此改为「数据库 AgentRun + beat 周期
-  reconciler」（新增独立 `beat` service），并把 attempt 预算闸门补到领取点。
-- ~~**强制中止失去所有权的 worker**~~ **Partial（本轮收紧，仍非 fencing token）**
-  —— owner CAS 仍只挡**状态提交**；在此之上补了两道：① 心跳 `renewed is False` 时
-  `_FenceGuard` 触发 `_supervise_execution` **取消正在执行的图任务**并抛
-  `ExecutionFenced`，被取消的 worker **不写任何终态、不消耗 attempt**；②
-  `ToolRegistry.set_execution_fence` 让副作用工具在发起外部写**之前**只读复核
-  ownership（失败即 fail-closed），只读工具不受影响。
-  **明确不宣称**单调 fencing token（`AgentRun` 没有 token 列，判定是只读
-  `SELECT COUNT(*)`）；取消前已发出的外部调用无法回收；外部系统端到端
-  exactly-once **NOT PROVIDED**。详见 `docs/limitations.md` §3。
-- 覆盖 `PENDING` 滞留 run（两阶段入队在 `mark_queued` 前被杀会永久滞留）；
-  `beat` 单点 HA；runtime 时间参数交叉校验（lease / visibility vs task time limit）；
-  side-effect claim TTL 从硬编码变成配置项。
-- Grafana 面板**真实渲染**验证（指标输出已补齐，渲染未验证）。
-- 持久化 trace 后端（Jaeger / Tempo）接入，tracing 从本地验证升级为可查询。
-
-### P2 — 路线图（不在本次收尾范围）
-
-Agent 行为评测 harness · LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
-长期记忆 · 真实 ERP 写操作验证 · RAG gold relevance 人工标注 · Kubernetes
-部署与多副本一致性 · 压测与容量基线 · MCP 写操作工具 · 多 LLM 供应商容灾。
-
----
-
-## Project Structure
-
+```bash
+make test
+make lint
+make audit-docs
+make agent-eval
+make runtime-e2e       # 需要真实 PostgreSQL + Redis；缺失时失败，不会假装通过
+make runtime-chaos     # 真实依赖的 worker crash/recovery 场景
 ```
+
+## 文档与工程阅读路线
+
+| 时间 | 阅读入口 |
+|---|---|
+| 5 分钟 | 本页架构图、[业务场景](#业务场景与评测)、[当前事实](docs/reference/current-state.md) |
+| 15 分钟 | `make demo-offline`、[offline demo guide](docs/guides/offline-demo.md)、[配置参考](docs/reference/configuration.md) |
+| 30 分钟 | [Architecture](docs/architecture.md) → [`api/`](api/) → [`core/graph_builder.py`](core/graph_builder.py) → [`runtime/`](runtime/) → [`core/session/`](core/session/) → [`tools/tool_registry.py`](tools/tool_registry.py) → [`evaluation/agent_eval/`](evaluation/agent_eval/) |
+
+完整导航：[入门与部署](docs/deployment.md) · [Architecture](docs/architecture.md) · [Runtime](docs/design/agent-runtime.md) · [Memory](docs/reference/memory-engineering-positioning-20261124.md) · [Tool governance](docs/design/tool-execution-boundaries.md) · [Security](docs/design/security.md) · [Evaluation](docs/evaluation.md) · [Operations](docs/operations/distributed-runtime-runbook.md) · [Troubleshooting](docs/operations/) · [Limitations](docs/limitations.md) · [Contributing](CONTRIBUTING.md)。
+
+## 项目结构
+
+```text
 customer-service-ai-agent/
-├── agents/         # 9 个 Agent 角色 + 质量评估器
-├── core/           # 配置 / DI 容器 / 图构建 / 消息总线 / 监控 / 会话 / HITL / 追踪
-├── runtime/        # 分布式 Agent Runtime（状态机 / thread 锁 / worker / 幂等 ledger / DLQ）
-├── api/            # FastAPI 服务层（路由 / SSE / WebSocket / 中间件）
-├── auth/           # JWT + Argon2id + Redis 黑名单 + 4 级 RBAC
-├── router/         # 双层查询路由（LLM ∥ 规则 + 熔断器降级）
-├── collaboration/  # 5 个兼容执行标识 + 安全重试
-├── rag/            # Qdrant + BM25 + RRF + 重排 + 查询改写
-├── cache/          # 三层响应缓存（与 Tool Result Cache / Store 分离）
-├── db/             # SQLAlchemy 模型 + Alembic 迁移
-├── erp/            # 金蝶 ERP 适配器（Mock / Real + HMAC + 重试 + 分页）
-├── tools/          # Function Calling 工具注册 + MCP 适配器
-├── llm/            # LLM 客户端（重试 / 熔断 / FC / SSE / 连接池）+ 规则兜底
-├── media/          # 多模态（图片 / 音频 / 视频 / 文档 / TTS）——API 层，非工具
-├── deploy/         # 部署资产根（compose/ · nginx/ · loki/ · otel/）
-├── monitoring/     # Prometheus + Grafana + Alertmanager
-├── web/            # 前端（原生 JS + Vite 8 + Vitest）
-├── tests/          # unit / integration / runtime / e2e / stress / eval
-├── docs/           # 文档与 ADR
-├── alembic/        # 数据库迁移脚本（8 个版本）
-└── scripts/        # 运维 / 验证 / 评测脚本（51 个 Python + 5 shell）
+├── agents/
+├── alembic/（8 个版本）
+├── api/
+├── auth/
+├── cache/
+├── collaboration/
+├── core/
+├── data/
+├── db/
+├── deploy/
+│   ├── compose/
+│   ├── loki/
+│   └── nginx/
+├── docs/
+├── erp/
+├── evaluation/
+├── integrations/
+├── knowledge/
+├── llm/
+├── monitoring/
+├── rag/
+├── router/
+├── runtime/
+├── scripts/
+├── tests/
+├── tools/
+└── web/
 ```
 
-完整目录说明见 [docs/reference/project-structure.md](docs/reference/project-structure.md)。
+## 限制与数据来源
 
----
+- 本仓库是独立维护的工程参考实现；不声称企业客户验收、真实生产流量或客户业务结果。
+- 示例业务/商品/协议目录使用合成或明确授权可公开数据；数据来源、许可与例外见 [DATA_PROVENANCE.md](DATA_PROVENANCE.md)。
+- 实际 ERP 写操作、生产多副本与容量、真实 provider 质量、独立人工金标、坐席通知/SLA 和历史会话 provenance 尚未全部验收；分项状态见 [Production Readiness](docs/production-readiness.md)。
+- Run delivery 是 at-least-once；本地 CAS/ledger 不代表外部系统 exactly-once。MCP/A2A 不是安全边界；工业集成须使用批准目录、TLS 信任与凭证。
 
-## Business Scenarios
-
-| 场景 | Agent | 涉及能力 |
-|---|---|---|
-| 产品成分/功效咨询 | `ProductAgent` | RAG + 查询改写 + BM25 混合检索 |
-| 技术使用与故障排查 | `TechAgent` | RAG + 多跳重排 |
-| 账单与对账 | `BillingAgent` | ERP Function Calling |
-| 投诉与差评处理 | `ComplaintAgent` | RAG + 会话记忆 + 情绪路由 + Hierarchical 编排 |
-| 售前推荐 | `SalesAgent` | RAG + 场景过滤 |
-| 售后退换 | `AftersalesAgent` | 高风险 → HITL 审批（治理机制已实现，真实 ERP 写操作 `NOT_VERIFIED`） |
-| 复杂订单问题 | `GeneralAgent` + 协作模式 | 固定子任务分发与主从汇总 |
-
----
-
-**工程验收范围：** 客服 Agent 编排、可靠性 Runtime、人工审批与运行时评测以 `docs/reference/current-state.md`、`docs/limitations.md` 和对应提交的 CI 证据为准。
-
-## Docs
-
-| 我想知道… | 去哪 |
-|---|---|
-| **当前系统的真实状态（唯一入口）** | [docs/reference/current-state.md](docs/reference/current-state.md) |
-| **架构总览与状态归属** | [docs/architecture.md](docs/architecture.md) |
-| **为什么这样设计（LangGraph / Human fallback / 不用裸 Chain）** | [docs/agent-design.md](docs/agent-design.md) |
-| **效果怎么衡量、测过什么** | [docs/evaluation.md](docs/evaluation.md) |
-| **能宣称到什么程度 / 上线还缺什么** | [docs/production-readiness.md](docs/production-readiness.md) |
-| **怎么部署、配置为什么这么设** | [docs/deployment.md](docs/deployment.md) |
-| **不宣称什么（最重要）** | [docs/limitations.md](docs/limitations.md) |
-| 整改计划（P0/P1/P2） | [docs/reports/audit/PROJECT_FINALIZATION_PLAN.md](docs/reports/audit/PROJECT_FINALIZATION_PLAN.md) |
-| 文档总索引 | [docs/README.md](docs/README.md) |
-| 分布式 Runtime 设计（架构/幂等/崩溃恢复/取舍） | [docs/design/agent-runtime.md](docs/design/agent-runtime.md) · [ADR-009](docs/decisions/009-distributed-agent-runtime.md) |
-| HITL 审批治理 | [docs/design/human-in-the-loop.md](docs/design/human-in-the-loop.md) |
-| RAG 方法论与评测口径（canonical） | [docs/reference/rag-evaluation.md](docs/reference/rag-evaluation.md) |
-| 分布式 Runtime 运维 / DLQ 重放 | [docs/operations/distributed-runtime-runbook.md](docs/operations/distributed-runtime-runbook.md) |
-| 生产部署与上线前检查 | [docs/operations/production-operations-guide.md](docs/operations/production-operations-guide.md) · [检查清单](docs/checklists/production-readiness-checklist.md) |
-| API 参考 / 配置项全表 / 测试指南 | [docs/reference/](docs/reference/) |
-| 历史版本与审计快照 | [docs/reports/](docs/reports/)（**历史快照，非当前事实**） |
-
----
+持续任务以 [GitHub Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) 为准；稳定版历史见 [GitHub Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)、tag 与[版本变更历史](docs/reports/releases/changelog.md)。当前最新公开 release 为 `v1.0.1`；Runtime version 与 Release/API version 独立管理。
 
 ## License
 
-[Apache 2.0](LICENSE).
-
-企业级实践参考实现；生产环境所需凭据与基础设施不在本仓库内。
-
-
-## 生态定位与公开工程证据边界（2026-10-30）
-
-这是公开工程参考仓库，不是任何私有经营系统的客户事实或生产应用替代品。
-
-- **唯一工程主责**：LangGraph customer-service workflow and distributed execution/HITL reference implementation。
-- **验证边界**：CI/runtime tests are not a production SLA; real ERP writes, live traffic and the published RAG relevance metrics remain unverified in the stated scope.
-- **公开交叉索引**：[Beauty RAG](https://github.com/Xander-Xai/Beauty-Industry-RAG-QA-System) owns a different domain-focused retrieval reference; an ecosystem link is not a shared production deployment.
-- 代码、测试、指标及发布的唯一技术权威在本仓；任何外部商业研究、PR、演示、内容制作或私人计划均不能替本仓证明生产安全、真实客户验收或收入。
-
-
-### 最新交付证据（2026-11-25）
-
-#76 已合并统一架构（Routing / Parallel / fixed Supervisor–Workers、未知外部写拒绝重放、缓存门控）；#78 已合并私有 HTTPS A2A 客户端，#79 已合并[会话格式盘点](docs/operations/session-record-inventory.md)，#81 已合并真实模型轨迹与计划分母诊断。#79 只读取显式授权离线导出并输出聚合统计，不证明历史明文来源，不执行迁移。#81 不是实际模型/ERP 质量证明。#80 的检索评测完整性加固以实际 merge 和 exact-head CI 为准。禁止将实验、历史指标或未部署能力当成生产交付。
-
-生产在线图生成式响应缓存禁用门禁随 #80 的最新代码治理验收，见 [生产准备度](docs/production-readiness.md)；开发保留缓存评测，不能据此宣称生产命中率或延迟收益。
+[Apache 2.0](LICENSE)。

@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible defect in code, tests, documentation or deployment.
+title: "bug: "
+labels: [bug]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal steps, command, fixture and exact SHA if available. Redact secrets and private data.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: OS, Python/Node/Docker versions, local/CI and dataset type
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Sanitized error, logs or failing test. Do not include credentials or customer records.
+    validations:
+      required: false
