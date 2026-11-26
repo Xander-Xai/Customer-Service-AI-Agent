@@ -642,16 +642,20 @@ class ServiceContainer:
             logger.info(f"工具注册完成: {self.tool_registry.list_tools()}")
 
         # A2A v1.0 is for an INDEPENDENT peer service, not for in-process
-        # LangGraph nodes. Disabled by default; only synthetic enum topics may
-        # cross this experimental boundary. No SDK import unless enabled.
+        # LangGraph nodes. The standard Compose profile enables a read-only
+        # synthetic policy peer; industrial deployments require approved HTTPS.
         from tools.a2a_policy_client import register_synthetic_a2a_tool
 
         if register_synthetic_a2a_tool(self.tool_registry):
             logger.info("Local synthetic A2A FAQ tool registered (no ERP access)")
 
-        from integrations.a2a_policy.business_client import register_business_a2a_tool
+        from integrations.a2a_policy.business_client import (
+            register_business_a2a_tool,
+            verify_business_a2a_peer,
+        )
 
         if register_business_a2a_tool(self.tool_registry):
+            await verify_business_a2a_peer()
             logger.info("Approved after-sales A2A specialist registered (advisory only)")
 
         # MCP 工具叠加进**同一个** registry（native 工具不受影响，默认关闭）。

@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-25 核查增量**：#80 reviewed-gold、#81 trace、#82 provider attempt metering、#83 工业身份/HTTP 限流/耐久任务及 DLQ 准入已合并。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)；SSE 有界队列与断线清理 #84 已合并；共享快路径执行配额为独立候选，仍需最新提交 CI 与合并回执。
+> **2026-11-26 核查增量**：#88 Agent Eval 已合并至 `ad22a59c`，#89 PostgreSQL 未知副作用回执窗口回归已合并至 `31a11f91`；#87 已在该主线之上完成标准 Compose 合成 MCP/A2A 运行与协议调用验证，最终 exact-head CI 仍以实时 PR/Actions 为准。真实 provider、授权企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -55,7 +55,8 @@
 ## 人工客服交接
 
 - [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
-- [人工交接运维说明](../human-handoff-operations.md)记录启用条件和待验收项。Web 工作台进度见 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43)。
+- [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 已合并认证的客户/坐席 Web 工作台。编译图转人工、坐席领取期间机器人暂停、API 消息往返和关闭/重开已有合成测试；真实 PostgreSQL/坐席/客户联调、通知与 SLA 仍 `NOT_VERIFIED`。人工接管与高风险交易审批是独立流程。
+- [人工交接运维说明](../human-handoff-operations.md)记录启用条件、现有测试证据和待验收项。
 
 ## RAG evaluation / evidence state
 
@@ -247,8 +248,8 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
-- **业务协议接入**：#72 的 SKU 支持文档 MCP 和 #73 的售后程序 A2A 已合入。实际目录需由责任方授权并锁定摘要；A2A 只接受枚举描述，服务端仅 loopback；#78 已合入受批准的私有 HTTPS 客户端，实际 TLS 入口仍待验收；不查询 ERP、不授权退款。均默认关闭，合成 FAQ 保留为协议回归。参见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md) 和 [A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。真实目录/模型路由/部署仍需验证。
-- **MCP 外部工具接入（`tools/mcp_adapter.py`）默认关闭**：`MCP_ENABLED=false`。
+- **业务协议接入（#86）**：标准 Compose profile 通过真实 MCP/A2A SDK 默认启用合成 SKU 文档工具与独立售后策略 peer；合成 MCP 结果明确标记 `SYNTHETIC_LOCAL_FIXTURE`，不伪装成产品方批准目录。一次性私有配置、只读 catalog/CA mount、隔离 peer 网络、healthcheck 与启动期 A2A 发现/结果探测已接线。合成 MCP stdio→SDK→ToolRegistry→expected-result，以及 A2A 独立进程→SDK→ToolRegistry→authenticated result 在 GitHub Actions synthetic fixture 环境为 `LOCALLY_VERIFIED`（测试源码 SHA `50a0b1f70769e72be9fa4bd6f6e1a22713d225e2`，CI `45738703085` + A2A SDK `45738703866`）。完整应用 Docker Compose startup 为 `BLOCKED`：本机 PyPI read timeout 阻止依赖层完成，未启动 app/worker/peer 栈。不能称 `STAGING_VERIFIED` 或 `PRODUCTION_VERIFIED`。工业 profile 不接受 synthetic mode，要求 approved catalog、私有 HTTPS、CA 与 bearer。回滚：`MCP_ENABLED=false` 和 `A2A_AFTERSALES_ENABLED=false`（本地 peer dormant）。详见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md)、[A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。
+- **MCP 外部工具接入（`tools/mcp_adapter.py`）runtime fallback 默认关闭**：`MCP_ENABLED=false`；普通 Compose profile 通过生成的合成 allowlist 默认启用产品文档工具，工业 profile 必须显式提供已批准配置。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，
   同名时跳过、绝不覆盖 native。
@@ -263,10 +264,11 @@ make runtime-delivery
   - 命名空间 `mcp__{server}__{tool}`；server 名禁止含 `__`；超长名截断补 sha256。
   - 启动期结构校验：`core/config.py::validate_mcp_settings`（fail closed）。
     `MCP_FAIL_CLOSED=true` 时初始化失败阻止启动，而不是静默降级为 native-only。
+  - **部署默认**：普通 Compose profile 默认启用合成产品文档 MCP，首次启动的私有 protocol volume 生成 A2A bearer；工业 profile 不得使用合成目录。显式回滚 `MCP_ENABLED=false`。
   - **边界（不得越界宣称）**：写操作 MCP 工具**未接入**（缺幂等 ledger + 人工审批
     两道防线）；RBAC 是**请求级**而非 per-tool，不能声称"MCP 工具经过了 RBAC"；
     响应侧结果大小当前**不设上限**（只限请求 payload 字节），属已知缺口；
-    官方 `mcp` SDK 是 `requirements-optional.txt` 里的**可选**依赖，延迟 import。
+    官方 `mcp` SDK 是标准运行时依赖；未开启/外部配置错误时仍 fail closed。
   - **Evidence**：`IMPLEMENTED`。端到端契约（`registry → adapter → 本地 fake
     server → result → policy/telemetry`）由
     `tests/integration/test_mcp_contract_e2e.py` + `tests/integration/fake_mcp_server.py`
@@ -429,8 +431,8 @@ make runtime-delivery
 - `PROMETHEUS_MULTIPROC_DIR` + `MultiProcessCollector` 聚合 app / worker 共享卷里的
   mmap 样本；**默认 REGISTRY 被排除**，否则同一批样本会出现两份 sample 行，
   Prometheus 解析时会丢弃其中一份（worker 的计数照样丢）。
-- compose 用一次性 `metrics-init` 服务在**服务栈启动时清理恰好一次**样本目录 ——
-  每个进程都清会把先启动进程的样本抹掉，指标静默归零。
+- compose 用一次性 root `metrics-init` 服务在**服务栈启动时修复共享卷归属并清理恰好一次**样本目录 ——
+  新 Docker named volume 默认归 root；若不先 chown 给镜像内的 `appuser`，app/worker 无法创建 mmap 文件。每个进程都清会把先启动进程的样本抹掉，指标静默归零。清理入口直接运行 `python core/metrics_exposition.py`，避免 `python -m core.metrics_exposition` 先导入 `core/__init__.py`、触发与维护脚本无关的应用凭据校验。
 - 多进程模式下 gauge 的聚合语义按指标显式声明：比值型用 `mostrecent`
   （`session_resolution_rate` / `escalation_rate` / `business_cache_hit_rate` /
   `rag_recall_at_3`），集群视角用 `livesum`（`agent_worker_active` /

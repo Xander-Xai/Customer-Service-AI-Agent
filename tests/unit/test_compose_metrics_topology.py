@@ -88,7 +88,20 @@ def test_metrics_wipe_runs_exactly_once_not_per_process():
     init = services.get("metrics-init")
     assert init is not None, "缺少 metrics-init 一次性初始化服务"
     command = str(init.get("command", ""))
-    assert "core.metrics_exposition" in command, f"metrics-init 未执行样本清理：{command!r}"
+    assert (
+        "core/metrics_exposition.py" in command
+    ), f"metrics-init 未执行独立样本清理脚本：{command!r}"
+    assert "-m core.metrics_exposition" not in command, (
+        "metrics-init imports the application package via `python -m`, which can "
+        "trigger unrelated production configuration validation"
+    )
+    assert (
+        init.get("user") == "0:0"
+    ), "metrics-init must own the fresh named-volume permission repair"
+    assert "chown appuser:appuser /app/var/prom-metrics" in command, (
+        "the shared named volume starts root-owned; app/worker run as appuser and "
+        "need write access before importing prometheus_client"
+    )
     assert init.get("restart", "") == "no", "metrics-init 必须跑完就退出，不能重启"
 
     for name in ("app", "worker"):

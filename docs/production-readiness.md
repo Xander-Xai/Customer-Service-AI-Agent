@@ -33,8 +33,8 @@
 | 混合检索 RAG | `rag/` | Qdrant + BM25 → RRF → cross-encoder rerank，确定性 point ID |
 | 三层响应缓存 | `cache/` | L1 Redis MD5 · L2 Qdrant 语义 · L3 Jaccard 回退 |
 | Tool Result Context Engineering | `core/tool_result_*.py` | 预算/压缩/offload/recovery/scope-safe reuse |
-| Function Calling + MCP 适配器 | `tools/` | MCP 默认关闭，read-only-first，SKU 文档接入；授权目录与实际业务待验证 |
-| A2A 售后程序专家 | `integrations/a2a_policy/` | 默认关闭，独立只读规则服务，支持显式批准的私有 HTTPS 客户端，服务端仍 loopback；生产 TLS 入口和实际目录待验证 |
+| Function Calling + MCP 适配器 | `tools/` | 标准 Compose 默认启用合成 SKU 文档，read-only-first；工业部署需批准目录，生产数据待验证 |
+| A2A 售后程序专家 | `integrations/a2a_policy/` | 标准 Compose 启动独立合成 peer 并生成私有 bearer；工业部署要求批准目录和私有 HTTPS/CA；企业 TLS/目录待验证 |
 | 分布式 Agent Runtime | `runtime/` | AgentRun 唯一真相源 · Postgres checkpoint · Redis 锁 · Celery worker · 三层幂等 · DLQ 重放 · run 事件流 |
 | Human-in-the-Loop 审批治理 | `core/hitl/` · `runtime/statuses.py` | 执行前拦截 · durable 审批 · 职责分离 · TTL 拒绝优先 · 审批幂等双防线 |
 | FastAPI 服务与安全 | `api/` · `auth/` | JWT + Argon2id + 4 级 RBAC · CSRF 双提交 · CSP nonce · 限流 · SSRF 防护 |
@@ -54,6 +54,7 @@
 | 离线测试套件（无 API Key、不出公网） | `make test` | Verified (Local) |
 | 代码规范（Ruff，阻塞） | `.github/workflows/ci.yml` `lint` lane | Verified (CI) |
 | 单测/集成 + 覆盖率门槛 + MCP 契约禁 skip | CI `test` lane（3 个 Python 版本） | Verified (CI) |
+| 标准合成产品文档 MCP/A2A business tool round-trip（真实 SDK / 本地进程 / allowlist / fail-closed） | `tests/integration/test_mcp_product_documents_stdio.py` · `tests/integration/test_a2a_business_policy.py` · CI runs `45738703085` / `45738703866` | Verified (CI; synthetic fixtures only) |
 | 分布式 Runtime 验收（真实 PG + Redis + 多进程 Celery） | `make runtime-e2e` · CI `runtime-e2e` lane | Verified (CI) |
 | worker SIGKILL 崩溃恢复 + 副作用只发生一次 | `make runtime-chaos` → `artifacts/runtime/chaos-*.json` | Verified (CI) |
 | Runtime 证据报告 | `make runtime-verify` → `artifacts/distributed-runtime/<ts>/report.json`（schema `distributed-runtime-evidence/v2`，带 `tested_code_sha`） | Verified (Local+CI) |
@@ -77,6 +78,7 @@
 |---|---|---|
 | 生产集群 / 多副本长期稳定性 / 真实用户流量 | `NOT_VERIFIED` | 无生产环境 |
 | 正式 649-query RAG 指标（Hit@K / MRR / NDCG …） | `NOT_VERIFIED`，且**当前不可测** | shipped gold 无 relevance 标注（`DATASET_DEFECT`） |
+| 完整标准 Docker Compose 启动（app/worker/protocol peers） | `BLOCKED` | 2026-11-26 本地 WSL2、显式仓库 Compose 文件与 Dev override、隔离 Compose project、仅合成 protocol fixtures：镜像构建成功；PostgreSQL/Redis/Qdrant healthy；`protocol-init`/`metrics-init` 成功退出；A2A peer、Celery worker/beat 与 app 容器 healthcheck 均 healthy。API `/api/health` payload 仍报 `unhealthy`，`llm.key_usable=false` / `degraded=true`，向量通道因占位 key 禁用。未验收真实 provider、production profile/TLS、ERP、nginx/Prometheus/Alertmanager 全栈或部署；不能把本次开发 profile 启动当作标准生产 readiness。 |
 | 真实金蝶 ERP 写操作（退款/改单） | `NOT_VERIFIED` | 仅用 `tools/hitl_staging_tools.py` 验证了治理机制，无企业 staging |
 | provider auth / staging 与计费 | `NOT_VERIFIED` | 历史 preflight 曾因 HTTP 401 阻塞，非当前根因 |
 | 生产 QPS / P95 / P99 / Token 成本 / FCR / 满意度 | `NOT_MEASURED` | 有 benchmark 脚本，但无 SLO 定义、无生产基线 |

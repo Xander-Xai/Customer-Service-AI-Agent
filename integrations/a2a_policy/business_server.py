@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from a2a.server.agent_execution.agent_executor import AgentExecutor
@@ -122,12 +123,16 @@ def main() -> None:
     import uvicorn
 
     base_url, _, _ = require_business_config()
-    # Private HTTPS is terminated by the operator-managed reverse proxy.
-    # Never bind this plaintext service to a public interface.
+    # Private HTTPS is terminated by the operator-managed reverse proxy. The
+    # explicitly opted-in local Compose profile binds to its private bridge;
+    # that service has no published host port and accepts no industrial config.
     port = args.listen_port if base_url.startswith("https://") else urlsplit(base_url).port
     if port is None or not 1 <= port <= 65535:
         parser.error("invalid peer listen port")
-    uvicorn.run(app, host="127.0.0.1", port=port, proxy_headers=False)
+    internal_http = os.getenv("A2A_AFTERSALES_INTERNAL_HTTP", "").lower() == "true"
+    uvicorn.run(
+        app, host="0.0.0.0" if internal_http else "127.0.0.1", port=port, proxy_headers=False
+    )
 
 
 if __name__ == "__main__":

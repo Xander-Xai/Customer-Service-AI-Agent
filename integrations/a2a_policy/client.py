@@ -65,13 +65,16 @@ async def delegate_readonly_task(
     max_chars: int,
     httpx_client: Any | None = None,
     tls_ca_file: str | None = None,
+    allow_internal_http: bool = False,
 ) -> str:
     """Shared SDK transport; caller defines the trusted peer and result contract."""
-    base_url = (
-        validate_private_https_base_url(base_url)
-        if tls_ca_file
-        else validate_loopback_base_url(base_url)
-    )
+    if tls_ca_file:
+        base_url = validate_private_https_base_url(base_url)
+    elif allow_internal_http:
+        if base_url != "http://a2a-peer:41243":
+            raise A2AContractError("Internal HTTP peer must use the isolated a2a-peer service")
+    else:
+        base_url = validate_loopback_base_url(base_url)
     expected_rpc_url = base_url + "/a2a/jsonrpc"
 
     import httpx
@@ -165,5 +168,11 @@ async def delegate_readonly_task(
     # This is a cooperative deadline, including discovery and SDK cleanup.
     try:
         return await asyncio.wait_for(exchange(), timeout=A2A_DEADLINE_SECONDS)
+    except A2AContractError:
+        raise
     except (httpx.HTTPError, asyncio.TimeoutError, OSError):
+        raise A2AContractError("A2A peer unavailable") from None
+    except Exception:
+        # SDK discovery/task transport errors are not always httpx exceptions.
+        # Normalize them at the protocol boundary and keep startup fail-closed.
         raise A2AContractError("A2A peer unavailable") from None

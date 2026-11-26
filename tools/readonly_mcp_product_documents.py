@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Any
 
 if __package__:
-    from tools.readonly_mcp_faq import FAQServer
+    from integrations.mcp_stdio import MCPStdioServer
 else:
-    # Resolve the installed first-party package, never the caller's cwd.
+    # Resolve the installed first-party protocol module, never the caller's cwd.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from tools.readonly_mcp_faq import FAQServer
+    from integrations.mcp_stdio import MCPStdioServer
 
 MAX_CATALOG_BYTES = 2 * 1024 * 1024
 MAX_RECORDS = 5000
@@ -69,7 +69,7 @@ def _date(value: Any) -> date:
 
 
 class ProductCatalog:
-    def __init__(self, path: Path, expected_sha256: str):
+    def __init__(self, path: Path, expected_sha256: str, *, synthetic_fixture: bool = False):
         if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
             raise ValueError("Pinned catalog digest required")
         with path.open("rb") as handle:
@@ -85,6 +85,11 @@ class ProductCatalog:
         if not isinstance(records, list) or not 1 <= len(records) <= MAX_RECORDS:
             raise ValueError("Invalid catalog population")
         self.digest = expected_sha256
+        self.provenance = (
+            "SYNTHETIC_LOCAL_FIXTURE"
+            if synthetic_fixture
+            else "OPERATOR_APPROVED_CUSTOMER_PUBLIC_CATALOG"
+        )
         self.records = {}
         for record in records:
             if not isinstance(record, dict) or set(record) != {
@@ -133,26 +138,24 @@ class ProductCatalog:
             "valid_until": record["valid_until"],
             "catalog_sha256": self.digest,
             "text": record["text"],
-            "provenance": "OPERATOR_APPROVED_CUSTOMER_PUBLIC_CATALOG",
+            "provenance": self.provenance,
         }
 
 
-class ProductDocumentServer(FAQServer):
+class ProductDocumentServer(MCPStdioServer):
     """Use the existing bounded MCP handshake; replace the business surface."""
 
     def __init__(self, catalog: ProductCatalog):
         super().__init__()
         self.catalog = catalog
+        self.server_name = "product-documents"
 
     def dispatch(self, request: Any) -> dict[str, Any] | None:
         if not isinstance(request, dict):
             return super().dispatch(request)
         method = request.get("method")
         if method not in {"tools/list", "tools/call"} or not self.ready:
-            response = super().dispatch(request)
-            if method == "initialize" and response and "result" in response:
-                response["result"]["serverInfo"] = {"name": "product-documents", "version": "1.0.0"}
-            return response
+            return super().dispatch(request)
         if "id" not in request:
             return None
         response = {"jsonrpc": "2.0", "id": request["id"]}
@@ -190,10 +193,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--sha256", required=True)
-    parser.add_argument("--authorized-customer-disclosure", action="store_true", required=True)
+    disclosure = parser.add_mutually_exclusive_group(required=True)
+    disclosure.add_argument("--authorized-customer-disclosure", action="store_true")
+    disclosure.add_argument("--synthetic-fixture", action="store_true")
     args = parser.parse_args()
     try:
-        server = ProductDocumentServer(ProductCatalog(args.catalog, args.sha256))
+        server = ProductDocumentServer(
+            ProductCatalog(args.catalog, args.sha256, synthetic_fixture=args.synthetic_fixture)
+        )
     except (OSError, TypeError, ValueError):
         print("Product catalog unavailable or invalid", file=sys.stderr)
         return 2

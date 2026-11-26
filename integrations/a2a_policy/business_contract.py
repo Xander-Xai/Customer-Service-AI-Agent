@@ -36,7 +36,15 @@ def require_business_config() -> tuple[str, str, str]:
     if os.getenv("A2A_AFTERSALES_ENABLED", "").lower() != "true":
         raise A2AIntegrationDisabled("After-sales A2A is disabled")
     environment = os.getenv("APP_ENV", "").lower()
+    industrial = os.getenv("CSAI_RUNTIME_PROFILE", "").lower() == "industrial"
     remote = os.getenv("A2A_AFTERSALES_PRIVATE_HTTPS", "").lower() == "true"
+    internal_http = os.getenv("A2A_AFTERSALES_INTERNAL_HTTP", "").lower() == "true"
+    if industrial and not remote:
+        raise A2AIntegrationDisabled("Industrial profile requires private HTTPS peer configuration")
+    if internal_http and (remote or environment not in {"development", "local", "test", "testing"}):
+        raise A2AIntegrationDisabled(
+            "Internal HTTP peer is restricted to non-industrial local deployment"
+        )
     if remote:
         if environment not in {"staging", "production"}:
             raise A2AIntegrationDisabled("Private HTTPS peer requires staging or production")
@@ -50,11 +58,16 @@ def require_business_config() -> tuple[str, str, str]:
     if not re.fullmatch(r"[A-Za-z0-9._~-]{32,256}", token) or not SHA.fullmatch(digest):
         raise A2AIntegrationDisabled("Explicit peer token and approved policy digest required")
     endpoint = os.getenv("A2A_AFTERSALES_ENDPOINT", "")
-    base_url = (
-        validate_private_https_base_url(endpoint)
-        if remote
-        else validate_loopback_base_url(endpoint)
-    )
+    if remote:
+        base_url = validate_private_https_base_url(endpoint)
+    elif internal_http:
+        if endpoint != "http://a2a-peer:41243":
+            raise A2AIntegrationDisabled(
+                "Internal HTTP peer endpoint must use the isolated a2a-peer service"
+            )
+        base_url = endpoint
+    else:
+        base_url = validate_loopback_base_url(endpoint)
     return base_url, token, digest
 
 
@@ -64,7 +77,7 @@ def require_private_ca_file() -> str:
     if not value:
         raise A2AIntegrationDisabled("Explicit private CA file required")
     path = Path(value)
-    if not path.is_absolute() or not path.is_file():
+    if not path.is_absolute() or not path.is_file() or path.stat().st_size == 0:
         raise A2AIntegrationDisabled("Explicit private CA file required")
     return str(path)
 

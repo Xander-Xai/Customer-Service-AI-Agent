@@ -19,17 +19,24 @@ Source owner review is an operator attestation, not independent licensing proof.
 Keep the catalog outside the repository, rotate its digest on approval, and
 restart the service to load a new revision.
 
-Example private runtime configuration (replace absolute path and sha256 with
-an actual approved catalog; never commit the catalog or confidential text):
+Example private runtime configuration (for Compose, set `MCP_PRODUCT_CATALOG_SOURCE`
+to the approved host file; it is mounted read-only at `/run/mcp/product-docs.json`.
+Never commit the catalog or confidential text):
 
 ```dotenv
 MCP_ENABLED=true
 MCP_FAIL_CLOSED=true
-MCP_SERVERS=[{"name":"productdocs","transport":"stdio","command":"python3","args":["/absolute/repository/tools/readonly_mcp_product_documents.py","--catalog","/private/product-docs.json","--sha256","<64-hex-digest>","--authorized-customer-disclosure"],"allowed_tools":["lookup_product_support_document"],"risk_level":"low","timeout_seconds":5}]
+MCP_SERVERS=[{"name":"productdocs","transport":"stdio","command":"python3","args":["/app/tools/readonly_mcp_product_documents.py","--catalog","/run/mcp/product-docs.json","--sha256","<64-hex-digest>","--authorized-customer-disclosure"],"allowed_tools":["lookup_product_support_document"],"risk_level":"low","timeout_seconds":5}]
 ```
 
-Existing bootstrap registers mcp__productdocs__lookup_product_support_document
-into the actual ToolRegistry. No new tool transport or default enablement.
+The standard Compose deployment starts with the committed synthetic fixture and
+registers `mcp__productdocs__lookup_product_support_document` into the actual
+ToolRegistry through the official MCP SDK and real stdio subprocess. First boot
+creates A2A credentials in a private Docker volume; no secret is committed.
+Its result provenance is `SYNTHETIC_LOCAL_FIXTURE`, not operator approval.
+Industrial mode requires an operator-approved catalog and digest. Set
+`MCP_ENABLED=false` for rollback. CI/local fixture evidence does not prove
+product correctness or enterprise approval.
 Use scripts.verify_mcp_staging with an independently reviewed expected document
 as a deployment gate. CI fixture proves the SDK/registry/subprocess path, not
 actual product accuracy, remote authentication, model routing or historical

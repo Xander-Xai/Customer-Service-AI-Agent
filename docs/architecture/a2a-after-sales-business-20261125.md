@@ -30,8 +30,8 @@ Start the independent process with:
 ```bash
 python -m integrations.a2a_policy.business_server --catalog /private/approved-policy.json --authorized-customer-disclosure
 ```
-Use the existing optional SDK dependencies. The main ToolRegistry registers
-after_sales_procedure_review when explicitly enabled. The two peers validate
+The main ToolRegistry registers `after_sales_procedure_review` for standard
+Compose and approved external deployments. The two peers validate
 card identity and exact RPC endpoint, bearer, bounded deadline, returned scope,
 policy digest, dates and nonauthorization fields. Only the operator attests
 catalog approval. A2A is justified where policy is independently owned and
@@ -48,7 +48,7 @@ customer data or write authority across A2A. Configure both peers with:
 
 - `APP_ENV=staging` or `production`, `A2A_AFTERSALES_ENABLED=true`.
 - `A2A_AFTERSALES_PRIVATE_HTTPS=true`, `A2A_AFTERSALES_ENDPOINT=https://policy.internal.example` (replace with the actual approved DNS name).
-- `A2A_AFTERSALES_CA_FILE=/private/company-ca.pem` (absolute path to the approved trust anchor), the existing pinned catalog SHA-256 and a random URL-safe bearer token.
+- `A2A_AFTERSALES_CA_FILE=/private/company-ca.pem` (absolute approved trust anchor), the existing pinned catalog SHA-256 and a random URL-safe bearer token. In Compose, set host-side `A2A_AFTERSALES_CA_SOURCE=/private/company-ca.pem`; app/worker mount it read-only at `/run/a2a-ca/ca.pem`, which is the in-container `A2A_AFTERSALES_CA_FILE`. Ensure the mounted file is readable by the unprivileged app user.
 
 The client verifies the DNS certificate against the explicit CA, does not
 follow redirects or ambient proxies, and verifies the Agent Card RPC URL
@@ -59,7 +59,9 @@ must route only the Agent Card and JSON-RPC endpoints, enforce an 8 KiB request
 body limit (including chunked bodies), rate limits, restricted network access,
 TLS certificate rotation, and authentication. Mount catalog, CA and secret
 read-only, restrict egress/DNS to the reviewed peer, disable public access and
-redact request/authorization logs. No default production flag is enabled.
+redact request/authorization logs. Industrial profile requires explicit
+external mode, approved catalog digest, private HTTPS, CA and bearer; missing
+configuration fails closed. Rollback is `A2A_AFTERSALES_ENABLED=false`.
 
 Acceptance before real traffic: valid private CA and hostname complete the
 real SDK round trip; wrong CA/hostname, unauthorized caller, redirected card,

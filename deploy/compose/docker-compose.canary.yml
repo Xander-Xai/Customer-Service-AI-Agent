@@ -16,6 +16,19 @@ services:
     ports:
       - "${CANARY_PORT:-8001}:8000"
     environment:
+      - CSAI_RUNTIME_PROFILE=${CSAI_RUNTIME_PROFILE:-standard}
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_ENABLED=${MCP_ENABLED:-true}
+      - MCP_FAIL_CLOSED=${MCP_FAIL_CLOSED:-true}
+      - MCP_SERVERS=${MCP_SERVERS:-}
+      - A2A_AFTERSALES_ENABLED=${A2A_AFTERSALES_ENABLED:-true}
+      - A2A_AFTERSALES_INTERNAL_HTTP=${A2A_AFTERSALES_INTERNAL_HTTP:-false}
+      - A2A_AFTERSALES_PRIVATE_HTTPS=${A2A_AFTERSALES_PRIVATE_HTTPS:-false}
+      - A2A_AFTERSALES_ENDPOINT=${A2A_AFTERSALES_ENDPOINT:-}
+      - A2A_AFTERSALES_TOKEN=${A2A_AFTERSALES_TOKEN:-}
+      - A2A_AFTERSALES_POLICY_SHA256=${A2A_AFTERSALES_POLICY_SHA256:-}
+      - A2A_AFTERSALES_CA_FILE=/run/a2a-ca/ca.pem
+      - CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.siliconflow.cn/v1}
       - OPENAI_MODEL=${OPENAI_MODEL:-Qwen/Qwen3-8B}
@@ -75,12 +88,20 @@ services:
       - ../../chat_sessions:/app/chat_sessions
       - canary-logs:/app/logs
       - ${TLS_CERT_DIR:-/dev/null}:/app/certs:ro
+      - ${MCP_PRODUCT_CATALOG_SOURCE:-/dev/null}:/run/mcp/product-docs.json:ro
+      - ${A2A_AFTERSALES_CA_SOURCE:-/dev/null}:/run/a2a-ca/ca.pem:ro
+      - protocol-config:/run/csai-protocol:ro
+    entrypoint: ["/bin/sh", "/app/scripts/exec_with_protocol_config.sh"]
     depends_on:
       redis:
         condition: service_healthy
       # 分布式 Runtime 门禁要求 PostgreSQL 可达（checkpoint + AgentRun 真相源）
       postgres:
         condition: service_healthy
+      a2a-peer:
+        condition: service_healthy
+      protocol-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; r=httpx.get('http://localhost:8000/api/health'); assert r.status_code==200"]
@@ -89,6 +110,7 @@ services:
       retries: 3
     networks:
       - cs-network
+      - protocol-network
 
   # ===== Nginx 配置更新（灰度流量分割）=====
   # 挂载目标必须是 /etc/nginx/conf.d/default.conf —— 镜像的 Dockerfile 把配置

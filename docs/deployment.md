@@ -117,7 +117,14 @@ python3 scripts/generate_prod_env.py     # 生成 .env.prod（高熵随机凭据
 | `LLM_PROVIDER` / `LLM_API_KEY` | 默认硅基流动 `Qwen/Qwen3-8B` |
 | `POSTGRES_URL` / `REDIS_URL` | 供 checkpoint / session / lock 共用 |
 | `QDRANT_URL` | 向量库 |
-| `MCP_SERVERS` | 默认空 → **MCP 完全不启用**（fail-closed） |
+| `CSAI_PROTOCOL_MODE` | 普通 Compose 默认 `synthetic`：启用仓库合成产品文档 MCP 与独立 A2A peer；`industrial` profile 禁止 synthetic，必须设为 `external` |
+| `CSAI_RUNTIME_PROFILE` | 接受空值（兼容旧部署）、`standard` 或 `industrial`；Compose 标准部署传入 `standard`，该值不启用工业专属准入策略 |
+| `APP_ENV` | 标准示例为 `development`；启用 `CSAI_RUNTIME_PROFILE=industrial` 时须显式设为 `staging` 或 `production` |
+| `MCP_SERVERS` | 标准 synthetic profile 由私有 protocol-config volume 提供；external/industrial 必须显式配置批准的 allowlist，否则 fail-closed |
+| `MCP_PRODUCT_CATALOG_SOURCE` | Compose external/industrial 的宿主机批准目录文件；只读挂载到 `/run/mcp/product-docs.json`，allowlist 必须固定其 SHA-256 |
+| `A2A_AFTERSALES_*` | 标准 synthetic profile 在首次启动时生成 bearer 与 policy digest；industrial 必须显式提供批准目录、HTTPS endpoint、CA 与 bearer |
+
+Compose 工业私有 TLS 的 CA 文件通过 `A2A_AFTERSALES_CA_SOURCE` 从宿主机只读挂载；应用进程内固定读取 `/run/a2a-ca/ca.pem`。CA 文件缺失或为空时 A2A readiness fail closed。
 | `HITL_*` | 默认 `HITL_ENABLED=false`；见下方警告 |
 
 > ⚠️ **关于 `HITL_*` 的一处已知 fail-open**：只设 `HITL_ENABLED=true`
@@ -126,6 +133,12 @@ python3 scripts/generate_prod_env.py     # 生成 .env.prod（高熵随机凭据
 > 详见 [limitations.md](limitations.md) 与
 > [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-3。
 > 部署前请显式设置 `HITL_HIGH_RISK_TOOLS`（或把阈值设成非零）。
+
+标准 Compose 首次启动由 `protocol-init` 创建本地随机 peer bearer 和只读配置，`a2a-peer`
+通过 healthcheck 就绪后，API/worker 才启动；该 peer 不发布宿主端口，仅用于合成数据验收。
+关闭能力可设置 `MCP_ENABLED=false` 与 `A2A_AFTERSALES_ENABLED=false`；后者让本地 A2A peer 进入不监听的 dormant 状态。使用工业 profile
+时需外部批准目录和私有 HTTPS，且不得复用 synthetic volume；旧 synthetic volume 切换时
+初始化器 fail-closed，需按运维流程明确清理/替换。
 
 ---
 

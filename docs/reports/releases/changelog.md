@@ -4,6 +4,9 @@
 
 ## Unreleased
 
+- **Runtime receipt crash-window regression (#89, 2026-11-26)**: added a real-PostgreSQL test with a deterministic fake external operation for remote success followed by receipt-commit failure, lease expiry, redelivery, and refusal to issue the external call again before reconciliation. It proves the ledger recovery contract only; no ERP receipt query, real refund, or cross-system exactly-once claim.
+- **Standard Compose business protocols (#87, 2026-11-26)**: standard profile defaults to the existing synthetic, read-only ProductDocs MCP tool and independent after-sales A2A peer through the existing ToolRegistry/SDK paths, with explicit rollback switches and industrial-profile fail-closed admission. Local isolated Compose smoke and synthetic SDK/registry contracts were exercised. Docker healthchecks, HTTP status and synthetic protocol readiness are reported separately from `/api/health` model readiness; real provider, enterprise catalog, private TLS/ERP and production deployment remain unverified. Exact-head CI: check the merged PR and Actions run for the final SHA.
+- **Customer handoff verification (2026-11-26)**: re-ran the existing compiled-graph, handoff API and service tests (23 passed with SQLite/test principals and a deterministic domain-mode fixture). This validates the code-level ticket/message lifecycle, not staffed PostgreSQL staging, notifications or SLA operations.
 - Security/cache isolation hardening and public-repository secret handling.
 - Tool Result Context Engineering: deterministic budget/compression, offload/recovery, and scoped exact reuse cache.
 - Evidence-driven engineering standard and explicit `UNKNOWN` / `NOT_MEASURED` / `NOT_VERIFIED` semantics.

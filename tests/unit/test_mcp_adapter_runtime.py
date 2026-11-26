@@ -14,9 +14,9 @@
 SDK：被测的是本仓自己的策略逻辑（allowlist / fail-closed / 错误分类 / payload
 上限 / 结果归一化），不是第三方 SDK 的行为。
 
-SDK client 侧（``McpSdkClient``）单列在 ``test_mcp_sdk_client.py``：它需要 ``mcp``
-包，而 CI 的 ``test`` job 只装 ``requirements.txt``、``mcp`` 在
-``requirements-optional.txt``，故用 stub 而非真实依赖。
+SDK client 侧（``McpSdkClient``）单列在 ``test_mcp_sdk_client.py``，用 stub
+检查本仓客户端逻辑；标准运行时另由集成/CI 测试使用官方 ``mcp`` SDK 与真实 stdio
+子进程验证协议调用。
 """
 
 from __future__ import annotations

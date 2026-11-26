@@ -18,8 +18,10 @@ MCP_SERVERS=[{"name":"syntheticfaq","transport":"stdio","command":"python3","arg
 
 Start from the repository root. No customer information or real business rules
 may be passed. Production needs its own reviewed service and access policy.
-The application-wide MCP default remains disabled until a trusted executable and
-SDK are configured; no silent substitution with the test fake.
+The runtime fallback remains disabled without an allowlist. Standard Compose now
+uses the business product-document tool with a deterministic synthetic catalog;
+this older FAQ process remains a protocol regression fixture, not a production
+customer-support source. No silent substitution with the test fake is allowed.
 
 Acceptance:
 ```bash

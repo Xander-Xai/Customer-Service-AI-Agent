@@ -84,7 +84,7 @@ HITL_ENABLED=true
 
 必须另外配置有效且授权的 ERP 凭据、可信用户到客户映射、PostgreSQL、Redis、密钥、模型及 TLS。运行时检查禁止 DEV_MODE、mock ERP、非 Redis session、非 PostgreSQL checkpoint、inline dispatcher、非 Redis thread lock 和关闭 HITL。原 demo/base 和未显式选择 industrial 的 prod 兼容配置不等于工业发布；不自动迁移旧会话。客户以真实 access JWT 创建新聊天会话，保留返回的 session ID/token；工业 POST /api/runs 要求现有会话及 Idempotency-Key。相同请求重试复用该会话。已过期 owner 不允许重新认领；30 天 TTL 是暂定策略，非完整保留/删除政策。历史列表仍基于当前实现，未保证跨副本完整分页。
 
-本候选不承诺 Redis 丢失后可恢复会话归属；需要持久归属、迁移、备份、删除竞态治理，且校验所有客户端及替代入口。真实 ERP adapter 当前是授权读能力，退款/改单无已验证外部交易接口，不得称为已实现真实支付；未知结果必须对账，禁止自动重复外部副作用。HITL 通过不等于交易成功。MCP SKU 文档、A2A 售后服务默认关闭，真实目录/远程互操作仍未验收。模型或 RAG 降级的语义、未确认工具回执、敏感数据、媒体、反馈去重、HTTP 分布式限流与配额应按真实任务继续核验。
+本候选不承诺 Redis 丢失后可恢复会话归属；需要持久归属、迁移、备份、删除竞态治理，且校验所有客户端及替代入口。真实 ERP adapter 当前是授权读能力，退款/改单无已验证外部交易接口，不得称为已实现真实支付；未知结果必须对账，禁止自动重复外部副作用。HITL 通过不等于交易成功。标准 Compose 使用 synthetic MCP/A2A 业务 fixtures；industrial profile 要求 external 模式、批准目录和私有 TLS，真实目录/远程互操作仍未验收。模型或 RAG 降级的语义、未确认工具回执、敏感数据、媒体、反馈去重、HTTP 分布式限流与配额应按真实任务继续核验。
 
 ## 验收和阻塞
 
