@@ -97,12 +97,49 @@ async def _run(dataset, cases, hitl_enabled: bool) -> list:
     return observations
 
 
+def _write_baseline(report: dict, out: Path) -> None:
+    """写**紧凑基线**（只保留可比较所需的部分）。
+
+    完整 artifact 含全部 observations（上百 KB），不适合提交进仓当基线。
+    基线只需要回答一个问题："上次的能力水位是多少"。因此这里只保留：
+
+    * ``schema_version`` —— 口径标识（口径变了就不可比）；
+    * ``dataset.sha256`` —— 分母标识（数据集变了就不可比）；
+    * ``metrics`` —— 各指标的分子/分母/数值；
+    * ``gate_specs`` —— 方向（gte / lte）与阈值。
+
+    刻意**不**保留 ``observations``（体积大、且基线比较不需要逐条观测）。
+    """
+    baseline = {
+        "schema_version": report.get("schema_version"),
+        "generated_at": report.get("generated_at"),
+        "overall_status": report.get("overall_status"),
+        "git_sha": report.get("git_sha"),
+        "dataset": {"sha256": (report.get("dataset") or {}).get("sha256")},
+        "metrics": report.get("metrics") or {},
+        "gate_specs": report.get("gate_specs") or {},
+        "code_provenance": report.get("code_provenance") or {},
+        "note": (
+            "Compact Agent Eval baseline for regression comparison. "
+            "Comparability requires the same schema_version AND the same "
+            "dataset.sha256; see scripts/compare_agent_eval_regression.py."
+        ),
+    }
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(baseline, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", default=None)
     parser.add_argument("--case", action="append", default=[])
     parser.add_argument("--tags", action="append", default=[])
     parser.add_argument("--out", default=None, help="evidence artifact 输出路径")
+    parser.add_argument(
+        "--baseline-out",
+        default=None,
+        help="同时写一份紧凑基线（只含可比较所需字段）到该路径",
+    )
     parser.add_argument("--print-contract", action="store_true")
     parser.add_argument("--print-annotation-status", action="store_true")
     parser.add_argument("--hitl-disabled", action="store_true")
@@ -158,6 +195,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         REPO_ROOT, dataset_path=REPO_ROOT / dataset.path
     ).to_dict()
     write_report(report, out)
+
+    if args.baseline_out:
+        baseline_path = Path(args.baseline_out)
+        _write_baseline(report, baseline_path)
+        print(f"baseline  -> {baseline_path}")
 
     print("\n=== 指标 ===")
     for name, metric in sorted(report["metrics"].items()):

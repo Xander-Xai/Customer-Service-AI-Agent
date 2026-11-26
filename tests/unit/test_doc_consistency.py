@@ -27,6 +27,53 @@ spec.loader.exec_module(audit)
 REAL_ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_business_requirements_guard_detects_missing_eval_metrics(tmp_repo: Path):
+    write(
+        tmp_repo,
+        "evaluation/agent_eval/contract.py",
+        'METRIC_NAMES = ("route_accuracy", "tool_execution_success_rate")\n',
+    )
+    write(
+        tmp_repo,
+        "docs/reference/agent-evaluation.md",
+        "route_accuracy is measured.\n",
+    )
+    write(
+        tmp_repo,
+        "docs/requirements/business-requirements.md",
+        "人工基线：NOT_MEASURED\n",
+    )
+
+    errors: list[str] = []
+    audit.check_business_requirements_alignment(errors, root=tmp_repo)
+
+    assert any("tool_execution_success_rate" in error for error in errors)
+
+
+def test_business_requirements_guard_accepts_current_eval_metrics(tmp_repo: Path):
+    write(
+        tmp_repo,
+        "evaluation/agent_eval/contract.py",
+        'METRIC_NAMES = ("route_accuracy", "tool_execution_success_rate")\n',
+    )
+    write(
+        tmp_repo,
+        "docs/reference/agent-evaluation.md",
+        "`route_accuracy` and `tool_execution_success_rate`\n",
+    )
+    write(
+        tmp_repo,
+        "docs/requirements/business-requirements.md",
+        "人工基线：NOT_MEASURED；`tool_execution_success_rate` `recovery_rate` "
+        "`human_intervention_rate` `safety_violation_rate`\n",
+    )
+
+    errors: list[str] = []
+    audit.check_business_requirements_alignment(errors, root=tmp_repo)
+
+    assert errors == []
+
+
 # ---------------------------------------------------------------- fixtures
 
 
