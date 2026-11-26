@@ -42,11 +42,10 @@ histogram 是正确的，对「比值型」gauge 会把 N 个副本的同一个�
 
 from __future__ import annotations
 
+import logging
 import os
 
-from core.logger import get_logger
-
-logger = get_logger("core.metrics_exposition")
+logger = logging.getLogger("core.metrics_exposition")
 
 #: 官方多进程模式的环境变量。必须在 ``prometheus_client`` 被 import **之前**设置，
 #: 否则该库不会切换到多进程写入路径。
@@ -168,11 +167,14 @@ __all__ = [
 
 
 def _main() -> int:
-    """``python -m core.metrics_exposition`` —— 供服务启动时清理样本目录。
+    """Run as a file (``python core/metrics_exposition.py``) to clean samples.
 
     **只能在「整个服务栈重启」时执行一次**。每个进程启动都执行是错的：先起来的
     worker 写好的样本会被后起来的 app 进程清掉，指标静默归零 —— 部署窗口内 DLQ
     告警会失明，而没有任何报错。compose 用一次性 ``metrics-init`` 服务保证它只跑一次。
+    Running as a package module imports ``core/__init__.py`` first, which loads
+    the full application configuration and rejects this maintenance-only
+    process for missing API/database credentials.
     """
     if not multiprocess_enabled():
         print(

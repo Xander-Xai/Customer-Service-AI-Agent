@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 def industrial_enabled() -> bool:
     profile = os.getenv("CSAI_RUNTIME_PROFILE", "").strip().lower()
-    if profile not in {"", "industrial"}:
+    if profile not in {"", "standard", "industrial"}:
         raise ValueError("Invalid CSAI_RUNTIME_PROFILE")
     return profile == "industrial"
 

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from core.industrial import validate_industrial_profile
+from core.industrial import industrial_enabled, validate_industrial_profile
 from core.session import ownership
 from runtime.bootstrap import CheckpointEpisodeMismatch, inspect_episode_checkpoint
 from runtime.errors import TransientError
@@ -17,6 +17,13 @@ def test_industrial_rejects_mock_and_unprotected_runtime():
     assert any("ERP_MODE=real" in item for item in failures)
     assert any("DEV_MODE=False" in item for item in failures)
     assert any("HITL_ENABLED=True" in item for item in failures)
+
+
+def test_standard_profile_is_valid_and_does_not_enable_industrial_mode(monkeypatch):
+    """Compose's standard profile must be accepted without industrial policy."""
+    monkeypatch.setenv("CSAI_RUNTIME_PROFILE", "standard")
+
+    assert industrial_enabled() is False
 
 
 @pytest.mark.asyncio

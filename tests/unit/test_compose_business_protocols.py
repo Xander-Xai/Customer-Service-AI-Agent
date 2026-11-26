@@ -51,6 +51,14 @@ def test_standard_compose_default_has_explicit_rollback_and_fail_closed():
     assert "CSAI_PROTOCOL_MODE=${CSAI_PROTOCOL_MODE:-synthetic}" in text
 
 
+def test_worker_healthcheck_loads_generated_protocol_configuration():
+    worker = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))["services"]["worker"]
+    healthcheck = " ".join(worker["healthcheck"]["test"])
+
+    assert "/app/scripts/exec_with_protocol_config.sh" in healthcheck
+    assert "celery -A runtime.celery_app:celery_app inspect ping" in healthcheck
+
+
 def test_non_compose_runtime_example_does_not_enable_empty_protocol_config():
     env = ENV_EXAMPLE.read_text(encoding="utf-8")
     assert "MCP_ENABLED=\n" in env

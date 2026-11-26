@@ -71,6 +71,8 @@ def _run_snippet(snippet: str, multiprocess_dir: Path) -> bytes:
         "PROMETHEUS_MULTIPROC_DIR": str(multiprocess_dir),
         # 明确关掉可能从父环境继承的东西，保证子进程语义干净可复现
         "DEV_MODE": "true",
+        "API_KEY_ENABLED": "false",
+        "PYTHON_DOTENV_DISABLED": "true",
     }
     result = subprocess.run(
         [sys.executable, "-c", snippet],
@@ -123,6 +125,34 @@ def test_worker_process_increments_are_visible_to_a_separate_exposition_process(
         "DLQ 告警仍然不会触发（指标存在但恒为 0）"
     )
     assert _sample(body, "agent_run_retry_total") == 3.0
+
+
+@pytest.mark.unit
+def test_metrics_init_script_cleans_samples_without_application_credentials(tmp_path):
+    """The one-shot metrics initializer is a maintenance script, not an app role."""
+    multiprocess_dir = tmp_path / "prom-metrics"
+    multiprocess_dir.mkdir()
+    sample = multiprocess_dir / "counter_123.db"
+    sample.write_bytes(b"old sample")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(Path.home()),
+        "PYTHONPATH": str(ROOT),
+        "PROMETHEUS_MULTIPROC_DIR": str(multiprocess_dir),
+    }
+
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "core" / "metrics_exposition.py")],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(ROOT),
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not sample.exists()
 
 
 @pytest.mark.unit

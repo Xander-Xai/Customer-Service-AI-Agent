@@ -61,7 +61,13 @@ services:
   metrics-init:
     build: ../..
     container_name: customer-service-metrics-init
-    command: ["python", "-m", "core.metrics_exposition"]
+    # Named volumes are root-owned on first creation. Repair ownership once
+    # before app/worker (the image's unprivileged appuser) create mmap samples.
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -c
+      - chown appuser:appuser /app/var/prom-metrics && exec python core/metrics_exposition.py
     environment:
       - SERVICE_ROLE=worker
       - PROMETHEUS_MULTIPROC_DIR=/app/var/prom-metrics
@@ -441,6 +447,7 @@ services:
       test:
         - CMD-SHELL
         - >-
+          /bin/sh /app/scripts/exec_with_protocol_config.sh
           celery -A runtime.celery_app:celery_app inspect ping
           -d celery@$$HOSTNAME --timeout=5 2>/dev/null | grep -q pong
       interval: 30s

@@ -423,8 +423,8 @@ make runtime-delivery
 - `PROMETHEUS_MULTIPROC_DIR` + `MultiProcessCollector` 聚合 app / worker 共享卷里的
   mmap 样本；**默认 REGISTRY 被排除**，否则同一批样本会出现两份 sample 行，
   Prometheus 解析时会丢弃其中一份（worker 的计数照样丢）。
-- compose 用一次性 `metrics-init` 服务在**服务栈启动时清理恰好一次**样本目录 ——
-  每个进程都清会把先启动进程的样本抹掉，指标静默归零。
+- compose 用一次性 root `metrics-init` 服务在**服务栈启动时修复共享卷归属并清理恰好一次**样本目录 ——
+  新 Docker named volume 默认归 root；若不先 chown 给镜像内的 `appuser`，app/worker 无法创建 mmap 文件。每个进程都清会把先启动进程的样本抹掉，指标静默归零。清理入口直接运行 `python core/metrics_exposition.py`，避免 `python -m core.metrics_exposition` 先导入 `core/__init__.py`、触发与维护脚本无关的应用凭据校验。
 - 多进程模式下 gauge 的聚合语义按指标显式声明：比值型用 `mostrecent`
   （`session_resolution_rate` / `escalation_rate` / `business_cache_hit_rate` /
   `rag_recall_at_3`），集群视角用 `livesum`（`agent_worker_active` /
