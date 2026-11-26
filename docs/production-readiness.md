@@ -78,7 +78,7 @@
 |---|---|---|
 | 生产集群 / 多副本长期稳定性 / 真实用户流量 | `NOT_VERIFIED` | 无生产环境 |
 | 正式 649-query RAG 指标（Hit@K / MRR / NDCG …） | `NOT_VERIFIED`，且**当前不可测** | shipped gold 无 relevance 标注（`DATASET_DEFECT`） |
-| 完整标准 Docker Compose 启动（app/worker/protocol peers） | `BLOCKED` | 2026-11-26 本地 WSL2、显式仓库 Compose 文件与 Dev override、隔离 Compose project、仅合成 protocol fixtures：镜像构建成功；PostgreSQL/Redis/Qdrant healthy；`protocol-init`/`metrics-init` 成功退出；A2A peer、Celery worker/beat 与 app 容器 healthcheck 均 healthy。API `/api/health` payload 仍报 `unhealthy`，`llm.key_usable=false` / `degraded=true`，向量通道因占位 key 禁用。未验收真实 provider、production profile/TLS、ERP、nginx/Prometheus/Alertmanager 全栈或部署；不能把本次开发 profile 启动当作标准生产 readiness。 |
+| 标准 Compose 合成启动（app/worker/beat/MCP/A2A peer） | `VERIFIED_LOCAL`（启动与协议调用）；模型业务 readiness `BLOCKED` | 2026-11-26 本地 WSL2、显式仓库 Compose 文件、隔离 Compose project、合成 fixtures：镜像构建成功；PostgreSQL/Redis/Qdrant healthy；`protocol-init`/`metrics-init` 成功退出；A2A peer、Celery worker/beat 与 app 容器 healthcheck 均 healthy；MCP/A2A 实际经 SDK 和 ToolRegistry 调用。应用 `/api/health` 返回 HTTP 200，但 payload 为 `unhealthy`（`llm.key_usable=false`、`degraded=true`），向量通道因占位 key 禁用。Docker healthcheck、协议 peer readiness、应用/model readiness 和业务成功是不同信号。未验收工业 profile、真实 provider、批准企业目录、TLS/CA、ERP、生产 nginx/Prometheus/Alertmanager 全栈或部署；本地合成启动不构成生产 readiness。|
 | 真实金蝶 ERP 写操作（退款/改单） | `NOT_VERIFIED` | 仅用 `tools/hitl_staging_tools.py` 验证了治理机制，无企业 staging |
 | provider auth / staging 与计费 | `NOT_VERIFIED` | 历史 preflight 曾因 HTTP 401 阻塞，非当前根因 |
 | 生产 QPS / P95 / P99 / Token 成本 / FCR / 满意度 | `NOT_MEASURED` | 有 benchmark 脚本，但无 SLO 定义、无生产基线 |

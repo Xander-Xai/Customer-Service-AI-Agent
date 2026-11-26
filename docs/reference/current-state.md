@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-26 核查增量**：#88 Agent Eval 已合并至 `ad22a59c`，#89 PostgreSQL 未知副作用回执窗口回归已合并至 `31a11f91`；#87 已在该主线之上完成标准 Compose 合成 MCP/A2A 运行与协议调用验证，最终 exact-head CI 仍以实时 PR/Actions 为准。真实 provider、授权企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
+> **2026-11-26 当前主线核查**：默认分支 `main` = `24ae5a16d94bb5050bccd1624f3bd9fadc2fe49a`；包含 #88（`ad22a59c`）、#89（`31a11f91`）和 #87（`24ae5a16`）。main exact-SHA CI [45800142625](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45800142625) 全部质量、安全、Runtime、三版本测试通过；镜像构建通过，部署 skipped。#87 最终 PR head CI [45786649665 attempt 3](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649665) 及 A2A SDK 互操作 [45786649767](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649767) 通过。标准 Compose 合成协议联调是工程/本地证据；真实 provider、批准企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -677,10 +677,14 @@ Grafana 面板引用的**每个** metric name 都出现在暴露面里；两个 
   [ADR-007](../decisions/007-current-default-llm.md) 取代）。
 
 
-## 交付治理增量（2026-11-25）
+## 交付治理增量（2026-11-26）
+
+- #87 已合并至当前 main；标准 Compose 合成 MCP/A2A 通过 SDK/ToolRegistry 集成路径，显式开关保留，工业配置 fail closed。Compose 容器探针健康不等于模型 readiness：本地合成环境 `/api/health` 显示 provider 不可用；真实授权目录/TLS/ERP 仍待外部验收。
+- #89 已合并，真实 PostgreSQL ledger 回归证明“外部成功但 receipt 未提交”的未知窗口不会盲目重发；fake 外部操作不等于 ERP 状态查询或跨系统 exactly-once。
+- #88 Agent Eval 已合并；scripted 图回归不是真实模型质量或业务 KPI。exact-SHA main CI、协议互操作和部署状态见本文顶部链接及实时 GitHub 元数据。
 
 - #76 已合入；#77 重叠方案已由同一工具拒绝重放、错误分类和 PostgreSQL 回归覆盖，关闭不独立合并。
 - #79 [会话格式盘点](../operations/session-record-inventory.md) 已合入，仅离线聚合、无原文、无解密、无自动迁移；实际 store 覆盖及来源证明仍 OPEN。
-- #81 真实轨迹诊断及 planned denominator 已合入；路由/参数/终态标签不等于独立业务 gold。#80 评测完整性加固随其实际合并状态核对。
+- #81 真实轨迹诊断及 planned denominator 已合入；路由/参数/终态标签不等于独立业务 gold。#80 评测完整性加固已合并。
 
-- 生成式响应缓存的生产读写禁用门禁由 #80 的最新治理分支补强，按实际合并与 exact-head CI 核对。开发模式保留评测；不影响 RAG 或工具结果治理。
+- 生成式响应缓存的生产读写禁用门禁由 #80 合并；开发模式保留评测，不影响 RAG 或工具结果治理。
