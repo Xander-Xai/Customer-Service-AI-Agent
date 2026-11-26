@@ -4,6 +4,8 @@
 
 这是一个独立维护的客服 Agent 工程参考实现：将客户请求路由到领域处理流程，并在需要时使用受控工具、持久化任务状态和人工审批/坐席接管。项目展示可检查、可运行的 Agent Runtime 与业务边界，不是通用 Agent Framework，也不代表任何企业的官方或生产系统。
 
+> **PRODUCTION NOT_VERIFIED**：生产验收尚未完成。生产多副本长期稳定与 autoscaling、企业 provider/ERP、容量和坐席 SLA 均须按 [Production Readiness](docs/production-readiness.md) 单独验证；本地演示和 CI 不构成生产验收。
+
 [![Main CI](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/workflows/ci.yml)
 ![Python 3.10–3.12](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)
 ![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-green)
@@ -112,6 +114,10 @@ docker compose -f deploy/compose/docker-compose.yml exec -T app \
 
 App startup runs Alembic upgrade. The health endpoint returns JSON; inspect `status` and component fields. HTTP 200 or a healthy Docker probe alone does not establish provider readiness. Standard Compose also initializes the synthetic read-only ProductDocs MCP and A2A peer; neither uses real customer or ERP data.
 
+### 端口语义
+
+`make dev` 和开发 Compose override 将 API 发布为 `http://localhost:8000`。生产 Compose 只由 nginx 对外发布入口：`NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT` 默认映射到容器 80/443；app 的 8000 与 Prometheus 的 9090 仅供 Compose 网络内部访问。
+
 停止服务：
 
 ```bash
@@ -160,15 +166,48 @@ make runtime-chaos     # 真实依赖的 worker crash/recovery 场景
 
 完整导航：[入门与部署](docs/deployment.md) · [Architecture](docs/architecture.md) · [Runtime](docs/design/agent-runtime.md) · [Memory](docs/reference/memory-engineering-positioning-20261124.md) · [Tool governance](docs/design/tool-execution-boundaries.md) · [Security](docs/design/security.md) · [Evaluation](docs/evaluation.md) · [Operations](docs/operations/distributed-runtime-runbook.md) · [Troubleshooting](docs/operations/) · [Limitations](docs/limitations.md) · [Contributing](CONTRIBUTING.md)。
 
+## 项目结构
+
+```text
+customer-service-ai-agent/
+├── agents/
+├── alembic/（8 个版本）
+├── api/
+├── auth/
+├── cache/
+├── collaboration/
+├── core/
+├── data/
+├── db/
+├── deploy/
+│   ├── compose/
+│   ├── loki/
+│   └── nginx/
+├── docs/
+├── erp/
+├── evaluation/
+├── integrations/
+├── knowledge/
+├── llm/
+├── monitoring/
+├── rag/
+├── router/
+├── runtime/
+├── scripts/
+├── tests/
+├── tools/
+└── web/
+```
+
 ## 限制与数据来源
 
-- 本仓库是独立维护的工程参考实现；不代表任职期间部署、企业客户验收或真实生产流量。
+- 本仓库是独立维护的工程参考实现；不声称企业客户验收、真实生产流量或客户业务结果。
 - 示例业务/商品/协议目录使用合成或明确授权可公开数据；数据来源、许可与例外见 [DATA_PROVENANCE.md](DATA_PROVENANCE.md)。
 - 实际 ERP 写操作、生产多副本与容量、真实 provider 质量、独立人工金标、坐席通知/SLA 和历史会话 provenance 尚未全部验收；分项状态见 [Production Readiness](docs/production-readiness.md)。
 - Run delivery 是 at-least-once；本地 CAS/ledger 不代表外部系统 exactly-once。MCP/A2A 不是安全边界；工业集成须使用批准目录、TLS 信任与凭证。
 
-持续任务以 [GitHub Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) 为准；稳定版历史以 [GitHub Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) 与 tag 为准。当前最新公开 release 为 `v1.0.1`；Runtime version 与 Release/API version 独立管理。
+持续任务以 [GitHub Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) 为准；稳定版历史见 [GitHub Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)、tag 与[版本变更历史](docs/reports/releases/changelog.md)。当前最新公开 release 为 `v1.0.1`；Runtime version 与 Release/API version 独立管理。
 
 ## License
 
-[Apache License 2.0](LICENSE)。
+[Apache 2.0](LICENSE)。
