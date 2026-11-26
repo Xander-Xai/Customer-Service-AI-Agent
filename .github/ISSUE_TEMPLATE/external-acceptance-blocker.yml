@@ -1,0 +1,26 @@
+name: External acceptance blocker
+description: Track acceptance that requires an authorized external system, owner or human reviewer.
+title: "acceptance: "
+labels: ["status:blocked", "acceptance:external"]
+body:
+  - type: textarea
+    id: implemented
+    attributes:
+      label: Implemented code and existing evidence
+      description: Link merged code/tests and state their environment and limits.
+    validations:
+      required: true
+  - type: textarea
+    id: blocker
+    attributes:
+      label: External prerequisite
+      description: Name the required authorized system, data owner, staff, provider or test dataset. Do not include secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Objective acceptance criteria
+      description: State observable pass/fail criteria and who can provide the evidence.
+    validations:
+      required: true

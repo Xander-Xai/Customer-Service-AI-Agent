@@ -1,359 +1,74 @@
 # Deployment
 
-> 🟢 CURRENT — 本文是**部署入口与配置理由**。
-> 具体运维操作与排障见 [operations/](operations/)，逐项发布检查见
-> [checklists/](checklists/)。
->
-> 部署栈是 **Docker Compose**。Kubernetes manifest **不在本仓库**
-> （理由见 [limitations.md](limitations.md)）。
+本指南区分**本地标准 Compose 栈**与**需授权和真实外部条件的工业 profile**。容器能启动、健康检查返回 200、CI 通过都不等于企业验收或生产就绪。
 
----
+## 本地标准 Compose
 
-## 1. 拓扑：6 个服务，1 个真相源
+### 前置条件
 
-```
-                          ┌──────────────┐
-   client ─── HTTPS ────► │    Nginx     │  TLS 终止 / WS upgrade / 静态资源
-                          └──────┬───────┘
-                                 │
-                    ┌────────────┴────────────┐
-                    │                         │
-            ┌───────▼────────┐        ┌───────▼────────┐
-            │  app (FastAPI) │        │  app (副本 2+) │   gunicorn workers
-            │  快路径 inline  │        │                │
-            └───┬────────┬───┘        └────────────────┘
-                │        │
-    ┌───────────┘        └──────────────────┐
-    │                                       │
-┌───▼──────────┐   ┌──────────────┐   ┌─────▼────────┐
-│ Redis        │   │ PostgreSQL   │   │ Qdrant       │
-│ session      │   │ 业务库       │   │ 向量库       │
-│ thread lock  │   │ AgentRun     │   │              │
-│ broker       │   │ approvals    │   └──────────────┘
-│ tool store   │   │ side_effects │
-│ run events   │   │ LangGraph    │
-└───┬──────────┘   │ checkpoints  │
-    │              └──────────────┘
-    │  ┌──────────────┐
-    └──►│ celery worker│  异步路径：claim run → 锁 → 跑图 → 终态
-       │  (N 副本)     │  崩溃可恢复；重投靠 at-least-once + 幂等
-       └──────────────┘
-```
+- Docker Engine 与 Docker Compose plugin；可拉取 Docker 基础镜像与 Python 依赖。
+- 本机未占用 Nginx/Grafana/Alertmanager 端口；可通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT`、`GRAFANA_PORT`、`ALERTMANAGER_PORT` 调整。
+- Compose 要求 `ADMIN_PASSWORD`、`POSTGRES_PASSWORD`、`GRAFANA_PASSWORD`。API 配置还需 `JWT_SECRET`、`SESSION_TOKEN_SECRET` 和 `API_KEY`。
+- API/Worker 要求非占位 `OPENAI_API_KEY`；空值或模板占位值会触发 fail-closed。Compose 会调用配置的 provider，可能产生费用；使用获准且限额的测试凭证。没有 provider 凭证时运行根目录[离线演示](../README.md#快速体验)，不把 blank-key HTTP 200 或 degraded health 当作业务 readiness。
+- 显式将 `DATABASE_URL` 指向 Compose 内部 PostgreSQL 服务（例如 `postgresql://csai:<password>@postgres:5432/csai`），避免 SQLite 被误作跨 worker 的业务库。
 
-**服务清单**（`deploy/compose/docker-compose.yml`）：
+不要将 `.env`、生成凭据或证书提交到 Git。一次性本地密码、provider key 注入、TLS 证书和验证命令示例见根目录 [README](../README.md#快速体验)。
 
-| 服务 | 角色 | 伸缩 |
-|---|---|---|
-| `nginx` | 反向代理 / TLS / 静态资源 | 1 |
-| `app` | FastAPI（快路径 + runs API + approvals API） | N（需一致配置，见下） |
-| `worker` | Celery 执行 AgentRun | N |
-| `postgres` | 业务库 + LangGraph checkpoint | 1（有状态） |
-| `redis` | session / thread lock / broker / tool store / run events | 1（有状态） |
-| `qdrant` | 向量库 | 1（有状态） |
+### 服务与协议默认
 
-其他 compose 变体：`override`（开发挂载）、`canary`（90/10）、
-`scale`（`make scale N=3`）、`monitoring`（Prometheus/Grafana/Alertmanager/Loki/Promtail）、
-`otel`（OTel Collector）。
+标准 Compose 定义 FastAPI `app`、Celery `worker`、独立 `beat`、PostgreSQL、Redis、Qdrant、Nginx 和监控服务。普通 Python runtime fallback 关闭；Compose 由一次性 `protocol-init` 在私有 volume 中为合成 fixture 生成随机 bearer 与摘要锁定配置，默认启动只读 ProductDocs MCP server 和独立 A2A after-sales peer。MCP/A2A 经现有 ToolRegistry/SDK 路径启用；peer 不发布宿主端口，合成协议不代表真实目录、ERP、退款资格或企业批准。
 
----
+- 显式回滚：`MCP_ENABLED=false`、`A2A_AFTERSALES_ENABLED=false`；A2A local peer 转入 dormant 状态。
+- `CSAI_RUNTIME_PROFILE=industrial` 不允许 synthetic mode；必须改为 `CSAI_PROTOCOL_MODE=external`，并提供获准目录和 SHA-256、private HTTPS endpoint、CA 与 bearer。标准合成 volume 不能直接升级为工业配置，需按运维流程替换。
+- API/Worker/beat 的 provider readiness 与 Compose container health 不等价；本地无 provider key 时，配置 fail-closed 会阻止应用进程运行。外部 provider readiness 的验收状态以 [Production Readiness](production-readiness.md) 为准。
 
-## 2. 启动前置校验（fail-fast，不是 warning）
-
-生产启动会**拒绝启动**而不是打一条 log 继续跑。这是有意的：
-带病启动的服务会在几分钟后以更难排查的方式失败。
-
-### 2.1 凭据类（`core/config.py`）
-
-| 变量 | 要求 |
-|---|---|
-| `JWT_SECRET` | 长度 ≥ 32 |
-| `SESSION_TOKEN_SECRET` | 必须设置 |
-| `API_KEY` | 必须设置 |
-
-### 2.2 分布式运行时（`core/config.py::validate_distributed_runtime_settings`）
-
-| 变量 | 要求 | 为什么 |
-|---|---|---|
-| `SESSION_STORAGE_BACKEND` | 必须 `redis` | 多 worker 下内存 session 会让同一会话在不同 worker 看到不同历史 |
-| `AGENT_RUN_DISPATCH` | 必须 `celery`（等价 canonical 旋钮 `AGENT_EXECUTION_MODE=queued`） | 否则异步 run 无人执行 |
-| `LANGGRAPH_CHECKPOINT_BACKEND` | 生产**不得**为 `memory` | 内存 checkpoint 多副本下会"看起来正常但状态已丢"，比启动失败危险 |
-| `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` | **>** `AGENT_RUN_TASK_TIME_LIMIT` + 30 | 锁先过期 = 同一 thread 并发执行 = 幂等键可能被绕过 |
-
-### 2.3 多 worker 一致性 gate（`GUNICORN_WORKERS>1` 时额外要求）
-
-| 变量 | 要求 |
-|---|---|
-| `LANGGRAPH_CHECKPOINT_BACKEND` | `postgres` |
-| `SESSION_STORAGE_BACKEND` | `redis` |
-| `AGENT_RUN_THREAD_LOCK_ENABLED` | `true` |
-| `AGENT_RUN_THREAD_LOCK_BACKEND` | `redis` |
-
-**为什么多 worker 要额外加一层？** 单 worker 时"忘了配 checkpoint"最多丢一次会话；
-多 worker 时同样的疏漏会让**两个副本各自认为自己是唯一真相源**，
-进而在同一 thread 上并发执行。这类 bug 在开发环境（一 worker）永远不会出现。
-
-### 2.4 Checkpointer 初始化：三层 fail-closed
-
-1. `LANGGRAPH_CHECKPOINT_BACKEND` 值非法 → `ConfigurationError`（`core/config.py:637`）
-2. 生产初始化失败 → **抛错拒绝回退 MemorySaver**（`core/container.py:341-351`）
-3. 图构建时 checkpointer 为 `None` + 非 dev → **抛错**（`core/container.py:278-289`）
-
-只有 dev/test 才允许降级到 `MemorySaver`，且降级会**显式标记**
-`status="degraded"` 并在健康检查里暴露——**静默降级是本项目明令禁止的**。
-
----
-
-## 3. 生成生产环境变量
+### 启动、检查与停止
 
 ```bash
-python3 scripts/generate_prod_env.py     # 生成 .env.prod（高熵随机凭据）
+make tls-local-cert  # 仅本机开发；不可用于生产
+docker compose -f deploy/compose/docker-compose.yml config
+docker compose -f deploy/compose/docker-compose.yml up -d --build
+docker compose -f deploy/compose/docker-compose.yml ps
+docker compose -f deploy/compose/docker-compose.yml exec -T app \
+  curl -fsS http://localhost:8000/api/health
 ```
 
-生成后**必须**人工确认并补齐（脚本不会替你决定）：
-
-| 变量 | 说明 |
-|---|---|
-| `ERP_MODE=real` + 金蝶凭据 | 生产应接真实 ERP；配置不全时 `erp/factory.py:41-45` 会**静默降级到 mock** |
-| `LLM_PROVIDER` / `LLM_API_KEY` | 默认硅基流动 `Qwen/Qwen3-8B` |
-| `POSTGRES_URL` / `REDIS_URL` | 供 checkpoint / session / lock 共用 |
-| `QDRANT_URL` | 向量库 |
-| `CSAI_PROTOCOL_MODE` | 普通 Compose 默认 `synthetic`：启用仓库合成产品文档 MCP 与独立 A2A peer；`industrial` profile 禁止 synthetic，必须设为 `external` |
-| `CSAI_RUNTIME_PROFILE` | 接受空值（兼容旧部署）、`standard` 或 `industrial`；Compose 标准部署传入 `standard`，该值不启用工业专属准入策略 |
-| `APP_ENV` | 标准示例为 `development`；启用 `CSAI_RUNTIME_PROFILE=industrial` 时须显式设为 `staging` 或 `production` |
-| `MCP_SERVERS` | 标准 synthetic profile 由私有 protocol-config volume 提供；external/industrial 必须显式配置批准的 allowlist，否则 fail-closed |
-| `MCP_PRODUCT_CATALOG_SOURCE` | Compose external/industrial 的宿主机批准目录文件；只读挂载到 `/run/mcp/product-docs.json`，allowlist 必须固定其 SHA-256 |
-| `A2A_AFTERSALES_*` | 标准 synthetic profile 在首次启动时生成 bearer 与 policy digest；industrial 必须显式提供批准目录、HTTPS endpoint、CA 与 bearer |
-
-Compose 工业私有 TLS 的 CA 文件通过 `A2A_AFTERSALES_CA_SOURCE` 从宿主机只读挂载；应用进程内固定读取 `/run/a2a-ca/ca.pem`。CA 文件缺失或为空时 A2A readiness fail closed。
-| `HITL_*` | 默认 `HITL_ENABLED=false`；见下方警告 |
-
-> ⚠️ **关于 `HITL_*` 的一处已知 fail-open**：只设 `HITL_ENABLED=true`
-> 而不设 `HITL_HIGH_RISK_TOOLS` 与 `HITL_HIGH_AMOUNT_THRESHOLD` 时，
-> 风险优先级链全部落空 → 判定为 `LOW` → **什么都不拦且不报警**。
-> 详见 [limitations.md](limitations.md) 与
-> [PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-3。
-> 部署前请显式设置 `HITL_HIGH_RISK_TOOLS`（或把阈值设成非零）。
-
-标准 Compose 首次启动由 `protocol-init` 创建本地随机 peer bearer 和只读配置，`a2a-peer`
-通过 healthcheck 就绪后，API/worker 才启动；该 peer 不发布宿主端口，仅用于合成数据验收。
-关闭能力可设置 `MCP_ENABLED=false` 与 `A2A_AFTERSALES_ENABLED=false`；后者让本地 A2A peer 进入不监听的 dormant 状态。使用工业 profile
-时需外部批准目录和私有 HTTPS，且不得复用 synthetic volume；旧 synthetic volume 切换时
-初始化器 fail-closed，需按运维流程明确清理/替换。
-
----
-
-## 4. 三条关键 TTL 关系（配错就会出事）
-
-| 关系 | 要求 | 违反后果 |
-|---|---|---|
-| `AGENT_RUN_THREAD_LOCK_TTL_SECONDS` > `AGENT_RUN_TASK_TIME_LIMIT` + 30 | 启动时校验（fail-fast） | 锁过期后另一 worker 接管同一 thread → **同一幂等键并发执行** |
-| `AGENT_RUN_VISIBILITY_TIMEOUT` ≥ 任务实际时长 | 需按最长任务设置 | 任务还在跑就被重投 → 依赖幂等兜底，但浪费资源 |
-| `HITL_APPROVAL_TTL_SECONDS` > 审批人响应预期 | 业务判断 | 过短会把还没来得及看的审批变成 `EXPIRED`（**按拒绝处理**） |
-
-Celery 侧的三个关键开关（`runtime/celery_app.py:34-67`）：
-
-```python
-task_acks_late = True                       # 执行完才 ack
-task_acks_on_failure_or_timeout = False      # 关键：失败不 ack → 会被重投
-task_reject_on_worker_lost = True            # worker 死了 → 重新入队
-broker_transport_options = {"visibility_timeout": ...}
-task_ignore_result = True                    # 结果后端不是真相源
-```
-
-**`task_acks_on_failure_or_timeout=False` 是最容易被写错的一个。**
-它是 Celery 的**反直觉默认值**（默认为 `True`），写成 `True` 会导致
-失败任务**永远不再投递**——崩溃恢复与重试退避全部静默失效。
-
-**明确不是 exactly-once**：`acks_late` + `reject_on_worker_lost` + `visibility_timeout`
-构成的是 **at-least-once**。正确性由三层幂等承担：
-
-| 层 | 机制 | 防什么 |
-|---|---|---|
-| run 级 | 终态重复投递 no-op + `idempotency_key` 唯一约束 | 同一请求重复提交产生两个 run |
-| thread 级 | Redis 锁 + lease | 同 thread 并发执行 |
-| 工具级 | `tool_side_effects` ledger，`operation_key` = 内容寻址重放稳定键（`build_replay_stable_operation_key`；HITL 为 `run_id:approval:{approval_id}`） | **做了一次被重做** |
-
----
-
-## 5. 上线步骤
-
-### 5.1 迁移
+App startup runs the Alembic upgrade path. Health endpoint returns JSON; inspect `status` and component fields. HTTP 200 or a healthy Docker probe alone does not establish provider readiness. App host port is not published in the base stack; service access normally goes through Nginx. A local self-signed certificate is untrusted in a browser and is never production TLS.
 
 ```bash
-make db-upgrade           # Alembic 升级到 head
-# 空库全链路验证（CI 有对应 job）
-bash scripts/verify_fresh_db_migration.sh
+docker compose -f deploy/compose/docker-compose.yml down
 ```
 
-必需表：`agent_runs`、`agent_dead_letters`、`tool_side_effects`、
-`human_approvals`（Alembic `006`）、以及 LangGraph checkpoint 表
-（由 `AsyncPostgresSaver.setup()` 在**跨进程 advisory lock 保护下**创建，
-多副本同时启动不会互相踩）。
+Normal `down` retains PostgreSQL, Redis and Qdrant volumes. Add `-v` only when deliberately deleting this isolated local stack's data.
 
-### 5.2 启动顺序
+2026-11-26 本地 WSL2 验证在已合入 PR #87 的源代码上构建了 app/worker/beat 镜像并启动基础设施和协议服务。未提供 provider key 时，API 在配置校验处 fail-closed；worker/beat 未保持 healthy，其独立重启原因未采集。另以 `APP_MODE=dev` 临时测试进程通过合成协议 volume 执行了官方 MCP SDK stdio → ToolRegistry ProductDocs 查询和 A2A SDK → 独立 peer 业务调用（`execution_authorized=false`）。此结果只证明组件协议互操作，不证明标准 app readiness 或图路由。临时容器、网络和 volume 已移除。完整标准 Compose 验收仍开放，见 [Issue #86](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/86)。
+
+## Runtime data duties
+
+- PostgreSQL 保存 durable `AgentRun`、业务记录与 LangGraph checkpoint。
+- Redis 用于 session、thread lease/lock、队列 broker 和运行时协调。
+- 多 worker / 多副本配置必须共享 PostgreSQL checkpoint、Redis session 和 Redis per-thread lock；配置与 fail-closed 校验见 [配置参考](reference/configuration.md)。
+- Qdrant 保存向量数据；BM25 与检索索引需按 RAG 运维流程导入，空库不代表知识检索部署完成。
+- Celery `worker` 执行 durable run；独立 `beat` 驱动 stuck-run reconciliation。服务健康不代表业务积压已清空。
+
+## 数据库迁移
+
+部署前审阅 Alembic 迁移与回滚方案，并在已设置 PostgreSQL `DATABASE_URL` 的目标环境执行。该命令不适用于默认 SQLite 示例配置；本次未对真实企业数据库执行迁移：
 
 ```bash
-make prod                 # 或 docker compose -f deploy/compose/docker-compose.yml up -d
+alembic upgrade head
 ```
 
-依赖顺序由 compose 保证：`postgres`/`redis`/`qdrant` healthy →
-`app` 与 `worker` 启动。`worker` 用 **Celery 原生健康检查**
-（`inspect ping` → `pong`），不是 `docker compose ps`——
-后者只要 compose 文件能解析就返回 0。
+现有生产数据须先备份并验证恢复；不可在未经数据所有者授权的情况下盘点或迁移真实 session/订单数据。迁移细节见 [生产运维指南](operations/production-operations-guide.md)。
 
-### 5.3 上线后必须确认
+## 工业 profile 与回滚
 
-```bash
-# 1) 基础设施健康
-curl -s localhost:8000/api/health
+工业配置是严格准入配置，不是本地 demo 的同义词。需要明确选择 `CSAI_RUNTIME_PROFILE=industrial`，并提供获准的身份映射、PostgreSQL/Redis、密钥、模型、TLS、ERP adapter、批准目录摘要、CA 与业务运营人员。缺失的身份、授权、checkpoint 或安全配置必须失败关闭。
 
-# 2) checkpoint 后端不是 memory，且没有静默降级
-curl -s localhost:8000/api/health | jq '.checkpointer'
-#   期望 status=healthy, backend=postgres
-#   若为 degraded → 查 DB 连通性，不要"先上线再说"
+- [Industrial Runtime Admission](architecture/industrial-runtime-admission.md)：准入代码和失败边界。
+- [Production Readiness](production-readiness.md)：生产证据与外部阻塞的唯一状态入口。
+- [Runtime runbook](operations/distributed-runtime-runbook.md)：worker、恢复、DLQ 和故障处置。
 
-# 3) session 后端
-curl -s localhost:8000/api/health | jq '.session'
+当前没有真实 ERP 写交易或生产运行证据。本地合成协议目录、mock ERP、CI 服务容器都不是生产数据或真实业务验收。回滚需同时检查数据库 schema、审批记录和副作用账本；不能只回滚镜像而忽略已执行的外部动作。
 
-# 4) worker 真的在消费（不只是进程存在）
-docker compose -f deploy/compose/docker-compose.yml exec worker \
-  celery -A runtime.celery_app:celery_app inspect active
-
-# 5) 熔断器是 closed（OPEN 说明 LLM 侧已经降级）
-curl -s localhost:8000/api/circuit-breaker
-
-# 6) DLQ 为空
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" localhost:8000/api/runs/dead
-```
-
-逐项检查清单见 [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md)。
-
----
-
-## 6. 卡死 run 的兜底
-
-`runtime/retry.py:33-66` 的 `reconcile_stuck_runs` 扫描
-长期停在 `QUEUED` / `RETRYING` 但没有活跃 worker 的 run，重新投递。
-
-> ✅ **已接 Celery Beat**：compose 里是**独立 `beat` service**
-> （`deploy/compose/docker-compose.yml`），周期由 `AGENT_RUN_RECONCILE_INTERVAL_SECONDS`
-> 控制（默认 30s）。刻意**不**内嵌 `worker -B`——worker 可被 `--scale` 成多副本，
-> 内嵌 beat 会让每个副本各调度一次；独立 service 保证恰好一个调度者。
-> CI 契约测试直接解析该 compose 文件，断言 `beat` service 存在且 worker 命令不含 `-B`。
->
-> **边界**：`beat` 是**单实例**，停摆即无自动恢复（只能手工
-> `python3 scripts/reconcile_stuck_runs.py --apply`）；且**beat 存活 ≠ 扫描成功**——
-> 扫描失败时 schedule 文件照样被写、健康检查照样是绿的，由 `AgentReconcileStalled`
-> 告警覆盖（[distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) §3.8）。
-> 详见 [limitations.md](limitations.md) §3。
-
----
-
-## 7. DLQ 与重放
-
-重试耗尽 → 写 `agent_dead_letters` + 状态 `DEAD_LETTER`。
-
-```bash
-# 列出（需 admin）
-curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "localhost:8000/api/runs/dead?limit=50"
-
-# 人工重放（复用原 run_id，绕过工具幂等键的问题）
-python3 scripts/replay_dead_run.py --run-id <RUN_ID>    # make runtime-replay-help
-```
-
-**为什么重放必须复用原 `run_id`？** 内容寻址重放稳定幂等键
-（`build_replay_stable_operation_key`）以 `run_id` 为其中一个分量；HITL 路径的
-`operation_key = run_id:approval:{approval_id}` 也含 `run_id`。
-换一个 `run_id` 就换了一套幂等键，**已执行过的副作用会真的再执行一次**。
-所以 `requeue_dead_letter`（`runtime/run_service.py:512-553`）
-在代码层面就禁止生成新 run_id。
-
-排障细节见 [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md)。
-
----
-
-## 8. 监控栈
-
-```bash
-make monitoring-up
-```
-
-| 组件 | 作用 | 备注 |
-|---|---|---|
-| Prometheus | 抓取 | ⚠️ 见下方断链说明 |
-| Alertmanager | 告警路由 | `monitoring/alertmanager.yml` |
-| Grafana | 看板 | `monitoring/grafana/dashboards/csai-overview.json` |
-| Loki + Promtail | 日志聚合 | 独立 compose 变体 |
-| OTel Collector | trace 接收 | ⚠️ 仅 `debug` exporter，**无持久化后端** |
-
-### ⚠️ 两处必须知道的观测缺口
-
-1. **DLQ 告警规则当前不可能触发。** 唯一的 Prometheus 端点
-   `GET /metrics/prometheus`（`api/routes/monitoring.py:332`）手工输出
-   10 个 `csai_*` 聚合指标，而 `agent_run_dead_letter_total` 等约 70 个
-   `prometheus_client` 注册指标**从未被序列化输出**
-   （全仓无 `generate_latest`）。`monitoring/alert_rules.yml` 的
-   `AgentRunDeadLetterDetected` 依赖一个不存在的时间序列。
-   **在修复前，DLQ 必须靠人看或靠查询。**
-2. **Grafana 有 6 个面板永远为空**（引用了从未输出的指标名）。
-
-两项的修复方案见 [limitations.md](limitations.md) 与
-[PROJECT_FINALIZATION_PLAN.md](reports/audit/PROJECT_FINALIZATION_PLAN.md) P0-1 / P1-6。
-
-**告警自动化的兜底**：除了 Prometheus，应用内还有
-`alerts/notifier.py`（webhook + SMTP）与 `SLAAlertManager`
-（`core/monitoring.py:1101+`，带严重度升级），可通过 `GET /api/alerts` 查询。
-
----
-
-## 9. 敏感信息
-
-| 文件 | 策略 |
-|---|---|
-| `.env` | gitignore，本地当前激活配置 |
-| `.env.example` | 占位符，**安全提交** |
-| `.env.test` | **提交到仓库**（全部 Mock，无真实凭据） |
-| `.env.dev` / `.env.prod` | gitignore |
-
-守卫：`scripts/check_secrets.py`（含 `--history` 全历史扫描，
-CI 每周 cron 跑）、`pre-commit` 钩子、CI 硬编码 key grep。
-策略全文见 [security/public-repository-secret-policy.md](security/public-repository-secret-policy.md)。
-
----
-
-## 10. 环境切换
-
-```bash
-make env-dev     # 宽松认证 / 详细日志 / SQLite
-make env-prod    # 严格认证 / JSON 日志 / PostgreSQL + Redis
-make env-test    # 最小依赖 / Mock 一切
-make env-check   # 查看当前环境
-```
-
----
-
-## 11. 本仓库不提供的部署方式
-
-| 不提供 | 理由 | 替代 |
-|---|---|---|
-| Kubernetes manifests | 没有真实集群与多副本一致性验证的 manifest 是**装饰性声明**，比没有更糟 | 路线图项，见 [limitations.md](limitations.md) |
-| Serverless 部署 | checkpoint + 长时 worker + Redis 锁模型与 FaaS 生命周期冲突 | — |
-| 蓝绿/金丝雀自动切换 | compose 有 `canary`（90/10 流量分割），但自动判据与回滚未经真实流量验证 | `make canary` 需人工盯 |
-| 托管的 trace 后端 | collector 只配了 `debug` exporter | 接入 Jaeger/Tempo 见路线图 |
-
----
-
-## 12. 延伸阅读
-
-| 你想知道 | 去 |
-|---|---|
-| 生产运维手册 | [operations/production-operations-guide.md](operations/production-operations-guide.md) |
-| 分布式 Runtime 排障 / DLQ 重放 | [operations/distributed-runtime-runbook.md](operations/distributed-runtime-runbook.md) |
-| LLM 提供商切换 | [operations/llm-provider-switch.md](operations/llm-provider-switch.md) |
-| E2E 验证方法论 | [operations/e2e-verification-guide.md](operations/e2e-verification-guide.md) |
-| 生产就绪逐项检查 | [checklists/production-readiness-checklist.md](checklists/production-readiness-checklist.md) |
-| 新环境快速启动 | [checklists/quick-launch-checklist.md](checklists/quick-launch-checklist.md) |
-| 配置项全表 | [reference/configuration.md](reference/configuration.md) |
-| 架构与状态归属 | [architecture.md](architecture.md) |
-| 已知不宣称项 | [limitations.md](limitations.md) |
+生产 Python 依赖契约是 `requirements.txt` 与 Dockerfile；`requirements-lock.txt` 是历史非权威快照，不是 lockfile。GitHub Release/tag、GHCR image、Actions 和部署是不同产物/证据；未通过 exact-head 发布门禁时不发布稳定版本。

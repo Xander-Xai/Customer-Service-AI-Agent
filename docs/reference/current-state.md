@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-26 核查增量**：#88 Agent Eval 已合并至 `ad22a59c`，#89 PostgreSQL 未知副作用回执窗口回归已合并至 `31a11f91`；#87 已在该主线之上完成标准 Compose 合成 MCP/A2A 运行与协议调用验证，最终 exact-head CI 仍以实时 PR/Actions 为准。真实 provider、授权企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
+> **2026-11-26 主线刷新**：#87 的标准 Compose 合成协议配置已合入；隔离协议 SDK/ToolRegistry 调用通过，但无 provider key 的本地 base Compose 中 API 进程 fail-closed，完整 API/Worker readiness 仍未验证。真实 provider、批准企业目录、TLS/ERP 和生产验收仍未完成。主线详细能力与证据以本页内容及 [Production Readiness](../production-readiness.md) 为准；最新 SHA 和 Actions 状态每次核查时读取 GitHub，不固定在此。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -37,6 +37,12 @@
 - Worker 在重试或审批恢复前通过 RunService 读取投影，仅记录核查建议、数量及异常标记到 trace；不把投影交给模型，不改变原有幂等、授权、审批和状态迁移规则。
 - 投影是只读诊断，不是原子授权快照；`execution_authorized` 始终为 false。真实故障恢复仍以 checkpoint、持久化账本和执行栅栏为准。
 - 验收入口：`pytest -q tests/unit/test_task_episode.py`（真实 SQLite 表；不调用外部模型或 ERP）。生产 PostgreSQL 崩溃/恢复与外部副作用一致性需单独验证。
+
+## Runtime Gate11 间歇性失败观察
+
+- Main SHA `1f29fa2fa2699ac3be46822e96de402b0ce5adad` 的 CI run [45601463377](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45601463377) attempt 1 在 `test_gate11_side_effect_tool_executes_exactly_once_across_worker_kill` 失败：run 最终为 `FAILED`, `attempt=2`, `error_code=CheckpointEpisodeMismatch`, `error_type=permanent`；attempt 2 在同一 SHA 通过。CI 日志没有保留触发 mismatch 的内部身份字段或 worker traceback，不能从该日志确认是 checkpoint run identity、query/session/user identity 还是执行时序导致。
+- 2026-11-26 在当前 main SHA `31a11f91d9a09ba6d5e8763db84151be930f9a27` 使用 Python 3.10.12、本机隔离 PostgreSQL 15 与 Redis 7、确定性 fake side effect，单独运行该测试通过（1 passed / 16.62s）；临时容器已停止并删除。这未复现先前异常，也不能证明竞态已修复。
+- 当前代码在恢复前会对照 checkpoint `episode_run_id`、thread、session、query、user 身份；不匹配时 fail closed 并要求 reconciliation。保留原断言、不增加重试、不降级为 skip。根因仍未定位，继续跟踪 [Issue #46](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/46) 中的真实 PG/Redis 故障复现与恢复验收。
 
 ## 同任务终态 checkpoint 恢复
 
@@ -248,7 +254,7 @@ make runtime-delivery
   （`rag/retrieval_contract.py`）→ RRF 融合 → rerank（`rag/reranker.py`）→ context。
   BM25 lifecycle: `rag/bm25_lifecycle.py`；确定性 point ID 与迁移：`rag/point_id.py`、
   `rag/point_id_migration.py`。
-- **业务协议接入（#86）**：标准 Compose profile 通过真实 MCP/A2A SDK 默认启用合成 SKU 文档工具与独立售后策略 peer；合成 MCP 结果明确标记 `SYNTHETIC_LOCAL_FIXTURE`，不伪装成产品方批准目录。一次性私有配置、只读 catalog/CA mount、隔离 peer 网络、healthcheck 与启动期 A2A 发现/结果探测已接线。合成 MCP stdio→SDK→ToolRegistry→expected-result，以及 A2A 独立进程→SDK→ToolRegistry→authenticated result 在 GitHub Actions synthetic fixture 环境为 `LOCALLY_VERIFIED`（测试源码 SHA `50a0b1f70769e72be9fa4bd6f6e1a22713d225e2`，CI `45738703085` + A2A SDK `45738703866`）。完整应用 Docker Compose startup 为 `BLOCKED`：本机 PyPI read timeout 阻止依赖层完成，未启动 app/worker/peer 栈。不能称 `STAGING_VERIFIED` 或 `PRODUCTION_VERIFIED`。工业 profile 不接受 synthetic mode，要求 approved catalog、私有 HTTPS、CA 与 bearer。回滚：`MCP_ENABLED=false` 和 `A2A_AFTERSALES_ENABLED=false`（本地 peer dormant）。详见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md)、[A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。
+- **业务协议接入（#86）**：标准 Compose 默认通过官方 MCP/A2A SDK 启用合成只读 SKU 文档工具与独立售后 peer；返回明确标记 `SYNTHETIC_LOCAL_FIXTURE`，不伪装成批准目录。私有 protocol volume、只读目录/CA mount、隔离 peer 网络、healthcheck 与启动期 A2A 发现/结果探测已接线。2026-11-26 本地 WSL2 build 完成；官方 MCP SDK→stdio→ToolRegistry 查询及 A2A SDK→独立 peer 业务调用通过 synthetic fixture。完整 base Compose 的 API 在缺 provider key 时 fail-closed，worker/beat 未保持 healthy；正常 app graph routing、企业目录、真实 TLS/ERP 与 production readiness 仍未验证。工业 profile 不接受 synthetic mode，要求 approved catalog、私有 HTTPS、CA 与 bearer。回滚：`MCP_ENABLED=false` 和 `A2A_AFTERSALES_ENABLED=false`。详见 [MCP 产品文档](../operations/mcp-product-documents-20261125.md)、[A2A 售后专家](../architecture/a2a-after-sales-business-20261125.md)。
 - **MCP 外部工具接入（`tools/mcp_adapter.py`）runtime fallback 默认关闭**：`MCP_ENABLED=false`；普通 Compose profile 通过生成的合成 allowlist 默认启用产品文档工具，工业 profile 必须显式提供已批准配置。
   它是 Function Calling 的**传输层扩展**，不是替代品 —— native 工具（ERP / RAG /
   系统内建）继续走进程内注册表，MCP 工具叠加进**同一个** `ToolRegistry`，

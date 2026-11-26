@@ -1,0 +1,26 @@
+name: Feature request
+description: Propose a focused capability or improvement with a user need and acceptance evidence.
+title: "enhancement: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: User or operational need
+      description: Who needs this, and what task is currently blocked?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include a simpler baseline and important alternatives considered.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria and evidence
+      description: How will behavior, failure handling and limitations be verified?
+    validations:
+      required: true

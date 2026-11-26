@@ -1266,6 +1266,12 @@ def test_discovery_includes_claude_md():
     assert REAL_ROOT / "CLAUDE.md" in docs
 
 
+def test_discovery_includes_contributing_guide():
+    """Contributor-facing root guidance must be covered by active-doc guards."""
+    docs = audit.discover_docs(REAL_ROOT)
+    assert REAL_ROOT / "CONTRIBUTING.md" in docs
+
+
 def test_real_bannered_snapshots_are_still_excluded():
     """#66 acceptance: tightening the banner match must not let a single real
     snapshot into the active scan. Derived from the files on disk (canonical
