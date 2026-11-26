@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-25 核查增量**：#80 reviewed-gold、#81 trace、#82 provider attempt metering、#83 工业身份/HTTP 限流/耐久任务及 DLQ 准入、#84 SSE 生命周期与 #85 共享快路径执行配额均已合并。#86 标准 Compose 默认业务协议接入仍在独立验收中。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
+> **2026-11-26 核查增量**：#88 Agent Eval 已合并至 `ad22a59c`，#89 PostgreSQL 未知副作用回执窗口回归已合并至 `31a11f91`；#87 已在该主线之上完成标准 Compose 合成 MCP/A2A 运行与协议调用验证，最终 exact-head CI 仍以实时 PR/Actions 为准。真实 provider、授权企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
@@ -55,7 +55,8 @@
 ## 人工客服交接
 
 - [PR #38](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/38) 已交付持久化工单后端，支持坐席领取、消息交互、关闭与重开。默认关闭。
-- [人工交接运维说明](../human-handoff-operations.md)记录启用条件和待验收项。Web 工作台进度见 [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43)。
+- [PR #43](https://github.com/Xander-Xai/Customer-Service-AI-Agent/pull/43) 已合并认证的客户/坐席 Web 工作台。编译图转人工、坐席领取期间机器人暂停、API 消息往返和关闭/重开已有合成测试；真实 PostgreSQL/坐席/客户联调、通知与 SLA 仍 `NOT_VERIFIED`。人工接管与高风险交易审批是独立流程。
+- [人工交接运维说明](../human-handoff-operations.md)记录启用条件、现有测试证据和待验收项。
 
 ## RAG evaluation / evidence state
 

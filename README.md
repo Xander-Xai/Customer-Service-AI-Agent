@@ -504,6 +504,12 @@ make prod              # 生产栈（Docker Compose + Nginx + TLS），缺 TLS �
 make tls-local-cert    # 仅本地开发：生成本地自签证书
 ```
 
+标准 Compose profile 默认启动合成数据上的只读 MCP 产品文档工具和 A2A 售后规则 peer；可用
+`MCP_ENABLED=false` / `A2A_AFTERSALES_ENABLED=false` 回滚关闭。关闭 peer 只影响相应协议能力，
+不代表应用业务 readiness。合成目录、容器 healthcheck 或 HTTP 200 均不证明模型可用、真实企业
+目录/TLS/ERP 已验收；请同时查看 `/api/health` 的 component 状态。工业 profile 必须使用批准的外部目录与私有 TLS 配置，合成配置会 fail closed。详见
+[协议部署边界](docs/deployment.md)。
+
 ### 部署前必须设置的变量
 
 | 变量 | 为什么 | 缺了会怎样 |
@@ -541,7 +547,7 @@ make tls-local-cert    # 仅本地开发：生成本地自签证书
 | 观测 | OpenTelemetry 语义 span + Prometheus + Grafana + Alertmanager + Loki |
 | 安全 | Argon2id · JWT（access + refresh + Redis 黑名单）· 4 级 RBAC · CSRF 双提交 · CSP nonce · SSRF 防护 · 限流 |
 | 部署 | Docker Compose 6 变体（base / prod / override / canary / scale / monitoring）+ Nginx + TLS |
-| 工具 | OpenAI Function Calling · MCP（read-only-first，默认关闭）· 金蝶 ERP 适配器（Mock/Real + HMAC + 重试 + 分页） |
+| 工具 | OpenAI Function Calling · 标准 Compose 的只读合成 MCP/A2A（显式可关闭；工业配置需授权）· 金蝶 ERP 适配器（Mock/Real + HMAC + 重试 + 分页） |
 | 前端 | 原生 JS + Vite 8 · Vitest（可嵌入 widget） |
 
 ---

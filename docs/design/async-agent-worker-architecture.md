@@ -82,6 +82,7 @@ flowchart TD
 - **DLQ 人工重放闭环**：`RunService.requeue_dead_letter` +
   `scripts/replay_dead_run.py`（复用原 `run_id`，保持工具幂等键有效）。
 - tool 幂等 ledger + `execute_idempotent_operation`。
+- **外部成功、receipt 尚未提交的未知窗口**：若外部调用返回成功后进程/数据库在持久回执提交前失败，ledger 保留 `PENDING`；租约过期后的同键重投必须得到 `SideEffectReconciliationRequired`，不得盲目再次调用外部系统。回归 `tests/integration/runtime/test_side_effect_claim_lease_pg.py::test_successful_external_call_without_durable_receipt_requires_reconciliation` 在真实 PostgreSQL ledger 上使用确定性 fake 外部写验证：远端调用计数保持 1。它不接 ERP、不查询外部 receipt，也不提供跨系统 exactly-once；恢复需要授权的下游查询/人工对账。
 - worker crash → broker redelivery → lease 接管 → **从 checkpoint 续跑**
   （集成测试 + `make runtime-chaos` 验证）。
 - **Cross-process 事件回传**：worker `XADD` 到 Redis Stream

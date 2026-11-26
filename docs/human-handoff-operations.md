@@ -90,3 +90,16 @@ This is the latest matching session run, not a guaranteed causal link to
 the escalation. It is a non-atomic diagnostic view and never grants
 execution authority. Human staff must still use the existing approval,
 reconciliation and checkpoint workflows. Real production validation remains open.
+
+## 2026-11-26: existing handoff path regression evidence
+
+The current compiled-graph and authenticated HTTP lifecycle contracts were
+re-run locally with `.env.test`: `tests/unit/test_handoff_graph.py`,
+`tests/unit/test_handoff_api.py`, and `tests/unit/test_handoff_service.py` —
+23 passed. The graph test uses an in-process deterministic domain-mode fixture
+and SQLite; the API test uses authenticated test principals and SQLite. These
+tests verify durable ticket creation before handoff, bot pause while claimed,
+one-winner claim, customer-visible staff reply, message idempotency, close and
+reopen, and cross-user authorization boundaries. They are not a live customer
+or staffed PostgreSQL staging acceptance. CI on the current main branch must
+also be checked at its exact SHA before reporting current verification.
