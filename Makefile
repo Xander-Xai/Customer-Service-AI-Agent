@@ -38,6 +38,13 @@ test-fast: env-test ## 快速测试（跳过慢测试，默认离线）
 	@echo "⚡ 快速测试..."
 	python3 -m pytest tests/ -x -v --tb=short -m "not slow"
 
+# 对抗性安全测试：提示注入 / 工具滥用 / 越权 / 数据泄漏边界。
+# 与普通单测分开成一条 lane，是为了让"安全回归"在 CI 输出里**单独可见** ——
+# 混在 4000 个单测里，安全用例失败很容易被淹没。
+test-security: env-test ## 对抗性安全测试（注入 / 工具滥用 / 越权 / 泄漏边界）
+	@echo "🛡️  运行对抗性安全测试..."
+	python3 -m pytest tests/security/ -v --tb=short
+
 test-real-providers: ## 真实 provider 验证（issue #52：默认不执行，需要真实凭据）
 	@echo "⚠️  真实 provider lane —— 需要真实 API Key，且会发起外网请求。"
 	@echo "    凭据从环境变量读取：OPENAI_API_KEY / EMBEDDING_API_KEY / RERANKER_API_KEY"
@@ -334,6 +341,25 @@ agent-eval-contract: ## agent-eval 契约守卫（指标名 / 证据边界 / 降
 
 agent-eval-annotation-status: ## 标注状态报告（human_confirmed 占比 + 各指标分母）
 	@python3 scripts/evaluate_agent.py --print-annotation-status
+
+# 回归评测：把当前一次 eval 与**已提交基线**逐指标比较，判定能力是否退步。
+#
+# 为什么需要它：`make agent-eval` 的门禁只回答"当前是否仍高于阈值"，
+# 答不了"这次改动有没有让能力退步"。0.96 -> 0.94 仍在 0.95 阈值之上，
+# 静默退化会被放行。
+#
+# 基线是 tests/eval/agent_eval_baseline.json（提交进仓，因此每次 PR 都能比较）。
+# 判定方向来自 artifact 自带的 gate_specs（gte 越高越好 / lte 越低越好），
+# 不 import 线上常量 —— 否则"改门禁阈值"会悄悄改写历史 artifact 的解读。
+#
+# 退出码：0 = 未见回归；1 = 确凿回归。INCOMPARABLE（口径或数据集变了）
+# 也返回 0，但报告里写明不可比 —— 不可比不等于"没退步"。
+agent-eval-regression: ## Agent 回归评测（与已提交基线比较，检测能力退化）
+	@python3 scripts/evaluate_agent.py --out artifacts/agent-eval/current.json >/dev/null
+	@python3 scripts/compare_agent_eval_regression.py \
+		--baseline tests/eval/agent_eval_baseline.json \
+		--current artifacts/agent-eval/current.json \
+		--out artifacts/agent-eval-regression/report.json
 
 # 真实模型 lane：默认**不**调用外部 provider。凭据只能从环境变量注入
 # （AGENT_EVAL_REAL_PROVIDER_API_KEY / OPENAI_API_KEY），且必须同时满足

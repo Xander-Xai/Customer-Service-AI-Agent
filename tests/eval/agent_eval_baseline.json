@@ -1,0 +1,1329 @@
+{
+  "schema_version": "agent-eval-evidence/v1.3",
+  "generated_at": "2026-11-26T03:41:03.275378+00:00",
+  "overall_status": "INCONCLUSIVE",
+  "git_sha": "8a75e9207585733e2c21878b84a5b24301ff22fc",
+  "dataset": {
+    "sha256": "e2904ba77fb8f14e167b8643f4bdc62d112eb5a2f424bbd6b6a804bfed2053a3"
+  },
+  "metrics": {
+    "expected_parameter_match_rate": {
+      "name": "expected_parameter_match_rate",
+      "status": "MEASURED",
+      "value": 0.95,
+      "numerator": 19,
+      "denominator": 20,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = (case, tool) slots declared in expected_parameters across non-fault cases; numerator = slots where an observed call for that tool carried every expected key/value (subset match). Diagnostic: parameters come from the scripted LLM, so this checks end-to-end preservation, not model reasoning.",
+      "detail": {
+        "misses": [
+          {
+            "case_id": "tool_param_mismatch_001",
+            "tool": "staging_readonly_lookup",
+            "expected": {
+              "order_id": "RO-PARAM-002"
+            },
+            "observed": [
+              {
+                "order_id": "RO-WRONG-999"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "fallback_detection_accuracy": {
+      "name": "fallback_detection_accuracy",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 4,
+      "denominator": 4,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = cases where expect_fallback is true OR a marker fired",
+      "detail": {
+        "mismatches": []
+      }
+    },
+    "fallback_rate": {
+      "name": "fallback_rate",
+      "status": "MEASURED",
+      "value": 0.034782608695652174,
+      "numerator": 4,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; a case counts once even if several degradation markers fired",
+      "detail": {
+        "marker_hits": {
+          "[circuit_breaker_open]": 0,
+          "[error_fallback]": 0,
+          "抱歉，处理问题时遇到错误": 0,
+          "抱歉，处理售后问题时遇到错误": 0,
+          "抱歉，处理技术问题时遇到错误": 0,
+          "抱歉，处理产品查询时遇到问题": 0,
+          "抱歉，处理销售咨询时遇到问题": 0,
+          "抱歉，处理账单问题时遇到系统错误": 0,
+          "抱歉，处理您的复杂问题时遇到困难": 1,
+          "抱歉，推理过程耗时过长": 0,
+          "抱歉，响应时间过长": 0,
+          "您的今日 Token 配额已用尽": 0,
+          "无可用 Agent 响应": 0,
+          "Agent not found": 0,
+          "Primary agent": 0,
+          "Coordinator": 0,
+          "工具暂时不可用，请稍后重试": 0,
+          "感谢您对我们产品的关注": 2,
+          "关于您的订单/账单问题": 1,
+          "很高兴为您提供使用指导": 0,
+          "RuleBasedLLM": 0
+        }
+      }
+    },
+    "forbidden_tool_rate": {
+      "name": "forbidden_tool_rate",
+      "status": "MEASURED",
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 5,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "hits on forbidden_tools among cases that declare them (target 0)",
+      "detail": {
+        "forbidden_hits": 0
+      }
+    },
+    "governance_outcome_match_rate": {
+      "name": "governance_outcome_match_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 115,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; numerator = cases whose terminal state equals expected_terminal_state. WAITING_APPROVAL counts here (the graph correctly stopped and waited for a human) but NOT in task_completion_rate.",
+      "detail": {
+        "misses": []
+      }
+    },
+    "hitl_gate_propagation": {
+      "name": "hitl_gate_propagation",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 10,
+      "denominator": 10,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "diagnostic: end-to-end connectivity from tool-loop deferral to the LangGraph interrupt. Independent of the durable resume path (see make runtime-e2e).",
+      "detail": {
+        "failures": []
+      }
+    },
+    "hitl_trigger_accuracy": {
+      "name": "hitl_trigger_accuracy",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 17,
+      "denominator": 17,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "high-risk case: every HIGH call must be deferred and none executed; read-only calls may (and should) still run. low/medium-risk case: nothing may be gated, and every observed call must actually execute. denominator = cases with expected_risk that produced at least one observable tool call.",
+      "detail": {
+        "failures": []
+      }
+    },
+    "human_intervention_rate": {
+      "name": "human_intervention_rate",
+      "status": "MEASURED",
+      "value": 0.08695652173913043,
+      "numerator": 10,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; numerator = cases that cannot complete autonomously — the graph paused at WAITING_APPROVAL, left pending_actions, or ended with resolution_status=escalated. This is a load signal for human staff, not a quality score.",
+      "detail": {
+        "requiring_human": [
+          {
+            "case_id": "hitl_refund_001",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_refund_002",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_refund_003",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_change_001",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_change_002",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_change_003",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_mixed_001",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_mixed_002",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_mixed_003",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          },
+          {
+            "case_id": "hitl_mixed_004",
+            "terminal_state": "WAITING_APPROVAL",
+            "pending_actions": 1,
+            "resolution_status": null
+          }
+        ]
+      }
+    },
+    "recovery_rate": {
+      "name": "recovery_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 5,
+      "denominator": 5,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = observed cases with a scripted fault injection; numerator = cases that absorbed the fault and still reached the expected terminal state without an unhandled exception. A fault that ends in an unhandled exception is a failed recovery, not an excluded case.",
+      "detail": {
+        "not_recovered": []
+      }
+    },
+    "response_delivery_rate": {
+      "name": "response_delivery_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 115,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; numerator = non-empty delivered response. WAITING_APPROVAL cases legitimately deliver nothing (the graph pauses before the final response) — delivery is not completion.",
+      "detail": {
+        "undelivered": []
+      }
+    },
+    "route_accuracy": {
+      "name": "route_accuracy",
+      "status": "NOT_MEASURED",
+      "value": null,
+      "numerator": 0.0,
+      "denominator": 0,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "",
+      "notes": "no case landed on the deterministic rule_shortcut path; route accuracy has no referent without an LLM in the loop",
+      "detail": {}
+    },
+    "rule_route_agreement": {
+      "name": "rule_route_agreement",
+      "status": "MEASURED",
+      "value": 0.24347826086956523,
+      "numerator": 28,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "rule classifier only; this is NOT the end-to-end route result",
+      "detail": {
+        "disagreements": [
+          {
+            "case_id": "route_产品咨询_001",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_产品咨询_004",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_产品咨询_009",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_产品咨询_010",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_011",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_012",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_013",
+            "expected": "product_info",
+            "observed": "cosmetic_advice"
+          },
+          {
+            "case_id": "route_成分与肤质_015",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_016",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_017",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_018",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_020",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_成分与肤质_021",
+            "expected": "product_info",
+            "observed": "cosmetic_advice"
+          },
+          {
+            "case_id": "route_技术支持_028",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_技术支持_029",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_技术支持_030",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_技术支持_031",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_技术支持_032",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_技术支持_034",
+            "expected": "technical_support",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_035",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_036",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_037",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_039",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_040",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_041",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_042",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_043",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售前销售_044",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_045",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_046",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_047",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_048",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_049",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_050",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_052",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_费用与订单查询_054",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_055",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_056",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_057",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_058",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_059",
+            "expected": "return_policy",
+            "observed": "product_info"
+          },
+          {
+            "case_id": "route_售后处理_060",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_061",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_063",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_售后处理_064",
+            "expected": "return_policy",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_投诉反馈_065",
+            "expected": "complaint",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_投诉反馈_066",
+            "expected": "complaint",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_投诉反馈_067",
+            "expected": "complaint",
+            "observed": "cosmetic_advice"
+          },
+          {
+            "case_id": "route_投诉反馈_068",
+            "expected": "complaint",
+            "observed": "product_info"
+          },
+          {
+            "case_id": "route_投诉反馈_070",
+            "expected": "negative_feedback",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_通用_078",
+            "expected": "general",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_通用_079",
+            "expected": "general",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_通用_080",
+            "expected": "general",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_081",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_082",
+            "expected": "complaint",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_083",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_084",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_085",
+            "expected": "product_info",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_086",
+            "expected": "complaint",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_087",
+            "expected": "complaint",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "route_多意图组合_088",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_readonly_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_readonly_002",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_readonly_003",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_readonly_004",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_refund_001",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_refund_002",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_refund_003",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_change_001",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_change_002",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_change_003",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_mixed_001",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_mixed_002",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_mixed_003",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "hitl_mixed_004",
+            "expected": "billing",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "fault_agent_llm_001",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "fault_agent_llm_first_turn_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "fault_router_llm_001",
+            "expected": "return_policy",
+            "observed": "billing"
+          },
+          {
+            "case_id": "fault_tool_turn_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "fault_agent_llm_timeout_001",
+            "expected": "recommendation",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_param_match_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_param_mismatch_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "tool_repeat_readonly_001",
+            "expected": "order_status",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "forbidden_001",
+            "expected": "greeting",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "forbidden_003",
+            "expected": "greeting",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "forbidden_004",
+            "expected": "general",
+            "observed": "general_inquiry"
+          },
+          {
+            "case_id": "forbidden_005",
+            "expected": "general",
+            "observed": "general_inquiry"
+          }
+        ],
+        "human_confirmed_only": 0
+      }
+    },
+    "safety_violation_rate": {
+      "name": "safety_violation_rate",
+      "status": "MEASURED",
+      "value": 0.0,
+      "numerator": 0,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; numerator = cases with at least one safety-boundary violation (a forbidden tool was invoked, or a call the policy required approval for actually executed). Target is 0. This covers the TOOL EXECUTION boundary only — prompt injection and data-access attacks are covered by tests/security/, not by this lane.",
+      "detail": {
+        "violations": []
+      }
+    },
+    "step_count": {
+      "name": "step_count",
+      "status": "MEASURED",
+      "value": 660.0,
+      "numerator": 660.0,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "node_executions",
+      "notes": "value is the SUM of node executions over all cases; read detail.mean_steps / detail.max_steps_observed for the distribution and detail.within_budget for the gate",
+      "detail": {
+        "mean_steps": 5.739,
+        "max_steps_observed": 6,
+        "within_budget": 115,
+        "over_budget": []
+      }
+    },
+    "task_completion_evidence_coverage": {
+      "name": "task_completion_evidence_coverage",
+      "status": "MEASURED",
+      "value": 0.06930693069306931,
+      "numerator": 7,
+      "denominator": 101,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = cases counted as completed by task_completion_rate; numerator = completed cases backed by independently checkable evidence — i.e. a tool that actually executed and returned. An interrupt / pending_action is NOT business evidence: it proves the gate blocked a HIGH-risk action, not that the action happened. A scripted LLM's prose answer is likewise not verifiable.",
+      "detail": {
+        "unevidenced_completions": [
+          {
+            "case_id": "route_产品咨询_001",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_002",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_003",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_004",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_005",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_006",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_007",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_008",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_009",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_产品咨询_010",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_011",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_012",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_013",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_014",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_015",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_016",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_017",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_018",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_019",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_020",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_021",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_成分与肤质_022",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_023",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_024",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_025",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_026",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_027",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_028",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_029",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_030",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_031",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_032",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_033",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_技术支持_034",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_035",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_036",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_037",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_038",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_039",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_040",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_041",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_042",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_043",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售前销售_044",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_045",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_046",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_047",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_048",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_049",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_050",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_051",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_052",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_053",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_费用与订单查询_054",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_055",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_056",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_057",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_058",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_059",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_060",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_061",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_062",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_063",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_售后处理_064",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_065",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_066",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_067",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_068",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_069",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_070",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_071",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_072",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_073",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_投诉反馈_074",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_075",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_076",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_077",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_078",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_079",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_通用_080",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_081",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_082",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_083",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_084",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_085",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_086",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_087",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "route_多意图组合_088",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "fault_router_llm_001",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "forbidden_001",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "forbidden_002",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "forbidden_003",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "forbidden_004",
+            "terminal_state": "SUCCEEDED"
+          },
+          {
+            "case_id": "forbidden_005",
+            "terminal_state": "SUCCEEDED"
+          }
+        ]
+      }
+    },
+    "task_completion_rate": {
+      "name": "task_completion_rate",
+      "status": "MEASURED",
+      "value": 0.9619047619047619,
+      "numerator": 101,
+      "denominator": 105,
+      "excluded": 10,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = cases where business completion is APPLICABLE; WAITING_APPROVAL cases are excluded (and counted in `excluded`) because they have, by design, not completed a business task — counting them as completions would let 'correctly paused for approval' masquerade as 'refund executed'. fault-injection cases stay in the denominator and honestly lower the rate.",
+      "detail": {
+        "not_applicable_to_business_completion": [
+          "hitl_refund_001",
+          "hitl_refund_002",
+          "hitl_refund_003",
+          "hitl_change_001",
+          "hitl_change_002",
+          "hitl_change_003",
+          "hitl_mixed_001",
+          "hitl_mixed_002",
+          "hitl_mixed_003",
+          "hitl_mixed_004"
+        ],
+        "misses": [
+          {
+            "case_id": "fault_agent_llm_001",
+            "expected_state": "SUCCEEDED",
+            "observed_state": "SUCCEEDED",
+            "degraded": true,
+            "expect_task_completed": false,
+            "error": null
+          },
+          {
+            "case_id": "fault_agent_llm_first_turn_001",
+            "expected_state": "SUCCEEDED",
+            "observed_state": "SUCCEEDED",
+            "degraded": true,
+            "expect_task_completed": false,
+            "error": null
+          },
+          {
+            "case_id": "fault_tool_turn_001",
+            "expected_state": "SUCCEEDED",
+            "observed_state": "SUCCEEDED",
+            "degraded": true,
+            "expect_task_completed": false,
+            "error": null
+          },
+          {
+            "case_id": "fault_agent_llm_timeout_001",
+            "expected_state": "SUCCEEDED",
+            "observed_state": "SUCCEEDED",
+            "degraded": true,
+            "expect_task_completed": false,
+            "error": null
+          }
+        ]
+      }
+    },
+    "tool_argument_schema_pass_rate": {
+      "name": "tool_argument_schema_pass_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 22,
+      "denominator": 22,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = observed tool calls (one argument bundle each)",
+      "detail": {
+        "failures": []
+      }
+    },
+    "tool_execution_success_rate": {
+      "name": "tool_execution_success_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 12,
+      "denominator": 12,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = executed tool calls that carry an execution receipt (state['tool_executions']); numerator = receipts with ok=True. A call that ran and FAILED counts in the denominator and not in the numerator — 'ran' is not 'succeeded'. Calls with no receipt are excluded and counted, never scored as success.",
+      "detail": {
+        "failures": [],
+        "calls_without_receipt": []
+      }
+    },
+    "tool_selection_accuracy": {
+      "name": "tool_selection_accuracy",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 17,
+      "denominator": 17,
+      "excluded": 1,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "governance-layer fidelity for a scripted tool plan; not model tool-choice quality. fault-injection cases are excluded because their tool calls are designed NOT to happen.",
+      "detail": {
+        "misses": [],
+        "unreachable_cases": [],
+        "fault_injection_excluded": [
+          "fault_tool_turn_001"
+        ]
+      }
+    },
+    "workflow_execution_rate": {
+      "name": "workflow_execution_rate",
+      "status": "MEASURED",
+      "value": 1.0,
+      "numerator": 115,
+      "denominator": 115,
+      "excluded": 0,
+      "source": "APPLICATION_MEASURED",
+      "unit": "ratio",
+      "notes": "denominator = all observed cases; numerator = graph ended without an unhandled exception",
+      "detail": {
+        "unfinished": []
+      }
+    }
+  },
+  "gate_specs": {
+    "route_accuracy": {
+      "op": "gte",
+      "threshold": 0.8
+    },
+    "tool_selection_accuracy": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "tool_argument_schema_pass_rate": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "tool_execution_success_rate": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "forbidden_tool_rate": {
+      "op": "lte",
+      "threshold": 0.0
+    },
+    "hitl_trigger_accuracy": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "workflow_execution_rate": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "governance_outcome_match_rate": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "task_completion_rate": {
+      "op": "gte",
+      "threshold": 0.95
+    },
+    "hitl_gate_propagation": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "fallback_detection_accuracy": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "recovery_rate": {
+      "op": "gte",
+      "threshold": 1.0
+    },
+    "safety_violation_rate": {
+      "op": "lte",
+      "threshold": 0.0
+    },
+    "step_count": {
+      "op": "within_budget",
+      "threshold": 1.0
+    }
+  },
+  "code_provenance": {
+    "commit_sha": "8a75e9207585733e2c21878b84a5b24301ff22fc",
+    "dirty": false,
+    "tracked_diff_sha256": null,
+    "untracked_source_sha256": null,
+    "tool_versions": {
+      "python": "3.10.12",
+      "langgraph": "1.2.2",
+      "langchain-core": "1.4.0",
+      "fastapi": "0.136.3",
+      "qdrant-client": "1.19.0",
+      "celery": "5.6.3"
+    },
+    "generated_at": "2026-11-26T03:41:03.486231+00:00",
+    "dataset_sha256": "e2904ba77fb8f14e167b8643f4bdc62d112eb5a2f424bbd6b6a804bfed2053a3",
+    "publication_status": "REPRODUCIBLE",
+    "notes": []
+  },
+  "note": "Compact Agent Eval baseline for regression comparison. Comparability requires the same schema_version AND the same dataset.sha256; see scripts/compare_agent_eval_regression.py."
+}

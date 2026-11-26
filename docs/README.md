@@ -81,6 +81,7 @@
 
 | 想知道 | 看 | 生命周期 |
 |---|---|---|
+| **业务需求与验收标准（为谁解决什么、怎么算做成）** | [requirements/business-requirements.md](requirements/business-requirements.md) | 🟢 CURRENT |
 | **架构入口（结构 + 设计理由）** | [architecture.md](architecture.md) | 🟢 CURRENT |
 | **Agent 设计理由（为什么 LangGraph / 为什么 Human fallback）** | [agent-design.md](agent-design.md) | 🟢 CURRENT |
 | **效果怎么衡量（评测与证据）** | [evaluation.md](evaluation.md) | 🟢 CURRENT |
@@ -127,6 +128,22 @@ lifecycle（例如 `reference/` 里 `current-state.md` 是 CURRENT，而带日�
 ---
 
 ## 按目录详解
+
+### `requirements/` — 业务需求与验收规格
+
+> 🟢 CURRENT — 业务侧需求的唯一真相源，随代码与验收门禁同步更新
+>
+> **前置阅读**：[requirements/business-requirements.md](requirements/business-requirements.md)
+> 回答"为谁解决什么业务问题、怎么算做成了"；技术理由见
+> [architecture.md](architecture.md)，证据口径见
+> [reference/current-state.md](reference/current-state.md)。
+
+| 文件 | 说明 | 读者 |
+|---|---|---|
+| [business-requirements.md](requirements/business-requirements.md) | 业务问题与目标、用户角色、业务范围、业务流程与任务状态机、业务规则表、异常分支、需求规格（SDD）、可执行验收标准、业务价值测量计划 | 产品、业务方、开发者、审计者 |
+
+> 本文**不含任何业务 KPI 数字**：本仓库无真实企业流量与人工基线，
+> 数字一律标 `NOT_MEASURED`，需要数字时看 §6 的测量计划。
 
 ### `design/` — 系统设计文档
 
