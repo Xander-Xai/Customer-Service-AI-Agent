@@ -7,13 +7,14 @@
 - Agent behavior evaluation uses successful `tool_executions` receipts as execution evidence and reports workflow, response, governance and task completion separately with explicit denominators/exclusions.
 - A regression comparator checks dataset SHA and clean source provenance before comparing directional gates; the committed scripted baseline is reproducible and fail-closed on incompatible artifacts.
 - Adversarial safety tests are a blocking CI lane. A test-only PostgreSQL regression covers the external-operation-success/local-receipt-commit-failure window and requires reconciliation rather than blind replay.
+- Standard Compose enables the existing synthetic read-only ProductDocs MCP tool and A2A peer; this is protocol fixture support, not enterprise catalog or full application readiness.
 - Repository documentation, contribution/security guidance and engineering navigation are being normalized separately; include them only after their documentation PR is merged.
 
 ## Compatibility
 
 - Runtime version remains `6.3`; GitHub Release tags use an independent SemVer sequence. This draft does not decide the next release version.
 - Current changes add evaluation evidence and tests; no schema migration or API version change is identified from PRs #88/#89.
-- Protocol deployment work in Draft PR #87 is not included in release scope until merged and its Compose acceptance gate passes.
+- PR #87 is merged for its source/config behavior, but full standard Compose API/Worker readiness is still unverified; do not describe it as deployment acceptance or release-ready protocol operations.
 
 ## Evidence and limitations
 

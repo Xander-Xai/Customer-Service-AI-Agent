@@ -84,7 +84,7 @@ python -m pip install -r requirements.txt -r requirements-dev.txt
 make demo-offline
 ```
 
-成功时会打印 `MOCK/OFFLINE` proof card，并写入 gitignored 的 `artifacts/demo/`。在 Python 3.10.12 环境、主线 SHA `31a11f91d9a09ba6d5e8763db84151be930f9a27` 上已实跑通过，egress guard 启用；这不是模型质量或生产验收。细节见 [offline demo guide](docs/guides/offline-demo.md)。
+成功时会打印 `MOCK/OFFLINE` proof card，并写入 gitignored 的 `artifacts/demo/`。proof card 会记录实际执行时的 SHA、时间、命令与测试锚点；运行使用 egress guard，不需要 provider key。它验证的是 Mock LLM 下的工程路径，不是模型质量或生产验收。细节见 [offline demo guide](docs/guides/offline-demo.md)。
 
 ### 路径 B：标准 Docker Compose 本地栈
 
@@ -135,9 +135,9 @@ docker compose -f deploy/compose/docker-compose.yml down
 | 售后流程查询 | A2A SDK 将枚举化问题/阶段委派给独立规则 peer | 合成结果不授权退款或证明退款资格；`execution_authorized=false`。见 [A2A 售后专家](docs/architecture/a2a-after-sales-business-20261125.md) |
 | 高风险动作或需要人工 | 耐久 run → 风险识别 → 审批 interrupt；客户转人工进入独立工单生命周期 | `WAITING_APPROVAL` 不是动作完成；真实 ERP 写入与坐席运营 UAT 未验证。见 [HITL](docs/design/human-in-the-loop.md) · [Handoff](docs/human-handoff-operations.md) |
 
-Agent Eval scripted baseline 衡量执行编排与治理，不衡量真实模型效果；115-case 数据 `human_confirmed_only=0`，整体 `INCONCLUSIVE`。**当前 649-query 正式 RAG 指标：`NOT_VERIFIED`**，现有 gold 缺少人工相关性判断。详见[当前事实](docs/reference/current-state.md)、[生产准备度](docs/production-readiness.md)及[RAG 评测参考](docs/reference/rag-evaluation.md)。
+Agent Eval scripted baseline 衡量执行编排与治理，不衡量真实模型效果；115-case 数据 `human_confirmed_only=0`，整体 `INCONCLUSIVE`。**当前 649-query 正式指标：`NOT_VERIFIED`**（RAG benchmark gold 缺少人工相关性判断）。详见[当前事实](docs/reference/current-state.md)、[生产准备度](docs/production-readiness.md)及[RAG 评测参考](docs/reference/rag-evaluation.md)。
 
-Runtime E2E 曾出现 Gate11 worker-recovery 间歇性 `CheckpointEpisodeMismatch`；相同 SHA CI 重跑与当前 main 的本地 PostgreSQL/Redis 定向测试通过，但根因尚未定位。详见[当前事实](docs/reference/current-state.md#runtime-gate11-间歇性失败观察)；一次通过不等于竞态已修复。
+Runtime E2E 曾出现 Gate11 worker-recovery 间歇性 `CheckpointEpisodeMismatch`；相同 SHA CI 重跑与 main commit `31a11f91d9a09ba6d5e8763db84151be930f9a27` 上的本地 PostgreSQL/Redis 定向测试通过，但根因尚未定位。详见[当前事实](docs/reference/current-state.md#runtime-gate11-间歇性失败观察)；一次通过不等于竞态已修复。
 
 常用验证命令：
 
