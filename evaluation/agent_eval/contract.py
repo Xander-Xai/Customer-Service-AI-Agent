@@ -25,9 +25,15 @@ DATASET_SCHEMA_VERSION = "agent-eval-dataset/v1"
 #:   v1.1 —— 拆出 workflow_execution / response_delivery / evidence_coverage；
 #:           completion 要求「无未预期降级」+ expect_task_completed 标签。
 #:   v1.2 —— **WAITING_APPROVAL 不再计入业务完成**：新增
-#           governance_outcome_match_rate 承接"治理正确"的语义，并把
-#           interrupt/pending_actions 从"业务完成证据"里剔除。
-REPORT_SCHEMA_VERSION = "agent-eval-evidence/v1.2"
+#:           governance_outcome_match_rate 承接"治理正确"的语义，并把
+#:           interrupt/pending_actions 从"业务完成证据"里剔除。
+#:   v1.3 —— **工具执行成功与"跑过"分离**：新增
+#:           tool_execution_success_rate / recovery_rate /
+#:           human_intervention_rate / safety_violation_rate；
+#:           task_completion_evidence_coverage 改为只认**成功**的执行收据
+#:           （此前跑失败的写操作也被算成业务完成证据，与
+#:           core/outcome.py 的运行时契约不一致）。
+REPORT_SCHEMA_VERSION = "agent-eval-evidence/v1.3"
 
 #: 与 ``core/hitl/risk.RiskLevel`` 同源的三档；不另立词汇表。
 RISK_LEVELS: tuple[str, ...] = ("low", "medium", "high")
@@ -93,6 +99,7 @@ METRIC_NAMES: tuple[str, ...] = (
     "route_accuracy",
     "tool_selection_accuracy",
     "tool_argument_schema_pass_rate",
+    "tool_execution_success_rate",
     "forbidden_tool_rate",
     "hitl_trigger_accuracy",
     "workflow_execution_rate",
@@ -100,6 +107,9 @@ METRIC_NAMES: tuple[str, ...] = (
     "governance_outcome_match_rate",
     "task_completion_rate",
     "task_completion_evidence_coverage",
+    "recovery_rate",
+    "human_intervention_rate",
+    "safety_violation_rate",
     "fallback_rate",
     "fallback_detection_accuracy",
 )
@@ -144,6 +154,51 @@ EVIDENCE_BOUNDARIES: dict[str, dict[str, str]] = {
         "does_not_measure": (
             "参数语义正确性（keyword 传的是不是用户真要查的东西）—— "
             "那需要标注与 LLM 判断，V1 不做。"
+        ),
+    },
+    "tool_execution_success_rate": {
+        "measures": (
+            "**真正执行了**的工具调用中，执行收据（state['tool_executions'] 的 "
+            "`ok` 字段）显示成功的比例。它区分「跑过」与「跑成功」：失败、"
+            "拒答、超时、错误字符串都记为失败。"
+        ),
+        "does_not_measure": (
+            "模型选工具选得对不对（那是 tool_selection_accuracy，且它衡量的是"
+            "治理层保真度而非模型能力）；也不衡量下游 ERP 的正确性"
+            "（staging 工具不等于真实 ERP 写入）。"
+        ),
+    },
+    "recovery_rate": {
+        "measures": (
+            "注入故障的用例中，系统**优雅降级并抵达期望终态**的比例——"
+            "即故障被吸收，而不是以未捕获异常收场。"
+        ),
+        "does_not_measure": (
+            "真实生产环境的故障恢复能力（进程崩溃、依赖掉线、Redis/PG 故障不在"
+            "本 lane 内，那些由 runtime-e2e / runtime-chaos 覆盖）；也不衡量"
+            "「故障后业务是否完成」——那由 task_completion_rate 单独回答。"
+        ),
+    },
+    "human_intervention_rate": {
+        "measures": (
+            "所有用例中需要人工介入的比例（WAITING_APPROVAL / 有 pending_actions "
+            "/ resolution_status=escalated）。它回答「多少请求必须由人接手」。"
+        ),
+        "does_not_measure": (
+            "人工介入的**质量**（人是否被给了足够上下文、坐席是否处理得对）；"
+            "也不等于生产环境的人工介入率——本数据集的意图分布是人工编排的，"
+            "不代表真实流量结构。"
+        ),
+    },
+    "safety_violation_rate": {
+        "measures": (
+            "违反安全策略的调用比例：命中 forbidden_tools 的调用，"
+            "以及**本应被审批闸门拦下却真的执行了**的 HIGH 风险调用。"
+        ),
+        "does_not_measure": (
+            "完整的 OWASP LLM 风险面（提示注入、记忆污染、越权数据访问等）。"
+            "本 lane 只覆盖**工具执行边界**这一层；对抗性测试由 "
+            "tests/security/ 单独覆盖。"
         ),
     },
     "expected_parameter_match_rate": {
@@ -216,13 +271,15 @@ EVIDENCE_BOUNDARIES: dict[str, dict[str, str]] = {
     },
     "task_completion_evidence_coverage": {
         "measures": (
-            "被计为「已完成」的 case 中，完成结论有**独立可核验证据**（真正执行过并"
-            "返回结果的工具调用）支撑的比例。"
+            "被计为「已完成」的 case 中，完成结论有**独立可核验证据**"
+            "（**执行成功**的工具调用）支撑的比例。"
         ),
         "does_not_measure": (
             "interrupt / pending_actions **不是**业务证据 —— 它只证明闸门拦住了高风险"
             "动作，不证明退款/改单真的执行了；脚本化 LLM 直接给出的文字回答同样不可"
-            "独立核验。因此覆盖率低是**事实陈述**，不是缺陷。"
+            "独立核验；**跑失败的工具调用也不算证据**（v1.3 起只认 ok=True 的收据，"
+            "与 core/outcome.py 的运行时契约一致）。因此覆盖率低是**事实陈述**，"
+            "不是缺陷。"
         ),
     },
     "fallback_rate": {

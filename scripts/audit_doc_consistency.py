@@ -2929,6 +2929,78 @@ def check_agent_eval_truth_and_formatting(
             )
 
 
+def check_business_requirements_alignment(errors: list[str], root: Path = ROOT) -> None:
+    """Keep business acceptance docs aligned with the Agent Eval contract.
+
+    Metric names are read from the canonical Python tuple rather than copied
+    into this guard, so additions to the contract require documentation updates.
+    """
+    contract_path = root / "evaluation" / "agent_eval" / "contract.py"
+    contract_metrics: set[str] = set()
+    if contract_path.exists():
+        try:
+            tree = ast.parse(contract_path.read_text(encoding="utf-8"))
+            for node in tree.body:
+                if not isinstance(node, ast.Assign | ast.AnnAssign):
+                    continue
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if not any(
+                    isinstance(target, ast.Name) and target.id == "METRIC_NAMES"
+                    for target in targets
+                ):
+                    continue
+                value = node.value
+                if isinstance(value, ast.Tuple | ast.List):
+                    contract_metrics = {
+                        item.value
+                        for item in value.elts
+                        if isinstance(item, ast.Constant) and isinstance(item.value, str)
+                    }
+                break
+        except (OSError, SyntaxError) as exc:
+            errors.append(f"cannot read Agent Eval metric contract: {contract_path}: {exc}")
+    else:
+        errors.append(f"missing Agent Eval metric contract: {contract_path.relative_to(root)}")
+
+    agent_eval_doc = root / "docs" / "reference" / "agent-evaluation.md"
+    business_doc = root / "docs" / "requirements" / "business-requirements.md"
+    for path in (agent_eval_doc, business_doc):
+        if not path.exists():
+            errors.append(
+                f"missing current requirements/evaluation document: {path.relative_to(root)}"
+            )
+
+    if agent_eval_doc.exists() and contract_metrics:
+        text = agent_eval_doc.read_text(encoding="utf-8")
+        missing = sorted(metric for metric in contract_metrics if f"`{metric}`" not in text)
+        if missing:
+            errors.append(
+                "Agent Eval documentation omits canonical metrics from contract.py: "
+                + ", ".join(missing)
+            )
+
+    if business_doc.exists():
+        text = business_doc.read_text(encoding="utf-8")
+        if "NOT_MEASURED" not in text or "人工基线" not in text:
+            errors.append(
+                "business requirements must explicitly mark the human baseline NOT_MEASURED"
+            )
+        required_acceptance_metrics = {
+            "tool_execution_success_rate",
+            "recovery_rate",
+            "human_intervention_rate",
+            "safety_violation_rate",
+        }
+        missing = sorted(
+            metric for metric in required_acceptance_metrics if f"`{metric}`" not in text
+        )
+        if missing:
+            errors.append(
+                "business requirements omit required Agent Eval acceptance metrics: "
+                + ", ".join(missing)
+            )
+
+
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -2991,6 +3063,7 @@ def main() -> int:
     check_rag_current_blocker_drift(docs, errors)
     check_rag_unresolved_blocker_drift(docs, errors)
     check_agent_eval_truth_and_formatting(docs, errors)
+    check_business_requirements_alignment(errors)
 
     if globals()["_WARNINGS"]:
         for warning in globals()["_WARNINGS"]:
@@ -3020,7 +3093,8 @@ def main() -> int:
         f"reconciler alert wiring, "
         f"exactly-once claim scope, "
         f"approval API surface, MCP main-state drift, RAG current-blocker drift, "
-        f"RAG unresolved-blocker drift, Agent Eval V1 truth + active-file formatting"
+        f"RAG unresolved-blocker drift, Agent Eval V1 truth + active-file formatting, "
+        f"business requirements / Agent Eval metric alignment"
     )
     return 0
 

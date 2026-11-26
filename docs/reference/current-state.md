@@ -111,6 +111,9 @@
 
 ## Agent 行为评测（Agent Eval V1）
 
+- 业务需求、业务任务流程、验收标准和未测业务基线见
+  [business-requirements.md](../requirements/business-requirements.md)。业务价值/人工基线
+  当前均为 `NOT_MEASURED`；该文档中的验收阈值是离线门禁，不是生产 KPI。
 - 位置：`evaluation/agent_eval/`；契约唯一真相源 `contract.py`；说明
   [agent-evaluation.md](agent-evaluation.md)。
 - **跑真实编译图**（`container.graph_app.astream(stream_mode="updates")`）+
@@ -138,6 +141,10 @@
   `task_completion_rate`（**业务**完成，**不含** WAITING_APPROVAL）。
   等待审批是"治理正确"，不是"业务完成"；interrupt/pending_actions 也不构成
   业务证据（只证明拦住了，不证明退款成功了）。
+- **V1.3 指标扩展**：正式契约还包括
+  `tool_execution_success_rate` / `recovery_rate` /
+  `human_intervention_rate` / `safety_violation_rate`。这些只描述当前
+  scripted 数据集的应用行为；尤其人工介入率不能外推为真实业务转人工率。
 - **三态门禁**：`FAIL`（可测门禁没过）/ `INCONCLUSIVE`（可测门禁过了但仍有
   NOT_AVAILABLE）/ `PASS`。`PASS` 与"存在 NOT_AVAILABLE"互斥，NOT_MEASURED
   永远不会被渲染成达标。

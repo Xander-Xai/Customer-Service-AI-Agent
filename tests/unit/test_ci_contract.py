@@ -926,3 +926,152 @@ def test_image_publication_requires_all_blocking_lanes():
     assert deploy is not None
     assert "needs: build-and-push" in deploy.group(1)
     assert "always()" not in deploy.group(1)
+
+
+class TestAgentEvalRegressionLane:
+    """The regression lane must be a real blocking gate in CI.
+
+    ``make agent-eval`` alone answers "is the current run above threshold?".
+    It cannot answer "did this change regress a capability?" — a metric moving
+    from 0.96 to 0.94 stays above a 0.95 gate, so a silent regression passes
+    the threshold check. That is the specific failure mode this lane closes.
+
+    The properties locked here:
+
+    1. a committed baseline exists (otherwise there is nothing to compare to);
+    2. CI actually runs the comparison (not just the single-run eval);
+    3. the step is not softened with ``continue-on-error``;
+    4. the baseline carries the comparability keys (schema + dataset sha256),
+       because a baseline without them cannot be compared honestly.
+    """
+
+    REGRESSION_STEP = "Agent eval regression vs committed baseline"
+    BASELINE = REPO_ROOT / "tests" / "eval" / "agent_eval_baseline.json"
+
+    def test_committed_baseline_exists(self):
+        assert self.BASELINE.exists(), (
+            "tests/eval/agent_eval_baseline.json is missing. The regression lane "
+            "compares against a committed baseline; without it there is nothing "
+            "to compare against and every run would be trivially 'no regression'."
+        )
+
+    def test_baseline_carries_the_comparability_keys(self):
+        import json
+
+        baseline = json.loads(self.BASELINE.read_text(encoding="utf-8"))
+        assert baseline.get("schema_version"), (
+            "The baseline must record the artifact schema version: a schema "
+            "change alters metric semantics, and comparing across it would "
+            "subtract numbers that do not mean the same thing."
+        )
+        assert (baseline.get("dataset") or {}).get("sha256"), (
+            "The baseline must record the dataset sha256: a different dataset "
+            "means different denominators, so the percentages are not comparable."
+        )
+        assert baseline.get("gate_specs"), (
+            "The baseline must record the gate specs (op + threshold). Without "
+            "the direction, a rise in a 'lower is better' metric could be read "
+            "as an improvement when it is a regression."
+        )
+        provenance = baseline.get("code_provenance") or {}
+        assert provenance.get("publication_status") == "REPRODUCIBLE", (
+            "The committed baseline must come from a clean committed worktree; "
+            "a dirty measurement cannot be used as a regression gate."
+        )
+        assert provenance.get("dirty") is False
+
+    def test_ci_runs_the_regression_comparison(self):
+        run = _step_run_exact(self.REGRESSION_STEP)
+        assert "agent-eval-regression" in run, (
+            f"The '{self.REGRESSION_STEP}' step does not run the regression "
+            f"target:\n{run}\nWithout it CI only checks absolute thresholds, so "
+            "a capability that regressed while staying above threshold passes."
+        )
+
+    def test_regression_step_is_not_softened(self):
+        assert "continue-on-error" not in _step_block_exact(self.REGRESSION_STEP), (
+            f"The '{self.REGRESSION_STEP}' step sets continue-on-error, so a "
+            "detected regression would not fail the job."
+        )
+
+    def test_regression_artifacts_are_not_committed(self):
+        """The per-run regression output is a build artifact, not a source file."""
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "artifacts/agent-eval-regression/report.json"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+        )
+        assert result.returncode == 0, (
+            "artifacts/agent-eval-regression/ must be gitignored; it is a "
+            "regenerated per-run report and does not belong in version control."
+        )
+
+
+class TestAdversarialSecurityLane:
+    """The adversarial security suite must be a real blocking gate in CI.
+
+    The repository previously had **no** adversarial test running in CI. The
+    only prompt-injection test lived in ``tests/e2e/test_e2e_real_llm.py``,
+    a file every CI lane explicitly ``--ignore``s because it needs a real
+    LLM. That made "the repo has a security test" true while "CI turns red
+    on a security regression" false — and the latter is the property that
+    matters for industrial delivery.
+
+    These assertions lock that property:
+
+    1. the suite lives in a directory CI does not exclude;
+    2. CI runs it as a blocking step (no ``continue-on-error``);
+    3. it is included in the coverage invocation, so it is not dead weight;
+    4. the ``security`` marker is registered (an unregistered marker is an
+       error under strict marker config, and silently disables selection).
+    """
+
+    SECURITY_STEP = "Run adversarial security tests"
+
+    def test_security_suite_directory_exists(self):
+        suite_dir = REPO_ROOT / "tests" / "security"
+        assert suite_dir.is_dir(), "tests/security/ must exist"
+        assert any(suite_dir.glob("test_*.py")), "tests/security/ has no test files"
+
+    def test_security_suite_is_not_ignored_by_ci(self):
+        """No CI lane may --ignore the security directory.
+
+        Only the ``--ignore`` *arguments* are inspected — a line that merely
+        lists ``tests/security/`` as an input is the opposite of an exclusion.
+        """
+        for line in _ci_lines():
+            if "--ignore" not in line:
+                continue
+            for ignored in re.findall(r"--ignore[=\s]+(\S+)", line):
+                assert (
+                    "tests/security" not in ignored
+                ), f"CI ignores the adversarial security suite: --ignore {ignored}"
+
+    def test_ci_runs_the_security_suite_as_a_blocking_step(self):
+        run = _step_run_exact(self.SECURITY_STEP)
+        assert (
+            "tests/security" in run
+        ), f"The '{self.SECURITY_STEP}' step does not run tests/security/:\n{run}"
+        assert "continue-on-error" not in _step_block_exact(self.SECURITY_STEP), (
+            f"The '{self.SECURITY_STEP}' step sets continue-on-error, so a "
+            "security regression would not fail the job."
+        )
+
+    def test_security_suite_is_included_in_the_coverage_invocation(self):
+        """The suite must be part of the measured test run, not a side lane."""
+        block = _step_block_exact("Run coverage report")
+        assert "tests/security" in block, (
+            "tests/security/ is missing from the coverage invocation:\n"
+            f"{block}\nA suite outside the measured run is easy to forget "
+            "when it later fails."
+        )
+
+    def test_security_marker_is_registered(self):
+        """An unregistered marker breaks `-m` selection and strict marker config."""
+        content = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        assert '"security:' in content, (
+            "pyproject.toml must register the `security` marker; the adversarial "
+            "suite uses it and an unregistered marker is an error."
+        )
