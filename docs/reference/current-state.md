@@ -1,6 +1,6 @@
 # 当前事实入口 (Current State)
 
-> **2026-11-26 当前主线核查**：默认分支 `main` = `24ae5a16d94bb5050bccd1624f3bd9fadc2fe49a`；包含 #88（`ad22a59c`）、#89（`31a11f91`）和 #87（`24ae5a16`）。main exact-SHA CI [45800142625](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45800142625) 全部质量、安全、Runtime、三版本测试通过；镜像构建通过，部署 skipped。#87 最终 PR head CI [45786649665 attempt 3](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649665) 及 A2A SDK 互操作 [45786649767](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649767) 通过。标准 Compose 合成协议联调是工程/本地证据；真实 provider、批准企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
+> **2026-11-26 合并验收快照**：CI run [45800142625](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45800142625) 验收了包含 #88（`ad22a59c`）、#89（`31a11f91`）和 #87（merge `24ae5a16`）的 `main` 快照 `24ae5a16d94bb5050bccd1624f3bd9fadc2fe49a`：质量、安全、Runtime、三版本测试通过；镜像构建通过，部署 skipped。#87 最终 PR head CI [45786649665 attempt 3](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649665) 及 A2A SDK 互操作 [45786649767](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45786649767) 通过。此处是带日期的验收快照；后续 `main` HEAD 请用 `git rev-parse origin/main` 与实时 Actions 查询。标准 Compose 合成协议联调是工程/本地证据；真实 provider、批准企业目录、TLS/ERP 和生产验收仍未完成。见 [工业运行时治理](../architecture/industrial-runtime-admission.md)。
 
 > 本文件是当前 runtime 事实的唯一定位入口（Current entry point）。
 > 它刻意**不硬编码 Git HEAD**：HEAD 请用 `git rev-parse HEAD` 获取。
