@@ -54,6 +54,7 @@
 | 离线测试套件（无 API Key、不出公网） | `make test` | Verified (Local) |
 | 代码规范（Ruff，阻塞） | `.github/workflows/ci.yml` `lint` lane | Verified (CI) |
 | 单测/集成 + 覆盖率门槛 + MCP 契约禁 skip | CI `test` lane（3 个 Python 版本） | Verified (CI) |
+| 标准合成产品文档 MCP/A2A business tool round-trip（真实 SDK / 本地进程 / allowlist / fail-closed） | `tests/integration/test_mcp_product_documents_stdio.py` · `tests/integration/test_a2a_business_policy.py` · CI runs `45738703085` / `45738703866` | Verified (CI; synthetic fixtures only) |
 | 分布式 Runtime 验收（真实 PG + Redis + 多进程 Celery） | `make runtime-e2e` · CI `runtime-e2e` lane | Verified (CI) |
 | worker SIGKILL 崩溃恢复 + 副作用只发生一次 | `make runtime-chaos` → `artifacts/runtime/chaos-*.json` | Verified (CI) |
 | Runtime 证据报告 | `make runtime-verify` → `artifacts/distributed-runtime/<ts>/report.json`（schema `distributed-runtime-evidence/v2`，带 `tested_code_sha`） | Verified (Local+CI) |
@@ -77,6 +78,7 @@
 |---|---|---|
 | 生产集群 / 多副本长期稳定性 / 真实用户流量 | `NOT_VERIFIED` | 无生产环境 |
 | 正式 649-query RAG 指标（Hit@K / MRR / NDCG …） | `NOT_VERIFIED`，且**当前不可测** | shipped gold 无 relevance 标注（`DATASET_DEFECT`） |
+| 完整标准 Docker Compose 启动（app/worker/protocol peers） | `BLOCKED` | 本机 Docker build 依赖从 PyPI 下载超时；仅 Compose render、Docker-volume credential readback 与 CI 协议组件测试通过，未启动完整应用栈 |
 | 真实金蝶 ERP 写操作（退款/改单） | `NOT_VERIFIED` | 仅用 `tools/hitl_staging_tools.py` 验证了治理机制，无企业 staging |
 | provider auth / staging 与计费 | `NOT_VERIFIED` | 历史 preflight 曾因 HTTP 401 阻塞，非当前根因 |
 | 生产 QPS / P95 / P99 / Token 成本 / FCR / 满意度 | `NOT_MEASURED` | 有 benchmark 脚本，但无 SLO 定义、无生产基线 |
