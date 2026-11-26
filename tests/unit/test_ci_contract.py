@@ -986,6 +986,12 @@ class TestAgentEvalRegressionLane:
             "the direction, a rise in a 'lower is better' metric could be read "
             "as an improvement when it is a regression."
         )
+        provenance = baseline.get("code_provenance") or {}
+        assert provenance.get("publication_status") == "REPRODUCIBLE", (
+            "The committed baseline must come from a clean committed worktree; "
+            "a dirty measurement cannot be used as a regression gate."
+        )
+        assert provenance.get("dirty") is False
 
     def test_ci_runs_the_regression_comparison(self):
         run = _step_run_exact(self.REGRESSION_STEP)

@@ -1,8 +1,8 @@
 {
   "schema_version": "agent-eval-evidence/v1.3",
-  "generated_at": "2026-11-25T10:06:13.907117+00:00",
+  "generated_at": "2026-11-26T03:41:03.275378+00:00",
   "overall_status": "INCONCLUSIVE",
-  "git_sha": "04455afcdaadfd8756e103ede5b625f83aa9a88f",
+  "git_sha": "8a75e9207585733e2c21878b84a5b24301ff22fc",
   "dataset": {
     "sha256": "e2904ba77fb8f14e167b8643f4bdc62d112eb5a2f424bbd6b6a804bfed2053a3"
   },
@@ -1308,24 +1308,22 @@
     }
   },
   "code_provenance": {
-    "commit_sha": "04455afcdaadfd8756e103ede5b625f83aa9a88f",
-    "dirty": true,
-    "tracked_diff_sha256": "6df57d60211910d4458bee9b645e77141bc68df15cf8e762dfa55f065a7b8a17",
-    "untracked_source_sha256": "7ece354230650f2e907f65e880aeff032191fa9fff1168b8aadd34b4f83e7e8f",
+    "commit_sha": "8a75e9207585733e2c21878b84a5b24301ff22fc",
+    "dirty": false,
+    "tracked_diff_sha256": null,
+    "untracked_source_sha256": null,
     "tool_versions": {
       "python": "3.10.12",
-      "langgraph": "1.2.12",
-      "langchain-core": "1.6.6",
-      "fastapi": "0.137.1",
-      "qdrant-client": "1.18.0",
+      "langgraph": "1.2.2",
+      "langchain-core": "1.4.0",
+      "fastapi": "0.136.3",
+      "qdrant-client": "1.19.0",
       "celery": "5.6.3"
     },
-    "generated_at": "2026-11-25T10:06:14.233356+00:00",
+    "generated_at": "2026-11-26T03:41:03.486231+00:00",
     "dataset_sha256": "e2904ba77fb8f14e167b8643f4bdc62d112eb5a2f424bbd6b6a804bfed2053a3",
-    "publication_status": "DIRTY_WORKTREE_NOT_REPRODUCIBLE",
-    "notes": [
-      "dirty worktree: commit_sha alone does NOT identify the tested code. Regenerate this artifact from a committed, clean worktree before using it as public evidence."
-    ]
+    "publication_status": "REPRODUCIBLE",
+    "notes": []
   },
   "note": "Compact Agent Eval baseline for regression comparison. Comparability requires the same schema_version AND the same dataset.sha256; see scripts/compare_agent_eval_regression.py."
 }
