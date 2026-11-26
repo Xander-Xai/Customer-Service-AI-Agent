@@ -360,6 +360,51 @@ async def test_no_false_success_when_result_commit_is_rejected(store, op_key):
 
 
 @requires_infra
+async def test_successful_external_call_without_durable_receipt_requires_reconciliation(
+    store, op_key, monkeypatch
+):
+    """A worker crash after remote success but before ledger commit must not replay blindly."""
+    from runtime.errors import SideEffectReconciliationRequired
+
+    external = _External()
+    arguments = {"order_id": f"ORD-unknown-{uuid.uuid4().hex[:8]}", "amount": 12}
+
+    def fail_receipt_commit(**_kwargs):
+        raise OSError("simulated process loss before receipt persistence")
+
+    monkeypatch.setattr(store, "commit_result_or_raise", fail_receipt_commit)
+    with pytest.raises(OSError, match="before receipt persistence"):
+        await execute_idempotent_operation(
+            tool_name="staging_refund",
+            operation_key=op_key,
+            run_id="run-receipt-crash",
+            thread_id="thread-receipt-crash",
+            arguments=arguments,
+            operation=lambda: external.write(arguments),
+            store=store,
+            claim_ttl_seconds=0.1,
+        )
+
+    assert external.executions == 1
+    assert store.get("staging_refund", op_key)["status"] == "PENDING"
+
+    # Let the worker's claim expire as it would after a hard process death.
+    await asyncio.sleep(0.15)
+    with pytest.raises(SideEffectReconciliationRequired):
+        await execute_idempotent_operation(
+            tool_name="staging_refund",
+            operation_key=op_key,
+            run_id="run-receipt-crash",
+            thread_id="thread-receipt-crash",
+            arguments=arguments,
+            operation=lambda: external.write(arguments),
+            store=store,
+            claim_ttl_seconds=0.1,
+        )
+    assert external.executions == 1, "未知外部结果在对账前不得自动重放"
+
+
+@requires_infra
 async def test_timing_is_real(store, op_key):
     """确认上面的用例确实在真实等待，而不是靠伪造时间通过。"""
     from runtime.side_effects import request_fingerprint
