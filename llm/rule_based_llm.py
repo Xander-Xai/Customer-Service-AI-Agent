@@ -91,6 +91,21 @@ class RuleBasedLLM:
             return max(scores, key=scores.get)
         return "general"
 
+    def _is_smalltalk(self, query: str) -> bool:
+        """问候/寒暄类短句按通用回复处理，避免被 agent 类型强行归类。"""
+        q = query.strip().lower()
+        if len(q) > 12:
+            return False
+        return any(w in q for w in ("你好", "您好", "hi", "hello", "在吗", "嗨", "谢谢", "再见"))
+
+    def _category_score(self, query: str, category: str) -> int:
+        """查询命中某类别关键词的数量（用于用户意图与 agent 类型冲突时裁决）。"""
+        config = RULE_TEMPLATES.get(category)
+        if not config:
+            return 0
+        query_lower = query.lower()
+        return sum(1 for kw in config["keywords"] if kw in query_lower)
+
     def _generate_response(self, query: str, query_type: str = None) -> str:
         """根据查询类型生成回复"""
         if not query_type:
@@ -100,6 +115,27 @@ class RuleBasedLLM:
 
         # 简单的个性化处理
         response = template["response"]
+
+        # 关键词补充说明（离线演示时让回答更具体）
+        if query_type == "product_info":
+            if "面膜" in query:
+                response += (
+                    "\n\n**面膜建议**：洁面后敷 10-15 分钟，每周 2-3 次；"
+                    "敷完轻拍吸收并涂抹面霜锁水。"
+                )
+            if "敏感肌" in query:
+                response += (
+                    "\n\n**敏感肌提示**：优先选择无香精、低刺激配方；"
+                    "首次使用先在耳后试用 24 小时。"
+                )
+            if "成分" in query:
+                response += "\n\n**成分说明**：核心成分为天然植物提取物，不含酒精与人工色素。"
+            if "防晒" in query:
+                response += "\n\n**防晒建议**：白天出门前 15 分钟涂抹，户外每 2-3 小时补涂一次。"
+        elif query_type == "tech_support" and ("顺序" in query or "步骤" in query):
+            response += (
+                "\n\n**顺序提示**：质地由轻薄到厚重（水 → 精华 → 乳 → 霜），防晒放在最后一步。"
+            )
 
         # 提取数字（可能是订单号）
         numbers = re.findall(r"\d{10,}", query)
@@ -141,16 +177,34 @@ class RuleBasedLLM:
             elif msg_type == "SystemMessage":
                 system_prompt = msg.content
 
-        # 从 system prompt 提取查询类型
-        query_type = None
+        # 去掉 agent 层包裹的不可信数据边界标签，按纯用户文本做分类
+        if isinstance(user_query, str):
+            user_query = re.sub(r"</?user_input>", "", user_query).strip()
+        else:
+            user_query = ""
+
+        # 优先按用户实际问题的关键词分类；用户问题无明确意图时，
+        # 才回退到 system prompt 指定的 agent 类型。
+        system_type = None
         if "产品" in system_prompt or "product" in system_prompt.lower():
-            query_type = "product_info"
+            system_type = "product_info"
         elif "账单" in system_prompt or "billing" in system_prompt.lower():
-            query_type = "billing"
+            system_type = "billing"
         elif "技术" in system_prompt or "tech" in system_prompt.lower():
-            query_type = "tech_support"
+            system_type = "tech_support"
         elif "投诉" in system_prompt or "complaint" in system_prompt.lower():
-            query_type = "complaint"
+            system_type = "complaint"
+
+        query_type = self._classify_query(user_query)
+        if query_type == "general":
+            if not self._is_smalltalk(user_query):
+                query_type = system_type
+        elif system_type and system_type != query_type:
+            query_hits = self._category_score(user_query, query_type)
+            system_hits = self._category_score(user_query, system_type)
+            # 平票时尊重路由到的 agent 类型（如“产品有问题”→投诉处理）
+            if system_hits >= query_hits:
+                query_type = system_type
 
         # 生成回复
         response_content = self._generate_response(user_query, query_type)

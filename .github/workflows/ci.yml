@@ -188,6 +188,18 @@ jobs:
         run: |
           python -m pytest tests/unit/ -v --tb=short --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear
 
+      # 对抗性安全测试：提示注入 / 工具滥用 / 越权 / 数据泄漏边界。
+      #
+      # 此前仓库**没有任何**对抗性测试在 CI 里跑过：唯一一条提示注入测试住在
+      # tests/e2e/test_e2e_real_llm.py，而该文件被上面每一条 lane 显式
+      # --ignore 掉（需要真实 LLM）。于是"仓库有安全测试"成立，而"CI 会因
+      # 安全回归而变红"不成立 —— 后者才是工业级交付需要的性质。
+      #
+      # 这一步是**阻塞**的，且不使用 continue-on-error。
+      - name: Run adversarial security tests
+        run: |
+          python -m pytest tests/security/ -v --tb=short --cache-clear
+
       - name: Run integration tests
         run: |
           python -m pytest tests/integration/ -v --tb=short -m "not real_llm" --cache-clear
@@ -241,10 +253,10 @@ jobs:
           # the pytest invocation). A contract test
           # (test_invocation_matches_run_command) enforces the two stay in sync.
           PYTEST_INVOCATION: >-
-            python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear
+            python -m pytest tests/unit/ tests/security/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear
         run: |
           set -o pipefail
-          python -m pytest tests/unit/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
+          python -m pytest tests/unit/ tests/security/ tests/integration/ tests/e2e/ -v --tb=short --cov=agents --cov=alerts --cov=api --cov=auth --cov=cache --cov=collaboration --cov=core --cov=db --cov=erp --cov=knowledge --cov=llm --cov=media --cov=rag --cov=router --cov=tools --cov-report=term-missing --cov-report=html --cov-report=xml --junit-xml=pytest-report.xml -p pytest_counts -m "not real_llm and not stress" --ignore=tests/e2e/test_e2e_real_llm.py --cache-clear 2>&1 | tail -30
 
       - name: Upload coverage artifact
         if: always()
@@ -585,12 +597,34 @@ jobs:
       - name: Agent eval evidence artifact (NOT_MEASURED => INCONCLUSIVE, never PASS)
         run: make agent-eval
 
+      # 回归评测：与**已提交基线**（tests/eval/agent_eval_baseline.json）比较。
+      #
+      # 为什么 `make agent-eval` 不够：它的门禁只回答"当前是否仍高于阈值"，
+      # 答不了"这次改动有没有让能力退步"。task_completion_rate 从 0.96 掉到
+      # 0.94 仍在 0.95 阈值之上 —— 静默退化会被放行。回归比较器逐指标判定
+      # **方向**（gte 越高越好 / lte 越低越好），把"仍在阈值内但已退步"
+      # 这类退化抓出来。
+      #
+      # 退出码：0 = 未见回归；1 = 确凿回归（CI 报红）。
+      # INCOMPARABLE（口径或数据集变了）也返回 0，但报告写明不可比 ——
+      # 不可比不等于"没退步"，因此这一步**不是**"通过"的证明。
+      - name: Agent eval regression vs committed baseline
+        run: make agent-eval-regression
+
       - name: Upload agent-eval evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agent-eval-evidence
           path: artifacts/agent-eval/
+          retention-days: 14
+
+      - name: Upload agent-eval regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-eval-regression
+          path: artifacts/agent-eval-regression/
           retention-days: 14
 
   security:

@@ -246,7 +246,25 @@ def detach_probes(attached) -> None:
 
 @dataclass(frozen=True)
 class ToolCallObservation:
-    """一次被发起的工具调用及其治理结果。"""
+    """一次被发起的工具调用及其治理结果。
+
+    ``executed`` 与 ``succeeded`` 是**两个不同的事实**，不能合并：
+
+    * ``executed`` —— 调用是否真的跑了（没有被 HITL 摘下，且产生了结果事件）。
+    * ``succeeded`` —— 调用跑完之后**是否成功**。``None`` = **无法判定**
+      （没有拿到权威执行收据），这不是 ``False``。
+
+    为什么要分开：``tool_result`` 流事件在**成功与失败两条路径上都会发**
+    （见 ``agents/base_agent.py``：失败时 ``result`` 变成
+    ``"工具暂时不可用，请稍后重试"``，事件照样发）。因此只靠事件流判断
+    "执行成功"，会把**失败的工具调用算成成功执行**，进而把它们当成
+    "业务完成有独立证据"——这正是 ``core/outcome.py::_independent_evidence``
+    早就修掉的同一类错误，只是当时只修了运行时、没修评测侧。
+
+    权威信号是 ``state["tool_executions"]`` 里的 ``{"tool", "ok"}`` 收据
+    （``agents/base_agent.py::_record_tool_execution``）。本 harness 直接读它，
+    不重新推断。
+    """
 
     name: str
     arguments: dict[str, Any]
@@ -256,6 +274,9 @@ class ToolCallObservation:
     executed: bool
     deferred: bool
     unknown_tool: bool = False
+    #: ``True`` = 执行收据显示成功；``False`` = 收据显示失败；
+    #: ``None`` = 没有收据（无法判定，例如工具未真正跑起来）。
+    succeeded: bool | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -267,6 +288,7 @@ class ToolCallObservation:
             "executed": self.executed,
             "deferred": self.deferred,
             "unknown_tool": self.unknown_tool,
+            "succeeded": self.succeeded,
         }
 
 
@@ -304,6 +326,12 @@ class CaseObservation:
     #: diagnostic to show cross-agent hand-off, and to report honestly which
     #: collaboration modes this dataset does *not* exercise.
     agents_used: tuple[str, ...] = ()
+    #: Authoritative per-tool execution receipts read from the graph state's
+    #: ``tool_executions`` (``{"tool": str, "ok": bool}``). This is the SAME
+    #: signal ``core.outcome`` uses to decide "business resolved with
+    #: evidence" — reading it here keeps the eval lane and the runtime
+    #: contract from disagreeing about whether a tool actually succeeded.
+    execution_receipts: tuple[dict[str, Any], ...] = ()
 
     @property
     def requested_tool_names(self) -> tuple[str, ...]:
@@ -312,6 +340,20 @@ class CaseObservation:
     @property
     def executed_tool_names(self) -> tuple[str, ...]:
         return tuple(c.name for c in self.tool_calls if c.executed)
+
+    @property
+    def succeeded_tool_names(self) -> tuple[str, ...]:
+        """工具**确实跑完且成功**的名字。
+
+        与 ``executed_tool_names`` 的区别：后者包含"跑了但失败"的调用。
+        只有本属性里的工具才构成"业务动作真的发生了"的证据。
+        """
+        return tuple(c.name for c in self.tool_calls if c.succeeded is True)
+
+    @property
+    def failed_tool_names(self) -> tuple[str, ...]:
+        """工具跑了但**失败**的名字（收据明确 ``ok=False``）。"""
+        return tuple(c.name for c in self.tool_calls if c.succeeded is False)
 
     @property
     def deferred_tool_names(self) -> tuple[str, ...]:
@@ -342,7 +384,10 @@ class CaseObservation:
             "response": self.response,
             "tool_calls": [c.to_dict() for c in self.tool_calls],
             "executed_tool_names": list(self.executed_tool_names),
+            "succeeded_tool_names": list(self.succeeded_tool_names),
+            "failed_tool_names": list(self.failed_tool_names),
             "deferred_tool_names": list(self.deferred_tool_names),
+            "execution_receipts": [dict(r) for r in self.execution_receipts],
             "fallback_markers": list(self.fallback_markers),
             "route_shortcut_used": self.route_shortcut_used,
             "hitl_defer_logged": self.hitl_defer_logged,
@@ -407,6 +452,36 @@ def _terminal_state(observed: dict[str, Any], pending_actions, interrupts) -> st
     if interrupts or observed.get("pending_actions"):
         return WAITING_APPROVAL
     return "SUCCEEDED"
+
+
+def _collect_execution_receipts(observed: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """从图状态里取权威的执行收据（``state["tool_executions"]``）。
+
+    这份收据由 ``agents/base_agent.py::_record_tool_execution`` 在工具
+    **真的返回之后**写入，形状是 ``{"tool": str, "ok": bool}``：
+    ``ok=True`` 表示这次执行成功，``ok=False`` 表示执行失败（异常、
+    错误字符串、拒答、超时）。被 HITL 摘出、从未执行的调用**不会**出现。
+
+    为什么评测侧必须读它而不是自己推断：``core/outcome.py`` 用同一份收据
+    判定"业务解决有独立证据"。评测侧若另起一套推断（例如只看
+    ``tool_result`` 事件），两边的"成功"定义就会漂移 —— 那是评测系统
+    最典型的自欺方式。
+
+    图状态里该键可能在多个节点上被重置（``check_cache`` 会置空），
+    因此这里读的是**最后一次**观测到的值。
+    """
+    raw = observed.get("tool_executions")
+    if not isinstance(raw, list):
+        return ()
+    receipts: list[dict[str, Any]] = []
+    for record in raw:
+        if (
+            isinstance(record, dict)
+            and record.get("tool")
+            and (record.get("ok") is True or record.get("ok") is False)
+        ):
+            receipts.append({"tool": str(record["tool"]), "ok": record["ok"]})
+    return tuple(receipts)
 
 
 def _detect_fallbacks(log_fired: set[str], observed: dict[str, Any]) -> tuple[str, ...]:
@@ -669,7 +744,8 @@ class AgentEvalHarness:
         interrupt_payloads = tuple(p for p in interrupt_payloads if isinstance(p, dict))
 
         registry = getattr(self.container, "tool_registry", None)
-        tool_calls = self._collect_tool_calls(events, registry, pending_actions)
+        execution_receipts = _collect_execution_receipts(observed)
+        tool_calls = self._collect_tool_calls(events, registry, pending_actions, execution_receipts)
 
         deferred_by_log = any(HITL_DEFER_MARKER[0] in p.fired for p in self._probes) or any(
             HITL_DEFER_MARKER[0] in m for m in self._probes[-1].messages
@@ -708,6 +784,7 @@ class AgentEvalHarness:
             error=error,
             error_traceback=error_traceback,
             agents_used=tuple(str(a) for a in (observed.get("agents_used") or ())),
+            execution_receipts=execution_receipts,
         )
         return observation
 
@@ -717,6 +794,7 @@ class AgentEvalHarness:
         events: list[dict[str, Any]],
         registry: Any,
         pending_actions: tuple[dict[str, Any], ...],
+        execution_receipts: tuple[dict[str, Any], ...] = (),
     ) -> tuple[ToolCallObservation, ...]:
         """把 tool_call / tool_result 事件 + pending_actions 归并成逐次调用观测。
 
@@ -724,6 +802,11 @@ class AgentEvalHarness:
         被 HITL 摘下的调用不会有 tool_result（它根本没跑），未摘出的调用才有。
         用「摘出的集合」与「已发起集合」求差，比等事件更可靠 —— 事件流本身
         也可能因为降级路径而缺失。
+
+        「执行成功没有」则**不**从事件流推断，而是读 ``execution_receipts``
+        （图状态里的 ``state["tool_executions"]``）。原因见
+        :class:`ToolCallObservation` 的 docstring：``tool_result`` 事件在失败
+        路径上照样发，只看事件会把失败当成成功。
         """
         from core.hitl.risk import classify_risk, requires_approval
 
@@ -734,6 +817,15 @@ class AgentEvalHarness:
         for event in events:
             if event.get("type") == "tool_result":
                 results_by_name[str(event.get("name"))] = str(event.get("summary"))
+
+        # 收据按工具名分桶，保留出现次序（同名工具可能被调用多次）。
+        receipt_by_name: dict[str, list[bool]] = {}
+        for receipt in execution_receipts:
+            name = str(receipt.get("tool") or "")
+            if not name:
+                continue
+            receipt_by_name.setdefault(name, []).append(bool(receipt.get("ok")))
+        receipt_cursor: dict[str, int] = {}
 
         observed: list[ToolCallObservation] = []
         for event in events:
@@ -758,6 +850,16 @@ class AgentEvalHarness:
                 except (SchemaError, KeyError, AttributeError) as exc:
                     schema_errors = (f"schema_check_failed: {exc}",)
             deferred = name in deferred_names
+
+            # 取该工具名下一条尚未消费的收据。收据是**按执行顺序**写入的，
+            # 而事件也是按调用顺序发出的，因此按名分桶 + 游标即可对齐。
+            succeeded: bool | None = None
+            bucket = receipt_by_name.get(name) or []
+            cursor = receipt_cursor.get(name, 0)
+            if cursor < len(bucket):
+                succeeded = bucket[cursor]
+                receipt_cursor[name] = cursor + 1
+
             observed.append(
                 ToolCallObservation(
                     name=name,
@@ -768,6 +870,7 @@ class AgentEvalHarness:
                     executed=not deferred and name in results_by_name,
                     deferred=deferred,
                     unknown_tool=not declared,
+                    succeeded=succeeded,
                 )
             )
         return tuple(observed)

@@ -42,7 +42,12 @@
 | **B. 分布式 Runtime** | 跨进程 checkpoint、同 thread 串行、跨 thread 并行、工具幂等、崩溃恢复 | **Level 2 已验证**（有 artifact） | `make runtime-e2e` / `make runtime-chaos` / `make runtime-verify` |
 | **C. 可观测性链路** | 5 个语义 span 是否真实到达 Collector | **Level 2 本地已验证** | `make otel-collector-smoke` |
 | **D. 响应质量** | 完整性/准确性/简洁性/礼貌/相关性 | **Implemented，但是启发式**（关键词打分，非 LLM 判官） | `agents/evaluator.py` |
-| **E. Agent 行为回归** | Agent 选择、工具选择、路由正确性 | **离线 Scripted 回放已实现；正式路由准确率 NOT_MEASURED（待人工确认）** | `python3 scripts/evaluate_agent.py` |
+| **E. Agent 行为回归** | 路由、工具计划保真度、执行成功、安全边界、故障恢复、人工介入、任务完成 | **离线 Scripted 回放已实现；正式路由准确率 NOT_MEASURED（待人工确认）** | `make agent-eval`；指标契约见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
+
+Agent Eval V1.3 新增 `tool_execution_success_rate`、`recovery_rate`、
+`human_intervention_rate`、`safety_violation_rate`。这些是固定评测集上的应用层
+行为指标；尤其 `human_intervention_rate` **不是生产转人工率**。业务需求与验收口径见
+[requirements/business-requirements.md](requirements/business-requirements.md)。
 
 ### E 类评测：人工确认路由标签的最小可复核路径
 
