@@ -1,0 +1,24 @@
+name: Engineering task
+description: Track a bounded maintenance, architecture, documentation or test task.
+title: "chore: "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and constraints
+      description: Affected modules, architecture boundaries and explicit non-goals.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: Required tests, docs/contracts and evidence.
+    validations:
+      required: true

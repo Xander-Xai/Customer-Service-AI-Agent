@@ -3,8 +3,9 @@
 ## Supported versions
 
 This repository is a reference implementation. Security fixes are applied to the
-`main` branch; no older release line is separately maintained. There is no
-versioned release tag, so "supported" means `main`.
+`main` branch; no older release line is separately maintained. Public release
+tags (currently including `v1.0.1`) are immutable snapshots and do not receive
+backports; use current `main` for fixes.
 
 ## Reporting a vulnerability
 
@@ -41,6 +42,14 @@ timing is agreed with the reporter in the private advisory.
 - Runtime security controls that are actually implemented are documented in
   [`docs/design/security.md`](../docs/design/security.md). That file describes
   implemented controls, not production-verified guarantees.
+- Never include secrets, production records, customer data, or private ERP
+  details in public issues or pull requests. Use environment-based secret
+  injection; `.env.example` is a placeholder template, not a credential store.
+- Tool adapters can cause external side effects. Report authorization,
+  idempotency, receipt, replay, and unknown-outcome risks privately when they
+  could permit an unauthorized action or duplicate business operation.
+- Data sources, generated fixtures, and known public-repository boundaries are
+  recorded in [`DATA_PROVENANCE.md`](../DATA_PROVENANCE.md).
 - Capabilities that are not production-verified are tracked as
   `NOT_VERIFIED` / `NOT_MEASURED` in the repository's evidence documentation.
   A control existing in code is not a claim that it has been validated under

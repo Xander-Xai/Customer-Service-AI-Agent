@@ -64,7 +64,7 @@
 | OTel Collector 传输链路（traces only） | `make otel-collector-smoke` → `artifacts/observability/otel-collector-*/report.json`（`VERIFIED_LOCAL`） | Verified (Local) |
 | 安全扫描 | CI `security` lane（严格 mypy + bandit + secret guard） | Verified (CI) |
 | 离线可复现 demo（证据卡） | `make demo-offline` | Verified (Local) |
-| 文档事实一致性守卫 | `make audit-docs`（**未接入 CI**，本地/提交前） | Verified (Local) |
+| 文档事实一致性守卫 | CI `test (3.11)` 执行 `project_facts.py --check` 与 `scripts/audit_doc_consistency.py`；本地 `make audit-docs` 同入口 | Verified (Local+CI) |
 
 复核命令与证据口径：[evaluation.md](evaluation.md) · [evaluation/distributed-runtime-evidence.md](evaluation/distributed-runtime-evidence.md)。
 
@@ -162,6 +162,10 @@ LLM-as-judge · 坐席工作台/转人工闭环 · LangGraph `store`
 
 生产在线图生成式响应缓存采取 fail-closed 策略：`DEV_MODE=false` 时，无论意图标签或命中分数均不读写响应缓存；开发环境仍保留评测路径。此决策不改变知识检索缓存和独立工具回执/工具结果复用的合同。重新启用前须通过跨客户、同客户跨任务、上下文、权限与新鲜度的配对负控制，不以旧 benchmark 作为上线许可。
 
-### Release gate correction (2026-11-25)
+### Main CI / Gate11 evidence snapshot (2026-11-26)
 
-Main CI 45572038791 (04455afc) had Runtime E2E Gate11 failure, but build-and-push succeeded because only test/security were dependencies. Deployment was skipped. Candidate #85 makes all eight quality job IDs required before image publication (including all matrix test jobs), adds static dependency regression; deploy continues to depend on publication. This is not a deployment acceptance or image revocation. Previously published image tags need independent operator audit before reuse; no image deletion, registry mutation or deployment was requested. Gate11 recovery remains unverified on the failed main SHA; exact new CI and failure diagnostics are required.
+Main `31a11f91d9a09ba6d5e8763db84151be930f9a27` CI [45785580625](https://github.com/Xander-Xai/Customer-Service-AI-Agent/actions/runs/45785580625) completed successfully, including Python 3.10/3.11/3.12, lint, dev-compat, Runtime E2E/worker-kill, metrics-alerting, Agent Eval, frontend and security. `build-and-push` succeeded after all blocking gates; `deploy` was skipped. This CI run is not production deployment evidence.
+
+The workflow published GHCR tags `31a11f9` and `latest` with manifest digest `sha256:fd50bd3ceee95a8d020b1f54fb4c21e8fc95b90fd91a2037ff07c123ef0586c7` for this source SHA. This is a build artifact, not a GitHub Release or a verified deployment; the deploy job was skipped.
+
+Earlier main SHA `1f29fa2fa2699ac3be46822e96de402b0ce5adad` had a Gate11 worker-kill recovery failure (`CheckpointEpisodeMismatch`, attempt 1) and passed on same-SHA attempt 2. A focused local run on the current SHA passed using temporary PostgreSQL 15 + Redis 7 and a fake side-effect provider, but the original failure's specific checkpoint identity mismatch was not captured and its root cause remains unlocated. Do not claim the concurrency issue fixed; preserve the strict mismatch rejection and track further evidence through Issue #46.

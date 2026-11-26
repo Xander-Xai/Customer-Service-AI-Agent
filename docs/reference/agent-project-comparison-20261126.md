@@ -1,0 +1,14 @@
+# Agent 工程项目对标差距（2026-11-26）
+
+核查日期：2026-11-26（GitHub 官方仓库树/文件与仓库元数据，经 `gh` CLI 读取）。对标用于选择适合当前单仓规模的维护实践，不复制其 SDK 或组织流程。所核对的默认分支：OpenAI `main@6afdd47b4fab14d61e0e6f7c002e6ec9b36fcd71`、LangGraph `main@3e3dbd42c5329dd404669ccd923c005c814bee3a`、Google ADK `main@03725e8c67ca27b2c07569797a0c18e867e0b217`。Microsoft 目标仓库经 API 返回 404；LangGraph 的托管 Docs 内容仅从 README 链接识别，本次未单独读取 hosted page 正文。
+
+| 参考仓库与文件 | 可借鉴实践 | 本项目核查差距 | 本轮落地 |
+|---|---|---|---|
+| [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) `main@6afdd47`：`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md`、`docs/quickstart.md`、`docs/testing.md`、`docs/tracing.md`、`examples/README.md`、`.github/workflows/tests.yml`、`.github/workflows/release-candidate.yml`、`.github/workflows/release-please.yml` | README 作为产品/能力入口；分主题能力文档与可运行示例；Coding Agent 规则、贡献/安全边界、CI 与 release 工作流彼此有清晰职责 | 本项目已有大量深度文档和离线 demo，但首页是历史快照拼接；贡献/PR/Issue 维护入口缺失或不集中 | 重写 README 和文档导航；新增 CONTRIBUTING、PR 模板及精简 Issue 表单；记录版本/评测事实来源 |
+| [LangGraph](https://github.com/langchain-ai/langgraph) `main@3e3dbd4`：`README.md`、`AGENTS.md`、`.github/PULL_REQUEST_TEMPLATE.md`、`.github/workflows/ci.yml`、`.github/workflows/release.yml`、GitHub Security Policy；官方 Docs: [`durable execution`](https://docs.langchain.com/oss/python/langgraph/durable-execution)、[`persistence`](https://docs.langchain.com/oss/python/langgraph/persistence)、[`interrupts`](https://docs.langchain.com/oss/python/langgraph/interrupts)；`examples/README.md`（归档说明）、`examples/customer-support/customer-support.ipynb`、`examples/human_in_the_loop/wait-user-input.ipynb` | 将 durable execution、persistence 与 human-in-the-loop 分开讲清；明确旧 examples 已归档并指向受维护的 docs website；PR 检查与 release 工作流分离 | 本项目对应能力代码与细节较完整，但使用者需要从 README 中穿过大量细节与旧治理记录才能找到入口 | README 用真实组件架构图和 5/15/30 分钟阅读路径导航；Current State、Architecture、Production Readiness、Changelog 职责明确 |
+| [Google ADK Python](https://github.com/google/adk-python) `main@03725e8`：`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`.github/SECURITY.md`、GitHub Security Policy、`CHANGELOG.md`、`docs/guides/evaluation/`、`docs/guides/tools/mcp_tool/`、`examples/`、`.github/workflows/continuous-integration.yml`、`.github/workflows/release-cut.yml`、`.github/workflows/release-publish.yml` | Examples 和分主题指南构成从入门到组件的阅读/运行路径；独立安全政策；CI 与分阶段发布工作流分别验证代码与产物 | 项目有 example/demo 与能力文档，但链接导航与仓库维护规范较散；发布说明没有集中的状态入口 | 文档导航指向现存 guide/代码；不再硬编码易漂移测试计数；Changelog 与 GitHub Release 各司其职，未通过门禁时不发布稳定版本 |
+| [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)：请求目标仓库 README、`AGENTS.md`、贡献/安全/文档/CI/Release 文件 | 作为工程组织、兼容性、安全边界和发布治理的候选参考 | 本次通过已认证 GitHub CLI 查询仓库元数据与 tree 均返回 `404 / Not Found`，无法核实目标文件；不以同名第三方示例替代官方来源 | 记录该来源不可访问；未据此推断实践或声称已经对标其内容 |
+
+## 对标结论
+
+本项目最适合落地的是“单一当前事实入口 + 可跑的最短演示 + 模块级深读路径 + 证据边界清晰的贡献/发布门禁”。不引入文档网站、额外 Agent 框架或发布平台；现有 `make audit-docs`、GitHub Actions 和 GitHub Releases 足以承担当前规模的维护职责。

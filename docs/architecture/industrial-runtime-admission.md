@@ -1,8 +1,11 @@
-# 工业客服运行时发布契约（2026-11-25，候选）
+# Industrial Runtime Admission Contract
+
+> 🟢 CURRENT — 本文说明工业 profile 的代码准入规则与失败边界，不代表真实企业环境已经验收。
+> 主线当前实现和验证命令见 [Current State](../reference/current-state.md)；外部/生产证据见 [Production Readiness](../production-readiness.md)。HEAD 与 PR 状态以 live GitHub metadata 为准。
 
 ## 基线和项目定位
 
-审查基线 main `a1f4a66e43e138e4b2c8c51aa3cd35dd3644b919`（#81 已合并）。#80 reviewed-gold、#82 provider attempt metering 未合并；核查时 CI 仍待执行。此次候选独立于这两个 PR。公开仓库的增量工程不是早期任职生产交付的证明。
+工业 profile 是同一 LangGraph 与 durable Runtime 的严格准入配置，不是新 Agent 框架。公开仓库的增量工程不是早期任职生产交付的证明；具体版本、PR 和 CI 状态由实时仓库 metadata 与同 SHA 证据确定。
 
 本仓负责客服业务路由、工具权限、人工审批、耐久任务与真实业务回执；复杂文档知识工程属于同任职阶段 Beauty RAG，通用受控分析沙箱属于另一任职阶段 Gaobao。不要为技术覆盖复制 Runtime。
 
@@ -53,7 +56,7 @@ flowchart TD
 
 Seven domain roles, ReAct and Response are nine registered runtime roles, not nine autonomous services. Direct routing is the default; parallel and fixed supervisor-workers share fan-out; consultation/hierarchical are compatibility profiles. No dynamic swarm. ResponseAgent is deterministic post-processing. Standalone loop is an offline/reference lane, not an alternative online executor. Local blackboard/message bus are run-local diagnostics, not distributed authorization. Durable human handoff is distinct from write approval.
 
-## 本轮候选改变
+## Industrial admission controls
 
 | 旧风险 | 新边界 |
 |---|---|
@@ -84,13 +87,13 @@ HITL_ENABLED=true
 
 必须另外配置有效且授权的 ERP 凭据、可信用户到客户映射、PostgreSQL、Redis、密钥、模型及 TLS。运行时检查禁止 DEV_MODE、mock ERP、非 Redis session、非 PostgreSQL checkpoint、inline dispatcher、非 Redis thread lock 和关闭 HITL。原 demo/base 和未显式选择 industrial 的 prod 兼容配置不等于工业发布；不自动迁移旧会话。客户以真实 access JWT 创建新聊天会话，保留返回的 session ID/token；工业 POST /api/runs 要求现有会话及 Idempotency-Key。相同请求重试复用该会话。已过期 owner 不允许重新认领；30 天 TTL 是暂定策略，非完整保留/删除政策。历史列表仍基于当前实现，未保证跨副本完整分页。
 
-本候选不承诺 Redis 丢失后可恢复会话归属；需要持久归属、迁移、备份、删除竞态治理，且校验所有客户端及替代入口。真实 ERP adapter 当前是授权读能力，退款/改单无已验证外部交易接口，不得称为已实现真实支付；未知结果必须对账，禁止自动重复外部副作用。HITL 通过不等于交易成功。标准 Compose 使用 synthetic MCP/A2A 业务 fixtures；industrial profile 要求 external 模式、批准目录和私有 TLS，真实目录/远程互操作仍未验收。模型或 RAG 降级的语义、未确认工具回执、敏感数据、媒体、反馈去重、HTTP 分布式限流与配额应按真实任务继续核验。
+工业准入代码不承诺 Redis 丢失后可恢复会话归属；真实部署仍需持久归属、迁移、备份、删除竞态治理，且校验所有客户端及替代入口。真实 ERP adapter 当前是授权读能力，退款/改单无已验证外部交易接口，不得称为已实现真实支付；未知结果必须对账，禁止自动重复外部副作用。HITL 通过不等于交易成功。标准 Compose 使用合成 MCP/A2A 业务 fixtures；industrial profile 要求 external 模式、批准目录和私有 TLS，真实目录/远程互操作仍未验收。模型或 RAG 降级的语义、未确认工具回执、敏感数据、媒体、反馈去重、HTTP 分布式限流与配额应按真实任务继续核验。
 
-## 验收和阻塞
+## Verification and production acceptance
 
 `pytest -q tests/unit/test_industrial_admission.py tests/unit/test_runs_api.py tests/test_episode_checkpoint_ownership.py --no-cov -o addopts=''`
 
-新增离线测试覆盖配置拒绝、Redis fixture 归属拒绝与故障、严格 checkpoint 读取、请求幂等冲突；旧会话测试改用已验证 bearer，拒绝无归属会话、refresh token 和不可信状态；PG 重放用例验证同会话复用、异会话冲突；SSE 回归验证图未完成时连续转发及结束后排空缓冲。不声称已运行或通过。需 exact-head CI、真实 PostgreSQL/Redis 并发与故障注入（含 API 与 worker 接管、崩溃、重投、Redis 状态丢失）、真实客户端、真实 ERP 只读与授权范围、独立人工审批/业务回执、真实模型与 review gold、provider 成本、负载与监控、备份恢复和隐私删除验收。#75 #46 #33 #49 #31 #25 保留开放，不凭合成用例或本地证据关闭。工业 release NO-GO 直到完成真实授权和全部发布门禁。
+工业准入相关 unit/CI/runtime 测试覆盖配置拒绝、session owner、checkpoint 身份、请求幂等、SSE 和快路径容量；精确命令与最新 exact-head CI 见 [Current State](../reference/current-state.md) 和 Actions。它们不替代真实 PostgreSQL/Redis 多副本故障验收、真实客户端、ERP 授权范围、独立人工审批/业务回执、provider 使用、负载/监控、备份恢复和隐私删除验收。工业 release 在真实授权条件和发布门禁完成前为 NO-GO。
 
 ### HTTP admission regression（2026-11-25）
 
@@ -108,10 +111,12 @@ HITL_ENABLED=true
 
 文字与图片 SSE 共用 ManagedSSE，队列最多 64 个事件，生产者 await put 提供本地事件级背压；空闲 15 秒发送 SSE comment，不冒充进度。响应发送失败、生成器关闭或断线取消时取消并等待图 task，清理使用 shield；尚未进入生成器也由响应对象收尾。工业图执行 AttributeError/TypeError 不再无 config 重跑，工业 checkpoint 检查显式 strict。仅提供协作式取消，不保证同步线程/已发 provider 请求中断，不保证 checkpoint rollback 或租约 fencing；空闲 heartbeat 不是业务超时。限制的是单流事件个数，不是每事件字节、全局 SSE 并发、broker 背压或模型成本。工业断线遗留 pending checkpoint 仍需对账，禁止自动接管；真实 ASGI 代理断线与慢客户端负载待验收。
 
-### 工业快路径执行容量（2026-11-25，独立候选）
+### 工业快路径执行容量（2026-11-25 implementation note）
 
-#83/#84 已合并，前述候选记录为历史。工业 API 的共享 _run_graph 入口（REST、文字/图片 SSE、调用该入口的媒体路由）先经过 Redis TIME + Lua 原子双配额：默认全局 32、用户 2；配置 CSAI_FAST_PATH_MAX_ACTIVE、CSAI_FAST_PATH_MAX_ACTIVE_PER_USER。每次执行独立随机 token，用户键 HMAC，过期成员原子清除，超额不插入。默认 90 秒协作式 deadline（CSAI_FAST_PATH_DEADLINE_SECONDS），要求小于 thread lock TTL 且留 10s margin，租约 TTL=deadline+30s；返回成功前再次核查两级租约及本地 deadline；Redis 不可用拒绝，用户 429、全局/租约失效 503、deadline 504；已开始 SSE 则 error event 无 done。正常/取消/异常尝试 owner-only ZREM，崩溃依赖过期。配置须在全部 API 副本一致；默认值不是压测结果。此为快路径 graph execution 数量，不是 SSE socket、媒体预处理、Worker/Broker、模型 token 或实际物理并行度。协作式超时不能终止同步线程/外部已发请求；Redis 重启、时钟跳变、事件循环阻塞和长时间取消可能造成租约与真实执行不一致，最终检查不是写入 fencing，不能保证 checkpoint/副作用回滚。真实多副本负载、Redis 故障恢复及 Thread lease fencing 仍未验收。
+#83–#85 已合并相关代码。工业 API 的共享 `_run_graph` 入口（REST、文字/图片 SSE、调用该入口的媒体路由）先经过 Redis TIME + Lua 原子双配额：默认全局 32、用户 2；配置 `CSAI_FAST_PATH_MAX_ACTIVE`、`CSAI_FAST_PATH_MAX_ACTIVE_PER_USER`。每次执行独立随机 token，用户键 HMAC，过期成员原子清除，超额不插入。默认 90 秒协作式 deadline（`CSAI_FAST_PATH_DEADLINE_SECONDS`），要求小于 thread lock TTL 且留 10s margin，租约 TTL=deadline+30s；返回成功前再次核查两级租约及本地 deadline；Redis 不可用拒绝，用户 429、全局/租约失效 503、deadline 504；已开始 SSE 则 error event 无 done。正常/取消/异常尝试 owner-only ZREM，崩溃依赖过期。配置须在全部 API 副本一致；默认值不是压测结果。此为快路径 graph execution 数量，不是 SSE socket、媒体预处理、Worker/Broker、模型 token 或实际物理并行度。协作式超时不能终止同步线程/外部已发请求；Redis 重启、时钟跳变、事件循环阻塞和长时间取消可能造成租约与真实执行不一致，最终检查不是写入 fencing，不能保证 checkpoint/副作用回滚。真实多副本负载、Redis 故障恢复及 Thread lease fencing 仍未验收。
 
-### 2026-11-25 验收纠偏
+### 2026-11-25 failure investigation snapshot
+
+> **HISTORICAL AUDIT SNAPSHOT — 2026-11-25.** The details below preserve the observed failure and same-day fix history; current Gate11 evidence is in [Current State](../reference/current-state.md).
 
 #84 已合并，但 main `04455afc` CI 45572038791 的 Gate11 worker kill 恢复出现 FAILED（205 pass / 1 fail），此前 #84 候选通过不能覆盖这一失败。#85 初始 head `d767ba3f` CI 45572249107 的真实 Redis 容量用例通过，但源码契约未随 `_run_graph` 包装器更新，单测两项与集成 checkpoint 源码检查失败，另有 Ruff E721/SIM105。修正检查同时覆盖包装器与实际执行函数，保留原断言；补充内存 ThreadLock 到期不可续租回归（防止过期 owner 复活，仅与 Redis 原语语义对齐，不是生产 fencing）。Gate11 失败时保留 error_code/error_type，不降低 SUCCEEDED 或副作用计数断言。主线 Gate11 根因仍未确证，须以最新完整 CI 和失败诊断为准；不将偶发通过等同于修复。
