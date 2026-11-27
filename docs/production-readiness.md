@@ -36,6 +36,7 @@
 | Function Calling + MCP 适配器 | `tools/` | 标准 Compose 默认启用合成 SKU 文档，read-only-first；工业部署需批准目录，生产数据待验证 |
 | A2A 售后程序专家 | `integrations/a2a_policy/` | 标准 Compose 启动独立合成 peer 并生成私有 bearer；工业部署要求批准目录和私有 HTTPS/CA；企业 TLS/目录待验证 |
 | 分布式 Agent Runtime | `runtime/` | AgentRun 唯一真相源 · Postgres checkpoint · Redis 锁 · Celery worker · 三层幂等 · DLQ 重放 · run 事件流 |
+| LLM 请求准入（专项切片，Implemented） | `llm/admission.py` · `llm/client.py` | Industrial ordinary/raw/stream HTTP attempts use shared Redis Lua token buckets; configured Provider/Model + user RPM/TPM; Redis/identity/config failure closes admission |
 | Human-in-the-Loop 审批治理 | `core/hitl/` · `runtime/statuses.py` | 执行前拦截 · durable 审批 · 职责分离 · TTL 拒绝优先 · 审批幂等双防线 |
 | FastAPI 服务与安全 | `api/` · `auth/` | JWT + Argon2id + 4 级 RBAC · CSRF 双提交 · CSP nonce · 限流 · SSRF 防护 |
 | 可观测性 | `core/tracing.py` · `core/telemetry.py` · `core/monitoring.py` | OTel 语义 span · Prometheus 指标 · 结构化日志脱敏 |
@@ -86,7 +87,8 @@
 | Nginx 多副本横向扩容（upstream 分发） | `NOT_VERIFIED` | 多副本可渲染，未在真实部署验证 |
 | 真实第三方 MCP server（网络/鉴权/写工具） | `NOT_VERIFIED` | 有确定性协议及第一方 SKU 文档契约；真实第三方服务与真实授权目录尚未验收 |
 | 真实 A2A 售后业务 | `NOT_VERIFIED` | 有独立 SDK 和规则引擎契约；真实授权目录、生产网络与模型路由尚未验收 |
-| 生产 worker autoscaling / backpressure / admission control | `NOT_VERIFIED` | 无自动扩缩与准入控制 |
+| 生产 worker autoscaling / durable-run backpressure | `NOT_VERIFIED` | 无自动扩缩；durable Run admission 仅限制新建 Run 数，不是 Worker 自动扩缩或完整 backpressure |
+| LLM 分布式准入、Token Quota 预占结算、Run 资源预算 | `PARTIAL / NOT_VERIFIED` | 代码新增 LLM API HTTP 尝试令牌桶，但真实 Redis 多进程集成尚未运行；Token Quota 仍无原子预占/结算，Run 级模型/Token/时间/工具总预算未闭环，Provider 限额参数须由环境所有者确认 |
 | 审批主动通知（push / 邮件 / IM）、审批 SLA | `NOT_VERIFIED` / `NOT_MEASURED` | 只有轮询队列 |
 | Agent 行为回归评测（Agent Eval V1） | `LEVEL_2_APPLICATION_MEASURED` | 已实现评测框架与**真实图脚本化回放**（零出网、JSONL 用例集、显式分子/分母/证据边界）。测编排/治理/路由行为，**不测**模型能力；见 [reference/agent-evaluation.md](reference/agent-evaluation.md) |
 | LLM-as-judge 语义质量 | 未实现 | 需固定 judge 模型 + 判官一致性验证；`agents/evaluator.py` 仍为启发式 |

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from integrations.a2a_policy.client import lookup_synthetic_faq
 from integrations.a2a_policy.contracts import A2AContractError
@@ -20,8 +21,8 @@ from integrations.a2a_policy.contracts import A2AContractError
 BASE = "http://127.0.0.1:41243"
 
 
-@pytest.fixture
-def app(monkeypatch):
+@pytest_asyncio.fixture
+async def app(monkeypatch):
     monkeypatch.setenv("APP_ENV", "testing")
     monkeypatch.setenv("A2A_FAQ_EXPERIMENT_ENABLED", "true")
     monkeypatch.setenv("A2A_FAQ_SHARED_TOKEN", "b" * 64)
@@ -29,7 +30,13 @@ def app(monkeypatch):
     pytest.importorskip("a2a", reason="optional A2A 1.x SDK not installed")
     from integrations.a2a_policy.server import build_app
 
-    return build_app(BASE)
+    app = build_app(BASE)
+    try:
+        yield app
+    finally:
+        # ASGITransport does not drive lifespan events; explicitly drain A2A's
+        # handler-owned background tasks before pytest closes the event loop.
+        await app.state.a2a_request_handler.aclose()
 
 
 @pytest.mark.asyncio
