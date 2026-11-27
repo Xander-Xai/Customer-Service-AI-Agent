@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hmac
+from contextlib import asynccontextmanager
 
 from a2a.server.agent_execution.agent_executor import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
@@ -205,15 +206,28 @@ def build_peer_app(card: AgentCard, executor: AgentExecutor, secret: str) -> Fas
         task_store=InMemoryTaskStore(),
         agent_card=card,
     )
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            # A2A 1.3 request handlers own producer/consumer tasks. Close them
+            # with the ASGI lifespan so task ContextVars are not detached after
+            # their event loop has already shut down.
+            await handler.aclose()
+
     app = FastAPI(
         routes=[
             *create_agent_card_routes(card),
             *create_jsonrpc_routes(handler, rpc_url="/a2a/jsonrpc"),
         ],
+        lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
     )
+    app.state.a2a_request_handler = handler
 
     app.add_middleware(PeerRequestBoundary, secret=secret)
 
