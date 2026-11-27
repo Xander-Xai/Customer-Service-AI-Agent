@@ -12,23 +12,29 @@ from contextvars import ContextVar, Token
 _current_run_id: ContextVar[str | None] = ContextVar("agent_run_id", default=None)
 _current_thread_id: ContextVar[str | None] = ContextVar("agent_thread_id", default=None)
 _current_task_id: ContextVar[str | None] = ContextVar("agent_task_id", default=None)
+_current_user_id: ContextVar[str | None] = ContextVar("agent_user_id", default=None)
 
 
 def set_run_context(
-    run_id: str | None, thread_id: str | None = None, task_id: str | None = None
-) -> tuple[Token, Token, Token]:
+    run_id: str | None,
+    thread_id: str | None = None,
+    task_id: str | None = None,
+    user_id: str | None = None,
+) -> tuple[Token, Token, Token, Token]:
     return (
         _current_run_id.set(run_id),
         _current_thread_id.set(thread_id),
         _current_task_id.set(task_id),
+        _current_user_id.set(user_id),
     )
 
 
-def reset_run_context(tokens: tuple[Token, Token, Token]) -> None:
-    run_token, thread_token, task_token = tokens
+def reset_run_context(tokens: tuple[Token, Token, Token, Token]) -> None:
+    run_token, thread_token, task_token, user_token = tokens
     _current_run_id.reset(run_token)
     _current_thread_id.reset(thread_token)
     _current_task_id.reset(task_token)
+    _current_user_id.reset(user_token)
 
 
 def get_current_run_id() -> str | None:
@@ -41,3 +47,8 @@ def get_current_thread_id() -> str | None:
 
 def get_current_task_id() -> str | None:
     return _current_task_id.get()
+
+
+def get_current_user_id() -> str | None:
+    """Return the authenticated principal attached by the server runtime."""
+    return _current_user_id.get()

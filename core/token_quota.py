@@ -138,6 +138,10 @@ class _RedisBackend(_QuotaBackend):
                 return None
             return UserQuota.from_dict({k: int(v) for k, v in data.items()})
         except Exception as e:
+            from core.industrial import industrial_enabled
+
+            if industrial_enabled():
+                raise RuntimeError("Token Quota Redis read unavailable") from e
             logger.warning(f"[TokenQuota] Redis get failed: {e}, fallback to memory")
             return None
 
@@ -147,6 +151,10 @@ class _RedisBackend(_QuotaBackend):
             # TTL: 90 天（覆盖月重置周期）
             self._client.expire(self._key(user_id), 90 * 24 * 3600)
         except Exception as e:
+            from core.industrial import industrial_enabled
+
+            if industrial_enabled():
+                raise RuntimeError("Token Quota Redis write unavailable") from e
             logger.warning(f"[TokenQuota] Redis set failed: {e}")
 
     def get_all(self) -> dict[str, UserQuota]:
@@ -176,7 +184,11 @@ class TokenQuotaManager:
                 redis.from_url(REDIS_URL).ping()
                 backend = _RedisBackend(REDIS_URL, TOKEN_QUOTA_REDIS_PREFIX)
                 logger.info("[TokenQuota] Using Redis backend")
-            except Exception:
+            except Exception as exc:
+                from core.industrial import industrial_enabled
+
+                if industrial_enabled():
+                    raise RuntimeError("Industrial Token Quota requires shared Redis") from exc
                 backend = _MemoryBackend()
                 logger.info("[TokenQuota] Using memory backend")
         self._backend = backend

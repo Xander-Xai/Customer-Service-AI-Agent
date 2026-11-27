@@ -291,6 +291,17 @@ make runtime-delivery
 - LLM 客户端：`llm/client.py`（指数退避重试 + 熔断 + FC + SSE 流式 + 连接池）；
   降级兜底 `llm/rule_based_llm.py`。**该熔断器与重试只保护 LLM 调用**，
   与工具层无关（见下）。
+- **LLM Provider attempt admission（2026-11-27 专项切片）**：`llm/admission.py` 在
+  普通、raw、stream 的每次 Provider HTTP 尝试前执行 Redis TIME + Lua 原子令牌桶；
+  全局 Provider/Model 与可信用户的 RPM/TPM 联合准入，失败不部分扣减，重试和
+  fallback 再次过闸。身份来自 API/Worker 的 `runtime.context`，不从 Prompt metadata
+  推断；工业配置缺身份/限额或 Redis 不可用时拒绝调用。配置、语义差异与验收边界见
+  [industrial admission](../architecture/industrial-runtime-admission.md)。该能力不等于
+  Token Quota 的原子预占/结算、Run 累计预算或 Provider 真实配额；上述预算治理仍有缺口。
+  本地证据（2026-11-27）：unit + HTTP admission/session/checkpoint 回归 `166 passed`；
+  LLM bucket integration 在本地 Redis 7.2 Alpine、两个独立 async client、同一 Python 进程下
+  `7 passed`。未验证独立进程/Worker、Redis Cluster、真实 Provider 或生产参数。
+  重跑：`python3 -m pytest -q tests/unit/test_llm_admission.py tests/unit/test_industrial_admission.py tests/unit/test_industrial_http_admission.py tests/unit/test_session_manager_coverage.py tests/unit/test_session_encryption.py tests/test_episode_checkpoint_ownership.py`；真实 Redis：`TEST_REDIS_URL=redis://127.0.0.1:16379/15 python3 -m pytest -q tests/integration/runtime/test_llm_admission_redis.py tests/unit/test_llm_admission.py`。
 - **工具执行层可靠性**（`tools/tool_registry.py`）：
   - **超时（Implemented）**：`TOOL_EXECUTION_TIMEOUT_SECONDS`（默认 30s），
     覆盖只读直调与幂等 ledger 闭包**两条**分支。**只读工具超时降级**为可解释的

@@ -153,8 +153,16 @@ async def _run_graph(
     from core.concurrency.fast_path_admission import execute_admitted
     from core.industrial import industrial_enabled
 
-    def operation():
-        return _run_graph_inner(session_id, query, stream_callback, multimodal_content, user_id)
+    async def operation():
+        from runtime.context import reset_run_context, set_run_context
+
+        tokens = set_run_context(None, session_id, user_id=user_id)
+        try:
+            return await _run_graph_inner(
+                session_id, query, stream_callback, multimodal_content, user_id
+            )
+        finally:
+            reset_run_context(tokens)
 
     if industrial_enabled():
         return await execute_admitted(user_id, operation)

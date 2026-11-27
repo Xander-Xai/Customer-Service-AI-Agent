@@ -428,7 +428,7 @@ async def execute_run(
             # 工具级第二道防线在拿到 runtime 之后再安装：真正的 ToolRegistry 属于
             # ServiceContainer（``runtime.container.tool_registry``），RunService 上
             # 并没有这个属性。过去的提前安装因此恒为空操作。
-            tokens = set_run_context(run_id, thread_id, task_id)
+            tokens = set_run_context(run_id, thread_id, task_id, run.get("user_id"))
             # Lightweight tracing: ONE span per execution attempt, opened after the
             # run context exists so run/thread/task correlation attributes are
             # available, and closed in the ``finally`` below so every exit path

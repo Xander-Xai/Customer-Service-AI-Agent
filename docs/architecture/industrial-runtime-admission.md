@@ -73,6 +73,14 @@ Seven domain roles, ReAct and Response are nine registered runtime roles, not ni
 | Redis ZADD 返回新增成员数而非窗口总量；登录/注册本地限流，Redis 故障回退 | 修复旧窗口 ZCARD；industrial 使用 Redis TIME + 原子 Lua 滑窗，登录/注册/普通 HTTP 独立作用域，429/503，无内存回退；健康与静态资源保持豁免 |
 | 旧 WS 旁路、会话删除未覆盖活跃 Run/审批/账本 | industrial 暂停旧 WS 和旧删除入口；不是功能完成 |
 
+### LLM Provider HTTP admission (2026-11-27 implementation slice)
+
+`llm/client.py` now checks a distributed token bucket before each actual chat-completion HTTP attempt in ordinary, raw, and streaming calls. Retry and tool-unsupported fallback attempts pass the same gate again. The bucket dimensions are provider-base-URL/model global RPM+TPM and HMAC-derived user RPM+TPM. One Lua decision checks all four dimensions before charging any; Redis `TIME` is authoritative, backwards time pauses refill, forward jumps are capped at one bucket capacity, and temporary denials include a bounded `Retry-After` without waiting. An estimate larger than bucket capacity is rejected without a misleading retry hint. Global and user keys share `{llm-admission:<provider/model digest>}` for Redis Cluster slot compatibility; per-user state is a separate expiring key.
+
+The authenticated FastAPI graph boundary and durable Worker attach the principal to `runtime.context`; model messages/Prompt metadata are not identity sources. Industrial requests reject missing trusted identity, missing explicit limits, or Redis errors. Set `CSAI_LLM_RPM`, `CSAI_LLM_TPM`, `CSAI_LLM_USER_RPM`, `CSAI_LLM_USER_TPM`, and `CSAI_LLM_BUCKET_TTL_SECONDS` to provider-agreed values on every API and Worker. Local defaults (60 RPM / 120,000 TPM / 6 user RPM / 12,000 user TPM) are development examples, not provider quotas or measured capacity. The bucket approximates a sustained rate; provider fixed/sliding-window semantics, tokenization and accounting differ, so provider-side 429 handling remains authoritative.
+
+Evidence: `tests/unit/test_llm_admission.py`; `tests/integration/runtime/test_llm_admission_redis.py` passed locally against Redis 7.2 Alpine using two independent async clients in one Python process. This verifies shared atomic state across clients, not separate worker processes or production Redis Cluster. This slice is not a durable Token Quota reservation/settlement system and does not add Run-wide call/time/tool budgets. User-level cross-session memory and bounded versioned session-summary cursors are also not implemented by this change. Do not infer those capabilities from this LLM admission gate.
+
 ## 工业候选配置
 
 ```dotenv

@@ -141,6 +141,9 @@ class OpenAICompatibleClient:
             if not client.is_closed:
                 await client.aclose()
         cls._client_pools.clear()
+        from llm.admission import close_admission_client
+
+        await close_admission_client()
 
     async def _record_token_usage(self, result: dict, latency_ms: float):
         """v5.1: 记录 Token 用量到全局追踪器"""
@@ -181,25 +184,11 @@ class OpenAICompatibleClient:
         if self.circuit_breaker and not await self.circuit_breaker.should_allow():
             raise LLMServiceError("CircuitBreaker OPEN: LLM 调用已熔断，走降级路径")
 
-        # v5.3: Token Quota 检查
-        try:
-            from core.token_quota import get_quota_manager
+        from runtime.context import get_current_user_id
 
-            quota_mgr = get_quota_manager()
-            # 尝试从消息中提取 user_id（如果有的话）
-            user_id = None
-            for msg in messages:
-                if hasattr(msg, "metadata") and msg.metadata:
-                    user_id = msg.metadata.get("user_id")
-                    break
-            if user_id:
-                quota_check = quota_mgr.check_quota(str(user_id))
-                if not quota_check["allowed"]:
-                    raise LLMServiceError(f"Token Quota 超限: {quota_check['reason']}")
-        except LLMServiceError:
-            raise
-        except Exception:
-            pass  # Quota 检查失败不影响主流程
+        # Identity comes from authenticated server context. Message metadata is
+        # caller-controlled and must never define an industrial quota principal.
+        user_id = get_current_user_id()
 
         payload: dict[str, Any] = {
             "model": self.model,
@@ -256,6 +245,7 @@ class OpenAICompatibleClient:
     ):
         """The retry loop of ``async_invoke``; the span is already open by the caller."""
         for attempt in range(self.max_retries):
+            await self._admit_attempt(payload, user_id)
             usage_attempt = begin_attempt()
             try:
                 resp = await client.post(
@@ -361,7 +351,12 @@ class OpenAICompatibleClient:
         call_timeout = httpx.Timeout(timeout or self.timeout)
         _call_start = time.time()
 
+        from runtime.context import get_current_user_id
+
+        user_id = get_current_user_id()
+
         for attempt in range(self.max_retries):
+            await self._admit_attempt(payload, user_id)
             usage_attempt = begin_attempt()
             try:
                 resp = await client.post(
@@ -412,7 +407,12 @@ class OpenAICompatibleClient:
         client = await self._get_async_client()
         call_timeout = httpx.Timeout(timeout or self.timeout)
 
+        from runtime.context import get_current_user_id
+
+        user_id = get_current_user_id()
+
         for attempt in range(self.max_retries):
+            await self._admit_attempt(payload, user_id)
             usage_attempt = begin_attempt()
             try:
                 async with client.stream(
@@ -467,3 +467,41 @@ class OpenAICompatibleClient:
         if self.circuit_breaker:
             await self.circuit_breaker.record_failure()
         raise Exception(f"LLM 流式调用失败（已重试 {self.max_retries} 次），请稍后重试")
+
+    async def _admit_attempt(self, payload: dict, user_id: str | None) -> None:
+        from core.industrial import industrial_enabled
+
+        if not industrial_enabled():
+            return
+        if user_id:
+            from core.token_quota import get_quota_manager
+
+            try:
+                quota = get_quota_manager().check_quota(user_id)
+            except Exception as exc:
+                raise LLMServiceError("Token Quota 不可用，已拒绝 Provider 请求") from exc
+            if not quota.get("allowed", False):
+                raise LLMServiceError(
+                    f"Token Quota 超限: {quota.get('reason', 'quota unavailable')}"
+                )
+        from llm.admission import (
+            LLMAdmissionRejected,
+            LLMAdmissionUnavailable,
+            admit_provider_attempt,
+            estimate_request_tokens,
+        )
+
+        try:
+            await admit_provider_attempt(
+                base_url=self.base_url,
+                model=self.model,
+                user_id=user_id,
+                estimated_tokens=estimate_request_tokens(
+                    payload.get("messages", []), int(payload.get("max_tokens", LLM_MAX_TOKENS))
+                ),
+            )
+        except LLMAdmissionRejected as exc:
+            retry = f"，Retry-After={exc.retry_after}s" if exc.retry_after is not None else ""
+            raise LLMServiceError(f"LLM 请求被限流（{exc.reason}{retry}）") from exc
+        except LLMAdmissionUnavailable as exc:
+            raise LLMServiceError("LLM 准入服务不可用，已拒绝 Provider 请求") from exc

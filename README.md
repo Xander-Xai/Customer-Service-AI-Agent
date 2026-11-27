@@ -126,6 +126,8 @@ docker compose -f deploy/compose/docker-compose.yml down
 
 标准多 worker 部署须共享 PostgreSQL checkpoint、Redis session 和 Redis thread lock（`AGENT_RUN_THREAD_LOCK_BACKEND=redis`，per-thread）。工业 profile 与外部授权要求见[部署指南](docs/deployment.md)及[准入契约](docs/architecture/industrial-runtime-admission.md)。
 
+准入分层：HTTP ingress 保留 Redis 滑动窗口；durable Run 使用 PostgreSQL 容量准入；industrial LLM ordinary/raw/stream Provider attempts 另经共享 Redis RPM/TPM 令牌桶。最后一层本地 Redis 7.2 验证只覆盖两个客户端，不是多 Worker/Cluster 或真实 Provider 配额验收。Token Quota 当前仍缺原子预占/实际结算，Run 全生命周期资源预算、会话摘要游标和授权用户级跨会话记忆也尚未闭环；详见[当前状态](docs/reference/current-state.md)与[生产准备度](docs/production-readiness.md)。
+
 ### Compose 验收状态
 
 2026-11-26 在 WSL2/Docker 29.5.2 + Compose 5.1.4 上，PR #87 代码构建了新 app/worker/beat 镜像，隔离基础服务和协议容器启动；API 因未提供 `OPENAI_API_KEY` 在配置校验处 fail-closed，worker/beat 未保持 healthy（其各自原因未单独采集），所以完整标准 Compose readiness 未通过。另用同一 app image 的临时测试进程（`APP_MODE=dev` / `DEV_MODE=true`）及私有 synthetic protocol volume，分别通过官方 MCP SDK → stdio → `ToolRegistry` SKU 查询和 A2A SDK → 独立售后 peer 业务调用（`execution_authorized=false`）。该回环证明协议组件，不证明标准 app graph readiness 或路由。临时容器、网络、volume 已清理；外部验收继续见 [Issue #86](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues/86)。
