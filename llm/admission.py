@@ -153,7 +153,7 @@ async def admit_provider_attempt(
             ttl,
             tpm,
         )
-        if not isinstance(result, (list, tuple)) or len(result) != 2:
+        if not isinstance(result, list | tuple) or len(result) != 2:
             raise LLMAdmissionUnavailable("Invalid Redis admission response")
         if int(result[0]) == -1:
             raise LLMAdmissionRejected(None, "request_exceeds_bucket_capacity")
