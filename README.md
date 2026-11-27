@@ -206,7 +206,7 @@ customer-service-ai-agent/
 - 实际 ERP 写操作、生产多副本与容量、真实 provider 质量、独立人工金标、坐席通知/SLA 和历史会话 provenance 尚未全部验收；分项状态见 [Production Readiness](docs/production-readiness.md)。
 - Run delivery 是 at-least-once；本地 CAS/ledger 不代表外部系统 exactly-once。MCP/A2A 不是安全边界；工业集成须使用批准目录、TLS 信任与凭证。
 
-持续任务以 [GitHub Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) 为准；稳定版历史见 [GitHub Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases)、tag 与[版本变更历史](docs/reports/releases/changelog.md)。当前最新公开 release 为 `v1.0.1`；Runtime version 与 Release/API version 独立管理。
+持续任务以 [GitHub Issues](https://github.com/Xander-Xai/Customer-Service-AI-Agent/issues) 为准；公开软件 release 历史与最新版本以 [GitHub Releases](https://github.com/Xander-Xai/Customer-Service-AI-Agent/releases) 实时元数据为准，变更历史见 tag 与[变更日志](docs/reports/releases/changelog.md)。Runtime version 与 Release/API version 独立管理；软件 release 不代表生产验收。
 
 ## License
 
